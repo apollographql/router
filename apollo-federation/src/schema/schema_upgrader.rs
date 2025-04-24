@@ -25,6 +25,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::subgraph::typestate::Expanded;
+use crate::subgraph::typestate::Raw;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -54,7 +55,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+        .all(|subgraph| !subgraph.is_fed_1())
     {
         return Ok(());
     }
@@ -80,7 +81,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
         }
     }
     for subgraph in subgraphs.iter() {
-        if !subgraph.schema().subgraph_metadata().is_some_and(|metadata| metadata.is_fed_2_schema()) {
+        if subgraph.is_fed_1() {
             let mut upgrader = SchemaUpgrader::new(subgraph, subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
         }
@@ -145,7 +146,8 @@ impl<'a> SchemaUpgrader<'a> {
 
         self.remove_tag_on_external()?;
 
-        todo!();
+        let new_subgraph = Subgraph::<Raw>::new(self.original_subgraph.name.as_str(), self.original_subgraph.url.as_str(), self.schema.schema().clone());
+        Ok(new_subgraph.assume_expanded()?)
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -312,22 +314,16 @@ impl<'a> SchemaUpgrader<'a> {
         else {
             return Ok(());
         };
-        let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec![];
+        let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Component<Directive>)> = vec![];
         for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(obj) = ty else {
                 continue;
             };
+            
             let object_pos = ObjectTypeDefinitionPosition::new(obj_name.clone());
-            for (field_name, field) in &obj.fields {
-                let pos = object_pos.field(field_name.clone());
-                let external_directive = field
-                    .node
-                    .directives
-                    .iter()
-                    .find(|d| d.name == external_directive.name);
-                if let Some(external_directive) = external_directive {
-                    to_delete.push((pos, external_directive.clone()));
-                }
+            let directives = object_pos.get_applied_directives(schema, &external_directive.name);
+            if !directives.is_empty() {
+                to_delete.push((object_pos, directives[0].clone()));
             }
         }
         for (pos, directive) in to_delete {

@@ -6,6 +6,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Type;
 
+use crate::link::federation_spec_definition::add_fed2_link_to_schema;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
@@ -48,6 +49,7 @@ pub struct Raw {
 pub struct Expanded {
     schema: FederationSchema,
     metadata: SubgraphMetadata,
+    is_fed_1: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +61,7 @@ pub struct Validated {
 trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
+    fn is_fed_1(&self) -> bool;
 }
 
 impl HasMetadata for Expanded {
@@ -69,6 +72,10 @@ impl HasMetadata for Expanded {
     fn schema(&self) -> &FederationSchema {
         &self.schema
     }
+    
+    fn is_fed_1(&self) -> bool {
+        self.is_fed_1
+    }
 }
 
 impl HasMetadata for Validated {
@@ -78,6 +85,10 @@ impl HasMetadata for Validated {
 
     fn schema(&self) -> &FederationSchema {
         &self.schema
+    }
+
+    fn is_fed_1(&self) -> bool {
+        true
     }
 }
 
@@ -141,7 +152,7 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded { schema, metadata, is_fed_1: false },
         })
     }
 
@@ -158,15 +169,21 @@ impl Subgraph<Raw> {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
+        let is_fed_1: bool;
         if schema.get_directive_definition(&name!("link")).is_some() {
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
+            is_fed_1 = false;
         } else {
-            // This must be a Fed 1 schema.
-            LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
+            // // This must be a Fed 1 schema.
+            // LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
-            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
-            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
-            add_fed1_link_to_schema(&mut schema)?;
+            // // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+            // //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+            // add_fed1_link_to_schema(&mut schema)?;
+            LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
+            
+            add_fed2_link_to_schema(&mut schema)?;
+            is_fed_1 = true;
         }
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
@@ -196,7 +213,7 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded { schema, metadata, is_fed_1 },
         })
     }
 }
@@ -288,6 +305,7 @@ impl Subgraph<Validated> {
                 // Other holders may still need the data in the `Arc`, so we clone the contents to allow mutation later
                 schema: (*self.state.schema).clone(),
                 metadata: self.state.metadata,
+                is_fed_1: false,
             },
         }
     }
@@ -301,6 +319,10 @@ impl<S: HasMetadata> Subgraph<S> {
 
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
+    }
+    
+    pub(crate) fn is_fed_1(&self) -> bool {
+        self.state.is_fed_1()
     }
 
     pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {

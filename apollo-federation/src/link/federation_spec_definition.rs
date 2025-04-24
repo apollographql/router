@@ -23,6 +23,7 @@ use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -35,6 +36,8 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+
+use super::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
@@ -753,6 +756,25 @@ impl FederationSpecDefinition {
         )
     }
 
+    fn tag_directive_specification(&self) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            self.version().ge(&Version { major: 2, minor: 0 }),
+            &[
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Scalar,
+                DirectiveLocation::Enum,
+                DirectiveLocation::EnumValue,
+                DirectiveLocation::InputObject,
+                DirectiveLocation::InputFieldDefinition,
+            ],
+            false, // TODO: Fix this
+            None,
+            None,
+        )
+    }
+    
     fn override_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
@@ -830,6 +852,7 @@ impl SpecDefinition for FederationSpecDefinition {
 
         specs.push(Box::new(self.shareable_directive_specification()));
         specs.push(Box::new(self.override_directive_specification()));
+        specs.push(Box::new(self.tag_directive_specification()));
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
@@ -850,6 +873,9 @@ impl SpecDefinition for FederationSpecDefinition {
 
 pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
     LazyLock::new(|| FederationSpecDefinition::new(Version { major: 1, minor: 0 }));
+
+pub(crate) static FED_2: LazyLock<FederationSpecDefinition> =
+    LazyLock::new(|| FederationSpecDefinition::new(Version { major: 2, minor: 4 }));
 
 pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
     LazyLock::new(|| {
@@ -935,6 +961,40 @@ pub(crate) fn add_fed1_link_to_schema(
             arguments: vec![Node::new(Argument {
                 name: LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME,
                 value: FED_1.url.to_string().into(),
+            })],
+        }),
+    )
+}
+
+pub(crate) fn add_fed2_link_to_schema(
+    schema: &mut FederationSchema,
+) -> Result<(), FederationError> {
+    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
+    // We can't use `import` argument here since fed1 @core does not support `import`.
+    // We will add imports later (see `fed1_link_imports`).
+    SchemaDefinitionPosition.insert_directive(
+        schema,
+        Component::new(Directive {
+            name: Identity::link_identity().name,
+            arguments: vec![Node::new(Argument {
+                name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                value: FED_2.url.to_string().into(),
+            }),
+            Node::new(Argument {
+                name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                value: Node::new(Value::List(vec!(
+                    Node::new(Value::String("@key".to_string())),
+                    Node::new(Value::String("@requires".to_string())),
+                    Node::new(Value::String("@provides".to_string())),
+                    Node::new(Value::String("@external".to_string())),
+                    Node::new(Value::String("@tag".to_string())),
+                    Node::new(Value::String("@extends".to_string())),
+                    Node::new(Value::String("@shareable".to_string())),
+                    Node::new(Value::String("@inaccessible".to_string())),
+                    Node::new(Value::String("@override".to_string())),
+                    Node::new(Value::String("@composeDirective".to_string())),
+                    Node::new(Value::String("@interfaceObject".to_string())),
+                ))),
             })],
         }),
     )
