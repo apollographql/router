@@ -93,15 +93,17 @@ async fn batch_missing_items() {
     Mock::given(method("GET"))
         .and(path("/users"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-        { "id": 3 },
-        { "id": 1 },
-        { "id": 2 }])))
+            { "id": 3 },
+            { "id": 1 },
+            { "id": 2 },
+            { "id": 4 },
+        ])))
         .mount(&mock_server)
         .await;
     Mock::given(method("POST"))
         .and(path("/users-batch"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            // 1 is not returned, so the extra fields should just null out (not be an error)
+            // 1 & 4 are not returned, so the extra fields should just null out (not be an error)
         {
           "id": 2,
           "name": "Ervin Howell",
@@ -143,6 +145,11 @@ async fn batch_missing_items() {
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette"
+          },
+          {
+            "id": 4,
+            "name": null,
+            "username": null
           }
         ]
       }
@@ -156,7 +163,7 @@ async fn batch_missing_items() {
             Matcher::new()
                 .method("POST")
                 .path("/users-batch")
-                .body(json!({ "ids": [3,1,2] })),
+                .body(json!({ "ids": [3,1,2,4] })),
         ],
     );
 }
