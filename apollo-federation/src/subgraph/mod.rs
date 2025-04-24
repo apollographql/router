@@ -374,6 +374,10 @@ impl SubgraphError {
             error: error.into(),
         }
     }
+
+    pub fn error(&self) -> &FederationError {
+        &self.error
+    }
 }
 
 impl Display for SubgraphError {
