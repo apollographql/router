@@ -918,3 +918,84 @@ mod link_handling_tests {
         // TODO: Test for fed1
     }
 }
+
+mod federation_1_schema_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_federation_directive_definitions_without_arguments() {
+        let doc = r#"
+            type Query {
+                a: Int
+            }
+
+            directive @key on OBJECT | INTERFACE
+            directive @requires on FIELD_DEFINITION
+        "#;
+        build_and_validate(doc);
+    }
+
+    #[test]
+    fn accepts_federation_directive_definitions_with_nullable_arguments() {
+        let doc = r#"
+            type Query {
+                a: Int
+            }
+
+            type T @key(fields: "id") {
+                id: ID! @requires(fields: "x")
+                x: Int @external
+            }
+
+            # Tests with the _FieldSet argument non-nullable
+            scalar _FieldSet
+            directive @key(fields: _FieldSet) on OBJECT | INTERFACE
+
+            # Tests with the argument as String and non-nullable
+            directive @requires(fields: String) on FIELD_DEFINITION
+        "#;
+        build_and_validate(doc);
+    }
+
+    #[test]
+    fn accepts_federation_directive_definitions_with_fieldset_type_instead_of_underscore_fieldset()
+    {
+        // accepts federation directive definitions with "FieldSet" type instead of "_FieldSet"
+        let doc = r#"
+            type Query {
+                a: Int
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+            }
+
+            scalar FieldSet
+            directive @key(fields: FieldSet) on OBJECT | INTERFACE
+        "#;
+        build_and_validate(doc);
+    }
+
+    #[test]
+    fn rejects_federation_directive_definition_with_unknown_arguments() {
+        let doc = r#"
+            type Query {
+                a: Int
+            }
+
+            type T @key(fields: "id", unknown: 42) {
+                id: ID!
+            }
+
+            scalar _FieldSet
+            directive @key(fields: _FieldSet!, unknown: Int) on OBJECT | INTERFACE
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@key": unknown/unsupported argument "unknown""#
+            )]
+        );
+    }
+}
