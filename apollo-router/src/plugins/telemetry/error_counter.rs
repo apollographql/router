@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use futures::future::ready;
+use futures::stream::once;
+use futures::StreamExt;
 use serde_json_bytes::{Value};
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::{OPERATION_KIND, OPERATION_NAME};
@@ -12,8 +15,10 @@ use crate::services::router::ClientRequestAccepts;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 // TODO call this for subgraph service (pre redaction), supergraph service, and _MAYBE_ router service (service unavail and invalid headers)
-pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
+pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
     let context = response.context.clone();
+    let errors_config = errors_config.clone();
+    
     // TODO do we really need this?
     let ClientRequestAccepts {
         wildcard: accepts_wildcard,
@@ -25,19 +30,19 @@ pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config
         .with_lock(|lock| lock.get().cloned())
         .unwrap_or_default();
 
-
-    if let Some(gql_response) = response.next_response().await {
+    let (parts, stream) = response.response.into_parts();
+    let stream = stream.inspect(move |resp| {
         // TODO make mapping to add to response context to avoid double counting
 
-        if !gql_response.has_next.unwrap_or(false)
-            && !gql_response.subscribed.unwrap_or(false)
+        if !resp.has_next.unwrap_or(false)
+            && !resp.subscribed.unwrap_or(false)
             && (accepts_json || accepts_wildcard)
         {
             // TODO ensure free plan is captured
-            if !gql_response.errors.is_empty() {
-                count_operation_errors(&gql_response.errors, &context, &errors_config);
+            if !resp.errors.is_empty() {
+                count_operation_errors(&resp.errors, &context, &errors_config);
             }
-            if let Some(value_completion) = gql_response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY) {
+            if let Some(value_completion) = resp.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY) {
                 // TODO inline this func?
                 count_value_completion_errors(
                     value_completion,
@@ -47,8 +52,8 @@ pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config
             }
         } else if accepts_multipart_defer || accepts_multipart_subscription {
             // TODO can we combine this with above?
-            if !gql_response.errors.is_empty() {
-                count_operation_errors(&gql_response.errors, &context, &errors_config);
+            if !resp.errors.is_empty() {
+                count_operation_errors(&resp.errors, &context, &errors_config);
             }
         } else {
             // TODO supposedly this is unreachable in router service. Will we be able to pick this up in a router service plugin callback instead?
@@ -60,8 +65,17 @@ pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config
                 &errors_config,
             );
         }
-    }
-    response
+    });
+
+    let (first_response, rest) = StreamExt::into_future(stream).await;
+    let response = http::Response::from_parts(
+        parts,
+        once(ready(first_response.unwrap_or_default()))
+            .chain(rest)
+            .boxed(),
+    );
+
+    SupergraphResponse { context, response }
 }
 
 // TODO router service plugin fn to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER? Would need to parse json response

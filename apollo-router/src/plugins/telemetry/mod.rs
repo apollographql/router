@@ -644,10 +644,6 @@ impl PluginPrivate for Telemetry {
 
                 resp
             })
-            .map_response(async move |resp: SupergraphResponse| {
-                // TODO make sure this doesn't override the above map_response
-                count_errors(resp, &config.apollo.errors).await;
-            })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     let custom_attributes = config
@@ -701,6 +697,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+
                         add_query_attributes(&ctx, &mut custom_attributes);
                         add_cost_attributes(&ctx, &mut custom_attributes);
                         span.set_span_dyn_attributes(custom_attributes);
@@ -732,6 +729,11 @@ impl PluginPrivate for Telemetry {
                                 custom_graphql_instruments.on_error(err, &ctx);
                             }
                         }
+
+                        if let Ok(resp) = result {
+                            result = Ok(count_errors(resp, &config.apollo.errors).await);
+                        }
+
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
