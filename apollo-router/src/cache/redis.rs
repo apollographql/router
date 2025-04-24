@@ -261,10 +261,9 @@ impl RedisCacheStorage {
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
 
-            i64_up_down_counter_with_unit!(
+            i64_up_down_counter!(
                 "apollo.router.cache.redis.connections",
                 "Number of Redis connections",
-                "{connection}",
                 1,
                 kind = caller
             );
@@ -278,10 +277,9 @@ impl RedisCacheStorage {
                 while reconnect_rx.recv().await.is_ok() {
                     tracing::info!("Redis client reconnected.");
                 }
-                i64_up_down_counter_with_unit!(
+                i64_up_down_counter!(
                     "apollo.router.cache.redis.connections",
                     "Number of Redis connections",
-                    "{connection}",
                     -1,
                     kind = caller
                 );
