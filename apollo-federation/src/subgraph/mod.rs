@@ -368,7 +368,7 @@ pub struct SubgraphError {
 }
 
 impl SubgraphError {
-    pub(crate) fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
         SubgraphError {
             subgraph: subgraph.into(),
             error: error.into(),
@@ -377,6 +377,24 @@ impl SubgraphError {
 
     pub fn error(&self) -> &FederationError {
         &self.error
+    }
+
+    // Format subgraph errors in the same way as `Rover` does.
+    // And return them as a vector of (error_code, error_message) tuples
+    // - Gather associated errors from the validation error.
+    // - Split each error into its code and message.
+    // - Add the subgraph name prefix to FederationError message.
+    pub fn format_errors(&self) -> Vec<(String, String)> {
+        self.error
+            .errors()
+            .iter()
+            .map(|e| {
+                (
+                    e.code_string(),
+                    format!("[{subgraph}] {e}", subgraph = self.subgraph),
+                )
+            })
+            .collect()
     }
 }
 
