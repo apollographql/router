@@ -539,6 +539,10 @@ impl SingleFederationError {
         }
     }
 
+    pub fn code_string(&self) -> String {
+        self.code().definition().code().to_string()
+    }
+
     pub(crate) fn root_already_used(
         operation_type: OperationType,
         expected_name: Name,
@@ -586,7 +590,7 @@ impl From<FederationSpecError> for FederationError {
 
 #[derive(Debug, Clone, thiserror::Error, Default)]
 pub struct MultipleFederationErrors {
-    pub errors: Vec<SingleFederationError>,
+    pub(crate) errors: Vec<SingleFederationError>,
 }
 
 impl MultipleFederationErrors {
@@ -713,6 +717,14 @@ impl FederationError {
         result.push(self);
         result.push(other);
         result.into()
+    }
+
+    pub fn errors(&self) -> Vec<&SingleFederationError> {
+        match self {
+            FederationError::SingleFederationError(e) => vec![e],
+            FederationError::MultipleFederationErrors(e) => e.errors.iter().collect(),
+            FederationError::AggregateFederationError(e) => e.causes.iter().collect(),
+        }
     }
 }
 
