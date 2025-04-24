@@ -8,10 +8,10 @@ use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 const CONNECTOR_HTTP_METHOD: Key = Key::from_static_str("connector.http.method");

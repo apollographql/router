@@ -414,6 +414,10 @@ mod tests {
                         ),
                     },
                     body: None,
+                    source_path: None,
+                    source_query_params: None,
+                    connect_path: None,
+                    connect_query_params: None,
                 },
                 selection: Named(
                     SubSelection {
@@ -525,6 +529,10 @@ mod tests {
                         ),
                     },
                     body: None,
+                    source_path: None,
+                    source_query_params: None,
+                    connect_path: None,
+                    connect_query_params: None,
                 },
                 selection: Named(
                     SubSelection {

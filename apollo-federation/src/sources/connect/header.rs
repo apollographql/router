@@ -391,7 +391,7 @@ mod test_interpolate {
         vars.insert("$config".to_string(), json!({"one": ["one", "two"]}));
         assert_eq!(
             header_value.interpolate(&vars),
-            Err("Expressions can't evaluate to arrays or objects.".to_string())
+            Err("Expression is not allowed to evaluate to arrays or objects.".to_string())
         );
     }
 
@@ -437,7 +437,7 @@ mod test_interpolate {
             header_value.interpolate(&vars),
             @r###"
         Err(
-            "Expressions can't evaluate to arrays or objects.",
+            "Expression is not allowed to evaluate to arrays or objects.",
         )
         "###
         );
