@@ -762,6 +762,7 @@ impl UsageGenerator<'_> {
                             self.process_extended_refs_for_value(type_name.to_string(), &arg.value);
                         }
                     }
+                    self.process_extended_refs_for_selection_set(&field.selection_set);
                 }
                 Selection::InlineFragment(fragment) => {
                     self.process_extended_refs_for_selection_set(&fragment.selection_set);

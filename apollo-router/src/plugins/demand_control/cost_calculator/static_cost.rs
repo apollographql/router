@@ -821,7 +821,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
@@ -849,7 +849,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)

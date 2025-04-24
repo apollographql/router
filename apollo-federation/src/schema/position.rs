@@ -11,6 +11,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -263,6 +264,20 @@ impl TypeDefinitionPosition {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn remove_extensions(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Object(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Interface(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Union(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Enum(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::InputObject(type_) => type_.remove_extensions(schema),
+        }
     }
 }
 
@@ -545,6 +560,18 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             )),
         }
     }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                let _ = type_.remove(schema);
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                let _ = type_.remove(schema);
+            }
+        }
+        Ok(())
+    }
 }
 
 fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
@@ -600,6 +627,23 @@ impl FieldDefinitionPosition {
         }
     }
 
+    #[allow(unused)]
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        match self {
+            FieldDefinitionPosition::Object(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            FieldDefinitionPosition::Interface(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            FieldDefinitionPosition::Union(_) => false,
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -616,6 +660,10 @@ impl FieldDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
+    }
+
+    pub(crate) fn is_interface(&self) -> bool {
+        matches!(self, FieldDefinitionPosition::Interface(_))
     }
 }
 
@@ -675,6 +723,13 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
+    }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.remove(schema),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.remove(schema),
+        }
     }
 
     pub(crate) fn insert_directive(
@@ -1388,6 +1443,18 @@ impl ScalarTypeDefinitionPosition {
 
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        for directive in self
+            .make_mut(&mut schema.schema)?
+            .make_mut()
+            .directives
+            .iter_mut()
+        {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        Ok(())
+    }
 }
 
 impl Display for ScalarTypeDefinitionPosition {
@@ -1465,7 +1532,7 @@ impl ObjectTypeDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Node<ObjectType>, PositionLookupError> {
@@ -1882,6 +1949,26 @@ impl ObjectTypeDefinitionPosition {
         type_.implements_interfaces.insert(new_name.into());
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.implements_interfaces = type_
+            .implements_interfaces
+            .iter()
+            .map(|i| {
+                let mut i = i.clone();
+                i.origin = ComponentOrigin::Definition;
+                i
+            })
+            .collect();
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
+        Ok(())
+    }
 }
 
 impl Display for ObjectTypeDefinitionPosition {
@@ -1957,7 +2044,7 @@ impl ObjectFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
@@ -2074,6 +2161,22 @@ impl ObjectFieldDefinitionPosition {
         let name = directive.name.clone();
         field.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Remove a directive application from this position by name.
@@ -3001,6 +3104,26 @@ impl InterfaceTypeDefinitionPosition {
         type_.implements_interfaces.insert(new_name.into());
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.implements_interfaces = type_
+            .implements_interfaces
+            .iter()
+            .map(|i| {
+                let mut i = i.clone();
+                i.origin = ComponentOrigin::Definition;
+                i
+            })
+            .collect();
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
+        Ok(())
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -3172,6 +3295,22 @@ impl InterfaceFieldDefinitionPosition {
         let name = directive.name.clone();
         field.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Remove a directive application from this position by name.
@@ -3983,6 +4122,23 @@ impl UnionTypeDefinitionPosition {
 
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.members = type_
+            .members
+            .iter()
+            .map(|m| {
+                let mut m = m.clone();
+                m.origin = ComponentOrigin::Definition;
+                m
+            })
+            .collect();
+        Ok(())
+    }
 }
 
 impl Display for UnionTypeDefinitionPosition {
@@ -4344,6 +4500,17 @@ impl EnumTypeDefinitionPosition {
                 .insert(new_name, enum_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        for (_, v) in type_.values.iter_mut() {
+            v.origin = ComponentOrigin::Definition;
+        }
         Ok(())
     }
 }
@@ -4843,6 +5010,17 @@ impl InputObjectTypeDefinitionPosition {
                 .insert(new_name, input_object_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
         Ok(())
     }
 }

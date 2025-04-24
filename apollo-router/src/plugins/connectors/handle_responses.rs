@@ -178,7 +178,7 @@ impl RawResponse {
                     )
                     .path::<Path>((&key).into())
                     .build()
-                    .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
                 if let Some(debug) = debug_context {
                     debug
@@ -496,7 +496,7 @@ async fn deserialize_response<T: HttpBody>(
             )
             .path(path)
             .build()
-            .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
     let path: Path = response_key.into();
@@ -613,6 +613,7 @@ async fn deserialize_response<T: HttpBody>(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::Schema;
@@ -624,9 +625,9 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use url::Url;
 
     use crate::Context;
     use crate::graphql;
@@ -649,11 +650,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -760,11 +759,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
@@ -876,11 +873,11 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
-                headers: Default::default(),
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data { id name }").unwrap(),
             entity_resolver: Some(EntityResolver::TypeBatch),
@@ -1001,11 +998,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
@@ -1128,11 +1123,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
@@ -1292,7 +1285,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1328,7 +1321,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1364,7 +1357,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1395,11 +1388,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: selection.clone(),
             entity_resolver: None,

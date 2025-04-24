@@ -59,7 +59,7 @@ pub(crate) struct ArgumentSpecification {
 pub(crate) struct ResolvedArgumentSpecification {
     pub(crate) name: Name,
     pub(crate) ty: Type,
-    default_value: Option<Value>,
+    pub(crate) default_value: Option<Value>,
 }
 
 impl From<&ResolvedArgumentSpecification> for InputValueDefinition {
@@ -83,8 +83,8 @@ pub(crate) struct FieldSpecification {
     pub(crate) arguments: Vec<ResolvedArgumentSpecification>,
 }
 
-impl From<&FieldSpecification> for FieldDefinition {
-    fn from(field_spec: &FieldSpecification) -> Self {
+impl From<FieldSpecification> for FieldDefinition {
+    fn from(field_spec: FieldSpecification) -> Self {
         FieldDefinition {
             description: None,
             name: field_spec.name.clone(),
@@ -200,9 +200,9 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
         }
 
         let mut field_map = IndexMap::default();
-        for ref field_spec in field_specs {
+        for field_spec in field_specs {
             let field_def: FieldDefinition = field_spec.into();
-            field_map.insert(field_spec.name.clone(), Component::new(field_def));
+            field_map.insert(field_def.name.clone(), Component::new(field_def));
         }
 
         let type_pos = ObjectTypeDefinitionPosition {
@@ -222,18 +222,14 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
     }
 }
 
-pub(crate) struct UnionTypeSpecification<F>
-where
-    F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
-{
+type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName>;
+
+pub(crate) struct UnionTypeSpecification {
     pub(crate) name: Name,
-    pub(crate) members: F,
+    pub(crate) members: Box<UnionTypeMembersFn>,
 }
 
-impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
-where
-    F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
-{
+impl TypeAndDirectiveSpecification for UnionTypeSpecification {
     fn name(&self) -> &Name {
         &self.name
     }

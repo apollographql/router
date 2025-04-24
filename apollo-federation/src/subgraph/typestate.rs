@@ -1,17 +1,43 @@
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::Type;
 
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
+use crate::bail;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
-use crate::schema::KeyDirective;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::type_and_directive_specification::FieldSpecification;
+use crate::schema::type_and_directive_specification::ResolvedArgumentSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::subgraph::SubgraphError;
+use crate::supergraph::ANY_TYPE_SPEC;
+use crate::supergraph::EMPTY_QUERY_TYPE_SPEC;
+use crate::supergraph::FEDERATION_ANY_TYPE_NAME;
+use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
+use crate::supergraph::FEDERATION_ENTITY_TYPE_NAME;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
+use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
+use crate::supergraph::SERVICE_TYPE_SPEC;
 
 #[derive(Clone, Debug)]
 pub struct Raw {
@@ -154,6 +180,12 @@ impl Subgraph<Raw> {
         // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
         FederationBlueprint::on_constructed(&mut schema)?;
 
+        // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
+        //            It seems to make sense for it to be a part of expansion stage. We can create
+        //            a separate stage for it between `Expanded` and `Validated` if we need a stage
+        //            that is expanded, but federation operations are not added.
+        add_federation_operations(&mut schema)?;
+
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -167,6 +199,54 @@ impl Subgraph<Raw> {
             state: Expanded { schema, metadata },
         })
     }
+}
+
+fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    // Add federation operation types
+    ANY_TYPE_SPEC.check_or_add(schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(schema, None)?;
+    entity_type_spec(schema)?.check_or_add(schema, None)?;
+
+    // Add the root `Query` Type (if not already present) and get the actual name in the schema.
+    let query_root_pos = SchemaRootDefinitionPosition {
+        root_kind: SchemaRootDefinitionKind::Query,
+    };
+    let query_root_type_name = if query_root_pos.try_get(schema.schema()).is_none() {
+        // If not present, add the default Query type with empty fields.
+        EMPTY_QUERY_TYPE_SPEC.check_or_add(schema, None)?;
+        query_root_pos.insert(schema, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
+        EMPTY_QUERY_TYPE_SPEC.name
+    } else {
+        query_root_pos.get(schema.schema())?.name.clone()
+    };
+
+    // Add or remove `Query._entities` (if applicable)
+    let entity_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name.clone(),
+        field_name: FEDERATION_ENTITIES_FIELD_NAME,
+    };
+    if let Some(_entity_type) = schema.entity_type()? {
+        if entity_field_pos.try_get(schema.schema()).is_none() {
+            entity_field_pos.insert(schema, Component::new(entities_field_spec(schema)?.into()))?;
+        }
+        // PORT_NOTE: JS version checks if the entity field definition's type is null when the
+        //            definition is found, but the `type` field is not nullable in Rust.
+    } else {
+        // Remove the `_entities` field if it is present
+        // PORT_NOTE: It's unclear why this is necessary. Maybe it's to avoid schema confusion?
+        entity_field_pos.remove(schema)?;
+    }
+
+    // Add `Query._service` (if not already present)
+    let service_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name.clone(),
+        field_name: FEDERATION_SERVICE_FIELD_NAME,
+    };
+    if service_field_pos.try_get(schema.schema()).is_none() {
+        service_field_pos.insert(schema, Component::new(service_field_spec(schema)?.into()))?;
+    }
+
+    Ok(())
 }
 
 impl Subgraph<Expanded> {
@@ -197,13 +277,6 @@ impl Subgraph<Expanded> {
             },
         })
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(
-        &self,
-    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
-        self.state.schema.key_directive_applications()
-    }
 }
 
 impl Subgraph<Validated> {
@@ -218,11 +291,6 @@ impl Subgraph<Validated> {
             },
         }
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective> {
-        todo!("Validated @key directives should be made available after validation")
-    }
 }
 
 #[allow(private_bounds)]
@@ -234,6 +302,80 @@ impl<S: HasMetadata> Subgraph<S> {
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
     }
+
+    pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn provides_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn requires_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+}
+
+// Constructs the `_Entity` type spec for the subgraph schema.
+// PORT_NOTE: Corresponds to the `entityTypeSpec` constant definition.
+fn entity_type_spec(schema: &FederationSchema) -> Result<UnionTypeSpecification, FederationError> {
+    // Please note that `_Entity` cannot use "interface entities" since interface types cannot
+    // be in unions. It is ok in practice because _Entity is only use as return type for
+    // `_entities`, and even when interfaces are involve, the result of an `_entities` call
+    // will always be an object type anyway, and since we force all implementations of an
+    // interface entity to be entity themselves in a subgraph, we're fine.
+    let mut entity_members = IndexSet::default();
+    for key_directive_app in schema.key_directive_applications()?.into_iter() {
+        let key_directive_app = key_directive_app?;
+        let target = key_directive_app.target();
+        if let ObjectOrInterfaceTypeDefinitionPosition::Object(obj_ty) = target {
+            entity_members.insert(ComponentName::from(&obj_ty.type_name));
+        }
+    }
+
+    Ok(UnionTypeSpecification {
+        name: FEDERATION_ENTITY_TYPE_NAME,
+        members: Box::new(move |_| entity_members.clone()),
+    })
+}
+
+fn representations_arguments_field_spec() -> ResolvedArgumentSpecification {
+    ResolvedArgumentSpecification {
+        name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+        ty: Type::NonNullList(Box::new(Type::NonNullNamed(FEDERATION_ANY_TYPE_NAME))),
+        default_value: None,
+    }
+}
+
+fn entities_field_spec(schema: &FederationSchema) -> Result<FieldSpecification, FederationError> {
+    let Some(entity_type) = schema.entity_type()? else {
+        bail!("The federation entity type is expected to be defined, but not found")
+    };
+    Ok(FieldSpecification {
+        name: FEDERATION_ENTITIES_FIELD_NAME,
+        ty: Type::NonNullList(Box::new(Type::Named(entity_type.type_name))),
+        arguments: vec![representations_arguments_field_spec()],
+    })
+}
+
+fn service_field_spec(schema: &FederationSchema) -> Result<FieldSpecification, FederationError> {
+    Ok(FieldSpecification {
+        name: FEDERATION_SERVICE_FIELD_NAME,
+        ty: Type::NonNullNamed(schema.service_type()?.type_name),
+        arguments: vec![],
+    })
 }
 
 #[cfg(test)]
@@ -687,5 +829,156 @@ mod tests {
                 .root_operation(OperationType::Subscription),
             Some(name!("MySubscription")).as_ref()
         );
+    }
+}
+
+// PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
+#[cfg(test)]
+mod link_handling_tests {
+    use super::*;
+
+    // TODO(FED-543): Remaining directive definitions should be added to the schema
+    #[allow(dead_code)]
+    const EXPECTED_FULL_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+    {
+      query: Query
+    }
+
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+    directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+    directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+    directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+    directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+    directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+    directive @federation__extends on OBJECT | INTERFACE
+
+    directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+    directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+    directive @federation__override(from: String!) on FIELD_DEFINITION
+
+    type T
+      @key(fields: "k")
+    {
+      k: ID!
+    }
+
+    enum link__Purpose {
+      """
+      \`SECURITY\` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      \`EXECUTION\` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+    scalar link__Import
+
+    scalar federation__FieldSet
+
+    scalar _Any
+
+    type _Service {
+      sdl: String
+    }
+
+    union _Entity = T
+
+    type Query {
+      _entities(representations: [_Any!]!): [_Entity]!
+      _service: _Service!
+    }
+    "#;
+
+    #[test]
+    fn expands_everything_if_only_the_federation_spec_is_linked() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+            type T @key(fields: "k") {
+                k: ID!
+            }
+            "#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph")
+        .validate(true)
+        .expect("expanded subgraph to be valid");
+
+        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
+        //                it's failing due to missing directive definitions. So, we use
+        //                `insta::assert_snapshot` for now.
+        // assert_eq!(subgraph.schema().schema().to_string(), EXPECTED_FULL_SCHEMA);
+        insta::assert_snapshot!(subgraph.schema().schema().to_string(), @r###"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+          query: Query
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+        directive @federation__override(from: String!) on FIELD_DEFINITION
+
+        type T @key(fields: "k") {
+          k: ID!
+        }
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        union _Entity = T
+
+        type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
+        }
+        "###);
     }
 }
