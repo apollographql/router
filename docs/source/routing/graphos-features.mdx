@@ -6,30 +6,52 @@ redirectFrom:
   - /router/enterprise-features
 ---
 
-A router connected to GraphOS, whether cloud-hosted or self-hosted, is called a **GraphOS Router**. It has access to specific GraphOS features depending on the connected GraphOS organization's plan. Refer to the [pricing page](https://www.apollographql.com/pricing#graphos-router) to compare GraphOS Router features across plan types.
-
 ## GraphOS Router features
 
-The GraphOS Router supports a collection of premium features specific to GraphOS. These features include:
+A GraphOS Router gains additional features when it's passed a license from a GraphOS plan.
 
-- Real-time updates via [GraphQL subscriptions](/graphos/routing/operations/subscriptions)
-- Improved performance with [query batching](/graphos/routing/performance/query-batching)
+> Refer to the [pricing page](https://www.apollographql.com/pricing) to compare GraphOS Router features across plan types.
+
+### Subscriptions
+
+Subscriptions enable clients to manage real-time data updates effectively, without the need for constant polling.  This is particularly crucial in applications that need live updates, such as notifications, stock tickers, or chat applications. Using subscriptions improves performance and user experience by ensuring that clients receive the latest information as soon as changes occur on the backend. 
+
+The router supports both the callback and multipart protocols for handling subscriptions. [Learn more](/graphos/routing/operations/subscriptions).
+
+
+### `@defer`
+
+The router's support of the `@defer` directive helps client developers tackle the common challenge of how to create a responsive user experience when certain fields of a query take longer to resolve than others. This is important for real-time applications like dashboards or reports.
+
+`@defer` improves application performance by delivering response data incrementally. The router supports deferring root fields of the `Query` type and fields of any entity type, and it can retrieve deferred data via follow-up queries to your subgraphs. [Learn more](/graphos/routing/operations/defer).
+
+### Entity caching
+
+Entity caching speeds up graph data retrieval by storing only the necessary data for entities, rather than entire client responses. It's helpful in scenarios where the same data is requested frequently, such as product information systems and user profile services.
+
+Using Redis, the router stores subgraph responses and ensures that requests for the same entity from different clients are served from the cache, rather than fetching the data repeatedly from subgraphs. It can cache data at a fine-grained level and provides separate configurations for caching duration (TTL) and other caching behaviors per subgraph. [Learn more](/graphos/routing/performance/caching/entity).
+
+### Query batching
+
+Query batching helps maintain data consistency when working with rapidly changing data and making multiple requests within a short duration. This is particularly beneficial in micro-frontend architectures where multiple frontend components request data independently to render a single page.
+
+Query batching allows developers to bundle multiple requests into a single batch, ensuring consistent data across these requests.  The router can accept batched requests from clients and process each request separately, preserving data consistency. [Learn more](/graphos/routing/performance/query-batching)
+
+### Other GraphOS Router features
+
 - Authentication of inbound requests via [JSON Web Token (JWT)](/graphos/routing/security/jwt)
 - [Authorization of specific fields and types](/graphos/routing/security/authorization) through the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes), [`@authenticated`](/graphos/routing/security/authorization#authenticated), and [`@policy`](/graphos/routing/security/authorization#policy) directives
 - Incremental migration between subgraphs through [the progressive `@override` directive](/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override).
 - Redis-backed [distributed caching of query plans and persisted queries](/graphos/routing/performance/caching/distributed)
-- Redis-backed [entity caching of subgraph responses](/graphos/routing/performance/caching/entity)
 - Custom request handling in any language via [external coprocessing](/graphos/routing/customization/coprocessor)
 - Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits),[demand control](/graphos/routing/security/request-limits), and [safelisting](/graphos/routing/security/persisted-queries)
 - Custom instrumentation and telemetry, including [custom attributes for spans](/graphos/reference/router/telemetry/instrumentation/spans#attributes).
 - An [offline license](/graphos/reference/router/graphos-features#the-enterprise-license) that enables running the router with GraphOS features when disconnected from the internet.
 - [Using contexts to share data](/graphos/schema-design/federated-schemas/entities/use-contexts) with the `@context` and `@fromContext` directives
 
-For details on these features, see [this blog post](https://blog.apollographql.com/apollo-router-v1-12-improved-router-security-performance-and-extensibility) in addition to the documentation links above.
+### Enabling licensed plan features
 
-### Enabling plan-specific features
-
-To enable support for plan-specific features in GraphOS Router:
+To enable licensed plan features in a router:
 
 - You must run GraphOS Router v1.12 or later. [Download the latest version.](/graphos/reference/router/self-hosted-install#1-download-and-extract-the-router-binary)
     - Certain features might require a later router version. See a particular feature's documentation for details.
