@@ -18,7 +18,6 @@ use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
@@ -73,12 +72,9 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
-                            let extension_code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED";
-                            count_graphql_error(1u64, Some(extension_code));
-
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
-                                .extension_code(extension_code)
+                                .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
                                 .build();
                             Ok(RouterResponse::error_builder()
                                 .status_code(StatusCode::SERVICE_UNAVAILABLE)

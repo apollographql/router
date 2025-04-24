@@ -50,8 +50,6 @@ use crate::http_ext;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_operation_error_codes;
-use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
@@ -340,23 +338,6 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-                    if let Some(value_completion) =
-                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
-                    {
-                        Self::count_value_completion_errors(
-                            value_completion,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
@@ -390,14 +371,6 @@ impl RouterService {
                         );
                     }
 
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
@@ -422,12 +395,6 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    count_operation_error_codes(
-                        &["INVALID_ACCEPT_HEADER"],
-                        &context,
-                        &self.apollo_telemetry_config.errors,
-                    );
-
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
                             .error(
@@ -867,20 +834,6 @@ impl RouterService {
                 self.translate_bytes_request(&bytes)
             };
         Ok(graphql_requests)
-    }
-
-    fn count_value_completion_errors(
-        value_completion: &Value,
-        context: &Context,
-        errors_config: &ErrorsConfiguration,
-    ) {
-        if let Some(vc_array) = value_completion.as_array() {
-            let errors: Vec<graphql::Error> = vc_array
-                .iter()
-                .filter_map(graphql::Error::from_value_completion_value)
-                .collect();
-            count_operation_errors(&errors, context, errors_config);
-        }
     }
 }
 
