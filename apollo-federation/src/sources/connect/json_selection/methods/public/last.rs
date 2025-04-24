@@ -42,13 +42,10 @@ fn last_method(
 
     match data {
         JSON::Array(array) => (array.last().cloned(), vec![]),
-        JSON::String(s) => {
-            if let Some(last) = s.as_str().chars().last() {
-                (Some(JSON::String(last.to_string().into())), vec![])
-            } else {
-                (None, vec![])
-            }
-        }
+        JSON::String(s) => s.as_str().chars().last().map_or_else(
+            || (None, vec![]),
+            |last| (Some(JSON::String(last.to_string().into())), vec![]),
+        ),
         _ => (
             Some(data.clone()),
             vec![ApplyToError::new(
@@ -83,14 +80,12 @@ fn last_shape(
 
     match input_shape.case() {
         ShapeCase::String(Some(value)) => {
-            if let Some(last_char) = value.chars().last() {
+            value.chars().last().map_or_else(Shape::none, |last_char| {
                 Shape::string_value(
                     last_char.to_string().as_str(),
                     method_name.shape_location(source_id),
                 )
-            } else {
-                Shape::none()
-            }
+            })
         }
 
         ShapeCase::String(None) => Shape::one(
@@ -103,11 +98,7 @@ fn last_shape(
 
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
-                if let Some(last) = prefix.last() {
-                    last.clone()
-                } else {
-                    Shape::none()
-                }
+                prefix.last().map_or_else(Shape::none, |last| last.clone())
             } else if let Some(last) = prefix.last() {
                 Shape::one(
                     [last.clone(), tail.clone(), Shape::none()],

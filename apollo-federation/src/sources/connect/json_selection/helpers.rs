@@ -67,7 +67,7 @@ pub(crate) fn span_is_all_spaces_or_comments(input: Span) -> bool {
     }
 }
 
-pub(crate) fn json_type_name(v: &JSON) -> &str {
+pub(crate) const fn json_type_name(v: &JSON) -> &str {
     match v {
         JSON::Array(_) => "array",
         JSON::Object(_) => "object",

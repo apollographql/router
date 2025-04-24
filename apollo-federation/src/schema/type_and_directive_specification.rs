@@ -287,7 +287,7 @@ impl TypeAndDirectiveSpecification for UnionTypeSpecification {
         }
 
         let type_pos = UnionTypeDefinitionPosition {
-            type_name: actual_name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(

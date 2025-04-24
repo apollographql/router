@@ -617,7 +617,7 @@ impl<'a> SchemaUpgrader<'a> {
                                 if used_in_other_definitions? {
                                     // remove @tag
                                     to_delete.push((
-                                        target.clone(),
+                                        target,
                                         application.directive.clone(),
                                     ));
                                 }

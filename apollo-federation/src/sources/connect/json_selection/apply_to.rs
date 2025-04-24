@@ -95,13 +95,13 @@ impl JSONSelection {
         match self {
             Self::Named(selection) => selection.compute_output_shape(
                 input_shape.clone(),
-                input_shape.clone(),
+                input_shape,
                 named_var_shapes,
                 source_id,
             ),
             Self::Path(path_selection) => path_selection.compute_output_shape(
                 input_shape.clone(),
-                input_shape.clone(),
+                input_shape,
                 named_var_shapes,
                 source_id,
             ),
@@ -173,7 +173,7 @@ pub struct ApplyToError {
 }
 
 impl ApplyToError {
-    pub(crate) fn new(message: String, path: Vec<JSON>, range: OffsetRange) -> Self {
+    pub(crate) const fn new(message: String, path: Vec<JSON>, range: OffsetRange) -> Self {
         Self {
             message,
             path,
@@ -352,7 +352,7 @@ impl ApplyToInternal for NamedSelection {
                 } else if *inline {
                     match value_opt {
                         Some(JSON::Object(map)) => {
-                            output = Some(JSON::Object(map.clone()));
+                            output = Some(JSON::Object(map));
                         }
                         Some(JSON::Null) => {
                             output = Some(JSON::Null);
@@ -490,7 +490,7 @@ impl ApplyToInternal for PathSelection {
                 // *and* dollar_shape to self.path.compute_output_shape.
                 self.path.compute_output_shape(
                     dollar_shape.clone(),
-                    dollar_shape.clone(),
+                    dollar_shape,
                     named_var_shapes,
                     source_id,
                 )
@@ -576,22 +576,23 @@ impl ApplyToInternal for WithRange<PathList> {
                         );
                     }
 
-                    if let Some(child) = data.get(key.as_str()) {
-                        tail.apply_to_path(child, vars, &input_path_with_key)
-                    } else {
-                        (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        )
-                    }
+                    data.get(key.as_str()).map_or_else(
+                        || {
+                            (
+                                None,
+                                vec![ApplyToError::new(
+                                    format!(
+                                        "Property {} not found in {}",
+                                        key.dotted(),
+                                        json_type_name(data),
+                                    ),
+                                    input_path_with_key.to_vec(),
+                                    key.range(),
+                                )],
+                            )
+                        },
+                        |child| tail.apply_to_path(child, vars, &input_path_with_key),
+                    )
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -601,31 +602,39 @@ impl ApplyToInternal for WithRange<PathList> {
                 let method_path =
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
 
-                if let Some(method) = ArrowMethod::lookup(method_name) {
-                    let (result_opt, errors) =
-                        method.apply(method_name, method_args.as_ref(), data, vars, &method_path);
+                ArrowMethod::lookup(method_name).map_or_else(
+                    || {
+                        (
+                            None,
+                            vec![ApplyToError::new(
+                                format!("Method ->{} not found", method_name.as_ref()),
+                                method_path.to_vec(),
+                                method_name.range(),
+                            )],
+                        )
+                    },
+                    |method| {
+                        let (result_opt, errors) = method.apply(
+                            method_name,
+                            method_args.as_ref(),
+                            data,
+                            vars,
+                            &method_path,
+                        );
 
-                    if let Some(result) = result_opt {
-                        tail.apply_to_path(&result, vars, &method_path)
-                            .prepend_errors(errors)
-                    } else {
-                        // If the method produced no output, assume the errors
-                        // explain the None. Methods can legitimately produce
-                        // None without errors (like ->first or ->last on an
-                        // empty array), so we do not report any blanket error
-                        // here when errors.is_empty().
-                        (None, errors)
-                    }
-                } else {
-                    (
-                        None,
-                        vec![ApplyToError::new(
-                            format!("Method ->{} not found", method_name.as_ref()),
-                            method_path.to_vec(),
-                            method_name.range(),
-                        )],
-                    )
-                }
+                        if let Some(result) = result_opt {
+                            tail.apply_to_path(&result, vars, &method_path)
+                                .prepend_errors(errors)
+                        } else {
+                            // If the method produced no output, assume the errors
+                            // explain the None. Methods can legitimately produce
+                            // None without errors (like ->first or ->last on an
+                            // empty array), so we do not report any blanket error
+                            // here when errors.is_empty().
+                            (None, errors)
+                        }
+                    },
+                )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
             PathList::Empty => {
@@ -696,7 +705,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     } else {
                         rest.compute_output_shape(
                             field(tail, key, source_id),
-                            dollar_shape.clone(),
+                            dollar_shape,
                             named_var_shapes,
                             source_id,
                         )
@@ -706,7 +715,7 @@ impl ApplyToInternal for WithRange<PathList> {
                 } else {
                     rest.compute_output_shape(
                         field(&input_shape, key, source_id),
-                        dollar_shape.clone(),
+                        dollar_shape,
                         named_var_shapes,
                         source_id,
                     )
@@ -720,21 +729,21 @@ impl ApplyToInternal for WithRange<PathList> {
                     named_var_shapes,
                     source_id,
                 ),
-                dollar_shape.clone(),
+                dollar_shape,
                 named_var_shapes,
                 source_id,
             ),
 
-            PathList::Method(method_name, _method_args, _tail) => {
-                if let Some(_method) = ArrowMethod::lookup(method_name) {
-                    // TODO: call method.shape here to re-enable method type-checking
-                    //  call for each inner type of a One
-                    Shape::unknown(method_name.shape_location(source_id))
-                } else {
-                    let message = format!("Method ->{} not found", method_name.as_str());
-                    Shape::error(message.as_str(), method_name.shape_location(source_id))
-                }
-            }
+            PathList::Method(method_name, _method_args, _tail) => ArrowMethod::lookup(method_name)
+                .map_or_else(
+                    || {
+                        Shape::error(
+                            format!("Method ->{} not found", method_name.as_str()),
+                            method_name.shape_location(source_id),
+                        )
+                    },
+                    |_method| Shape::unknown(method_name.shape_location(source_id)),
+                ),
 
             PathList::Selection(selection) => selection.compute_output_shape(
                 input_shape,
@@ -939,6 +948,7 @@ impl ApplyToInternal for SubSelection {
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore _previous_dollar_shape.
+        #[expect(clippy::redundant_clone)]
         let dollar_shape = input_shape.clone();
 
         // Build up the merged object shape using Shape::all to merge the
@@ -1630,7 +1640,7 @@ mod tests {
         assert_eq!(
             selection!("nested.path { id: $args.id name }").apply_to(&json!({
                 "nested": {
-                    "path": data.clone(),
+                    "path": data,
                 },
             })),
             (
@@ -1953,7 +1963,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -1969,7 +1979,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -1985,7 +1995,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
         }
 
@@ -2012,7 +2022,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2028,7 +2038,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2044,7 +2054,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
         }
 
@@ -2073,7 +2083,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2092,7 +2102,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2109,7 +2119,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2128,7 +2138,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2145,7 +2155,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
         }
 
@@ -2197,7 +2207,7 @@ mod tests {
                 "#
                 )
                 .apply_with_vars(&data, &vars),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2209,7 +2219,7 @@ mod tests {
                 "#
                 )
                 .apply_with_vars(&data, &vars),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2221,7 +2231,7 @@ mod tests {
                 "#
                 )
                 .apply_with_vars(&data, &vars),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2233,7 +2243,7 @@ mod tests {
                 "#
                 )
                 .apply_with_vars(&data, &vars),
-                expected.clone(),
+                expected,
             );
 
             assert_eq!(
@@ -2354,7 +2364,7 @@ mod tests {
                 "#
                 )
                 .apply_to(&data),
-                expected.clone(),
+                expected,
             );
         }
 

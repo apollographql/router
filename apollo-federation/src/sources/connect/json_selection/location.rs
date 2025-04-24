@@ -34,7 +34,7 @@ pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 
     fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
-        self.range().map(|range| source_id.location(range.clone()))
+        self.range().map(|range| source_id.location(range))
     }
 }
 

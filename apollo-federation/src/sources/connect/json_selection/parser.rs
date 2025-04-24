@@ -1,7 +1,6 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use apollo_compiler::collections::IndexSet;
 use nom::IResult;
 use nom::Slice;
 use nom::branch::alt;
@@ -81,7 +80,7 @@ pub(crate) trait ExternalVarPaths {
 // JSONSelection     ::= PathSelection | NakedSubSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum JSONSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
@@ -146,20 +145,14 @@ impl JSONSelection {
             }
 
             Err(e) => match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => {
-                    Err(JSONSelectionParseError {
-                        message: if let Some(message_str) = e.input.extra {
-                            message_str.to_string()
-                        } else {
-                            // These errors aren't the most user-friendly, but
-                            // with any luck we can gradually replace them with
-                            // custom error messages over time.
-                            format!("nom::error::ErrorKind::{:?}", e.code)
-                        },
-                        fragment: e.input.fragment().to_string(),
-                        offset: e.input.location_offset(),
-                    })
-                }
+                nom::Err::Error(e) | nom::Err::Failure(e) => Err(JSONSelectionParseError {
+                    message: e.input.extra.map_or_else(
+                        || format!("nom::error::ErrorKind::{:?}", e.code),
+                        |message_str| message_str.to_string(),
+                    ),
+                    fragment: e.input.fragment().to_string(),
+                    offset: e.input.location_offset(),
+                }),
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
             },
@@ -374,25 +367,18 @@ impl NamedSelection {
 
     pub(crate) fn names(&self) -> Vec<&str> {
         match self {
-            Self::Field(alias, name, _) => {
-                if let Some(alias) = alias {
-                    vec![alias.name.as_str()]
-                } else {
-                    vec![name.as_str()]
-                }
-            }
-            Self::Path { alias, path, .. } => {
+            Self::Field(alias, name, _) => alias
+                .as_ref()
+                .map_or_else(|| vec![name.as_str()], |alias| vec![alias.name.as_str()]),
+            Self::Path { alias, path, .. } =>
+            {
                 #[allow(clippy::if_same_then_else)]
                 if let Some(alias) = alias {
                     vec![alias.name.as_str()]
                 } else if let Some(sub) = path.next_subselection() {
-                    // Flatten and deduplicate the names of the NamedSelection
-                    // items in the SubSelection.
-                    let mut name_set = IndexSet::default();
-                    for selection in sub.selections_iter() {
-                        name_set.extend(selection.names());
-                    }
-                    name_set.into_iter().collect()
+                    sub.selections_iter()
+                        .flat_map(|selection| selection.names())
+                        .collect()
                 } else {
                     vec![]
                 }
@@ -653,15 +639,14 @@ impl PathList {
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
                     let known_var = KnownVariable::from_str(full_name.as_str());
-                    let var_range = merge_ranges(dollar_range.clone(), var.range());
+                    let var_range = merge_ranges(dollar_range, var.range());
                     let ranged_known_var = WithRange::new(known_var, var_range);
                     Ok((
                         remainder,
                         WithRange::new(Self::Var(ranged_known_var, rest), full_range),
                     ))
                 } else {
-                    let ranged_dollar_var =
-                        WithRange::new(KnownVariable::Dollar, dollar_range.clone());
+                    let ranged_dollar_var = WithRange::new(KnownVariable::Dollar, dollar_range);
                     Ok((
                         remainder,
                         WithRange::new(Self::Var(ranged_dollar_var, rest), full_range),
@@ -1063,7 +1048,7 @@ impl Key {
         WithRange::new(self, None)
     }
 
-    pub fn is_quoted(&self) -> bool {
+    pub const fn is_quoted(&self) -> bool {
         matches!(self, Self::Quoted(_))
     }
 
@@ -1171,17 +1156,18 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
                 chars.push(c);
             }
 
-            if let Some(remainder) = remainder_opt {
-                Ok((
-                    remainder,
-                    WithRange::new(
-                        chars.iter().collect::<String>(),
-                        Some(start..remainder.location_offset()),
-                    ),
-                ))
-            } else {
-                Err(nom_fail_message(input, "Unterminated string literal"))
-            }
+            remainder_opt.map_or_else(
+                || Err(nom_fail_message(input, "Unterminated string literal")),
+                |remainder| {
+                    Ok((
+                        remainder,
+                        WithRange::new(
+                            chars.iter().collect::<String>(),
+                            Some(start..remainder.location_offset()),
+                        ),
+                    ))
+                },
+            )
         }
 
         _ => Err(nom_error_message(input, "Not a string literal")),
@@ -1703,7 +1689,7 @@ mod tests {
             check_path_selection("$.hello. world", expected.clone());
             check_path_selection("$.hello . world", expected.clone());
             check_path_selection("$ . hello . world", expected.clone());
-            check_path_selection(" $ . hello . world ", expected.clone());
+            check_path_selection(" $ . hello . world ", expected);
         }
 
         {
@@ -1718,7 +1704,7 @@ mod tests {
             check_path_selection("hello .world", expected.clone());
             check_path_selection("hello. world", expected.clone());
             check_path_selection("hello . world", expected.clone());
-            check_path_selection(" hello . world ", expected.clone());
+            check_path_selection(" hello . world ", expected);
         }
 
         {
@@ -1741,7 +1727,7 @@ mod tests {
             check_path_selection("hello .world { hello }", expected.clone());
             check_path_selection("hello. world { hello }", expected.clone());
             check_path_selection("hello . world { hello }", expected.clone());
-            check_path_selection(" hello . world { hello } ", expected.clone());
+            check_path_selection(" hello . world { hello } ", expected);
         }
 
         {
@@ -1776,7 +1762,7 @@ mod tests {
             );
             check_path_selection(
                 " nested . 'string literal' . \"property\" . name ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1817,7 +1803,7 @@ mod tests {
             );
             check_path_selection(
                 " nested . \"string literal\" { leggo: 'my ego' } ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1861,7 +1847,7 @@ mod tests {
             );
             check_path_selection(
                 " $ . results { 'quoted without alias' { id 'n a m e' } } ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1905,7 +1891,7 @@ mod tests {
             );
             check_path_selection(
                 " $ . results { 'non-identifier alias' : 'quoted with alias' { id 'n a m e': name } } ",
-                expected.clone(),
+                expected,
             );
         }
     }
@@ -2483,7 +2469,7 @@ mod tests {
             check_path_selection("data->query($.a, $.b, $.c )", expected.clone());
             check_path_selection("data->query($.a, $.b, $.c,)", expected.clone());
             check_path_selection("data->query($.a, $.b, $.c ,)", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c , )", expected.clone());
+            check_path_selection("data->query($.a, $.b, $.c , )", expected);
         }
 
         {
@@ -2525,7 +2511,7 @@ mod tests {
             check_path_selection("data.x->concat([data.y, data.z,])", expected.clone());
             check_path_selection("data.x->concat([data.y, data.z , ])", expected.clone());
             check_path_selection("data.x->concat([data.y, data.z,],)", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected);
         }
 
         check_path_selection(

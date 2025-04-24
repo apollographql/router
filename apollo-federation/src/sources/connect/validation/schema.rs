@@ -148,7 +148,7 @@ fn check_seen_fields(
     let federation = Link::for_identity(schema, &Identity::federation_identity());
     let external_directive_name = federation
         .map(|(link, _)| link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME))
-        .unwrap_or(EXTERNAL_DIRECTIVE_NAME.clone());
+        .unwrap_or(EXTERNAL_DIRECTIVE_NAME);
 
     let all_fields: IndexSet<_> = schema
         .types

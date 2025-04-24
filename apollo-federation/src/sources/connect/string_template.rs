@@ -638,7 +638,7 @@ mod test_interpolate_uri {
 
         let uri = template.interpolate(vars).expect("Failed to interpolate");
 
-        assert_eq!(uri.to_string(), "/1/1.2/true//string")
+        assert_eq!(uri, "/1/1.2/true//string")
     }
 
     #[test]
