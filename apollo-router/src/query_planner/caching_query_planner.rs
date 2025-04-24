@@ -1053,7 +1053,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         let _ = planner
             .call(query_planner::CachingRequest::new(
