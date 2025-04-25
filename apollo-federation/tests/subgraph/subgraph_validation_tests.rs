@@ -2,23 +2,44 @@ use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::subgraph::typestate::Validated;
 
-fn build_inner(schema_str: &str) -> Result<Subgraph<Validated>, SubgraphError> {
+enum BuildOption {
+    AsIs,
+    AsFed2,
+}
+
+fn build_inner(
+    schema_str: &str,
+    build_option: BuildOption,
+) -> Result<Subgraph<Validated>, SubgraphError> {
     let name = "S";
-    Subgraph::parse(name, &format!("http://{name}"), schema_str)
-        .expect("valid schema")
+    let subgraph =
+        Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
+    let subgraph = if matches!(build_option, BuildOption::AsFed2) {
+        subgraph
+            .into_fed2_subgraph()
+            .map_err(|e| SubgraphError::new(name, e))?
+    } else {
+        subgraph
+    };
+    subgraph
         .expand_links()
         .map_err(|e| SubgraphError::new(name, e))?
         .validate(true)
 }
 
 fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
-    build_inner(schema_str).expect("expanded subgraph to be valid")
+    build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
 }
 
-fn build_for_errors(schema: &str) -> Vec<(String, String)> {
-    build_inner(schema)
+fn build_for_errors_with_option(schema: &str, build_option: BuildOption) -> Vec<(String, String)> {
+    build_inner(schema, build_option)
         .expect_err("subgraph error was expected")
         .format_errors()
+}
+
+/// Build subgraph expecting errors, assuming fed 2.
+fn build_for_errors(schema: &str) -> Vec<(String, String)> {
+    build_for_errors_with_option(schema, BuildOption::AsFed2)
 }
 
 fn remove_indentation(s: &str) -> String {
@@ -59,9 +80,17 @@ fn remove_indentation(s: &str) -> String {
 fn check_errors(a: &[(String, String)], b: &[(&str, &str)]) -> Result<(), String> {
     if a.len() != b.len() {
         return Err(format!(
-            "Mismatched error counts: {} != {}",
+            "Mismatched error counts: {} != {}\n\nexpected:\n{}\n\nactual:\n{}",
+            b.len(),
             a.len(),
-            b.len()
+            b.iter()
+                .map(|(code, msg)| { format!("- {}: {}", code, msg) })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            a.iter()
+                .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
+                .collect::<Vec<_>>()
+                .join("\n"),
         ));
     }
 
@@ -105,7 +134,7 @@ mod fieldset_based_directives {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_key() {
         let schema_str = r#"
             type Query {		
@@ -127,7 +156,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_provides() {
         let schema_str = r#"
             type Query {
@@ -150,7 +179,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -173,7 +202,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -215,7 +244,7 @@ mod fieldset_based_directives {
             "#,
                 version
             );
-            let err = build_for_errors(&schema_str);
+            let err = build_for_errors_with_option(&schema_str, BuildOption::AsIs);
 
             assert_errors!(
                 err,
@@ -319,7 +348,7 @@ mod fieldset_based_directives {
                 f: Int
             }
         "#;
-        let err = build_for_errors(schema_str);
+        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
 
         assert_errors!(
             err,
@@ -714,9 +743,8 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_invalid_known_directive_location() {
-        let errors = build_for_errors(
-            // @external is not allowed on 'schema' and likely never will.
-            r#"
+        // @external is not allowed on 'schema' and likely never will.
+        let doc = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
@@ -727,11 +755,9 @@ mod link_handling_tests {
             directive @federation__external(
                 reason: String
             ) on OBJECT | FIELD_DEFINITION | SCHEMA
-            "#,
-        );
-
+            "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@federation__external": "@federation__external" should have locations OBJECT, FIELD_DEFINITION, but found (non-subset) OBJECT, FIELD_DEFINITION, SCHEMA"#,
@@ -741,8 +767,7 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_invalid_non_repeatable_directive_marked_repeatable() {
-        let errors = build_for_errors(
-            r#"
+        let doc = r#"
                 extend schema
                   @link(url: "https://specs.apollo.dev/federation/v2.0" import: ["@key"])
 
@@ -751,10 +776,9 @@ mod link_handling_tests {
                 }
 
                 directive @federation__external repeatable on OBJECT | FIELD_DEFINITION
-            "#,
-        );
+            "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@federation__external": "@federation__external" should not be repeatable"#,
@@ -764,8 +788,7 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_unknown_argument_of_known_directive() {
-        let errors = build_for_errors(
-            r#"
+        let doc = r#"
             extend schema
               @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
@@ -774,10 +797,9 @@ mod link_handling_tests {
             }
 
             directive @federation__external(foo: Int) on OBJECT | FIELD_DEFINITION
-            "#,
-        );
+        "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@federation__external": unknown/unsupported argument "foo""#,
@@ -787,8 +809,7 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_invalid_type_for_a_known_argument() {
-        let errors = build_for_errors(
-            r#"
+        let doc = r#"
               extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
@@ -800,10 +821,9 @@ mod link_handling_tests {
                 fields: String!
                 resolvable: String
               ) repeatable on OBJECT | INTERFACE
-            "#,
-        );
+        "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@key": argument "resolvable" should have type "Boolean" but found type "String""#,
@@ -813,8 +833,7 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_a_required_argument_defined_as_optional() {
-        let errors = build_for_errors(
-            r#"
+        let doc = r#"
                 extend schema
                     @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
@@ -828,10 +847,9 @@ mod link_handling_tests {
                 ) repeatable on OBJECT | INTERFACE
 
                 scalar federation__FieldSet
-            "#,
-        );
+            "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@key": argument "fields" should have type "federation__FieldSet!" but found type "federation__FieldSet""#,
@@ -841,8 +859,7 @@ mod link_handling_tests {
 
     #[test]
     fn errors_on_invalid_definition_for_link_purpose() {
-        let errors = build_for_errors(
-            r#"
+        let doc = r#"
                 extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
 
                 type T {
@@ -853,10 +870,9 @@ mod link_handling_tests {
                     EXECUTION
                     RANDOM
                 }
-            "#,
-        );
+            "#;
         assert_errors!(
-            errors,
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "TYPE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for type "Purpose": expected values [EXECUTION, SECURITY] but found [EXECUTION, RANDOM]."#,
@@ -915,7 +931,24 @@ mod link_handling_tests {
             )]
         );
 
-        // TODO: Test for fed1
+        // Test for fed1
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "INVALID_GRAPHQL",
+                r###"
+                [S] Error: non-repeatable directive key can only be used once per location
+                   ╭─[ S:2:39 ]
+                   │
+                 2 │             type T @key(fields: "k1") @key(fields: "k2") {
+                   │                    ──┬─               ─────────┬────────  
+                   │                      ╰──────────────────────────────────── directive `@key` first called here
+                   │                                                │          
+                   │                                                ╰────────── directive `@key` called again here
+                ───╯
+                "###
+            )]
+        );
     }
 }
 
@@ -991,7 +1024,7 @@ mod federation_1_schema_tests {
             directive @key(fields: _FieldSet!, unknown: Int) on OBJECT | INTERFACE
         "#;
         assert_errors!(
-            build_for_errors(doc),
+            build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
                 r#"[S] Invalid definition for directive "@key": unknown/unsupported argument "unknown""#
@@ -1004,7 +1037,7 @@ mod shareable_tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn can_only_be_applied_to_fields_of_object_types() {
         let doc = r#"
             interface I {
@@ -1021,7 +1054,7 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_duplicate_shareable_on_the_same_definition_declaration() {
         let doc = r#"
             type E @shareable @key(fields: "id") @shareable {
@@ -1039,7 +1072,7 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_the_same_extension_declaration() {
         let doc = r#"
             type E @shareable {
@@ -1061,7 +1094,7 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_a_field() {
         let doc = r#"
             type E {
@@ -1217,9 +1250,7 @@ mod cost_tests {
     use super::*;
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_cost_applications_on_interfaces() {
         let doc = r#"
             extend schema
@@ -1248,9 +1279,7 @@ mod list_size_tests {
     use super::*;
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_applications_on_non_lists_unless_it_uses_sized_fields() {
         let doc = r#"
             extend schema
@@ -1276,9 +1305,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_negative_assumed_size() {
         let doc = r#"
             extend schema
@@ -1300,9 +1327,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched error counts:"#)]
     fn rejects_slicing_arguments_not_in_field_arguments() {
         let doc = r#"
             extend schema
@@ -1336,9 +1361,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched error counts:"#)]
     fn rejects_slicing_arguments_not_int_or_int_non_null() {
         let doc = r#"
             extend schema
@@ -1378,9 +1401,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_when_output_type_is_not_object() {
         let doc = r#"
             extend schema
@@ -1411,9 +1432,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_not_in_output_type() {
         let doc = r#"
             extend schema
@@ -1438,9 +1457,7 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
-    )]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_not_lists() {
         let doc = r#"
             extend schema

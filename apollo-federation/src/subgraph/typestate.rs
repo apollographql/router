@@ -15,7 +15,9 @@ use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_I
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::federation_spec_definition::add_federation_link_to_schema;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -117,7 +119,7 @@ impl Subgraph<Raw> {
     }
 
     pub fn parse(
-        name: &'static str,
+        name: &str,
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Raw>, FederationError> {
@@ -127,6 +129,18 @@ impl Subgraph<Raw> {
             .build()?;
 
         Ok(Self::new(name, url, schema))
+    }
+
+    /// Converts the schema to a fed2 schema.
+    /// - It is assumed to have no `@link` to the federation spec.
+    /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
+    /// - This is mainly for testing and not optimized.
+    // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
+    pub fn into_fed2_subgraph(self) -> Result<Self, FederationError> {
+        let mut schema = self.state.schema;
+        let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
+        add_federation_link_to_schema(&mut schema, federation_spec.version())?;
+        Ok(Self::new(&self.name, &self.url, schema))
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, FederationError> {

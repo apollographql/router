@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
@@ -23,6 +24,8 @@ use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -119,6 +122,13 @@ impl FederationSpecDefinition {
         // least one version.
         let latest_version = FEDERATION_VERSIONS.versions().last().unwrap();
         Self::for_version(latest_version).unwrap()
+    }
+
+    /// Some users rely on auto-expanding fed v1 graphs with fed v2 directives. While technically
+    /// we should only expand @tag directive from v2 definitions, we will continue expanding other
+    /// directives (up to v2.4) to ensure backwards compatibility.
+    pub(crate) fn auto_expanded_federation_spec() -> &'static Self {
+        Self::for_version(&Version { major: 2, minor: 4 }).unwrap()
     }
 
     pub(crate) fn is_fed1(&self) -> bool {
@@ -965,4 +975,46 @@ pub(crate) fn fed1_link_imports() -> Vec<Arc<link::Import>> {
         .chain(directive_imports)
         .map(Arc::new)
         .collect()
+}
+
+/// Adds a bootstrap federation (v2 or above) link directive to the schema.
+/// - Similar to `add_fed1_link_to_schema`, but for federation v2 and above.
+/// - Mainly for testing.
+pub(crate) fn add_federation_link_to_schema(
+    schema: &mut Schema,
+    federation_version: &Version,
+) -> Result<(), FederationError> {
+    let federation_spec = FEDERATION_VERSIONS
+        .find(federation_version)
+        .ok_or_else(|| internal_error!(
+            "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
+            federation_version,
+        ))?;
+
+    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
+    // - auto import all directives.
+    let imports: Vec<_> = federation_spec
+        .directive_specs()
+        .iter()
+        .map(|d| format!("@{}", d.name()).into())
+        .collect();
+
+    schema
+        .schema_definition
+        .make_mut()
+        .directives
+        .push(Component::new(Directive {
+            name: Identity::link_identity().name,
+            arguments: vec![
+                Node::new(Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: federation_spec.url.to_string().into(),
+                }),
+                Node::new(Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(Value::List(imports)),
+                }),
+            ],
+        }));
+    Ok(())
 }
