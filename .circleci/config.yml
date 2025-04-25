@@ -12,18 +12,18 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
     resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
       - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.5.0
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.21.1
@@ -32,13 +32,13 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
@@ -932,7 +932,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:4652bf6
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:4720fb1
     resource_class: small
     environment:
       <<: *common_job_environment
