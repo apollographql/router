@@ -837,6 +837,91 @@ mod fieldset_based_directives {
     }
 }
 
+mod root_types {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_using_query_as_type_name_if_not_the_query_root() {
+        let schema_str = r#"
+            schema {
+                query: MyQuery
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type Query {
+                g: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "ROOT_QUERY_USED",
+                r#"[S] The schema has a type named "Query" but it is not set as the query root type ("MyQuery" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_using_mutation_as_type_name_if_not_the_mutation_root() {
+        let schema_str = r#"
+            schema {
+                mutation: MyMutation
+            }
+
+            type MyMutation {
+                f: Int
+            }
+
+            type Mutation {
+                g: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "ROOT_MUTATION_USED",
+                r#"[S] The schema has a type named "Mutation" but it is not set as the mutation root type ("MyMutation" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_using_subscription_as_type_name_if_not_the_subscription_root() {
+        let schema_str = r#"
+            schema {
+                subscription: MySubscription
+            }
+
+            type MySubscription {
+                f: Int
+            }
+
+            type Subscription {
+                g: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "ROOT_SUBSCRIPTION_USED",
+                r#"[S] The schema has a type named "Subscription" but it is not set as the subscription root type ("MySubscription" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+            )]
+        );
+    }
+}
+
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
 #[cfg(test)]
 mod link_handling_tests {
