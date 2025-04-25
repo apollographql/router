@@ -170,22 +170,21 @@ fn count_operation_errors(
         }
     }
 
-    let mut map = previously_counted_errors_map.clone();
+    let mut diff_map = previously_counted_errors_map.clone();
     for error in errors {
         let code = get_code(&error);
 
         // If we already counted this error in a previous layer, then skip counting it again
-        if let Some(count) = map.get_mut(&code) {
+        if let Some(count) = diff_map.get_mut(&code) {
             *count = count.saturating_sub(1);
             if *count == 0 {
-                map.remove(&code);
+                diff_map.remove(&code);
             }
             continue;
         }
 
         // If we haven't seen this error before, or we see more occurrences than we've counted
         // before, then count the error
-
         let service = error
             .extensions
             .get("service")
@@ -197,8 +196,6 @@ fn count_operation_errors(
             None => "".into(),
             Some(path) => path.to_string(),
         };
-        let entry = map.entry(code.clone()).or_insert(0u64);
-        *entry += 1;
 
         let send_otlp_errors = if service.is_empty() {
             matches!(
@@ -227,16 +224,13 @@ fn count_operation_errors(
                 "graphql.operation.type" = operation_kind.clone(),
                 "apollo.client.name" = client_name.clone(),
                 "apollo.client.version" = client_version.clone(),
-                "graphql.error.extensions.code" = code.unwrap_or_default(),
+                "graphql.error.extensions.code" = code.clone().unwrap_or_default(),
                 "graphql.error.extensions.severity" = severity_str,
                 "graphql.error.path" = path,
                 "apollo.router.error.service" = service
             );
         }
-    }
-
-    for (code, count) in map {
-        count_graphql_error(count, code.as_deref());
+        count_graphql_error(1, code.as_deref());
     }
 }
 
