@@ -721,12 +721,15 @@ impl Verifier for OtlpTraceSpec<'_> {
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
         let binding = trace.select_path(&format!(
-            "$..[?(@.attributes[?(@.key == 'otel.original_name' && @.value.stringValue == '{}')])].attributes[?(@.key == '_dd.measured')].value.intValue",
+            "$..[?(@.attributes[?(@.key == 'otel.original_name' && @.value.stringValue == '{}')])].attributes[?(@.key == '_dd.measured')].value.stringValue",
             name
         ))?;
 
-        let measured = binding.first().and_then(|v| v.as_i64()).unwrap_or_default();
-        Ok(measured == 1)
+        let measured = binding
+            .first()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        Ok(measured == "1")
     }
 
     async fn find_valid_metrics(&self) -> Result<(), BoxError> {
