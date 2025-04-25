@@ -8,6 +8,7 @@ use std::ops::Not;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
@@ -1928,12 +1929,17 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
         )?;
+        dbg!(fields.to_string());
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
             } else {
-                let fields = fields.serialize().no_indent().to_string();
+                let fields = FieldSet {
+                    sources: Default::default(),
+                    selection_set: fields,
+                }.serialize().no_indent().to_string();
+                dbg!(&fields);
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {
                         federation_spec_definition.provides_directive(schema, fields)?

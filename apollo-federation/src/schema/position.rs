@@ -335,6 +335,7 @@ impl TypeDefinitionPosition {
     }
 
     /// Remove a directive application.
+    #[allow(unused)]
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,

@@ -15,6 +15,7 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
+use super::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -36,8 +37,6 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
-
-use super::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");

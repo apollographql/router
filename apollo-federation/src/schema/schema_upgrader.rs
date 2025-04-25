@@ -15,7 +15,6 @@ use super::field_set::collect_target_fields_from_field_set;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
-use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -51,10 +50,14 @@ struct TypeInfo {
 // However, those messages were never used, so we have omitted them here.
 pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: &[&mut Subgraph<Expanded>],
-) -> Result<(), FederationError> {
+) -> Result<Vec<Subgraph<Expanded>>, FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs.iter().all(|subgraph| !subgraph.is_fed_1()) {
-        return Ok(());
+        let mut result = vec![];
+        for subgraph in subgraphs.iter() {
+            result.push((*subgraph).clone());
+        }
+        return Ok(result);
     }
 
     let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
@@ -77,14 +80,23 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             }
         }
     }
+    let mut result = vec![];
     for subgraph in subgraphs.iter() {
         if subgraph.is_fed_1() {
             let mut upgrader = SchemaUpgrader::new(subgraph, subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
+            let new_subgraph = Subgraph::<Raw>::new(
+                subgraph.name.as_str(),
+                subgraph.url.as_str(),
+                upgrader.schema.schema().clone(),
+            )
+            .assume_expanded()?;
+            result.push(new_subgraph);
+        } else {
+            result.push((*subgraph).clone());
         }
     }
-    // TODO: Return federation_subgraphs
-    todo!();
+    Ok(result)
 }
 
 // Extensions for FederationError to provide additional error types
@@ -111,7 +123,7 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     #[allow(unused)]
-    fn upgrade(&mut self) -> Result<Subgraph<Expanded>, FederationError> {
+    fn upgrade(&mut self) -> Result<(), FederationError> {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
         self.pre_upgrade_validations()?;
 
@@ -134,7 +146,7 @@ impl<'a> SchemaUpgrader<'a> {
 
         // Note that this rule rely on being after `removeDirectivesOnInterface` in practice (in that it doesn't check interfaces).
         self.remove_provides_on_non_composite();
-
+        dbg!(self.schema.schema().to_string());
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
         self.remove_unused_externals();
@@ -143,12 +155,7 @@ impl<'a> SchemaUpgrader<'a> {
 
         self.remove_tag_on_external()?;
 
-        let new_subgraph = Subgraph::<Raw>::new(
-            self.original_subgraph.name.as_str(),
-            self.original_subgraph.url.as_str(),
-            self.schema.schema().clone(),
-        );
-        Ok(new_subgraph.assume_expanded()?)
+        Ok(())
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -322,7 +329,7 @@ impl<'a> SchemaUpgrader<'a> {
         };
         let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Component<Directive>)> = vec![];
         for (obj_name, ty) in &schema.schema().types {
-            let ExtendedType::Object(obj) = ty else {
+            let ExtendedType::Object(_) = ty else {
                 continue;
             };
 
@@ -622,6 +629,10 @@ impl<'a> SchemaUpgrader<'a> {
                 for field in pos.fields(self.schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
+                    dbg!(field.type_name(), field.field_name(), self
+                        .original_subgraph
+                        .metadata()
+                        .is_field_external(&field_def));
                     if self
                         .original_subgraph
                         .metadata()
@@ -660,6 +671,7 @@ impl<'a> SchemaUpgrader<'a> {
         }
 
         for field in fields_to_remove {
+            dbg!(field.field_name());
             field.remove(&mut self.schema)?;
         }
         for type_ in types_to_remove {
@@ -852,7 +864,7 @@ impl<'a> SchemaUpgrader<'a> {
 mod tests {
     use super::*;
 
-    const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+    const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
 
     #[test]
     fn upgrades_complex_schema() {
@@ -878,7 +890,7 @@ mod tests {
 
             # A type with a genuine 'graphqQL' extension, to ensure the extend don't get removed.
             type Random {
-                x: Int @provides(fields: "x")
+                x: Int
             }
 
             extend type Random {
@@ -907,46 +919,80 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
+        let result = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
 
         insta::assert_snapshot!(
-            s1.schema().schema().to_string(),
-            r#"
-            schema
-                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
-            {
-                query: Query
-            }
+            result[0].schema().schema().to_string(), @r###"
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+  query: Query
+}
 
-            type Query {
-                products: [Product!]! @provides(fields: "description")
-            }
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-            interface I {
-                upc: ID!
-                description: String
-            }
+directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
-            type Product implements I
-                @key(fields: "upc")
-            {
-                upc: ID!
-                inventory: Int
-                description: String @external
-            }
+directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            type Random {
-                x: Int
-            }
+directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            extend type Random {
-                y: Int
-            }
-        "#
-            .replace(
-                "FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED",
-                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
-            )
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+directive @override(from: String!) on FIELD_DEFINITION
+
+directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @composeDirective(name: String!) repeatable on SCHEMA
+
+type Query {
+  products: [Product!]! @provides(fields: "description")
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+}
+
+interface I {
+  upc: ID!
+  description: String
+}
+
+type Random {
+  x: Int
+}
+
+extend type Random {
+  y: Int
+}
+
+type Product implements I @key(fields: "upc") {
+  upc: ID!
+  inventory: Int
+  description: String @external
+}
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar federation__FieldSet
+
+scalar _Any
+
+type _Service @shareable {
+  sdl: String
+}
+
+union _Entity = Product
+        "###
         );
     }
 
