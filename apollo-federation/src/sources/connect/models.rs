@@ -86,10 +86,8 @@ pub struct ConnectorErrorsSettings {
 impl ConnectorErrorsSettings {
     fn from_directive(
         connect_errors: Option<&ErrorsArguments>,
-        source_errors: Option<&Option<ErrorsArguments>>,
+        source_errors: Option<&ErrorsArguments>,
     ) -> Self {
-        let source_errors = source_errors.and_then(|s| s.as_ref());
-
         // `errors` set at @connect always overrides whatever is set at @source
         let message = if let Some(connect_errors) = connect_errors {
             connect_errors.message.clone()
@@ -192,7 +190,7 @@ impl Connector {
         // Get our batch and error settings
         let batch_settings = ConnectorBatchSettings::from_directive(&connect);
         let connect_errors = connect.errors.as_ref();
-        let source_errors = source.map(|s| &s.errors);
+        let source_errors = source.and_then(|s| s.errors.as_ref());
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
         // Calculate which variables and headers are in use in the request

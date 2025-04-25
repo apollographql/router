@@ -7,10 +7,10 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Value;
 use hashbrown::HashMap;
 
-use super::coordinates::ErrorsCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
+use super::errors::ErrorsCoordinate;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;

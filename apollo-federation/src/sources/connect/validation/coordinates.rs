@@ -35,30 +35,6 @@ impl Display for ConnectDirectiveCoordinate<'_> {
     }
 }
 
-/// Coordinate for an `errors` argument in `@source` or `@connect`.
-#[derive(Clone, Copy)]
-pub(super) enum ErrorsCoordinate<'a> {
-    Source {
-        source: SourceDirectiveCoordinate<'a>,
-    },
-    Connect {
-        connect: ConnectDirectiveCoordinate<'a>,
-    },
-}
-
-impl Display for ErrorsCoordinate<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Self::Connect { connect } => {
-                write!(f, "{connect}")
-            }
-            Self::Source { source } => {
-                write!(f, "{source}")
-            }
-        }
-    }
-}
-
 /// The location of a `@source` directive.
 #[derive(Clone, Copy)]
 pub(super) struct SourceDirectiveCoordinate<'a> {

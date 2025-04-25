@@ -1,6 +1,8 @@
 //! Parsing and validation for `@connect(errors:)` or `@source(errors:)`
 
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -8,7 +10,8 @@ use apollo_compiler::ast::Value;
 use multi_try::MultiTry;
 use shape::Shape;
 
-use super::coordinates::ErrorsCoordinate;
+use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::SourceDirectiveCoordinate;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
@@ -66,18 +69,14 @@ impl<'schema> Errors<'schema> {
                 message: format!(
                     "{coordinate} `{ERRORS_ARGUMENT_NAME}` argument must be an object."
                 ),
-                locations: directive
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
+                locations: arg.line_column_range(&schema.sources).into_iter().collect(),
             }])
         }
     }
 
     /// Type-check the `@connect(errors:)` or `@source(errors:)` directive.
     ///
-    /// Does things like ensuring that every accessed variable actually exists and that expressions
-    /// used in the URL and headers result in scalars.
+    /// Runs [`ErrorsMessage::type_check`] and [`ErrorsExtensions::type_check`]
     ///
     /// TODO: Return some type checking results, like extracted keys?
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Vec<Message>> {
@@ -139,7 +138,7 @@ impl<'schema> ErrorsMessage<'schema> {
         };
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
-        // Ensure that the message selection is a valid JSON selection string
+        // Ensure that the selection is a valid JSONSelection string
         let string = match GraphQLString::new(value, &schema.sources) {
             Ok(selection_str) => selection_str,
             Err(_) => {
@@ -184,9 +183,7 @@ impl<'schema> ErrorsMessage<'schema> {
         }))
     }
 
-    /// Check that the selection of the body matches the inputs at this location.
-    ///
-    /// TODO: check keys here?
+    /// Check that only available variables are used, and the expression results in a string
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
             selection,
@@ -217,25 +214,49 @@ impl<'schema> ErrorsMessage<'schema> {
     }
 }
 
+/// Coordinate for an `errors` argument in `@source` or `@connect`.
+#[derive(Clone, Copy)]
+pub(super) enum ErrorsCoordinate<'a> {
+    Source {
+        source: SourceDirectiveCoordinate<'a>,
+    },
+    Connect {
+        connect: ConnectDirectiveCoordinate<'a>,
+    },
+}
+
+impl Display for ErrorsCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Connect { connect } => {
+                write!(f, "{connect}")
+            }
+            Self::Source { source } => {
+                write!(f, "{source}")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ErrorsMessageCoordinate<'schema> {
     coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsMessageCoordinate<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_MESSAGE_ARGUMENT_NAME}:}})`",
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_MESSAGE_ARGUMENT_NAME}:)`",
                     directive_name = source.directive.name
                 )
             }
             ErrorsCoordinate::Connect { connect } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_MESSAGE_ARGUMENT_NAME}:}})` on `{element}`",
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_MESSAGE_ARGUMENT_NAME}:)` on `{element}`",
                     directive_name = connect.directive.name,
                     element = connect.element
                 )
@@ -264,7 +285,7 @@ impl<'schema> ErrorsExtensions<'schema> {
         };
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
-        // Ensure that the message selection is a valid JSON selection string
+        // Ensure that the selection is a valid JSONSelection string
         let string = match GraphQLString::new(value, &schema.sources) {
             Ok(selection_str) => selection_str,
             Err(_) => {
@@ -309,9 +330,7 @@ impl<'schema> ErrorsExtensions<'schema> {
         }))
     }
 
-    /// Check that the selection of the body matches the inputs at this location.
-    ///
-    /// TODO: check keys here?
+    /// Check that the selection only uses allowed variables and evaluates to an object
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
             selection,
@@ -333,7 +352,7 @@ impl<'schema> ErrorsExtensions<'schema> {
                 location: 0..string.as_str().len(),
             },
             context,
-            &Shape::empty_object([]),
+            &Shape::dict(Shape::unknown([]), []),
         )
         .map_err(|mut message| {
             message.message = format!("In {coordinate}: {message}", message = message.message);
@@ -348,19 +367,19 @@ struct ErrorsExtensionsCoordinate<'schema> {
 }
 
 impl Display for ErrorsExtensionsCoordinate<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_EXTENSIONS_ARGUMENT_NAME}:}})`",
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_EXTENSIONS_ARGUMENT_NAME}:)`",
                     directive_name = source.directive.name
                 )
             }
             ErrorsCoordinate::Connect { connect } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_EXTENSIONS_ARGUMENT_NAME}:}})` on `{element}`",
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_EXTENSIONS_ARGUMENT_NAME}:)` on `{element}`",
                     directive_name = connect.directive.name,
                     element = connect.element
                 )
