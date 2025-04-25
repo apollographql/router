@@ -93,6 +93,7 @@ enum Command {
         /// Path(s) to subgraph schemas.
         schemas: Vec<PathBuf>,
     },
+    /// Expand and validate a subgraph schema and print the result
     Subgraph {
         /// The path to the subgraph schema file, or `-` for stdin
         subgraph_schema: PathBuf,
