@@ -98,7 +98,7 @@ fn last_shape(
 
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
-                prefix.last().map_or_else(Shape::none, |last| last.clone())
+                prefix.last().cloned().unwrap_or_else(Shape::none)
             } else if let Some(last) = prefix.last() {
                 Shape::one(
                     [last.clone(), tail.clone(), Shape::none()],

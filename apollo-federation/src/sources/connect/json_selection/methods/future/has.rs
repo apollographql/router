@@ -21,17 +21,7 @@ fn has_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let Some(MethodArgs { args, .. }) = method_args else {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!("Method ->{} requires an argument", method_name.as_ref()),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        );
-    };
-    let Some(arg) = args.first() else {
+    let Some(arg) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
             None,
             vec![ApplyToError::new(

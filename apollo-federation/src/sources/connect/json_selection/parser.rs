@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+use itertools::Itertools;
 use nom::IResult;
 use nom::Slice;
 use nom::branch::alt;
@@ -378,6 +379,7 @@ impl NamedSelection {
                 } else if let Some(sub) = path.next_subselection() {
                     sub.selections_iter()
                         .flat_map(|selection| selection.names())
+                        .unique()
                         .collect()
                 } else {
                     vec![]
@@ -1048,7 +1050,7 @@ impl Key {
         WithRange::new(self, None)
     }
 
-    pub const fn is_quoted(&self) -> bool {
+    pub fn is_quoted(&self) -> bool {
         matches!(self, Self::Quoted(_))
     }
 
@@ -1236,7 +1238,10 @@ mod tests {
     fn test_identifier() {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(name.as_ref(), expected_name);
         }
 
@@ -1273,7 +1278,10 @@ mod tests {
     fn test_string_literal() {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(lit.as_ref(), expected);
         }
         check("'hello world'", "hello world");
@@ -1287,7 +1295,10 @@ mod tests {
     fn test_key() {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(key.as_ref(), expected);
         }
 
@@ -1302,7 +1313,10 @@ mod tests {
     fn test_alias() {
         fn check(input: &str, alias: &str) {
             let (remainder, parsed) = Alias::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(parsed.name(), alias);
         }
 
@@ -1317,7 +1331,10 @@ mod tests {
     fn test_named_selection() {
         fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
             let (remainder, selection) = NamedSelection::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             let selection = selection.strip_ranges();
             assert_eq!(selection, expected);
             assert_eq!(selection.names(), names);
@@ -1643,7 +1660,10 @@ mod tests {
     #[track_caller]
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
-        assert!(span_is_all_spaces_or_comments(remainder));
+        assert!(
+            span_is_all_spaces_or_comments(remainder),
+            "remainder is `{remainder}`"
+        );
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
             selection!(input).strip_ranges(),
@@ -2695,7 +2715,10 @@ mod tests {
     fn test_subselection() {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(parsed.strip_ranges(), expected);
         }
 

@@ -575,24 +575,21 @@ impl ApplyToInternal for WithRange<PathList> {
                             )],
                         );
                     }
-
-                    data.get(key.as_str()).map_or_else(
-                        || {
-                            (
-                                None,
-                                vec![ApplyToError::new(
-                                    format!(
-                                        "Property {} not found in {}",
-                                        key.dotted(),
-                                        json_type_name(data),
-                                    ),
-                                    input_path_with_key.to_vec(),
-                                    key.range(),
-                                )],
-                            )
-                        },
-                        |child| tail.apply_to_path(child, vars, &input_path_with_key),
-                    )
+                    let Some(child) = data.get(key.as_str()) else {
+                        return (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        );
+                    };
+                    tail.apply_to_path(child, vars, &input_path_with_key)
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -742,6 +739,8 @@ impl ApplyToInternal for WithRange<PathList> {
                             method_name.shape_location(source_id),
                         )
                     },
+                    // TODO: call method.shape here to re-enable method type-checking
+                    //  call for each inner type of a One
                     |_method| Shape::unknown(method_name.shape_location(source_id)),
                 ),
 

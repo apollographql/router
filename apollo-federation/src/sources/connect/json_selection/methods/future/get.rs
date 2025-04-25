@@ -34,7 +34,7 @@ fn get_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let Some(MethodArgs { args, .. }) = method_args else {
+    let Some(index_literal) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
             None,
             vec![ApplyToError::new(
@@ -44,16 +44,7 @@ fn get_method(
             )],
         );
     };
-    let Some(index_literal) = args.first() else {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!("Method ->{} requires an argument", method_name.as_ref()),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        );
-    };
+
     match index_literal.apply_to_path(data, vars, input_path) {
         (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
             (JSON::Array(array), Some(i)) => {
