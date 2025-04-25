@@ -922,6 +922,118 @@ mod root_types {
     }
 }
 
+mod custom_error_message_for_misnamed_directives {
+    use super::*;
+
+    struct FedVersionSchemaParams {
+        extended_schema: &'static str,
+        extra_msg: &'static str,
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn has_suggestions_if_a_federation_directive_is_misspelled_in_all_schema_versions() {
+        let schema_versions = [
+            FedVersionSchemaParams {
+                // fed1
+                extended_schema: r#""#,
+                extra_msg: " If so, note that it is a federation 2 directive but this schema is a federation 1 one. To be a federation 2 schema, it needs to @link to the federation specification v2.",
+            },
+            FedVersionSchemaParams {
+                // fed2
+                extended_schema: r#"
+                    extend schema
+                        @link(url: "https://specs.apollo.dev/federation/v2.0")
+                    "#,
+                extra_msg: "",
+            },
+        ];
+        for fed_ver in schema_versions {
+            let schema_str = format!(
+                r#"{}
+                    type T @keys(fields: "id") {{
+                        id: Int @foo
+                        foo: String @sharable
+                    }}
+                "#,
+                fed_ver.extended_schema
+            );
+            let err = build_for_errors(&schema_str);
+
+            assert_errors!(
+                err,
+                [
+                    ("INVALID_GRAPHQL", r#"[S] Unknown directive "@foo"."#,),
+                    (
+                        "INVALID_GRAPHQL",
+                        format!(
+                            r#"[S] Unknown directive "@sharable". Did you mean "@shareable"?{}"#,
+                            fed_ver.extra_msg
+                        )
+                        .as_str(),
+                    ),
+                    (
+                        "INVALID_GRAPHQL",
+                        r#"[S] Unknown directive "@keys". Did you mean "@key"?"#,
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn has_suggestions_if_a_fed2_directive_is_used_in_fed1() {
+        let schema_str = r#"
+            type T @key(fields: "id") {
+                id: Int
+                foo: String @shareable
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "INVALID_GRAPHQL",
+                r#"[S] Unknown directive "@shareable". If you meant the \"@shareable\" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn has_suggestions_if_a_fed2_directive_is_used_under_wrong_name_for_the_schema() {
+        let schema_str = r#"
+            extend schema
+                @link(
+                url: "https://specs.apollo.dev/federation/v2.0"
+                import: [{ name: "@key", as: "@myKey" }]
+                )
+
+            type T @key(fields: "id") {
+                id: Int
+                foo: String @shareable
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [
+                (
+                    "INVALID_GRAPHQL",
+                    r#"[S] Unknown directive "@shareable". If you meant the \"@shareable\" federation directive, you should use fully-qualified name "@federation__shareable" or add "@shareable" to the \`import\` argument of the @link to the federation specification."#,
+                ),
+                (
+                    "INVALID_GRAPHQL",
+                    r#"[S] Unknown directive "@key". If you meant the "@key" federation directive, you should use "@myKey" as it is imported under that name in the @link to the federation specification of this schema."#,
+                ),
+            ]
+        );
+    }
+}
+
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
 #[cfg(test)]
 mod link_handling_tests {
