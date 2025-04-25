@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/errors.gr
 [
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(errors: {message:})`: object values aren't valid here",
+        message: "In `@source(errors.message:)`: object values aren't valid here",
         locations: [
             13:25..13:47,
             13:25..13:47,
@@ -14,7 +14,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/errors.gr
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@connect(errors: {message:})` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
+        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
         locations: [
             48:27..48:49,
             48:27..48:49,
