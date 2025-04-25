@@ -369,8 +369,8 @@ impl NamedSelection {
     pub(crate) fn names(&self) -> Vec<&str> {
         match self {
             Self::Field(alias, name, _) => alias
-                .as_ref()
-                .map_or_else(|| vec![name.as_str()], |alias| vec![alias.name.as_str()]),
+                .as_ref().map(|alias| vec![alias.name.as_str()])
+                .unwrap_or_else(|| vec![name.as_str()]),
             Self::Path { alias, path, .. } =>
             {
                 #[allow(clippy::if_same_then_else)]
