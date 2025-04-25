@@ -18,20 +18,21 @@ use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
     let context = response.context.clone();
     let errors_config = errors_config.clone();
-    
-    // TODO do we really need this?
-    let ClientRequestAccepts {
-        wildcard: accepts_wildcard,
-        json: accepts_json,
-        multipart_defer: accepts_multipart_defer,
-        multipart_subscription: accepts_multipart_subscription,
-    } = context
-        .extensions()
-        .with_lock(|lock| lock.get().cloned())
-        .unwrap_or_default();
 
     let (parts, stream) = response.response.into_parts();
+    // Clone context again to avoid move issues
     let stream = stream.inspect(move |resp| {
+        // TODO do we really need this?
+        let ClientRequestAccepts {
+            wildcard: accepts_wildcard,
+            json: accepts_json,
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
+        } = context
+            .extensions()
+            .with_lock(|lock| lock.get().cloned())
+            .unwrap_or_default();
+        
         // TODO make mapping to add to response context to avoid double counting
 
         if !resp.has_next.unwrap_or(false)
