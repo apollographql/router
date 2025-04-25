@@ -1077,3 +1077,138 @@ mod shareable_tests {
         );
     }
 }
+
+mod interface_object_and_key_on_interfaces_validation_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn key_on_interfaces_require_key_on_all_implementations() {
+        let doc = r#"
+            interface I @key(fields: "id1") @key(fields: "id2") {
+                id1: ID!
+                id2: ID!
+            }
+
+            type A implements I @key(fields: "id2") {
+                id1: ID!
+                id2: ID!
+                a: Int
+            }
+
+            type B implements I @key(fields: "id1") @key(fields: "id2") {
+                id1: ID!
+                id2: ID!
+                b: Int
+            }
+
+            type C implements I @key(fields: "id2") {
+                id1: ID!
+                id2: ID!
+                c: Int
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INTERFACE_KEY_NOT_ON_IMPLEMENTATION",
+                r#"[S] Key @key(fields: "id1") on interface type "I" is missing on implementation types "A" and "C"."#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn key_on_interfaces_with_key_on_some_implementation_non_resolvable() {
+        let doc = r#"
+            interface I @key(fields: "id1") {
+                id1: ID!
+            }
+
+            type A implements I @key(fields: "id1") {
+                id1: ID!
+                a: Int
+            }
+
+            type B implements I @key(fields: "id1") {
+                id1: ID!
+                b: Int
+            }
+
+            type C implements I @key(fields: "id1", resolvable: false) {
+                id1: ID!
+                c: Int
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INTERFACE_KEY_NOT_ON_IMPLEMENTATION",
+                r#"[S] Key @key(fields: "id1") on interface type "I" should be resolvable on all implementation types, but is declared with argument "@key(resolvable:)" set to false in type "C"."#
+            )]
+        );
+    }
+
+    #[test]
+    fn ensures_order_of_fields_in_key_does_not_matter() {
+        let doc = r#"
+            interface I @key(fields: "a b c") {
+                a: Int
+                b: Int
+                c: Int
+            }
+
+            type A implements I @key(fields: "c b a") {
+                a: Int
+                b: Int
+                c: Int
+            }
+
+            type B implements I @key(fields: "a c b") {
+                a: Int
+                b: Int
+                c: Int
+            }
+
+            type C implements I @key(fields: "a b c") {
+                a: Int
+                b: Int
+                c: Int
+            }
+        "#;
+
+        // Ensure no errors are returned
+        build_and_validate(doc);
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
+    fn only_allow_interface_object_on_entity_types() {
+        // There is no meaningful way to make @interfaceObject work on a value type at the moment,
+        // because if you have an @interfaceObject, some other subgraph needs to be able to resolve
+        // the concrete type, and that imply that you have key to go to that other subgraph. To be
+        // clear, the @key on the @interfaceObject technically don't need to be "resolvable", and
+        // the difference between no key and a non-resolvable key is arguably more of a convention
+        // than a genuine mechanical difference at the moment, but still a good idea to rely on
+        // that convention to help catching obvious mistakes early.
+        let doc = r#"
+            # This one shouldn't raise an error
+            type A @key(fields: "id", resolvable: false) @interfaceObject {
+                id: ID!
+            }
+
+            # This one should
+            type B @interfaceObject {
+                x: Int
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INTERFACE_OBJECT_USAGE_ERROR",
+                r#"[S] The @interfaceObject directive can only be applied to entity types but type "B" has no @key in this subgraph."#
+            )]
+        );
+    }
+}
