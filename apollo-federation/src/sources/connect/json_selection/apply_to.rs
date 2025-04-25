@@ -739,8 +739,6 @@ impl ApplyToInternal for WithRange<PathList> {
                             method_name.shape_location(source_id),
                         )
                     },
-                    // TODO: call method.shape here to re-enable method type-checking
-                    //  call for each inner type of a One
                     |_method| Shape::unknown(method_name.shape_location(source_id)),
                 ),
 
