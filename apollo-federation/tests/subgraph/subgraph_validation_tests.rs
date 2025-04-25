@@ -329,6 +329,512 @@ mod fieldset_based_directives {
             )]
         );
     }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_non_string_argument_to_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: ["f"]) {
+                f: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS_TYPE",
+                r#"[S] On type "T", for @key(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_non_string_argument_to_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: ["f"])
+            }
+
+            type T {
+                f: Int @external
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        // Note: since the error here is that we cannot parse the key `fields`, this also means that @external on
+        // `f` will appear unused and we get an error for it. It's kind of hard to avoid cleanly and hopefully
+        // not a big deal (having errors dependencies is not exactly unheard of).
+        assert_errors!(
+            err,
+            [
+                (
+                    "PROVIDES_INVALID_FIELDS_TYPE",
+                    r#"[S] On field "Query.t", for @provides(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_non_string_argument_to_requires() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T {
+                f: Int @external
+                g: Int @requires(fields: ["f"])
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        // Note: since the error here is that we cannot parse the key `fields`, this also means that @external on
+        // `f` will appear unused and we get an error for it. It's kind of hard to avoid cleanly and hopefully
+        // not a big deal (having errors dependencies is not exactly unheard of).
+        assert_errors!(
+            err,
+            [
+                (
+                    "REQUIRES_INVALID_FIELDS_TYPE",
+                    r#"[S] On field "T.g", for @requires(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    // Special case of non-string argument, specialized because it hits a different
+    // code-path due to enum values being parsed as string and requiring special care.
+    fn rejects_enum_like_argument_to_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: f) {
+                f: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS_TYPE",
+                r#"[S] On type "T", for @key(fields: f): Invalid value for argument "fields": must be a string."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    // Special case of non-string argument, specialized because it hits a different
+    // code-path due to enum values being parsed as string and requiring special care.
+    fn rejects_enum_like_argument_to_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: f)
+            }
+
+            type T {
+                f: Int @external
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        // Note: since the error here is that we cannot parse the key `fields`, this also mean that @external on
+        // `f` will appear unused and we get an error for it. It's kind of hard to avoid cleanly and hopefully
+        // not a big deal (having errors dependencies is not exactly unheard of).
+        assert_errors!(
+            err,
+            [
+                (
+                    "PROVIDES_INVALID_FIELDS_TYPE",
+                    r#"[S] On field "Query.t", for @provides(fields: f): Invalid value for argument "fields": must be a string."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    // Special case of non-string argument, specialized because it hits a different
+    // code-path due to enum values being parsed as string and requiring special care.
+    fn rejects_enum_like_argument_to_requires() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T {
+                f: Int @external
+                g: Int @requires(fields: f)
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        // Note: since the error here is that we cannot parse the key `fields`, this also mean that @external on
+        // `f` will appear unused and we get an error for it. It's kind of hard to avoid cleanly and hopefully
+        // not a big deal (having errors dependencies is not exactly unheard of).
+        assert_errors!(
+            err,
+            [
+                (
+                    "REQUIRES_INVALID_FIELDS_TYPE",
+                    r#"[S] On field "T.g", for @requires(fields: f): Invalid value for argument "fields": must be a string."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_invalid_fields_argument_to_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: ":f") {
+                f: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS",
+                r#"[S] On type "T", for @key(fields: ":f"): Syntax Error: Expected Name, found ":"."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_invalid_fields_argument_to_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "{{f}}")
+            }
+
+            type T {
+                f: Int @external
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [
+                (
+                    "PROVIDES_INVALID_FIELDS",
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax Error: Expected Name, found "{"."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_invalid_fields_argument_to_requires() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T {
+                f: Int @external
+                g: Int @requires(fields: "f b")
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "REQUIRES_INVALID_FIELDS",
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_key_on_interface_field() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "f") {
+                f: I
+            }
+
+            interface I {
+                i: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_FIELDS_SELECT_INVALID_TYPE",
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Interface type which is not allowed in @key"#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_key_on_union_field() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "f") {
+                f: U
+            }
+
+            union U = Query | T
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_FIELDS_SELECT_INVALID_TYPE",
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Union type which is not allowed in @key"#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_directive_applications_in_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "v { x ... @include(if: false) { y }}") {
+                v: V
+            }
+
+            type V {
+                x: Int
+                y: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_DIRECTIVE_IN_FIELDS_ARG",
+                r#"[S] On type "T", for @key(fields: "v { x ... @include(if: false) { y }}"): cannot have directive applications in the @key(fields:) argument but found @include(if: false)."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_directive_applications_in_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "v { ... on V @skip(if: true) { x y } }")
+            }
+
+            type T @key(fields: "id") {
+                id: ID
+                v: V @external
+            }
+
+            type V {
+                x: Int
+                y: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "PROVIDES_DIRECTIVE_IN_FIELDS_ARG",
+                r#"[S] On field "Query.t", for @provides(fields: "v { ... on V @skip(if: true) { x y } }"): cannot have directive applications in the @provides(fields:) argument but found @skip(if: true)."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_directive_applications_in_requires() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id") {
+                id: ID
+                a: Int @requires(fields: "... @skip(if: false) { b }")
+                b: Int @external
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "REQUIRES_DIRECTIVE_IN_FIELDS_ARG",
+                r#"[S] On field "T.a", for @requires(fields: "... @skip(if: false) { b }"): cannot have directive applications in the @requires(fields:) argument but found @skip(if: false)."#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn can_collect_multiple_errors_in_a_single_fields_argument() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "f(x: 3)")
+            }
+
+            type T @key(fields: "id") {
+                id: ID
+                f(x: Int): Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [
+                (
+                    "PROVIDES_FIELDS_HAS_ARGS",
+                    r#"[S] On field "Query.t", for @provides(fields: "f(x: 3)"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @provides)"#,
+                ),
+                (
+                    "PROVIDES_FIELDS_MISSING_EXTERNAL",
+                    r#"[S] On field "Query.t", for @provides(fields: "f(x: 3)"): field "T.f" should not be part of a @provides since it is already provided by this subgraph (it is not marked @external)"#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_aliases_in_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "foo: id") {
+                id: ID!
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS",
+                r#"[S] On type "T", for @key(fields: "foo: id"): Cannot use alias "foo" in "foo: id": aliases are not currently supported in @key"#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_aliases_in_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "bar: x")
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int @external
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "PROVIDES_INVALID_FIELDS",
+                r#"[S] On field "Query.t", for @provides(fields: "bar: x"): Cannot use alias "bar" in "bar: x": aliases are not currently supported in @provides"#,
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    fn rejects_aliases_in_requires() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T {
+                x: X @external
+                y: Int @external
+                g: Int @requires(fields: "foo: y")
+                h: Int @requires(fields: "x { m: a n: b }")
+            }
+
+            type X {
+                a: Int
+                b: Int
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.g", for @requires(fields: "foo: y"): Cannot use alias "foo" in "foo: y": aliases are not currently supported in @requires"#,
+                ),
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "m" in "m: a": aliases are not currently supported in @requires"#,
+                ),
+            ]
+        );
+    }
 }
 
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
