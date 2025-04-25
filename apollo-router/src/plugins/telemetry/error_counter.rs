@@ -1,18 +1,20 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use futures::future::ready;
-use futures::stream::once;
-use futures::StreamExt;
-use serde_json_bytes::{Value};
 use crate::apollo_studio_interop::UsageReporting;
-use crate::context::{OPERATION_KIND, OPERATION_NAME};
-use crate::{graphql, Context};
+use crate::context::{COUNTED_ERRORS, OPERATION_KIND, OPERATION_NAME};
+use crate::graphql::Error;
 use crate::plugins::telemetry::apollo::{ErrorsConfiguration, ExtendedErrorMetricsMode};
 use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::services::{SupergraphResponse};
 use crate::services::router::ClientRequestAccepts;
+use crate::services::SupergraphResponse;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+use crate::{graphql, Context};
+use futures::future::ready;
+use futures::stream::once;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use serde_json_bytes::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 // TODO call this for subgraph service (pre redaction), supergraph service, and _MAYBE_ router service (service unavail and invalid headers)
 pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
@@ -32,8 +34,6 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
-        
-        // TODO make mapping to add to response context to avoid double counting
 
         if !resp.has_next.unwrap_or(false)
             && !resp.subscribed.unwrap_or(false)
@@ -66,17 +66,34 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
                 &errors_config,
             );
         }
+
+        context
+            .insert(COUNTED_ERRORS, to_map(resp.errors.clone()))
+            .expect("Unable to insert errors into context.");
     });
 
+
     let (first_response, rest) = StreamExt::into_future(stream).await;
-    let response = http::Response::from_parts(
+    let new_response = http::Response::from_parts(
         parts,
         once(ready(first_response.unwrap_or_default()))
             .chain(rest)
             .boxed(),
     );
 
-    SupergraphResponse { context, response }
+    SupergraphResponse { context: response.context, response: new_response }
+}
+
+
+fn to_map(errors: Vec<Error>) -> HashMap<Option<String>, u64> {
+    let mut map: HashMap<Option<String>, u64> = HashMap::new();
+    errors.into_iter().for_each(|error| {
+        map.entry(get_code(&error))
+            .and_modify(|count| { *count += 1 })
+            .or_insert(1);
+    });
+
+    map
 }
 
 // TODO router service plugin fn to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER? Would need to parse json response
@@ -114,10 +131,16 @@ fn count_value_completion_errors(
 }
 
 fn count_operation_errors(
-    errors: &[graphql::Error],
+    errors: &[Error],
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
+    let previously_counted_errors_map: HashMap<Option<String>, u64> = context
+        .get(COUNTED_ERRORS)
+        .ok()
+        .flatten()
+        .unwrap_or(HashMap::new());
+
     let unwrap_context_string = |context_key: &str| -> String {
         context
             .get::<_, String>(context_key)
@@ -147,14 +170,22 @@ fn count_operation_errors(
         }
     }
 
-    let mut map = HashMap::new();
+    let mut map = previously_counted_errors_map.clone();
     for error in errors {
-        let code = error.extensions.get("code").and_then(|c| match c {
-            Value::String(s) => Some(s.as_str().to_owned()),
-            Value::Bool(b) => Some(format!("{b}")),
-            Value::Number(n) => Some(n.to_string()),
-            Value::Null | Value::Array(_) | Value::Object(_) => None,
-        });
+        let code = get_code(&error);
+
+        // If we already counted this error in a previous layer, then skip counting it again
+        if let Some(count) = map.get_mut(&code) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                map.remove(&code);
+            }
+            continue;
+        }
+
+        // If we haven't seen this error before, or we see more occurrences than we've counted
+        // before, then count the error
+
         let service = error
             .extensions
             .get("service")
@@ -209,7 +240,15 @@ fn count_operation_errors(
     }
 }
 
-/// Shared counter for `apollo.router.graphql_error` for consistency
+fn get_code(error: &Error) -> Option<String> {
+    error.extensions.get("code").and_then(|c| match c {
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::Bool(b) => Some(format!("{b}")),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    })
+}
+
 fn count_graphql_error(count: u64, code: Option<&str>) {
     match code {
         None => {
@@ -233,21 +272,21 @@ fn count_graphql_error(count: u64, code: Option<&str>) {
 
 #[cfg(test)]
 mod test {
-    use serde_json_bytes::Value;
     use serde_json_bytes::json;
+    use serde_json_bytes::Value;
 
-    use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::telemetry::CLIENT_NAME;
-    use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
     use crate::plugins::telemetry::error_counter::{count_operation_error_codes, count_operation_errors};
+    use crate::plugins::telemetry::CLIENT_NAME;
+    use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::Context;
 
     #[tokio::test]
     async fn test_count_operation_error_codes_with_extended_config_enabled() {
