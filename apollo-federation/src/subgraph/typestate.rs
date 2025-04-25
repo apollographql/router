@@ -1,9 +1,12 @@
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::Type;
 
 use crate::LinkSpecDefinition;
@@ -15,9 +18,13 @@ use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_I
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
-use crate::link::federation_spec_definition::add_federation_link_to_schema;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -213,6 +220,48 @@ impl Subgraph<Raw> {
             state: Expanded { schema, metadata },
         })
     }
+}
+
+/// Adds a federation (v2 or above) link directive to the schema.
+/// - Similar to `add_fed1_link_to_schema`, but the link is added before bootstrapping.
+/// - This is mainly for testing.
+fn add_federation_link_to_schema(
+    schema: &mut Schema,
+    federation_version: &Version,
+) -> Result<(), FederationError> {
+    let federation_spec = FEDERATION_VERSIONS
+        .find(federation_version)
+        .ok_or_else(|| internal_error!(
+            "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
+            federation_version,
+        ))?;
+
+    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
+    // - auto import all directives.
+    let imports: Vec<_> = federation_spec
+        .directive_specs()
+        .iter()
+        .map(|d| format!("@{}", d.name()).into())
+        .collect();
+
+    schema
+        .schema_definition
+        .make_mut()
+        .directives
+        .push(Component::new(Directive {
+            name: Identity::link_identity().name,
+            arguments: vec![
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: federation_spec.url().to_string().into(),
+                }),
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(ast::Value::List(imports)),
+                }),
+            ],
+        }));
+    Ok(())
 }
 
 fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), FederationError> {
