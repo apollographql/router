@@ -212,7 +212,7 @@ impl Plugin for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
-            all = match RedisCacheStorage::new(redis_config).await {
+            all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
@@ -234,7 +234,7 @@ impl Plugin for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
-                let storage = match RedisCacheStorage::new(redis_config).await {
+                let storage = match RedisCacheStorage::new(redis_config, "entity").await {
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
