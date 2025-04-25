@@ -369,7 +369,8 @@ impl NamedSelection {
     pub(crate) fn names(&self) -> Vec<&str> {
         match self {
             Self::Field(alias, name, _) => alias
-                .as_ref().map(|alias| vec![alias.name.as_str()])
+                .as_ref()
+                .map(|alias| vec![alias.name.as_str()])
                 .unwrap_or_else(|| vec![name.as_str()]),
             Self::Path { alias, path, .. } =>
             {
@@ -1158,16 +1159,17 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
                 chars.push(c);
             }
 
-            remainder_opt.ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
-            .map(|remainder| {
-                (
-                    remainder,
-                    WithRange::new(
-                        chars.iter().collect::<String>(),
-                        Some(start..remainder.location_offset()),
+            remainder_opt
+                .ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
+                .map(|remainder| {
+                    (
+                        remainder,
+                        WithRange::new(
+                            chars.iter().collect::<String>(),
+                            Some(start..remainder.location_offset()),
+                        ),
                     )
-                 )
-            })
+                })
         }
 
         _ => Err(nom_error_message(input, "Not a string literal")),
