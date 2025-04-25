@@ -999,3 +999,81 @@ mod federation_1_schema_tests {
         );
     }
 }
+
+mod shareable_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
+    fn can_only_be_applied_to_fields_of_object_types() {
+        let doc = r#"
+            interface I {
+                a: Int @shareable
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INVALID_SHAREABLE_USAGE",
+                r#"[S] Invalid use of @shareable on field "I.a": only object type fields can be marked with @shareable"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
+    fn rejects_duplicate_shareable_on_the_same_definition_declaration() {
+        let doc = r#"
+            type E @shareable @key(fields: "id") @shareable {
+                id: ID!
+                a: Int
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INVALID_SHAREABLE_USAGE",
+                r#"[S] Invalid duplicate application of @shareable on the same type declaration of "E": @shareable is only repeatable on types so it can be used simultaneously on a type definition and its extensions, but it should not be duplicated on the same definition/extension declaration"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
+    fn rejects_duplicate_shareable_on_the_same_extension_declaration() {
+        let doc = r#"
+            type E @shareable {
+                id: ID!
+                a: Int
+            }
+
+            extend type E @shareable @shareable {
+                b: Int
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INVALID_SHAREABLE_USAGE",
+                r#"[S] Invalid duplicate application of @shareable on the same type declaration of "E": @shareable is only repeatable on types so it can be used simultaneously on a type definition and its extensions, but it should not be duplicated on the same definition/extension declaration"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
+    fn rejects_duplicate_shareable_on_a_field() {
+        let doc = r#"
+            type E {
+                a: Int @shareable @shareable
+            }
+        "#;
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "INVALID_SHAREABLE_USAGE",
+                r#"[S] Invalid duplicate application of @shareable on field "E.a": @shareable is only repeatable on types so it can be used simultaneously on a type definition and its extensions, but it should not be duplicated on the same definition/extension declaration"#
+            )]
+        );
+    }
+}
