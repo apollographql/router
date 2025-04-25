@@ -1212,3 +1212,261 @@ mod interface_object_and_key_on_interfaces_validation_tests {
         );
     }
 }
+
+mod cost_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_cost_applications_on_interfaces() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+
+            type Query {
+                a: A
+            }
+
+            interface A {
+                x: Int @cost(weight: 10)
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "COST_APPLIED_TO_INTERFACE_FIELD",
+                r#"[S] @cost cannot be applied to interface "A.x""#
+            )]
+        );
+    }
+}
+
+mod list_size_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_applications_on_non_lists_unless_it_uses_sized_fields() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                a1: A @listSize(assumedSize: 5)
+                a2: A @listSize(assumedSize: 10, sizedFields: ["ints"])
+            }
+
+            type A {
+                ints: [Int]
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "LIST_SIZE_APPLIED_TO_NON_LIST",
+                r#"[S] "Query.a1" is not a list"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_negative_assumed_size() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                a: [Int] @listSize(assumedSize: -5)
+                b: [Int] @listSize(assumedSize: 0)
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "LIST_SIZE_INVALID_ASSUMED_SIZE",
+                r#"[S] Assumed size of "Query.a" cannot be negative"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_slicing_arguments_not_in_field_arguments() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                myField(something: Int): [String]
+                    @listSize(slicingArguments: ["missing1", "missing2"])
+                myOtherField(somethingElse: String): [Int]
+                    @listSize(slicingArguments: ["alsoMissing"])
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "missing1" is not an argument of "Query.myField""#
+                ),
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "missing2" is not an argument of "Query.myField""#
+                ),
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "alsoMissing" is not an argument of "Query.myOtherField""#
+                )
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_slicing_arguments_not_int_or_int_non_null() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                sliced(
+                    first: String
+                    second: Int
+                    third: Int!
+                    fourth: [Int]
+                    fifth: [Int]!
+                ): [String]
+                    @listSize(
+                        slicingArguments: ["first", "second", "third", "fourth", "fifth"]
+                    )
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "Query.sliced(first:)" must be Int or Int!"#
+                ),
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "Query.sliced(fourth:)" must be Int or Int!"#
+                ),
+                (
+                    "LIST_SIZE_INVALID_SLICING_ARGUMENT",
+                    r#"[S] Slicing argument "Query.sliced(fifth:)" must be Int or Int!"#
+                )
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_sized_fields_when_output_type_is_not_object() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                notObject: Int @listSize(assumedSize: 1, sizedFields: ["anything"])
+                a: A @listSize(assumedSize: 5, sizedFields: ["ints"])
+                b: B @listSize(assumedSize: 10, sizedFields: ["ints"])
+            }
+
+            type A {
+                ints: [Int]
+            }
+
+            interface B {
+                ints: [Int]
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "LIST_SIZE_INVALID_SIZED_FIELD",
+                r#"[S] Sized fields cannot be used because "Int" is not a composite type"#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_sized_fields_not_in_output_type() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                a: A @listSize(assumedSize: 5, sizedFields: ["notOnA"])
+            }
+
+            type A {
+                ints: [Int]
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "LIST_SIZE_INVALID_SIZED_FIELD",
+                r#"[S] Sized field "notOnA" is not a field on type "A""#
+            )]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"The https://specs.apollo.dev/federation/v1.0 specification should have been added to the schema before this is called"#
+    )]
+    fn rejects_sized_fields_not_lists() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+
+            type Query {
+                a: A
+                    @listSize(
+                        assumedSize: 5
+                        sizedFields: ["list", "nonNullList", "notList"]
+                    )
+            }
+
+            type A {
+                list: [String]
+                nonNullList: [String]!
+                notList: String
+            }
+        "#;
+
+        assert_errors!(
+            build_for_errors(doc),
+            [(
+                "LIST_SIZE_APPLIED_TO_NON_LIST",
+                r#"[S] Sized field "A.notList" is not a list"#
+            )]
+        );
+    }
+}
