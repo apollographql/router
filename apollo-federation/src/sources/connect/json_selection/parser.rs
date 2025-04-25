@@ -1158,18 +1158,16 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
                 chars.push(c);
             }
 
-            remainder_opt.map_or_else(
-                || Err(nom_fail_message(input, "Unterminated string literal")),
-                |remainder| {
-                    Ok((
-                        remainder,
-                        WithRange::new(
-                            chars.iter().collect::<String>(),
-                            Some(start..remainder.location_offset()),
-                        ),
-                    ))
-                },
-            )
+            remainder_opt.ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
+            .map(|remainder| {
+                (
+                    remainder,
+                    WithRange::new(
+                        chars.iter().collect::<String>(),
+                        Some(start..remainder.location_offset()),
+                    )
+                 )
+            })
         }
 
         _ => Err(nom_error_message(input, "Not a string literal")),
