@@ -5,10 +5,13 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
+use super::field_set::collect_target_fields_from_field_set;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
@@ -20,6 +23,7 @@ use crate::error::SingleFederationError;
 use crate::schema::SubgraphMetadata;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
@@ -306,7 +310,7 @@ impl<'a> SchemaUpgrader<'a> {
             return Ok(());
         };
         let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec![];
-        for (obj_name, ty) in schema.schema().types.iter() {
+        for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(obj) = ty else {
                 continue;
             };
@@ -330,7 +334,108 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn remove_external_on_type_extensions(&mut self) -> Result<(), FederationError> {
-        todo!();
+        let Some(metadata) = &self.schema.subgraph_metadata else {
+            return Ok(());
+        };
+        let types: Vec<_> = self.schema.get_types().collect();
+        let key_directive = metadata
+            .federation_spec_definition()
+            .key_directive_definition(&self.schema)?;
+        let external_directive = metadata
+            .federation_spec_definition()
+            .external_directive_definition(&self.schema)?;
+
+        let mut to_remove = vec![];
+        for ty in &types {
+            if !ty.is_composite_type()
+                || (!self.is_federation_type_extension(ty)? && !self.is_root_type_extension(ty))
+            {
+                continue;
+            }
+
+            let key_applications = ty.get_applied_directives(&self.schema, &key_directive.name);
+            if !key_applications.is_empty() {
+                for directive in key_applications {
+                    let args = metadata
+                        .federation_spec_definition()
+                        .key_directive_arguments(directive)?;
+                    for field in collect_target_fields_from_field_set(
+                        Valid::assume_valid_ref(self.schema.schema()),
+                        ty.type_name().clone(),
+                        args.fields,
+                        false,
+                    )? {
+                        let external =
+                            field.get_applied_directives(&self.schema, &external_directive.name);
+                        if !external.is_empty() {
+                            to_remove.push((field.clone(), external[0].clone()));
+                        }
+                    }
+                }
+            } else {
+                // ... but if the extension does _not_ have a key, then if the extension has a field that is
+                // part of the _1st_ key on the subgraph owning the type, then this field is not considered
+                // external (yes, it's pretty damn random, and it's even worst in that even if the extension
+                // does _not_ have the "field of the _1st_ key on the subraph owning the type", then the
+                // query planner will still request it to the subgraph, generating an invalid query; but
+                // we ignore that here). Note however that because other subgraphs may have already been
+                // upgraded, we don't know which is the "type owner", so instead we look up at the first
+                // key of every other subgraph. It's not 100% what fed1 does, but we're in very-strange
+                // case territory in the first place, so this is probably good enough (that is, there is
+                // customer schema for which what we do here matter but not that I know of for which it's
+                // not good enough).
+                let Some(entries) = self.object_type_map.get(ty.type_name()) else {
+                    continue;
+                };
+                for (subgraph_name, info) in entries.iter() {
+                    if subgraph_name == self.original_subgraph.name.as_str() {
+                        continue;
+                    }
+                    let Some(other_schema) = self
+                        .subgraphs
+                        .iter()
+                        .find(|subgraph| &subgraph.name == subgraph_name)
+                    else {
+                        continue;
+                    };
+                    let keys_in_other = info.pos.get_applied_directives(
+                        other_schema.schema(),
+                        &info
+                            .metadata
+                            .federation_spec_definition()
+                            .key_directive_definition(other_schema.schema())?
+                            .name,
+                    );
+                    if keys_in_other.is_empty() {
+                        continue;
+                    }
+                    let directive = keys_in_other[0];
+                    let args = metadata
+                        .federation_spec_definition()
+                        .key_directive_arguments(directive)?;
+                    for field in collect_target_fields_from_field_set(
+                        Valid::assume_valid_ref(self.schema.schema()),
+                        ty.type_name().clone(),
+                        args.fields,
+                        false,
+                    )? {
+                        if TypeDefinitionPosition::from(field.parent()) != info.pos {
+                            continue;
+                        }
+                        let external =
+                            field.get_applied_directives(&self.schema, &external_directive.name);
+                        if !external.is_empty() {
+                            to_remove.push((field.clone(), external[0].clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (pos, directive) in &to_remove {
+            pos.remove_directive(&mut self.schema, directive);
+        }
+        Ok(())
     }
 
     fn fix_inactive_provides_and_requires(&mut self) -> Result<(), FederationError> {
@@ -418,7 +523,9 @@ impl<'a> SchemaUpgrader<'a> {
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
     fn is_root_type_extension(&self, pos: &TypeDefinitionPosition) -> bool {
-        if !matches!(pos, TypeDefinitionPosition::Object(_)) || !self.is_root_type(pos) {
+        if !matches!(pos, TypeDefinitionPosition::Object(_))
+            || !Self::is_root_type(&self.schema, pos)
+        {
             return false;
         }
         let Ok(ty) = pos.get(self.schema.schema()) else {
@@ -435,8 +542,8 @@ impl<'a> SchemaUpgrader<'a> {
             || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
     }
 
-    fn is_root_type(&self, ty: &TypeDefinitionPosition) -> bool {
-        self.schema
+    fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
+        schema
             .schema()
             .schema_definition
             .iter_root_operations()
@@ -557,7 +664,99 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn add_shareable(&mut self) -> Result<(), FederationError> {
-        todo!();
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+
+        // Get key directive and shareable directive from the metadata
+        let key_directive = metadata
+            .federation_spec_definition()
+            .key_directive_definition(schema)?;
+
+        let shareable_directive = metadata
+            .federation_spec_definition()
+            .shareable_directive_definition(schema)?;
+
+        let mut fields_to_add_shareable = vec![];
+        let mut types_to_add_shareable = vec![];
+        for type_pos in schema.get_types() {
+            let has_key_directive = type_pos.has_applied_directive(schema, &key_directive.name);
+            let is_root_type = Self::is_root_type(schema, &type_pos);
+            let TypeDefinitionPosition::Object(obj_pos) = type_pos else {
+                continue;
+            };
+            let obj_name = &obj_pos.type_name;
+            // Skip Subscription root type - no shareable needed
+            if obj_pos.type_name.as_str() == SchemaRootDefinitionKind::Subscription.to_string() {
+                continue;
+            }
+            if has_key_directive || is_root_type {
+                for field in obj_pos.fields(schema.schema())? {
+                    let obj_field = FieldDefinitionPosition::Object(field.clone());
+                    if self
+                        .original_subgraph
+                        .metadata()
+                        .is_field_shareable(&obj_field)
+                    {
+                        continue;
+                    }
+                    let Some(entries) = self.object_type_map.get(obj_name) else {
+                        continue;
+                    };
+
+                    let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, info)| {
+                        if subgraph_name != self.original_subgraph.name.as_str()
+                            && (info.metadata.is_field_external(&obj_field)
+                                || info.metadata.is_field_partially_external(&obj_field))
+                        {
+                            return true;
+                        }
+                        false
+                    });
+                    if type_in_other_subgraphs
+                        && !obj_field.has_applied_directive(schema, &shareable_directive.name)
+                    {
+                        fields_to_add_shareable.push(field.clone());
+                    }
+                }
+            } else {
+                let Some(entries) = self.object_type_map.get(obj_name) else {
+                    continue;
+                };
+                let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _info)| {
+                    if subgraph_name != self.original_subgraph.name.as_str() {
+                        return true;
+                    }
+                    false
+                });
+                if type_in_other_subgraphs
+                    && !obj_pos.has_applied_directive(schema, &shareable_directive.name)
+                {
+                    types_to_add_shareable.push(obj_pos.clone());
+                }
+            }
+        }
+        let shareable_directive_name = shareable_directive.name.clone();
+        for pos in &fields_to_add_shareable {
+            pos.insert_directive(
+                schema,
+                Node::new(Directive {
+                    name: shareable_directive_name.clone(),
+                    arguments: vec![],
+                }),
+            )?;
+        }
+        for pos in &types_to_add_shareable {
+            pos.insert_directive(
+                schema,
+                Component::new(Directive {
+                    name: shareable_directive_name.clone(),
+                    arguments: vec![],
+                }),
+            )?;
+        }
+        Ok(())
     }
 
     fn remove_tag_on_external(&mut self) -> Result<(), FederationError> {
