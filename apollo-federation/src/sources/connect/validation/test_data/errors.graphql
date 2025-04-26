@@ -58,6 +58,16 @@ type Query {
       selection: "$"
     )
 
+  valid_sourceless_only_message: [String!]!
+    @connect(http: { GET: "http://127.0.0.1" }, errors: { message: "error.message" }, selection: "$")
+
+  valid_sourceless_only_extensions: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
   valid_sourceless_literal_string: [String!]!
     @connect(
       http: { GET: "http://127.0.0.1" }
@@ -97,4 +107,14 @@ type Query {
       errors: { message: "error.message", extensions: "$args.myArg" }
       selection: "$"
     )
+
+  invalid_sourceless_empty_message: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  invalid_sourceless_empty_extensions: [String!]!
+    @connect(http: { GET: "http://127.0.0.1" }, errors: { message: "error.message", extensions: "" }, selection: "$")
 }

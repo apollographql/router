@@ -165,16 +165,6 @@ impl<'schema> ErrorsMessage<'schema> {
                 });
             }
         };
-        if selection.is_empty() {
-            return Err(Message {
-                code: Code::InvalidErrorsMessage,
-                message: format!("{coordinate} is empty"),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
 
         Ok(Some(Self {
             selection,
@@ -312,16 +302,6 @@ impl<'schema> ErrorsExtensions<'schema> {
                 });
             }
         };
-        if selection.is_empty() {
-            return Err(Message {
-                code: Code::InvalidErrorsExtensions,
-                message: format!("{coordinate} is empty"),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
 
         Ok(Some(Self {
             selection,
