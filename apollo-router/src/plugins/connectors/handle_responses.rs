@@ -1,3 +1,4 @@
+use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
@@ -156,31 +157,33 @@ impl RawResponse {
                 debug_request,
                 data,
             } => {
-                let mut message = "Request failed".to_string();
                 let mut extensions = None;
 
                 // Do we have errors settings for this connector?
-                let inputs = key.inputs().merge(
-                    &connector.response_variables,
-                    &connector.response_headers,
-                    connector.config.as_ref(),
-                    context,
-                    Some(parts.status.as_u16()),
-                    supergraph_request,
-                    Some(&parts),
-                );
+                let inputs = LazyCell::new(|| {
+                    key.inputs().merge(
+                        &connector.response_variables,
+                        &connector.response_headers,
+                        connector.config.as_ref(),
+                        context,
+                        Some(parts.status.as_u16()),
+                        supergraph_request,
+                        Some(&parts),
+                    )
+                });
 
                 // Do we have a error message mapping set for this connector?
-                if let Some(message_selection) = &connector.error_settings.message {
+                let message = if let Some(message_selection) = &connector.error_settings.message {
                     // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
                     let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
 
-                    message = res
-                        .unwrap_or_else(|| Value::Null)
+                    res.unwrap_or_else(|| Value::Null)
                         .as_str()
                         .unwrap_or_default()
-                        .to_string();
-                }
+                        .to_string()
+                } else {
+                    "Request failed".to_string()
+                };
 
                 // Do we have a error extensions mapping set for this connector?
                 if let Some(extensions_selection) = &connector.error_settings.extensions {
@@ -208,9 +211,7 @@ impl RawResponse {
                     }
 
                     for (key, value) in extensions {
-                        if key.as_str() != "code" {
-                            error = error.extension(key.clone(), value.clone());
-                        }
+                        error = error.extension(key.clone(), value.clone());
                     }
                 } else {
                     error = error

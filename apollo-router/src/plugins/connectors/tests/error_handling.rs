@@ -53,8 +53,6 @@ async fn only_source_no_error() {
     )
     .await;
 
-    // TODO: Why is status not here?
-
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -128,8 +126,9 @@ async fn only_source_with_error() {
             "only_source"
           ],
           "extensions": {
-            "status": 500,
             "code": "BIG_BOOM",
+            "status": 500,
+            "fromSource": "a",
             "service": "connectors"
           }
         }
@@ -259,8 +258,8 @@ async fn only_connect_with_error() {
             "only_connect"
           ],
           "extensions": {
-            "status": 500,
             "code": "BIG_BOOM",
+            "status": 500,
             "service": "connectors"
           }
         }
@@ -392,6 +391,7 @@ async fn both_source_and_connect_with_error() {
           ],
           "extensions": {
             "code": "BIG_BOOM",
+            "fromConnect": "b",
             "service": "connectors"
           }
         }

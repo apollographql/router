@@ -30,17 +30,17 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/errors.gr
         code: InvalidErrorsMessage,
         message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
         locations: [
-            64:27..64:49,
-            64:27..64:49,
+            76:27..76:49,
+            76:27..76:49,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
         message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string_from_args`: number values aren't valid here",
         locations: [
-            75:58..75:61,
-            75:51..75:61,
-            78:33..78:38,
+            87:58..87:61,
+            87:51..87:61,
+            90:33..90:38,
         ],
     },
 ]

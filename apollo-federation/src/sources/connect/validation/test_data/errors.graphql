@@ -58,6 +58,18 @@ type Query {
       selection: "$"
     )
 
+  valid_sourceless_literal_string: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: {
+        message: """
+        $("An error!")
+        """
+        extensions: "status: $status"
+      }
+      selection: "$"
+    )
+
   invalid_sourceless_message_not_string: [String!]!
     @connect(
       http: { GET: "http://127.0.0.1" }

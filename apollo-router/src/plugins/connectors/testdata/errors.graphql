@@ -13,7 +13,7 @@ schema
     args: {
       name: "withconfig"
       http: { baseURL: "http://localhost:4001/api" }
-      errors: { message: "error.message", extensions: "code: error.code\n status: $status" }
+      errors: { message: "error.message", extensions: "code: error.code\n status: $status\n fromSource: $('a')" }
     }
   )
   @join__directive(
@@ -117,7 +117,7 @@ type Query @join__type(graph: CONNECTORS) {
         source: "withconfig"
         http: { GET: "/users" }
         selection: "id name username"
-        errors: { message: "error.message", extensions: "code: error.code" }
+        errors: { message: "error.message", extensions: "code: error.code\n fromConnect: $('b')" }
       }
     )
 }

@@ -29,8 +29,8 @@ impl Display for ConnectDirectiveCoordinate<'_> {
         let Self { directive, element } = self;
         write!(
             f,
-            "`@{connect_directive_name}` on `{element}`",
-            connect_directive_name = directive.name
+            "`@{directive_name}` on `{element}`",
+            directive_name = directive.name
         )
     }
 }
@@ -44,11 +44,7 @@ pub(super) struct SourceDirectiveCoordinate<'a> {
 impl Display for SourceDirectiveCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self { directive } = self;
-        write!(
-            f,
-            "`@{connect_directive_name}`",
-            connect_directive_name = directive.name
-        )
+        write!(f, "`@{directive_name}`", directive_name = directive.name)
     }
 }
 
