@@ -146,7 +146,7 @@ impl<'a> SchemaUpgrader<'a> {
 
         // Note that this rule rely on being after `removeDirectivesOnInterface` in practice (in that it doesn't check interfaces).
         self.remove_provides_on_non_composite();
-        dbg!(self.schema.schema().to_string());
+
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
         self.remove_unused_externals();
@@ -629,10 +629,7 @@ impl<'a> SchemaUpgrader<'a> {
                 for field in pos.fields(self.schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
-                    dbg!(field.type_name(), field.field_name(), self
-                        .original_subgraph
-                        .metadata()
-                        .is_field_external(&field_def));
+
                     if self
                         .original_subgraph
                         .metadata()
@@ -671,7 +668,6 @@ impl<'a> SchemaUpgrader<'a> {
         }
 
         for field in fields_to_remove {
-            dbg!(field.field_name());
             field.remove(&mut self.schema)?;
         }
         for type_ in types_to_remove {
