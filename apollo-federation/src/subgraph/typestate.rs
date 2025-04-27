@@ -1,6 +1,5 @@
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -16,7 +15,6 @@ use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_I
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::federation_spec_definition::add_fed2_link_to_schema;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -174,10 +172,9 @@ impl Subgraph<Raw> {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        let is_fed_1: bool;
-        if schema.get_directive_definition(&name!("link")).is_some() {
+        let is_fed_1 = if schema.get_directive_definition(&name!("link")).is_some() {
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
-            is_fed_1 = false;
+            false
         } else {
             // // This must be a Fed 1 schema.
             // LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
@@ -188,8 +185,8 @@ impl Subgraph<Raw> {
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
             add_fed2_link_to_schema(&mut schema)?;
-            is_fed_1 = true;
-        }
+            true
+        };
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
         schema.collect_links_metadata()?;

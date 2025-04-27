@@ -23,7 +23,6 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
-use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::schema::SubgraphMetadata;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
@@ -109,24 +108,22 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             )
             .assume_expanded()?;
             upgraded.insert(subgraph.name.clone(), new_subgraph);
-        } else {
-            if let Some(interface_object_def) = subgraph
-                .metadata()
-                .federation_spec_definition()
-                .interface_object_directive_definition(subgraph.schema())?
-            {
-                let referencers = subgraph
-                    .schema()
-                    .referencers()
-                    .get_directive(interface_object_def.name.as_str())?;
-                if referencers.object_types.len() > 0 {
-                    subgraphs_using_interface_object.insert(name.clone());
-                }
+        } else if let Some(interface_object_def) = subgraph
+            .metadata()
+            .federation_spec_definition()
+            .interface_object_directive_definition(subgraph.schema())?
+        {
+            let referencers = subgraph
+                .schema()
+                .referencers()
+                .get_directive(interface_object_def.name.as_str())?;
+            if !referencers.object_types.is_empty() {
+                subgraphs_using_interface_object.insert(name.clone());
             }
         }
     }
 
-    if subgraphs_using_interface_object.len() > 0 {
+    if !subgraphs_using_interface_object.is_empty() {
         // TODO: Make this a composition error and make the strings "human readable"
         let cond_1_str = subgraphs_using_interface_object
             .iter()
@@ -639,19 +636,19 @@ impl<'a> SchemaUpgrader<'a> {
             for pos in &self
                 .schema
                 .referencers()
-                .get_directive(&key)?
+                .get_directive(key)?
                 .interface_types
                 .clone()
             {
-                pos.remove_directive_name(&mut self.schema, &key);
+                pos.remove_directive_name(&mut self.schema, key);
 
                 let fields: Vec<_> = pos.fields(self.schema.schema())?.collect();
                 for field in fields {
                     if let Some(provides) = &self.expanded_info.provides_directive_name {
-                        field.remove_directive_name(&mut self.schema, &provides);
+                        field.remove_directive_name(&mut self.schema, provides);
                     }
                     if let Some(requires) = &self.expanded_info.requires_directive_name {
-                        field.remove_directive_name(&mut self.schema, &requires);
+                        field.remove_directive_name(&mut self.schema, requires);
                     }
                 }
             }
