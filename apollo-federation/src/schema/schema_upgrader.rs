@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
@@ -36,7 +37,7 @@ use crate::utils::FallibleIterator;
 struct SchemaUpgrader<'a> {
     schema: FederationSchema,
     expanded_info: ExpandedSubgraphInfo,
-    subgraphs: &'a Vec<Subgraph<Expanded>>,
+    subgraphs: &'a IndexMap<String, Subgraph<Expanded>>,
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
 
@@ -87,8 +88,12 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             }
         }
     }
+    
+    // insertion order is preserved with IndexMap
+    let subgraphs: IndexMap<String, Subgraph<Expanded>> = subgraphs.into_iter().map(|subgraph| (subgraph.name.clone(), subgraph)).collect();
+    
     let mut upgraded: HashMap<String, Subgraph<Expanded>> = Default::default();
-    for subgraph in subgraphs.iter() {
+    for (name, subgraph) in subgraphs.iter() {
         if subgraph.is_fed_1() {
             let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
@@ -101,9 +106,9 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             upgraded.insert(subgraph.name.clone(), new_subgraph);
         }
     }
-    Ok(subgraphs.into_iter().map(|subgraph| {
+    Ok(subgraphs.into_iter().map(|(name, subgraph)| {
         if subgraph.is_fed_1() {
-            return upgraded.remove(&subgraph.name).unwrap();
+            return upgraded.remove(&name).unwrap();
         }
         subgraph
     }).collect())
@@ -121,7 +126,7 @@ impl<'a> SchemaUpgrader<'a> {
     #[allow(unused)]
     fn new(
         original_subgraph: &'a Subgraph<Expanded>,
-        subgraphs: &'a Vec<Subgraph<Expanded>>,
+        subgraphs: &'a IndexMap<String, Subgraph<Expanded>>,
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         let schema = original_subgraph.schema().clone();
@@ -151,10 +156,7 @@ impl<'a> SchemaUpgrader<'a> {
     
     // function to get subgraph from list of subgraphs by name. Right now it will just iterate, but perhaps the struct should be a HashMap eventually
     fn get_subgraph_by_name(&self, name: &String) -> Option<&Subgraph<Expanded>> {
-        self
-            .subgraphs
-            .iter()
-            .find(|subgraph| &subgraph.name == name)
+        self.subgraphs.get(name)
     }
 
     #[allow(unused)]
@@ -814,8 +816,8 @@ impl<'a> SchemaUpgrader<'a> {
                             {
                                 let used_in_other_definitions =
                                     self.subgraphs.iter().fallible_any(
-                                        |subgraph| -> Result<bool, FederationError> {
-                                            if self.expanded_info.subgraph_name != subgraph.name {
+                                        |(name, subgraph)| -> Result<bool, FederationError> {
+                                            if &self.expanded_info.subgraph_name != name {
                                                 // check to see if the field is external in the other subgraphs
                                                 if let Some(other_metadata) =
                                                     &subgraph.schema().subgraph_metadata
