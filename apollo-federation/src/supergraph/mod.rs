@@ -8,13 +8,13 @@ use std::ops::Not;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use apollo_compiler::executable::FieldSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -1929,7 +1929,7 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
         )?;
-        
+
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
@@ -1938,7 +1938,10 @@ fn remove_inactive_applications(
                 let fields = FieldSet {
                     sources: Default::default(),
                     selection_set: fields,
-                }.serialize().no_indent().to_string();
+                }
+                .serialize()
+                .no_indent()
+                .to_string();
 
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {

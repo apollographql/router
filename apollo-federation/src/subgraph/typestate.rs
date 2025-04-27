@@ -1,6 +1,6 @@
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;

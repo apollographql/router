@@ -1,19 +1,19 @@
 use std::collections::HashSet;
 
-use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 
-use super::compute_subgraph_metadata;
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
+use super::compute_subgraph_metadata;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
@@ -89,11 +89,14 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             }
         }
     }
-    
+
     // insertion order is preserved with IndexMap
-    let subgraphs: IndexMap<String, Subgraph<Expanded>> = subgraphs.into_iter().map(|subgraph| (subgraph.name.clone(), subgraph)).collect();
+    let subgraphs: IndexMap<String, Subgraph<Expanded>> = subgraphs
+        .into_iter()
+        .map(|subgraph| (subgraph.name.clone(), subgraph))
+        .collect();
     let mut subgraphs_using_interface_object: IndexSet<String> = Default::default();
-    
+
     let mut upgraded: HashMap<String, Subgraph<Expanded>> = Default::default();
     for (name, subgraph) in subgraphs.iter() {
         if subgraph.is_fed_1() {
@@ -107,28 +110,50 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             .assume_expanded()?;
             upgraded.insert(subgraph.name.clone(), new_subgraph);
         } else {
-            if let Some(interface_object_def) = subgraph.metadata().federation_spec_definition().interface_object_directive_definition(subgraph.schema())? {
-                let referencers = subgraph.schema().referencers().get_directive(interface_object_def.name.as_str())?;
+            if let Some(interface_object_def) = subgraph
+                .metadata()
+                .federation_spec_definition()
+                .interface_object_directive_definition(subgraph.schema())?
+            {
+                let referencers = subgraph
+                    .schema()
+                    .referencers()
+                    .get_directive(interface_object_def.name.as_str())?;
                 if referencers.object_types.len() > 0 {
                     subgraphs_using_interface_object.insert(name.clone());
                 }
             }
         }
     }
-    
+
     if subgraphs_using_interface_object.len() > 0 {
-        
         // TODO: Make this a composition error and make the strings "human readable"
-        let cond_1_str = subgraphs_using_interface_object.iter().cloned().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(" ");
-        let cond_2_str = upgraded.keys().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(" ");
-        return Err(internal_error!("The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" version 2.0 or newer): @interfaceObject is used in subgraph {} but subgraph {} is not a federation 2 subgraph schema.", cond_1_str, cond_2_str));
+        let cond_1_str = subgraphs_using_interface_object
+            .iter()
+            .cloned()
+            .map(|k| format!("\"{k}\""))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let cond_2_str = upgraded
+            .keys()
+            .map(|k| format!("\"{k}\""))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(internal_error!(
+            "The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" version 2.0 or newer): @interfaceObject is used in subgraph {} but subgraph {} is not a federation 2 subgraph schema.",
+            cond_1_str,
+            cond_2_str
+        ));
     }
-    Ok(subgraphs.into_iter().map(|(name, subgraph)| {
-        if subgraph.is_fed_1() {
-            return upgraded.remove(&name).unwrap();
-        }
-        subgraph
-    }).collect())
+    Ok(subgraphs
+        .into_iter()
+        .map(|(name, subgraph)| {
+            if subgraph.is_fed_1() {
+                return upgraded.remove(&name).unwrap();
+            }
+            subgraph
+        })
+        .collect())
 }
 
 // Extensions for FederationError to provide additional error types
@@ -154,13 +179,13 @@ impl<'a> SchemaUpgrader<'a> {
                 key_directive_name: original_subgraph.key_directive_name()?.clone(),
                 requires_directive_name: original_subgraph.requires_directive_name()?.clone(),
                 provides_directive_name: original_subgraph.provides_directive_name()?.clone(),
-                extends_directive_name: original_subgraph.extends_directive_name()?.clone(),     
+                extends_directive_name: original_subgraph.extends_directive_name()?.clone(),
             },
             subgraphs,
             object_type_map,
         })
     }
-    
+
     // because the schema may have been changed since the last time metadata was calculated, we need to create it every time it's needed.
     fn subgraph_metadata(&self) -> Result<SubgraphMetadata, FederationError> {
         compute_subgraph_metadata(&self.schema)?.ok_or_else(|| {
@@ -170,7 +195,7 @@ impl<'a> SchemaUpgrader<'a> {
             )
         })
     }
-    
+
     // function to get subgraph from list of subgraphs by name. Right now it will just iterate, but perhaps the struct should be a HashMap eventually
     fn get_subgraph_by_name(&self, name: &String) -> Option<&Subgraph<Expanded>> {
         self.subgraphs.get(name)
@@ -239,8 +264,7 @@ impl<'a> SchemaUpgrader<'a> {
                             subgraph_name.as_str() != self.expanded_info.subgraph_name.as_str()
                         })
                         .fallible_any(|(other_name, type_info)| {
-                            let Some(other_subgraph) = self.get_subgraph_by_name(other_name)
-                            else {
+                            let Some(other_subgraph) = self.get_subgraph_by_name(other_name) else {
                                 return Ok(false);
                             };
                             let extended_type =
@@ -454,8 +478,7 @@ impl<'a> SchemaUpgrader<'a> {
                     if subgraph_name == self.expanded_info.subgraph_name.as_str() {
                         continue;
                     }
-                    let Some(other_schema) = self.get_subgraph_by_name(subgraph_name)
-                    else {
+                    let Some(other_schema) = self.get_subgraph_by_name(subgraph_name) else {
                         continue;
                     };
                     let keys_in_other = info.pos.get_applied_directives(
@@ -680,8 +703,7 @@ impl<'a> SchemaUpgrader<'a> {
                     let field_def = FieldDefinitionPosition::from(field.clone());
 
                     let metadata = self.subgraph_metadata()?;
-                    if metadata.is_field_external(&field_def)
-                        && !metadata.is_field_used(&field_def)
+                    if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
                     }
@@ -754,9 +776,7 @@ impl<'a> SchemaUpgrader<'a> {
             if has_key_directive || is_root_type {
                 for field in obj_pos.fields(schema.schema())? {
                     let obj_field = FieldDefinitionPosition::Object(field.clone());
-                    if metadata
-                        .is_field_shareable(&obj_field)
-                    {
+                    if metadata.is_field_shareable(&obj_field) {
                         continue;
                     }
                     let Some(entries) = self.object_type_map.get(obj_name) else {
@@ -960,7 +980,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s1, _s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrades schema").try_into().expect("Expected 2 elements");
+        let [s1, _s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
 
         insta::assert_snapshot!(
             s1.schema().schema().to_string(), @r###"
@@ -985,6 +1008,8 @@ mod tests {
             directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
             directive @composeDirective(name: String!) repeatable on SCHEMA
+            
+            directive @interfaceObject on OBJECT
 
             type Query {
               products: [Product!]! @provides(fields: "description")
@@ -1057,7 +1082,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s]: [Subgraph<Expanded>; 1] = upgrade_subgraphs_if_necessary(vec![s]).expect("upgrades schema").try_into().expect("Expected 1 element");
+        let [s]: [Subgraph<Expanded>; 1] = upgrade_subgraphs_if_necessary(vec![s])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 1 element");
 
         insta::assert_snapshot!(
             s.schema().schema().to_string(),
@@ -1119,7 +1147,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s1, s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrades schema").try_into().expect("Expected 2 elements");
+        let [s1, s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
 
         let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap();
         let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap();
@@ -1178,7 +1209,7 @@ mod tests {
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
-        
+
         let errors = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
 
         assert_eq!(
@@ -1226,7 +1257,10 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
         .expand_links()
         .expect("expands schema");
 
-        let [s1, s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrades schema").try_into().expect("Expected 2 elements");
+        let [s1, s2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
 
         // 2 things must happen here:
         // 1. the @external on type `T` in s2 should be removed, as @external on types were no-ops in fed1 (but not in fed2 anymore, hence the removal)
@@ -1261,7 +1295,10 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
         .expand_links()
         .expect("expands schema");
 
-        let [subgraph]: [Subgraph<Expanded>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph]).expect("upgrades schema").try_into().expect("Expected 1 element");
+        let [subgraph]: [Subgraph<Expanded>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 1 element");
         // Note: this test mostly exists for dev awareness. By design, this will
         // always require updating when the fed spec version is updated, so hopefully
         // you're reading this comment. Existing schemas which don't include a @link
@@ -1303,6 +1340,8 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
             directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
             directive @composeDirective(name: String!) repeatable on SCHEMA
+            
+            directive @interfaceObject on OBJECT
 
             type Query {
               hello: String
@@ -1369,7 +1408,11 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
         .expand_links()
         .expect("expands schema");
 
-        let [subgraph1, subgraph2]: [Subgraph<Expanded>; 2] = upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2]).expect("upgrades schema").try_into().expect("Expected 2 elements");
+        let [subgraph1, subgraph2]: [Subgraph<Expanded>; 2] =
+            upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
 
         assert!(
             !subgraph1
