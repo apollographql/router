@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
@@ -91,6 +92,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     
     // insertion order is preserved with IndexMap
     let subgraphs: IndexMap<String, Subgraph<Expanded>> = subgraphs.into_iter().map(|subgraph| (subgraph.name.clone(), subgraph)).collect();
+    let mut subgraphs_using_interface_object: IndexSet<String> = Default::default();
     
     let mut upgraded: HashMap<String, Subgraph<Expanded>> = Default::default();
     for (name, subgraph) in subgraphs.iter() {
@@ -104,7 +106,22 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
             )
             .assume_expanded()?;
             upgraded.insert(subgraph.name.clone(), new_subgraph);
+        } else {
+            if let Some(interface_object_def) = subgraph.metadata().federation_spec_definition().interface_object_directive_definition(subgraph.schema())? {
+                let referencers = subgraph.schema().referencers().get_directive(interface_object_def.name.as_str())?;
+                if referencers.object_types.len() > 0 {
+                    subgraphs_using_interface_object.insert(name.clone());
+                }
+            }
         }
+    }
+    
+    if subgraphs_using_interface_object.len() > 0 {
+        
+        // TODO: Make this a composition error and make the strings "human readable"
+        let cond_1_str = subgraphs_using_interface_object.iter().cloned().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(" ");
+        let cond_2_str = upgraded.keys().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(" ");
+        return Err(internal_error!("The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" version 2.0 or newer): @interfaceObject is used in subgraph {} but subgraph {} is not a federation 2 subgraph schema.", cond_1_str, cond_2_str));
     }
     Ok(subgraphs.into_iter().map(|(name, subgraph)| {
         if subgraph.is_fed_1() {
@@ -1161,12 +1178,14 @@ mod tests {
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
-
+        
         let errors = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
 
         assert_eq!(
             errors.to_string(),
-            r#"The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to "https://specs.apollo.dev/federation" version 2.0 or newer): @interfaceObject is used in subgraph "s1" but subgraph "s2" is not a federation 2 subgraph schema."#
+            r#"An internal error has occurred, please report this bug to Apollo.
+
+Details: The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to "https://specs.apollo.dev/federation" version 2.0 or newer): @interfaceObject is used in subgraph "s1" but subgraph "s2" is not a federation 2 subgraph schema."#
         );
     }
 
@@ -1212,16 +1231,15 @@ mod tests {
         // 2 things must happen here:
         // 1. the @external on type `T` in s2 should be removed, as @external on types were no-ops in fed1 (but not in fed2 anymore, hence the removal)
         // 2. field `T.x` in s1 must be marked @shareable since it is resolved by s2 (since again, it's @external annotation is ignored).
-
         assert!(
-            s1.schema()
+            s2.schema()
                 .schema()
                 .types
                 .get("T")
                 .is_some_and(|t| !t.directives().has("external"))
         );
         assert!(
-            s2.schema()
+            s1.schema()
                 .schema()
                 .type_field("T", "x")
                 .is_ok_and(|f| f.directives.has("shareable"))
@@ -1263,14 +1281,55 @@ mod tests {
         // - Trevor
         insta::assert_snapshot!(
             subgraph.schema().schema().to_string(),
-            r#"
-            schema
-                @link(url: "https://specs.apollo.dev/link/v1.0")
-                @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])
-            {
-                query: Query
+            @r###"
+            schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+              query: Query
             }
-        "#
+            
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+            directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+            directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+            directive @override(from: String!) on FIELD_DEFINITION
+
+            directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+            directive @composeDirective(name: String!) repeatable on SCHEMA
+
+            type Query {
+              hello: String
+              _service: _Service!
+            }
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            scalar link__Import
+
+            scalar federation__FieldSet
+
+            scalar _Any
+
+            type _Service {
+              sdl: String
+            }
+        "###
         );
     }
 

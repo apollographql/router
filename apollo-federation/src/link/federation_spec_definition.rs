@@ -822,7 +822,18 @@ impl FederationSpecDefinition {
             None,
         )
     }
-}
+
+    fn interface_object_directive_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::Object],
+            false,
+            None,
+            None,
+        )
+    }}
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
     // PORT_NOTE: `schema.subgraph_metadata` is not accessible, since it's not validated, yet.
@@ -855,6 +866,10 @@ impl SpecDefinition for FederationSpecDefinition {
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
+        }
+        
+        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+            specs.push(Box::new(Self::interface_object_directive_directive_specification()));
         }
 
         // TODO: The remaining directives added in later versions are implemented in separate specs,
