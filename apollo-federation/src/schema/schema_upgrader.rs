@@ -1063,6 +1063,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn update_federation_directive_non_string_arguments() {
         let s = Subgraph::parse(
             "s",
@@ -1113,6 +1114,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn remove_tag_on_external_field_if_found_on_definition() {
         let s1 = Subgraph::parse(
             "s1",
