@@ -28,9 +28,12 @@ use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use fred::cmd;
+use fred::prelude::Client as RedisClient;
+use fred::prelude::Config as RedisConfig;
+use fred::prelude::Value as RedisValue;
 use fred::prelude::*;
-use fred::types::ScanType;
-use fred::types::Scanner;
+use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::HeaderValue;
 use http::Method;
@@ -58,8 +61,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
-    let connection_task = client.connect();
-    client.wait_for_connect().await.unwrap();
+    let connection_task = client.init().await.unwrap();
 
     client.del::<String, _>(known_cache_key).await.unwrap();
 
@@ -193,8 +195,7 @@ async fn apq() -> Result<(), BoxError> {
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
-    let connection_task = client.connect();
-    client.wait_for_connect().await.unwrap();
+    let connection_task = client.init().await.unwrap();
 
     let config = json!({
         "apq": {
@@ -337,8 +338,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
-    let connection_task = client.connect();
-    client.wait_for_connect().await.unwrap();
+    let connection_task = client.init().await.unwrap();
 
     let mut subgraphs = MockedSubgraphs::default();
     subgraphs.insert(
@@ -593,8 +593,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
-    let connection_task = client.connect();
-    client.wait_for_connect().await.unwrap();
+    let connection_task = client.init().await.unwrap();
 
     let mut subgraphs = MockedSubgraphs::default();
     subgraphs.insert(
