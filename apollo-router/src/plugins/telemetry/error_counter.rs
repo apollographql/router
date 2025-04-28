@@ -5,25 +5,47 @@ use crate::plugins::telemetry::apollo::{ErrorsConfiguration, ExtendedErrorMetric
 use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router::ClientRequestAccepts;
-use crate::services::SupergraphResponse;
+use crate::services::{ExecutionResponse, RouterResponse, SubgraphResponse, SupergraphResponse};
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 use crate::{graphql, Context};
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
+use serde::de::DeserializeOwned;
 use serde_json_bytes::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::de::DeserializeOwned;
 
-// TODO call this for subgraph service (pre redaction), supergraph service, and _MAYBE_ router service (service unavail and invalid headers)
-pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
+pub(crate) async fn count_subgraph_errors(response: SubgraphResponse, errors_config: &ErrorsConfiguration) -> SubgraphResponse {
+    let context = response.context.clone();
+    let errors_config = errors_config.clone();
+
+    let response_body = response.response.body();
+    if !response_body.errors.is_empty() {
+        count_operation_errors(&response_body.errors, &context, &errors_config);
+    }
+    context
+        .insert(COUNTED_ERRORS, to_map(&response_body.errors))
+        .expect("Unable to insert errors into context.");
+
+    SubgraphResponse {
+        context: response.context,
+        subgraph_name: response.subgraph_name,
+        id: response.id,
+        response: response.response
+    }
+}
+
+pub(crate) async fn count_supergraph_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
+    // TODO streaming subscriptions?
+    // TODO multiple responses in the stream?
+
     let context = response.context.clone();
     let errors_config = errors_config.clone();
 
     let (parts, stream) = response.response.into_parts();
     // Clone context again to avoid move issues
-    let stream = stream.inspect(move |resp| {
+    let stream = stream.inspect(move |response_body| {
         // TODO do we really need this?
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
@@ -35,15 +57,15 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
 
-        if !resp.has_next.unwrap_or(false)
-            && !resp.subscribed.unwrap_or(false)
+        if !response_body.has_next.unwrap_or(false)
+            && !response_body.subscribed.unwrap_or(false)
             && (accepts_json || accepts_wildcard)
         {
             // TODO ensure free plan is captured
-            if !resp.errors.is_empty() {
-                count_operation_errors(&resp.errors, &context, &errors_config);
+            if !response_body.errors.is_empty() {
+                count_operation_errors(&response_body.errors, &context, &errors_config);
             }
-            if let Some(value_completion) = resp.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY) {
+            if let Some(value_completion) = response_body.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY) {
                 // TODO inline this func?
                 count_value_completion_errors(
                     value_completion,
@@ -53,8 +75,8 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
             }
         } else if accepts_multipart_defer || accepts_multipart_subscription {
             // TODO can we combine this with above?
-            if !resp.errors.is_empty() {
-                count_operation_errors(&resp.errors, &context, &errors_config);
+            if !response_body.errors.is_empty() {
+                count_operation_errors(&response_body.errors, &context, &errors_config);
             }
         } else {
             // TODO supposedly this is unreachable in router service. Will we be able to pick this up in a router service plugin callback instead?
@@ -68,7 +90,7 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
         }
 
         context
-            .insert(COUNTED_ERRORS, to_map(resp.errors.clone()))
+            .insert(COUNTED_ERRORS, to_map(&response_body.errors))
             .expect("Unable to insert errors into context.");
     });
 
@@ -81,11 +103,48 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
             .boxed(),
     );
 
-    SupergraphResponse { context: response.context, response: new_response }
+    SupergraphResponse {
+        context: response.context,
+        response: new_response
+    }
 }
 
+pub(crate) async fn count_execution_errors(response: ExecutionResponse, errors_config: &ErrorsConfiguration) -> ExecutionResponse {
+    let context = response.context.clone();
+    let errors_config = errors_config.clone();
 
-fn to_map(errors: Vec<Error>) -> HashMap<String, u64> {
+    let (parts, stream) = response.response.into_parts();
+    // Clone context again to avoid move issues
+    let stream = stream.inspect(move |response_body| {
+        if !response_body.errors.is_empty() {
+            count_operation_errors(&response_body.errors, &context, &errors_config);
+        }
+        context
+            .insert(COUNTED_ERRORS, to_map(&response_body.errors))
+            .expect("Unable to insert errors into context.");
+    });
+
+
+    let (first_response, rest) = StreamExt::into_future(stream).await;
+    let new_response = http::Response::from_parts(
+        parts,
+        once(ready(first_response.unwrap_or_default()))
+            .chain(rest)
+            .boxed(),
+    );
+
+    ExecutionResponse {
+        context: response.context,
+        response: new_response
+    }
+}
+
+pub(crate) async fn count_router_errors(response: RouterResponse, errors_config: &ErrorsConfiguration) -> RouterResponse {
+    // TODO how do we parse the json response to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER?
+    return  response
+}
+
+fn to_map(errors: &Vec<Error>) -> HashMap<String, u64> {
     let mut map: HashMap<String, u64> = HashMap::new();
     errors.into_iter().for_each(|error| {
         map.entry(get_code(&error).unwrap_or_default())
@@ -95,8 +154,6 @@ fn to_map(errors: Vec<Error>) -> HashMap<String, u64> {
 
     map
 }
-
-// TODO router service plugin fn to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER? Would need to parse json response
 
 fn count_operation_error_codes(
     codes: &[&str],
@@ -159,6 +216,7 @@ fn count_operation_errors(
         }
     }
 
+    // TODO how do we account for redacted errors when comparing? Likely skip them completely (they will have been counted with correct codes in subgraph layer)
     let mut diff_map = previously_counted_errors_map.clone();
     for error in errors {
         let code = get_code(&error).unwrap_or_default();
@@ -257,20 +315,20 @@ mod test {
     use serde_json_bytes::json;
     use serde_json_bytes::Value;
 
-    use crate::context::{COUNTED_ERRORS, OPERATION_KIND};
     use crate::context::OPERATION_NAME;
+    use crate::context::{COUNTED_ERRORS, OPERATION_KIND};
     use crate::graphql;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-    use crate::plugins::telemetry::error_counter::{count_errors, count_operation_error_codes, count_operation_errors};
+    use crate::plugins::telemetry::error_counter::{count_operation_error_codes, count_operation_errors, count_supergraph_errors};
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::SupergraphResponse;
     use crate::Context;
-    use crate::services::router::ClientRequestAccepts;
 
     #[tokio::test]
     async fn test_count_errors_with_no_previously_counted_errors() {
@@ -296,7 +354,7 @@ mod test {
             let _ = context.insert(CLIENT_NAME, "client-1".to_string());
             let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
 
-            let new_response = count_errors(
+            let new_response = count_supergraph_errors(
                 SupergraphResponse::fake_builder()
                     .header("Accept", "application/json")
                     .context(context)
@@ -364,7 +422,7 @@ mod test {
             let _ = context.insert(CLIENT_NAME, "client-1".to_string());
             let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
 
-            let new_response = count_errors(
+            let new_response = count_supergraph_errors(
                 SupergraphResponse::fake_builder()
                     .header("Accept", "application/json")
                     .context(context)
@@ -377,7 +435,7 @@ mod test {
                     )
                     .error(
                         graphql::Error::builder()
-                            .message("Customer error text")
+                            .message("Custom error text")
                             .extension_code("CUSTOM_ERROR")
                             .build()                    )
                     .build()

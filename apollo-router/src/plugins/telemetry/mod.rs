@@ -113,7 +113,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-use crate::plugins::telemetry::error_counter::count_errors;
+use crate::plugins::telemetry::error_counter::{count_subgraph_errors, count_supergraph_errors};
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -730,8 +730,9 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
+                        // TODO should I just move this to the above ok? Or maybe we want to count even if we have an Err?
                         if let Ok(resp) = result {
-                            result = Ok(count_errors(resp, &config.apollo.errors).await);
+                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
                         }
 
                         result = Self::update_otel_metrics(
@@ -850,7 +851,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let result: Result<SubgraphResponse, BoxError> = f.await;
+                        let mut result: Result<SubgraphResponse, BoxError> = f.await;
 
                         match &result {
                             Ok(resp) => {
@@ -884,6 +885,11 @@ impl PluginPrivate for Telemetry {
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }
+                        }
+
+                        // TODO merge into above match?
+                        if let Ok(resp) = result {
+                            result = Ok(count_subgraph_errors(resp, &config.apollo.errors).await);
                         }
 
                         result
