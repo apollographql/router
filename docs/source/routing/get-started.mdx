@@ -4,7 +4,7 @@ subtitle: Run the router in dev mode for an example graph
 description: This quickstart tutorial walks you through installing an Apollo Router binary, running it with an example supergraph schema, and making test queries with Apollo Sandbox
 ---
 
-import ElasticNotice from "../../../shared/elastic-notice.mdx";
+import ElasticNotice from "../../shared/elastic-notice.mdx";
 
 Hello! Let's run an Apollo Router binary for the very first time.
 
@@ -16,11 +16,13 @@ You will:
 - Run the router for your supergraph in development mode.
 - Make queries to the running router with the Apollo Sandbox IDE.
 
-## 0. Apollo Router is the graph runtime
+## Apollo Router is the graph runtime
 
-Apollo Router is often called the runtime or execution engine of Apollo. That's because it runs a federated graph. It accepts incoming GraphQL client requests, plans how to efficiently call the APIs that make up the graph, orchestrates the API calls to fetch the requested data, and bundles the data into a response.
+Apollo Router is called the graph runtime or execution engine of Apollo. That's because it receives requests to the graph and returns responses that fetch data from the different APIs that make up a graph. Specifically, It accepts incoming client requests, plans how to efficiently call the APIs that make up the graph, orchestrates the API calls to fetch the requested data, and bundles the data into a response.
 
-You can run a router locally or scale up to deploy a fleet in your own infrastructure. Each router is an endpoint to a GraphQL API. It's the gateway for all client requests to a graph. Like API gateways in general, a router offers a central place to implement cross-cutting concerns, such as authentication, authorization, caching, logging, monitoring, rate limiting, and demand control.
+Because Apollo uses GraphQL and Apollo Federation to define a graph, each router is an endpoint to a GraphQL API. It's the gateway for all client requests to a graph. Like API gateways in general, a router offers a central place to implement cross-cutting concerns, such as authentication, authorization, caching, logging, monitoring, rate limiting, and demand control.
+
+You can deploy the router locally or at scale in containers on your own infrastructure. This guide walks you through the basics of running the router locally. 
 
 ## 1. Download and extract the router binary
 
@@ -54,7 +56,7 @@ You can run a router locally or scale up to deploy a fleet in your own infrastru
 
 ## 2. Download a supergraph schema
 
-A router needs a schema for the supergraph that it's orchestrating. For this guide, we're downloading an example supergraph schema that we'll provide to the router.
+A router needs a schema for the graph that it's orchestrating. For this guide, we're downloading an example supergraph schema that we'll provide to the router.
 
 1. From your project's root directory, run the following to download and save a supergraph schema to a file:
 
