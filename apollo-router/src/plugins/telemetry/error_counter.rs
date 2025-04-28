@@ -11,10 +11,10 @@ use crate::{graphql, Context};
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use serde_json_bytes::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use serde::de::DeserializeOwned;
 
 // TODO call this for subgraph service (pre redaction), supergraph service, and _MAYBE_ router service (service unavail and invalid headers)
 pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
@@ -85,10 +85,10 @@ pub(crate) async fn count_errors(response: SupergraphResponse, errors_config: &E
 }
 
 
-fn to_map(errors: Vec<Error>) -> HashMap<Option<String>, u64> {
-    let mut map: HashMap<Option<String>, u64> = HashMap::new();
+fn to_map(errors: Vec<Error>) -> HashMap<String, u64> {
+    let mut map: HashMap<String, u64> = HashMap::new();
     errors.into_iter().for_each(|error| {
-        map.entry(get_code(&error))
+        map.entry(get_code(&error).unwrap_or_default())
             .and_modify(|count| { *count += 1 })
             .or_insert(1);
     });
@@ -135,24 +135,13 @@ fn count_operation_errors(
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
-    let previously_counted_errors_map: HashMap<Option<String>, u64> = context
-        .get(COUNTED_ERRORS)
-        .ok()
-        .flatten()
-        .unwrap_or(HashMap::new());
+    let previously_counted_errors_map: HashMap<String, u64> = unwrap_from_context(context, COUNTED_ERRORS);
 
-    let unwrap_context_string = |context_key: &str| -> String {
-        context
-            .get::<_, String>(context_key)
-            .unwrap_or_default()
-            .unwrap_or_default()
-    };
-
-    let mut operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
-    let mut operation_name = unwrap_context_string(OPERATION_NAME);
-    let operation_kind = unwrap_context_string(OPERATION_KIND);
-    let client_name = unwrap_context_string(CLIENT_NAME);
-    let client_version = unwrap_context_string(CLIENT_VERSION);
+    let mut operation_id: String = unwrap_from_context(context, APOLLO_OPERATION_ID);
+    let mut operation_name: String = unwrap_from_context(context, OPERATION_NAME);
+    let operation_kind: String = unwrap_from_context(context, OPERATION_KIND);
+    let client_name: String = unwrap_from_context(context, CLIENT_NAME);
+    let client_version: String = unwrap_from_context(context, CLIENT_VERSION);
 
     let maybe_usage_reporting = context
         .extensions()
@@ -172,7 +161,7 @@ fn count_operation_errors(
 
     let mut diff_map = previously_counted_errors_map.clone();
     for error in errors {
-        let code = get_code(&error);
+        let code = get_code(&error).unwrap_or_default();
 
         // If we already counted this error in a previous layer, then skip counting it again
         if let Some(count) = diff_map.get_mut(&code) {
@@ -224,14 +213,22 @@ fn count_operation_errors(
                 "graphql.operation.type" = operation_kind.clone(),
                 "apollo.client.name" = client_name.clone(),
                 "apollo.client.version" = client_version.clone(),
-                "graphql.error.extensions.code" = code.clone().unwrap_or_default(),
+                "graphql.error.extensions.code" = code.clone(),
                 "graphql.error.extensions.severity" = severity_str,
                 "graphql.error.path" = path,
                 "apollo.router.error.service" = service
             );
         }
-        count_graphql_error(1, code.as_deref());
+        count_graphql_error(1, code);
     }
+}
+
+fn unwrap_from_context<V: Default + DeserializeOwned>(context: &Context, key: &str) -> V
+{
+    context
+        .get::<_, V>(key)      // -> Option<Result<T, E>>
+        .unwrap_or_default()   // -> Result<T, E> (defaults to Ok(T::default()))
+        .unwrap_or_default()   // -> T (defaults on Err)
 }
 
 fn get_code(error: &Error) -> Option<String> {
@@ -243,44 +240,103 @@ fn get_code(error: &Error) -> Option<String> {
     })
 }
 
-fn count_graphql_error(count: u64, code: Option<&str>) {
-    match code {
-        None => {
-            u64_counter!(
-                "apollo.router.graphql_error",
-                "Number of GraphQL error responses returned by the router",
-                count
-            );
-        }
-        Some(code) => {
-            u64_counter!(
-                "apollo.router.graphql_error",
-                "Number of GraphQL error responses returned by the router",
-                count,
-                code = code.to_string()
-            );
-        }
-    }
+fn count_graphql_error(count: u64, code: String) {
+    // TODO ensure an empty string matches when we used a None optional before
+    u64_counter!(
+        "apollo.router.graphql_error",
+        "Number of GraphQL error responses returned by the router",
+        count,
+        code = code
+    );
 }
 
 
 #[cfg(test)]
 mod test {
+    use http::StatusCode;
     use serde_json_bytes::json;
     use serde_json_bytes::Value;
 
-    use crate::context::OPERATION_KIND;
+    use crate::context::{COUNTED_ERRORS, OPERATION_KIND};
     use crate::context::OPERATION_NAME;
     use crate::graphql;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-    use crate::plugins::telemetry::error_counter::{count_operation_error_codes, count_operation_errors};
+    use crate::plugins::telemetry::error_counter::{count_errors, count_operation_error_codes, count_operation_errors};
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::SupergraphResponse;
     use crate::Context;
+    use crate::services::router::ClientRequestAccepts;
+
+    #[tokio::test]
+    async fn test_count_errors_with_no_previously_counted_errors() {
+        async {
+            let config = ErrorsConfiguration {
+                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+                ..Default::default()
+            };
+
+            let context = Context::default();
+
+            context.extensions()
+                .with_lock(|lock| lock.insert(ClientRequestAccepts{
+                    multipart_defer: false,
+                    multipart_subscription: false,
+                    json: true,
+                    wildcard: false,
+                }));
+
+            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+            let new_response = count_errors(
+                SupergraphResponse::fake_builder()
+                    .header("Accept", "application/json")
+                    .context(context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("You did a bad request.")
+                            .extension_code("GRAPHQL_VALIDATION_FAILED")
+                            .build(),
+                    ])
+                    .build()
+                    .unwrap(),
+                &config,
+            ).await;
+
+            assert_counter!(
+                    "apollo.router.operations.error",
+                    1,
+                    "apollo.operation.id" = "some-id",
+                    "graphql.operation.name" = "SomeOperation",
+                    "graphql.operation.type" = "query",
+                    "apollo.client.name" = "client-1",
+                    "apollo.client.version" = "version-1",
+                    "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
+                    "graphql.error.extensions.severity" = "ERROR",
+                    "graphql.error.path" = "",
+                    "apollo.router.error.service" = ""
+                );
+
+            assert_counter!(
+                    "apollo.router.graphql_error",
+                    1,
+                    code = "GRAPHQL_VALIDATION_FAILED"
+                );
+
+            assert_eq!(new_response.context.get_json_value(COUNTED_ERRORS), Some(json!({"GRAPHQL_VALIDATION_FAILED": 1})))
+        }
+        .with_metrics()
+        .await;
+    }
 
     #[tokio::test]
     async fn test_count_operation_error_codes_with_extended_config_enabled() {
