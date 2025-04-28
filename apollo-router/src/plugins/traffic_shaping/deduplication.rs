@@ -124,35 +124,39 @@ where
                     let authorization_cache_key = request.authorization.clone();
                     let id = request.id.clone();
                     let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
-                    let res = {
+                    let (res, hdl) = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
                         // return with Err(), then we remove the entry from the wait map
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
-                        tokio::task::spawn(async move {
+                        let hdl = tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
                             let mut locked_wait_map = wait_map.lock().await;
                             locked_wait_map.remove(&cache_key);
                         });
 
-                        service.call(request).await.map(CloneSubgraphResponse)
+                        (service.call(request).await.map(CloneSubgraphResponse), hdl)
                     };
 
-                    // Let our waiters know
+                    // Make sure that our spawned task has completed. Ignore the result to preserve
+                    // existing behaviour.
+                    let _ = hdl.await;
+                    // At this point we have removed ourselves from the wait_map, so we won't get
+                    // any more receivers. If we have any receivers, let them know
+                    if tx.receiver_count() > 0 {
+                        // Clippy is wrong, the suggestion adds a useless clone of the error
+                        #[allow(clippy::useless_asref)]
+                        let broadcast_value = res
+                            .as_ref()
+                            .map(|response| response.clone())
+                            .map_err(|e| e.to_string());
 
-                    // Clippy is wrong, the suggestion adds a useless clone of the error
-                    #[allow(clippy::useless_asref)]
-                    let broadcast_value = res
-                        .as_ref()
-                        .map(|response| response.clone())
-                        .map_err(|e| e.to_string());
-
-                    // We may get errors here, for instance if a task is cancelled,
-                    // so just ignore the result of send
-                    let _ = tokio::task::spawn_blocking(move || {
-                        tx.send(broadcast_value)
-                    }).await
-                    .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
+                        // We may get errors here, for instance if a task is cancelled,
+                        // so just ignore the result of send
+                        let _ = tokio::task::spawn_blocking(move || {
+                            tx.send(broadcast_value)
+                        }).await.expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
+                    }
 
                     return res.map(|response| {
                         SubgraphResponse::new_from_response(
