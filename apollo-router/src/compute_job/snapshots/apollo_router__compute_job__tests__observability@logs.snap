@@ -14,12 +14,12 @@ expression: yaml
   message: Inner
   span:
     job.age: P4
-    job.type: QueryParsing
+    job.type: query_parsing
     name: compute_job.execution
   spans:
     - name: test_observability
-    - job.type: QueryParsing
+    - job.type: query_parsing
       name: compute_job
     - job.age: P4
-      job.type: QueryParsing
+      job.type: query_parsing
       name: compute_job.execution
