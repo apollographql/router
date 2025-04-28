@@ -6,14 +6,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/body_sele
 [
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.dollar`: must start with one of $args, $config, $context",
+        message: "In `@connect(http: {body:})` on `Query.dollar`: must start with one of $args, $config, $context, $request",
         locations: [
             12:20..12:21,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.dollarField`: `foo` must start with one of $args, $config, $context",
+        message: "In `@connect(http: {body:})` on `Query.dollarField`: `foo` must start with one of $args, $config, $context, $request",
         locations: [
             20:22..20:25,
         ],
@@ -27,7 +27,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/body_sele
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.invalidVariable`: unknown variable `$nosuchvariable`, must be one of $args, $config, $context",
+        message: "In `@connect(http: {body:})` on `Query.invalidVariable`: unknown variable `$nosuchvariable`, must be one of $args, $config, $context, $request",
         locations: [
             52:32..52:47,
         ],

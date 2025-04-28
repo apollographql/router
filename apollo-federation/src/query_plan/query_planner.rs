@@ -187,6 +187,11 @@ pub struct QueryPlanOptions<'a> {
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.
     pub non_local_selections_limit_enabled: bool,
+    /// Names of subgraphs that are disabled and should be avoided during
+    /// planning. If this is non-empty, query planner may error if it cannot
+    /// find a plan that doesn't use the disabled subgraphs, specifically with
+    /// `SingleFederationError::NoPlanFoundWithDisabledSubgraphs`.
+    pub disabled_subgraph_names: IndexSet<String>,
 }
 
 impl Default for QueryPlanOptions<'_> {
@@ -195,6 +200,7 @@ impl Default for QueryPlanOptions<'_> {
             override_conditions: Vec::new(),
             check_for_cooperative_cancellation: None,
             non_local_selections_limit_enabled: true,
+            disabled_subgraph_names: Default::default(),
         }
     }
 }
@@ -460,6 +466,17 @@ impl QueryPlanner {
             )),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
+            disabled_subgraphs: self
+                .federated_query_graph
+                .subgraphs()
+                .filter_map(|(subgraph, _)| {
+                    if options.disabled_subgraph_names.contains(subgraph.as_ref()) {
+                        Some(subgraph.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
 
         let mut non_local_selection_state = options

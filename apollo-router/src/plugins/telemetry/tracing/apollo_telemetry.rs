@@ -1283,7 +1283,6 @@ impl SpanExporter for Exporter {
     fn set_resource(&mut self, _resource: &Resource) {
         // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
         // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
-        tracing::warn!("setting resource attributes is not allowed for Apollo telemetry");
     }
 }
 

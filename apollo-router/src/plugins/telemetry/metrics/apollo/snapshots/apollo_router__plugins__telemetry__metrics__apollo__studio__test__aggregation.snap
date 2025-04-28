@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
 expression: aggregated_metrics
-snapshot_kind: text
 ---
 {
   "traces_per_query": {
@@ -15,8 +14,8 @@ snapshot_kind: text
             "operation_type": "",
             "operation_subtype": "",
             "result": "",
-            "client_library_name": "",
-            "client_library_version": ""
+            "client_library_name": "library_name_1",
+            "client_library_version": "library_version_1"
           },
           {
             "context": {
@@ -25,8 +24,8 @@ snapshot_kind: text
               "operation_type": "",
               "operation_subtype": "",
               "result": "",
-              "client_library_name": "",
-              "client_library_version": ""
+              "client_library_name": "library_name_1",
+              "client_library_version": "library_version_1"
             },
             "query_latency_stats": {
               "request_latencies": {
@@ -1456,7 +1455,8 @@ snapshot_kind: text
           ],
           "is_interface": false
         }
-      }
+      },
+      "query_metadata": null
     }
   },
   "licensed_operation_count_by_type": {

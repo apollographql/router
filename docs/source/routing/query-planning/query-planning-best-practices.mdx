@@ -1,0 +1,186 @@
+---
+title: Best Practices for Query Planning
+subtitle: Design your schemas and use features to optimize query planning performance
+description: Learn best practices in GraphQL schema design to achieve efficient query planning of your graphs using Apollo Federation and Apollo Router
+---
+
+When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity and performance of your graph. Adding one field or changing one directive may create a new supergraph that has hundreds, or even thousands, of new possible paths and edges to connect entities and resolve client operations. Consequently, query planning throughput and latency may degrade.
+While validation errors can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), other changes may lead to issues that only arise at runtime, during query plan generation or execution.
+
+Examples of changes that can impact query planning include:
+* Adding or modifying `@key`, `@requires`, `@provides`, or `@shareable` directive usage
+* Adding or removing a type implementation from an interface
+* Using `interfaceObject` and adding new fields to an interface
+
+To help alleviate these issues as much as possible, we recommend following some of these best practices for your federated graph.
+
+## Use shared types and fields judiciously
+
+The [`@shareable` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/sharing-types) allows multiple subgraphs to resolve the same types or fields on entities, giving the query planner options for potentially shorter query paths. However, it's important to use it judiciously.
+- Extensive `@shareable` use can exponentially increase the number of possible query plans generated as the query planner will find the shortest path to the desired result. This can then potentially lead to performance degradation at runtime as we generate plans.
+- Using `@shareable` at root fields on the `Query`, `Mutation`, and `Subscription` types indicates that any subgraph can resolve a given entry point. While query plans can be deterministic for a given version of Router + Federation, there are no guarantees across versions, meaning that your plans may change if new services get added or deleted. This could cause an unexpected change in traffic for a given service, even there were no changes in the operations.
+  - Using shared root types also implies that the fields return the same data in the same order across all subgraphs, even if the data is a list, which is often not the case for dynamic applications.
+
+## Minimize operations spanning multiple subgraphs
+
+Operations that need to query multiple subgraphs can impact performance because each additional subgraph queried adds complexity to the query plan, increasing the time in the Router for both generation and execution of the operation.
+- Design your schema to minimize operations that span numerous subgraphs.
+- Using directives like `@requires` or `@interfaceObject` carefully to control complexity.
+
+
+### `@requires` directive
+
+The [`@requires` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#requires) allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
+- Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans.
+- When performing schema migrations involving `@requires`, ensure compatibility by deploying changes in a manner that avoids disrupting ongoing queries. Plan deployments and schema changes in an atomic fashion.
+
+#### Example
+
+Consider the following example of a `Products` subgraph and a `Reviews` subgraph:
+
+```graphql title="Products subgraph" showLineNumbers=false disableCopy=true
+type Product @key(fields: "upc") {
+  upc: ID!
+  nameLowerCase: String!
+}
+```
+
+```graphql title="Reviews subgraph" showLineNumbers=false disableCopy=true
+type Product @key(fields: "upc") {
+  upc: ID!
+  nameLowercase: String! @external
+  reviews: [Review]! @requires(fields: "nameLowercase")
+}
+```
+
+Suppose you want to deprecate the `nameLowercase` field and replace it with the `name` field, like so:
+
+```graphql title="Products subgraph" showLineNumbers=false disableCopy=true {3-4}
+type Product @key(fields: "upc") {
+  upc: ID!
+  nameLowerCase: String! @deprecated
+  name: String!
+}
+```
+
+```graphql title="Reviews subgraph" showLineNumbers=false disableCopy=true {3-5}
+type Product @key(fields: "upc") {
+  upc: ID!
+  nameLowercase: String! @external
+  name: String! @external
+  reviews: [Review]! @requires(fields: "name")
+}
+```
+
+To perform this migration in place:
+
+1. Modify the `Products` subgraph to add the new field using `rover subgraph publish` to push the new subgraph schema.
+2. Deploy a new version of the `Reviews` subgraph with a resolver that accepts either `nameLowercase` or `name` in the source object.
+3. Modify the Reviews subgraph's schema in the registry so that it `@requires(fields: "name")`.
+4. Deploy a new version of the `Reviews` subgraph with a resolver that only accepts the `name` in its source object.
+
+Alternatively, you can perform this operation with an atomic migration at the subgraph level by modifying the subgraph's URL:
+
+1. Modify the `Products` subgraph to add the `name` field (as usual, first deploy all replicas, then use `rover subgraph publish` to push the new subgraph schema).
+2. Deploy a new set of `Reviews` replicas to a new URL that reads from `name`.
+3. Register the `Reviews` subgraph with the new URL and the schema changes above.
+
+With this atomic strategy, the query planner resolves all outstanding requests to the old subgraph URL that relied on `nameLowercase` with the old query-planning configuration, which `@requires` the `nameLowercase` field. All new requests are made to the new subgraph URL using the new query-planning configuration, which `@requires` the `name` field.
+
+## Manage interface migrations
+
+Interfaces are an essential part of GraphQL schema design, offering flexibility in defining polymorphic types. However, they can also be open for implementation across service boundaries, allowing subgraphs to contribute a new type that changes how existing operations execute.
+
+- Approach interface migrations similar to database migrations. Ensure that changes to interface implementations are performed safely, avoiding disruptions to query operations.
+
+
+### Example
+
+Suppose you define a `Channel` interface in one subgraph and other types that implement `Channel` in two other subgraphs:
+
+```graphql disableCopy=true showLineNumbers=false title="Channel subgraph"
+interface Channel @key(fields: "id") {
+  id: ID!
+}
+```
+
+```graphql disableCopy=true showLineNumbers=false title="Web subgraph"
+type WebChannel implements Channel @key(fields: "id") {
+  id: ID!
+  webHook: String!
+}
+```
+
+```graphql disableCopy=true showLineNumbers=false title="Email subgraph"
+type EmailChannel implements Channel @key(fields: "id") {
+  id: ID!
+  emailAddress: String!
+}
+```
+
+To safely remove the `EmailChannel` type from your supergraph schema:
+
+1. Perform a `rover subgraph publish` of the `email` subgraph that removes the `EmailChannel` type from its schema.
+2. Deploy a new version of the subgraph that removes the `EmailChannel` type.
+
+The first step causes the query planner to stop sending fragments `...on EmailChannel`, which would fail validation if sent to a subgraph that isn't aware of the type.
+
+If you want to keep the `EmailChannel` type but remove it from the `Channel` interface, the process is similar. Instead of removing the `EmailChannel` type altogether, only remove the `implements Channel` addendum to the type definition. This is because the query planner expands queries to interfaces or unions into fragments on their implementing types.
+
+For example, a query like this:
+
+```graphql
+query FindChannel($id: ID!) {
+  channel(id: $id) {
+    id
+  }
+}
+```
+
+generates two queries, one to each subgraph, like so:
+
+<CodeColumns>
+
+    ```graphql title="Query to email subgraph"
+    query {
+    _entities(...) {
+    ...on EmailChannel {
+    id
+}
+}
+}
+    ```
+
+    ```graphql title="Query to web subgraph"
+    query {
+    _entities(...) {
+    ...on WebChannel {
+    id
+}
+}
+}
+    ```
+
+</CodeColumns>
+
+Currently, the router expands all interfaces into implementing types.
+
+## Use recommended features
+
+GraphOS and router provide many features that help monitor and improve query planning performance, both at build time and runtime. 
+
+### Build time
+
+* Use [schema proposals](https://www.apollographql.com/docs/graphos/platform/schema-management/proposals) to review changes that have a large impact across entities and interfaces
+* Enable [common linter settings](https://www.apollographql.com/docs/graphos/platform/schema-management/linting)
+* Setup [custom checks](https://www.apollographql.com/docs/graphos/platform/schema-management/checks/custom) to do advanced and specific validations, like [limiting the size of query plans](https://github.com/apollosolutions/example-graphos-custom-check-query-planner)
+
+### Runtime
+
+In the [router configuration](https://www.apollographql.com/docs/graphos/routing/configuration) there are many settings to help monitor and improve performance impacts. Here are some features all production graphs should consider:
+
+* Monitor your query planner performance with the [standard instruments](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#query-planning)
+* Enabling and configuring the [in-memory cache for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory)
+* Using the cache [warm up features](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) included out of the box and using the `dry-run` headers for operations
+* Enabling and configuring [distributed caches for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/distributed) to share across router instances
+* Limiting the size of operations (and therefore their query plans) with [request limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) and the cost with [demand control](https://www.apollographql.com/docs/graphos/routing/security/demand-control)

@@ -37,6 +37,7 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
+pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
 pub(crate) const FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC: Name = name!("extends");
@@ -920,7 +921,6 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
 }
 
 /// Adds a bootstrap fed 1 link directive to the schema.
-#[allow(dead_code)]
 pub(crate) fn add_fed1_link_to_schema(
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {

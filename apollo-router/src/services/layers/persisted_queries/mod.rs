@@ -30,9 +30,11 @@ const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_querie
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
-/// Marker type for request context to identify requests that were expanded from a persisted query
-/// ID.
-struct UsedQueryIdFromManifest;
+/// Used to identify requests that were expanded from a persisted query ID
+#[derive(Clone)]
+pub(crate) struct UsedQueryIdFromManifest {
+    pub(crate) pq_id: String,
+}
 
 /// Implements persisted query support, namely expanding requests using persisted query IDs and
 /// filtering free-form GraphQL requests based on router configuration.
@@ -170,10 +172,12 @@ impl PersistedQueryLayer {
                 body.extensions.remove("persistedQuery");
                 // Record that we actually used our ID, so we can skip the
                 // safelist check later.
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(UsedQueryIdFromManifest));
+
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(UsedQueryIdFromManifest {
+                        pq_id: persisted_query_id.into(),
+                    })
+                });
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",

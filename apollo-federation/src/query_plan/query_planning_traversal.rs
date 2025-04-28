@@ -90,6 +90,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: EnabledOverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+    pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
 }
 
 impl QueryPlanningParameters<'_> {
@@ -332,6 +333,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_destinations,
             excluded_conditions,
             &parameters.override_conditions,
+            &parameters.disabled_subgraphs,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
@@ -448,6 +450,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 /*resolver*/ self,
                 &self.parameters.override_conditions,
                 &|| self.parameters.check_cancellation(),
+                &self.parameters.disabled_subgraphs,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -549,10 +552,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             // happen for a top-level query planning (unless the supergraph has *not* been
             // validated), but can happen when computing sub-plans for a key condition.
             return if self.is_top_level {
-                Err(FederationError::internal(format!(
-                    "Was not able to find any options for {}: This shouldn't have happened.",
-                    selection,
-                )))
+                if self.parameters.disabled_subgraphs.is_empty() {
+                    Err(FederationError::internal(format!(
+                        "Was not able to find any options for {}: This shouldn't have happened.",
+                        selection,
+                    )))
+                } else {
+                    // If subgraphs were disabled, this could be expected, and we indicate this in
+                    // the error accordingly.
+                    Err(SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+                }
             } else {
                 // Indicate to the caller that query planning should terminate with no plan.
                 Ok((true, None))
@@ -1174,6 +1183,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
+            disabled_subgraphs: self.parameters.disabled_subgraphs.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

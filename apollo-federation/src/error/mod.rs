@@ -154,10 +154,20 @@ pub enum SingleFederationError {
     UnknownFederationLinkVersion { message: String },
     #[error("{message}")]
     UnknownLinkVersion { message: String },
-    #[error("{message}")]
-    KeyFieldsHasArgs { message: String },
-    #[error("{message}")]
-    ProvidesFieldsHasArgs { message: String },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+    )]
+    KeyFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+    )]
+    ProvidesFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
     #[error("{message}")]
     ProvidesFieldsMissingExternal { message: String },
     #[error("{message}")]
@@ -168,16 +178,24 @@ pub enum SingleFederationError {
     ProvidesUnsupportedOnInterface { message: String },
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
-    #[error("{message}")]
-    KeyDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    ProvidesDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    RequiresDirectiveInFieldsArgs { message: String },
+    #[error(
+        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+    )]
+    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+    )]
+    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+    )]
+    RequiresHasDirectiveInFieldsArg { applied_directives: String },
     #[error("{message}")]
     ExternalUnused { message: String },
-    #[error("{message}")]
-    TypeWithOnlyUnusedExternal { message: String },
+    #[error(
+        "Type {type_name} contains only external fields and all those fields are all unused (they do not appear in any @key, @provides or @requires)."
+    )]
+    TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
     #[error("{message}")]
@@ -318,6 +336,8 @@ pub enum SingleFederationError {
     QueryPlanComplexityExceeded { message: String },
     #[error("the caller requested cancellation")]
     PlanningCancelled,
+    #[error("No plan was found when subgraphs were disabled")]
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl SingleFederationError {
@@ -373,13 +393,13 @@ impl SingleFederationError {
             SingleFederationError::RequiresUnsupportedOnInterface { .. } => {
                 ErrorCode::RequiresUnsupportedOnInterface
             }
-            SingleFederationError::KeyDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::KeyHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::KeyDirectiveInFieldsArgs
             }
-            SingleFederationError::ProvidesDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::ProvidesHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::ProvidesDirectiveInFieldsArgs
             }
-            SingleFederationError::RequiresDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::RequiresHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::RequiresDirectiveInFieldsArgs
             }
             SingleFederationError::ExternalUnused { .. } => ErrorCode::ExternalUnused,
@@ -513,7 +533,14 @@ impl SingleFederationError {
                 ErrorCode::QueryPlanComplexityExceededError
             }
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
+                ErrorCode::NoPlanFoundWithDisabledSubgraphs
+            }
         }
+    }
+
+    pub fn code_string(&self) -> String {
+        self.code().definition().code().to_string()
     }
 
     pub(crate) fn root_already_used(
@@ -563,7 +590,7 @@ impl From<FederationSpecError> for FederationError {
 
 #[derive(Debug, Clone, thiserror::Error, Default)]
 pub struct MultipleFederationErrors {
-    pub errors: Vec<SingleFederationError>,
+    pub(crate) errors: Vec<SingleFederationError>,
 }
 
 impl MultipleFederationErrors {
@@ -690,6 +717,14 @@ impl FederationError {
         result.push(self);
         result.push(other);
         result.into()
+    }
+
+    pub fn errors(&self) -> Vec<&SingleFederationError> {
+        match self {
+            FederationError::SingleFederationError(e) => vec![e],
+            FederationError::MultipleFederationErrors(e) => e.errors.iter().collect(),
+            FederationError::AggregateFederationError(e) => e.causes.iter().collect(),
+        }
     }
 }
 
@@ -1577,6 +1612,15 @@ static QUERY_PLAN_COMPLEXITY_EXCEEDED: LazyLock<ErrorCodeDefinition> = LazyLock:
     )
 });
 
+static NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_owned(),
+        "Indicates that the provided query could not be query planned due to subgraphs being disabled"
+            .to_owned(),
+        None,
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1659,6 +1703,7 @@ pub enum ErrorCode {
     UnsupportedFederationVersion,
     UnsupportedFederationDirective,
     QueryPlanComplexityExceededError,
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl ErrorCode {
@@ -1759,6 +1804,7 @@ impl ErrorCode {
             ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
             ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
+            ErrorCode::NoPlanFoundWithDisabledSubgraphs => &NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS,
         }
     }
 }
