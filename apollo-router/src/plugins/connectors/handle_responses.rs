@@ -192,7 +192,10 @@ impl RawResponse {
                         extensions_selection.apply_with_vars(&data, &inputs);
 
                     // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    extensions = res.and_then(|e| e.as_object().cloned());
+                    extensions = res.and_then(|e| match e {
+                        Value::Object(map) => Some(map),
+                        _ => None,
+                    });
                 }
 
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
