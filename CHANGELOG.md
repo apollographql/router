@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.61.5] - 2025-04-28
 
-## 🚀 Features
+## 🔍 Debuggability
 
 ### Add compute job pool spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
 
