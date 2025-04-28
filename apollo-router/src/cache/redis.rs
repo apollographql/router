@@ -12,6 +12,7 @@ use fred::prelude::Client as RedisClient;
 use fred::prelude::ClientLike;
 use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
+use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
@@ -46,6 +47,8 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+/// Interval on which we send PING commands to the Redis servers.
+const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -307,6 +310,13 @@ impl RedisCacheStorage {
         }
 
         let _handle = pooled_client.init().await?;
+        let heartbeat_clients = pooled_client.clone();
+        let _heartbeat_handle = tokio::spawn(async move {
+            heartbeat_clients
+                .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, true)
+                .await
+        });
+
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool(Arc::new(pooled_client))),
