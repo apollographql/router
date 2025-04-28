@@ -16,17 +16,17 @@ You will:
 - Run the router for your supergraph in development mode.
 - Make queries to the running router with the Apollo Sandbox IDE.
 
-## Apollo Router is the graph runtime
+## Concept: Apollo Router is the graph runtime
 
-Apollo Router is called the graph runtime or execution engine of Apollo. That's because it receives requests to the graph and returns responses that fetch data from the different APIs that make up a graph. Specifically, It accepts incoming client requests, plans how to efficiently call the APIs that make up the graph, orchestrates the API calls to fetch the requested data, and bundles the data into a response.
+Apollo Router is the graph runtime of Apollo. It receives client requests, intelligently orchestrates calls to the various APIs that make up a graph, then bundles the fetched data into a client response.
 
-Because Apollo uses GraphQL and Apollo Federation to define a graph, each router is an endpoint to a GraphQL API. It's the gateway for all client requests to a graph. Like API gateways in general, a router offers a central place to implement cross-cutting concerns, such as authentication, authorization, caching, logging, monitoring, rate limiting, and demand control.
+Because Apollo uses GraphQL and Apollo Federation to define a graph, each router is an endpoint of a GraphQL API. It's the gateway for all client requests to a federated graph, or "supergraph." Like API gateways in general, a router offers a central place to implement cross-cutting concerns, such as authentication, authorization, caching, logging, monitoring, rate limiting, and demand control. These and other features of the router are configurable declaratively via YAML.
 
 You can deploy the router locally or at scale in containers on your own infrastructure. This guide walks you through the basics of running the router locally. 
 
 ## 1. Download and extract the router binary
 
-<ElasticNotice />
+Let's start by downloading a router binary.
 
 1. Download and install the latest version of the router binary with a single command line:
 
@@ -54,15 +54,16 @@ You can deploy the router locally or at scale in containers on your own infrastr
     ./router --version
     ```
 
+
 ## 2. Download a supergraph schema
 
-A router needs a schema for the graph that it's orchestrating. For this guide, we're downloading an example supergraph schema that we'll provide to the router.
+A router needs a schema for the federated graph, or "supergraph", that it's orchestrating. For this guide, we're downloading an example supergraph schema, which we'll provide to the router when running it.
 
 1. From your project's root directory, run the following to download and save a supergraph schema to a file:
 
-```bash
-curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
-```
+  ```bash showLineNumbers=false
+  curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
+  ```
 
 <ExpansionPanel title="Content of supergraph schema">
 
@@ -236,7 +237,7 @@ Running the router in development mode enables some useful development-only feat
 
     </ExpansionPanel>
 
-## Make a query
+## 4. Make a query
 
 A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server running a development instance of your graph. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your development graph. 
 
