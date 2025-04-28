@@ -37,7 +37,7 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
             span.span_context.is_remote(),
             span.span_context.trace_state().clone(),
         );
-        span.attributes.push(KeyValue::new("_dd.measured", "1"));
+        span.attributes.push(KeyValue::new("_dd.measured", 1));
         self.delegate.on_end(span)
     }
 
