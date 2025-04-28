@@ -45,11 +45,7 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
-<<<<<<< HEAD
-=======
-pub(crate) use self::schema::validate_yaml_configuration;
 use self::server::Server;
->>>>>>> 8683f3a6 (feat: add server configuration to router config)
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
@@ -68,12 +64,8 @@ pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
-<<<<<<< HEAD
 mod schema;
-=======
-pub(crate) mod schema;
 pub(crate) mod server;
->>>>>>> 8683f3a6 (feat: add server configuration to router config)
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]

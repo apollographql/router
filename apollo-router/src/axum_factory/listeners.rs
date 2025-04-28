@@ -268,22 +268,8 @@ pub(super) fn serve_router_on_listen_addr(
     connection_shutdown_timeout: Duration,
     address: ListenAddr,
     router: axum::Router,
-<<<<<<< HEAD
     main_graphql_port: bool,
     http_config: Http,
-=======
-    opt_max_headers: Option<usize>,
-    opt_max_buf_size: Option<ByteSize>,
-<<<<<<< HEAD
-<<<<<<< HEAD
-	opt_http_read_timeout: Duration,
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
-=======
-    http_read_timeout: Duration,
->>>>>>> de2127f5 (style: fix lint errors)
-=======
-    header_read_timeout: Duration,
->>>>>>> f0aa17d8 (refactor: fix header_read_timeout variable name)
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -368,24 +354,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-<<<<<<< HEAD
                                         let connection = http_config.serve_connection(stream, app);
-=======
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
-
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
                                     }
@@ -393,28 +362,7 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
-<<<<<<< HEAD
                                         let connection = http_config.serve_connection(stream, app);
-=======
-                                        let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
-
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls(stream) => {
@@ -430,25 +378,6 @@ pub(super) fn serve_router_on_listen_addr(
                                             let protocol = stream.get_ref().1.alpn_protocol();
                                             let http2 = protocol == Some(&b"h2"[..]);
 
-<<<<<<< HEAD
-=======
-                                        let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
-
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
                                         let connection = http_config
                                             .http2_only(http2)
                                             .serve_connection(stream, app);

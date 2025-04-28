@@ -5,16 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-<<<<<<< HEAD
-<<<<<<< HEAD
-use std::time::Duration;
 use std::time::Instant;
-=======
-use std::time::{Duration, Instant};
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
-=======
-use std::time::Instant;
->>>>>>> de2127f5 (style: fix lint errors)
 
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
@@ -324,7 +315,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map_err(ApolloRouterError::ServerCreationError)?;
             let mut http_config = Http::new();
             http_config.http1_keep_alive(true);
-            http_config.http1_header_read_timeout(Duration::from_secs(10));
+            http_config.http1_header_read_timeout(configuration.server.http.header_read_timeout);
 
             #[cfg(feature = "hyper_header_limits")]
             if let Some(max_headers) = configuration.limits.http1_max_request_headers {
@@ -341,18 +332,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.supergraph.connection_shutdown_timeout,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
-<<<<<<< HEAD
                 true,
                 http_config.clone(),
-=======
-                configuration.limits.http1_max_request_headers,
-                configuration.limits.http1_max_request_buf_size,
-<<<<<<< HEAD
-				configuration.server.http.header_read_timeout,
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
-=======
-                configuration.server.http.header_read_timeout,
->>>>>>> de2127f5 (style: fix lint errors)
                 all_connections_stopped_sender.clone(),
             );
 
@@ -393,18 +374,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             configuration.supergraph.connection_shutdown_timeout,
                             listen_addr.clone(),
                             router,
-<<<<<<< HEAD
                             false,
                             http_config.clone(),
-=======
-                            configuration.limits.http1_max_request_headers,
-                            configuration.limits.http1_max_request_buf_size,
-<<<<<<< HEAD
-							configuration.server.http.header_read_timeout,
->>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
-=======
-                            configuration.server.http.header_read_timeout,
->>>>>>> de2127f5 (style: fix lint errors)
                             all_connections_stopped_sender.clone(),
                         );
                         (
