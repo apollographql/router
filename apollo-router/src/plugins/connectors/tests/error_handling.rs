@@ -399,3 +399,125 @@ async fn both_source_and_connect_with_error() {
     }
     "#);
 }
+
+#[tokio::test]
+async fn redact_errors_when_include_subgraph_errors_disabled() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        },
+        "include_subgraph_errors": {
+          "subgraphs": {
+              "connectors": false
+          }
+      }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_source { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Subgraph errors redacted",
+          "path": [
+            "only_source"
+          ]
+        }
+      ]
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        },
+        "include_subgraph_errors": {
+          "subgraphs": {
+              "connectors": true
+          }
+      }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_source { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Something blew up!",
+          "path": [
+            "only_source"
+          ],
+          "extensions": {
+            "code": "BIG_BOOM",
+            "status": 500,
+            "fromSource": "a",
+            "service": "connectors"
+          }
+        }
+      ]
+    }
+    "#);
+}

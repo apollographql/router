@@ -218,7 +218,6 @@ impl RawResponse {
                     }
                 } else {
                     error = error
-                        .extension("service", connector.id.subgraph_name.clone())
                         .extension(
                             "http",
                             Value::Object(Map::from_iter([(
@@ -238,7 +237,8 @@ impl RawResponse {
                 let error = error
                     .extension_code(extension_code)
                     .build()
-                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    // Always set the subgraph name and if required, it will get filtered out by the include_subgraph_errors plugin
+                    .with_subgraph_name(&connector.id.subgraph_name);
 
                 if let Some(debug) = debug_context {
                     debug
@@ -1307,7 +1307,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1384,9 +1384,6 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(404),
                                 }),
@@ -1420,9 +1417,6 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(500),
                                 }),
@@ -1448,7 +1442,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
