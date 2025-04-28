@@ -225,25 +225,6 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  echo "nothing to do now"
-                  # if [[ ! -d "$HOME/.deb" ]]; then
-                    # mkdir $HOME/.deb
-                    # sudo apt-get update
-                    # sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential libssl-dev libdw-dev
-                  # fi
-                  # sudo dpkg -i $HOME/.deb/*.deb
-
-      - when:
-          condition:
-            or:
               - equal: [ *windows_build_executor, << parameters.platform >> ]
               - equal: [ *windows_test_executor, << parameters.platform >> ]
           steps:
