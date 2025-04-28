@@ -23,25 +23,23 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             source_url: Some(
                 http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -97,21 +95,15 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             source_url: Some(
                 http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users-batch",
-                                    location: 1..12,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users-batch",
+                            location: 0..12,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Post,
             headers: {},
@@ -180,6 +172,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                     },
                 ),
             ),
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {

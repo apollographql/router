@@ -35,21 +35,15 @@ expression: "&connectors"
             source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/posts",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {
@@ -72,6 +66,10 @@ expression: "&connectors"
                 ),
             },
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -164,21 +162,15 @@ expression: "&connectors"
             source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/posts",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Post,
             headers: {
@@ -265,6 +257,10 @@ expression: "&connectors"
                     },
                 ),
             ),
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {

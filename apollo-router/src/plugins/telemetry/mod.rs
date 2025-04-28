@@ -64,13 +64,13 @@ use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
 use self::config::TraceIdFormat;
-use self::config_new::events::RouterEvents;
-use self::config_new::events::SubgraphEvents;
-use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
-use self::config_new::instruments::RouterInstruments;
-use self::config_new::instruments::SubgraphInstruments;
+use self::config_new::router::events::RouterEvents;
+use self::config_new::router::instruments::RouterInstruments;
 use self::config_new::spans::Spans;
+use self::config_new::subgraph::events::SubgraphEvents;
+use self::config_new::subgraph::instruments::SubgraphInstruments;
+use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
@@ -170,8 +170,10 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
 pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
 pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_library_version";
 pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
@@ -1449,8 +1451,14 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
-                                    client_library_name: String::new(),
-                                    client_library_version: String::new(),
+                                    client_library_name: context
+                                        .get(CLIENT_LIBRARY_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_library_version: context
+                                        .get(CLIENT_LIBRARY_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
                                         .to_string(),
