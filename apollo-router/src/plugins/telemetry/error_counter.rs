@@ -339,6 +339,99 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_count_errors_with_previously_counted_errors() {
+        async {
+            let config = ErrorsConfiguration {
+                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+                ..Default::default()
+            };
+
+            let context = Context::default();
+
+            context.extensions()
+                .with_lock(|lock| lock.insert(ClientRequestAccepts{
+                    multipart_defer: false,
+                    multipart_subscription: false,
+                    json: true,
+                    wildcard: false,
+                }));
+
+            let _ = context.insert(COUNTED_ERRORS, json!({"GRAPHQL_VALIDATION_FAILED": 1}));
+
+            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+            let new_response = count_errors(
+                SupergraphResponse::fake_builder()
+                    .header("Accept", "application/json")
+                    .context(context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .error(
+                        graphql::Error::builder()
+                            .message("You did a bad request.")
+                            .extension_code("GRAPHQL_VALIDATION_FAILED")
+                            .build()
+                    )
+                    .error(
+                        graphql::Error::builder()
+                            .message("Customer error text")
+                            .extension_code("CUSTOM_ERROR")
+                            .build()                    )
+                    .build()
+                    .unwrap(),
+                &config,
+            ).await;
+
+            assert_counter!(
+                    "apollo.router.operations.error",
+                    1,
+                    "apollo.operation.id" = "some-id",
+                    "graphql.operation.name" = "SomeOperation",
+                    "graphql.operation.type" = "query",
+                    "apollo.client.name" = "client-1",
+                    "apollo.client.version" = "version-1",
+                    "graphql.error.extensions.code" = "CUSTOM_ERROR",
+                    "graphql.error.extensions.severity" = "ERROR",
+                    "graphql.error.path" = "",
+                    "apollo.router.error.service" = ""
+                );
+
+            assert_counter!(
+                    "apollo.router.graphql_error",
+                    1,
+                    code = "CUSTOM_ERROR"
+                );
+
+            assert_counter_not_exists!(
+                    "apollo.router.operations.error",
+                    u64,
+                    "apollo.operation.id" = "some-id",
+                    "graphql.operation.name" = "SomeOperation",
+                    "graphql.operation.type" = "query",
+                    "apollo.client.name" = "client-1",
+                    "apollo.client.version" = "version-1",
+                    "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
+                    "graphql.error.extensions.severity" = "ERROR",
+                    "graphql.error.path" = "",
+                    "apollo.router.error.service" = ""
+                );
+
+            assert_counter_not_exists!(
+                    "apollo.router.graphql_error",
+                    u64,
+                    code = "GRAPHQL_VALIDATION_FAILED"
+                );
+
+            assert_eq!(new_response.context.get_json_value(COUNTED_ERRORS), Some(json!({"GRAPHQL_VALIDATION_FAILED": 1, "CUSTOM_ERROR": 1})))
+        }
+            .with_metrics()
+            .await;
+    }
+
+    #[tokio::test]
     async fn test_count_operation_error_codes_with_extended_config_enabled() {
         async {
             let config = ErrorsConfiguration {
