@@ -28,7 +28,7 @@ You can deploy the router locally or at scale in containers on your own infrastr
 
 <ElasticNotice />
 
-- Download and install the latest version of the router binary with a single command line:
+1. Download and install the latest version of the router binary with a single command line:
 
     ```bash showLineNumbers=false
     curl -sSL https://router.apollo.dev/download/nix/latest | sh
@@ -46,9 +46,9 @@ You can deploy the router locally or at scale in containers on your own infrastr
 
     </ExpansionPanel>
 
-    > Optionally, go to [router releases](https://github.com/apollographql/router/releases) in GitHub to download and extract a bundle.
+    Optionally, go to [router releases](https://github.com/apollographql/router/releases) in GitHub to download and extract a bundle.
 
-- Check that your router installed successfully by running the `router` binary from your project's root directory:
+1. Check that your router installed successfully by running the `router` binary from your project's root directory:
 
     ```bash showLineNumbers=false
     ./router --version
@@ -199,17 +199,17 @@ type User
 
 </ExpansionPanel>
 
-## 3. Run and test the router in dev mode
+## 3. Run the router
 
-You can run the router in development mode, where it enables some useful development-only features. This dev mode includes running its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server that's running the router's supergraph and that has its own browser-based IDE that you make test queries with.
+Running the router in development mode enables some useful development-only features. Let's now run the router in dev mode, using the supergraph schema you saved: 
 
-Let's now run the router in dev mode, using the supergraph schema you saved, and make some test queries in its Sandbox: 
-
-1. Run the router with command-line options that enable dev mode and provide a path to a supergraph schema:
+1. Run the router with command-line options, which enable dev mode and provide a path to your supergraph schema:
 
     ```sh
     ./router --dev --supergraph supergraph-schema.graphql
     ```
+
+1. Check that your router is running, with output similar to the example: 
 
     <ExpansionPanel title="Example router output">
 
@@ -236,35 +236,41 @@ Let's now run the router in dev mode, using the supergraph schema you saved, and
 
     </ExpansionPanel>
 
+## Make a query
+
+A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server running a development instance of your graph. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your development graph. 
+
+Let's use Sandbox to write and send a query to your graph:
+
 1. Open a browser and go to the URL of the router's Sandbox, `http://127.0.0.1:4000`.
 
 1. Copy and paste the example query into the **Operation** pane:
 
-```graphql
-query Query {
-  recommendedProducts {
-    inStock
-    name
-    price
-    reviews {
-      author {
-        name
+  ```graphql
+  query Query {
+    recommendedProducts {
+      inStock
+      name
+      price
+      reviews {
+        author {
+          name
+        }
       }
     }
   }
-}
 ```
 
 1. Click **Query** to run the query, then check its response in the **Response** pane.
 
-<img
-  className="screenshot"
-  alt="Apollo Sandbox IDE showing successful query and response at the end of the router quickstart"
-  src="../images/router-quickstart-sandbox.jpg"
-  width="300"
-/>
+  <img
+    className="screenshot"
+    alt="Apollo Sandbox IDE showing successful query and response at the end of the router quickstart"
+    src="../images/router-quickstart-sandbox.jpg"
+    width="700"
+  />
 
-That's it! You've successfully run a router in dev mode for an example supergraph.
+That's it! You've successfully sent a query to a router running a development graph and received a response.
 
 
 ## Next steps
