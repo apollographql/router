@@ -460,7 +460,7 @@ impl<'a> SchemaUpgrader<'a> {
                 // ... but if the extension does _not_ have a key, then if the extension has a field that is
                 // part of the _1st_ key on the subgraph owning the type, then this field is not considered
                 // external (yes, it's pretty damn random, and it's even worst in that even if the extension
-                // does _not_ have the "field of the _1st_ key on the subraph owning the type", then the
+                // does _not_ have the "field of the _1st_ key on the subgraph owning the type", then the
                 // query planner will still request it to the subgraph, generating an invalid query; but
                 // we ignore that here). Note however that because other subgraphs may have already been
                 // upgraded, we don't know which is the "type owner", so instead we look up at the first
@@ -842,7 +842,7 @@ impl<'a> SchemaUpgrader<'a> {
             applications
                 .iter()
                 .try_for_each(|application| -> Result<(), FederationError> {
-                    if let Ok(application) = (*application).as_ref() {
+                    if let Ok(application) = application {
                         if let Ok(target) = FieldDefinitionPosition::try_from(application.target.clone()) {
                             if metadata
                                 .external_metadata()
@@ -1111,7 +1111,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn remove_tag_on_external_field_if_found_on_definition() {
         let s1 = Subgraph::parse(
             "s1",
@@ -1151,8 +1150,8 @@ mod tests {
             .try_into()
             .expect("Expected 2 elements");
 
-        let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap();
-        let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap();
+        let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap().fields.get("y").unwrap();
+        let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap().fields.get("y").unwrap();
 
         assert_eq!(type_a_in_s1.directives.get_all("tag").count(), 0);
         assert_eq!(
