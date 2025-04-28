@@ -10,6 +10,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
@@ -608,6 +609,9 @@ impl<'a> SchemaUpgrader<'a> {
         if !matches!(pos, TypeDefinitionPosition::Object(_))
             || !Self::is_root_type(&self.schema, pos)
         {
+        if !matches!(pos, TypeDefinitionPosition::Object(_))
+            || !Self::is_root_type(&self.schema, pos)
+        {
             return false;
         }
         let Ok(ty) = pos.get(self.schema.schema()) else {
@@ -623,6 +627,8 @@ impl<'a> SchemaUpgrader<'a> {
             || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
     }
 
+    fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
+        schema
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
         schema
             .schema()

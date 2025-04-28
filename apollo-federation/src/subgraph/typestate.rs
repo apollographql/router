@@ -331,6 +331,11 @@ impl<S: HasMetadata> Subgraph<S> {
         self.state.is_fed_1()
     }
 
+    /// Returns the schema as a string. Mainly for testing purposes.
+    pub fn schema_string(&self) -> String {
+        self.schema().schema().to_string()
+    }
+
     pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()

@@ -339,22 +339,22 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                 .iter()
                 .map(|val| val.0.clone())
                 .collect();
-            let actual_value_set: IndexSet<Name> =
+            let expected_value_set: IndexSet<Name> =
                 self.values.iter().map(|val| val.name.clone()).collect();
-            if existing_value_set != actual_value_set {
+            if existing_value_set != expected_value_set {
                 let enum_type_name = &self.name;
-                let expected_value_names: Vec<String> = existing_value_set
+                let expected_value_names: Vec<String> = expected_value_set
                     .iter()
                     .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
-                let actual_value_names: Vec<String> = actual_value_set
+                let actual_value_names: Vec<String> = existing_value_set
                     .iter()
                     .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
                 return Err(SingleFederationError::TypeDefinitionInvalid {
-                    message: format!("Invalid definition of type {enum_type_name}: expected values [{}] but found [{}].",
+                    message: format!(r#"Invalid definition for type "{enum_type_name}": expected values [{}] but found [{}]."#,
                     expected_value_names.join(", "), actual_value_names.join(", "))
                 }.into());
             }
@@ -599,11 +599,9 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
 //////////////////////////////////////////////////////////////////////////////
 // Helper functions for TypeSpecification implementations
 // Argument naming conventions:
-// - `expected`: the expected definition either by the Federation assumption or the existing
-//               definition in the schema.
-// - `actual`: the definition from the TypeAndDirectiveSpecification, which is being checked.
-// PORT_NOTE: The JS code uses the terms `actual`, `expected` and `existing` slightly differently.
-//            But, the new convention seems easier to understand.
+// - `existing` or `actual`: the existing definition as defined in the schema.
+// - `expected`: the expected definition either by the Federation assumption or from the
+//               TypeAndDirectiveSpecification.
 
 // TODO: Consider moving this to the schema module.
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::Display)]
@@ -705,8 +703,8 @@ fn default_value_message(value: Option<&Value>) -> String {
 }
 
 fn ensure_same_arguments(
-    expected: &[Node<InputValueDefinition>],
-    actual: &[ResolvedArgumentSpecification],
+    expected: &[ResolvedArgumentSpecification],
+    actual: &[Node<InputValueDefinition>],
     schema: &FederationSchema,
     what: &str,
     generate_error: fn(&str) -> SingleFederationError,
@@ -730,7 +728,7 @@ fn ensure_same_arguments(
 
         // ensure expected argument and actual argument have the same type.
         // TODO: Make it easy to get a cloned (inner) type from a Node<Type>.
-        let mut actual_type = actual_arg.ty.clone();
+        let mut actual_type = actual_arg.ty.as_ref().clone();
         if actual_type.is_non_null() && !expected_arg.ty.is_non_null() {
             // It's ok to redefine an optional argument as mandatory. For instance, if you want to force people on your team to provide a "deprecation reason", you can
             // redefine @deprecated as `directive @deprecated(reason: String!)...` to get validation. In other words, you are allowed to always pass an argument that
@@ -739,22 +737,22 @@ fn ensure_same_arguments(
         }
         // ensure argument type is compatible with the expected one and
         // argument's default value (if any) is compatible with the expected one
-        if *expected_arg.ty != actual_type
-            && is_valid_input_type_redefinition(&expected_arg.ty, &actual_type, schema)
+        if expected_arg.ty != actual_type
+            && !is_valid_input_type_redefinition(&expected_arg.ty, &actual_type, schema)
         {
             let arg_name = &expected_arg.name;
             let expected_type = &expected_arg.ty;
             errors.push(generate_error(&format!(
-                    r#"Invalid definition for {what}: Argument "{arg_name}" should have type {expected_type} but found type {actual_type}"#
+                    r#"Invalid definition for {what}: argument "{arg_name}" should have type "{expected_type}" but found type "{actual_type}""#
                 )));
         } else if !actual_type.is_non_null()
-            && expected_arg.default_value.as_deref() != actual_arg.default_value.as_ref()
+            && expected_arg.default_value.as_ref() != actual_arg.default_value.as_deref()
         {
             let arg_name = &expected_arg.name;
-            let expected_value = default_value_message(expected_arg.default_value.as_deref());
-            let actual_value = default_value_message(actual_arg.default_value.as_ref());
+            let expected_value = default_value_message(expected_arg.default_value.as_ref());
+            let actual_value = default_value_message(actual_arg.default_value.as_deref());
             errors.push(generate_error(&format!(
-                    r#"Invalid definition for {what}: Argument "{arg_name}" should have {expected_value} but found {actual_value}"#
+                    r#"Invalid definition for {what}: argument "{arg_name}" should have {expected_value} but found {actual_value}"#
                 )));
         }
     }
@@ -774,23 +772,26 @@ fn ensure_same_arguments(
     errors
 }
 
+// The `existing_obj_type` is the definition that is defined in the schema.
+// And the `expected_fields` are the expected fields from the specification.
+// The existing (= actual) field definitions must be compatible with the expected ones.
 fn ensure_same_fields(
     existing_obj_type: &ObjectType,
-    actual_fields: &[FieldSpecification],
+    expected_fields: &[FieldSpecification],
     schema: &FederationSchema,
 ) -> Vec<SingleFederationError> {
     let obj_type_name = existing_obj_type.name.clone();
     let mut errors = vec![];
 
-    // ensure all actual fields are a subset of the existing object type's fields.
-    for actual_field_def in actual_fields {
-        let actual_field_name = &actual_field_def.name;
-        let expected_field = existing_obj_type.fields.get(actual_field_name);
-        let Some(expected_field) = expected_field else {
+    // ensure all expected fields are a subset of the existing object type's fields.
+    for expected_field_def in expected_fields {
+        let field_name = &expected_field_def.name;
+        let existing_field = existing_obj_type.fields.get(field_name);
+        let Some(existing_field) = existing_field else {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
                     "Invalid definition of type {}: missing field {}",
-                    obj_type_name, actual_field_name
+                    obj_type_name, field_name
                 ),
             });
             continue;
@@ -800,23 +801,23 @@ fn ensure_same_fields(
         // We allow adding non-nullability because we've seen redefinition of the federation
         // _Service type with type String! for the `sdl` field and we don't want to break backward
         // compatibility as this doesn't feel too harmful.
-        let mut expected_field_type = expected_field.ty.clone();
-        if !actual_field_def.ty.is_non_null() && expected_field_type.is_non_null() {
-            expected_field_type = expected_field_type.nullable();
+        let mut existing_field_type = existing_field.ty.clone();
+        if !expected_field_def.ty.is_non_null() && existing_field_type.is_non_null() {
+            existing_field_type = existing_field_type.nullable();
         }
-        if actual_field_def.ty != expected_field_type {
-            let actual_field_type = &actual_field_def.ty;
+        if expected_field_def.ty != existing_field_type {
+            let expected_field_type = &expected_field_def.ty;
             errors.push(SingleFederationError::TypeDefinitionInvalid {
-                message: format!("Invalid definition for field {actual_field_name} of type {obj_type_name}: should have type {expected_field_type} but found type {actual_field_type}")
+                message: format!("Invalid definition for field {field_name} of type {obj_type_name}: should have type {expected_field_type} but found type {existing_field_type}")
             });
         }
 
         // ensure field arguments are as expected
         let mut arg_errors = ensure_same_arguments(
-            &expected_field.arguments,
-            &actual_field_def.arguments,
+            &expected_field_def.arguments,
+            &existing_field.arguments,
             schema,
-            &format!(r#"field "{}.{}""#, obj_type_name, expected_field.name),
+            &format!(r#"field "{}.{}""#, obj_type_name, existing_field.name),
             |s| SingleFederationError::TypeDefinitionInvalid {
                 message: s.to_string(),
             },
@@ -827,6 +828,9 @@ fn ensure_same_fields(
     errors
 }
 
+// The `existing_directive` is the definition that is defined in the schema.
+// And the rest of arguments are the expected directive definition from the specification.
+// The existing (= actual) definition must be compatible with the expected one.
 fn ensure_same_directive_structure(
     existing_directive: &DirectiveDefinition,
     name: &Name,
@@ -837,20 +841,20 @@ fn ensure_same_directive_structure(
 ) -> Result<(), FederationError> {
     let directive_name = format!("@{name}");
     let mut arg_errors = ensure_same_arguments(
-        &existing_directive.arguments,
         args,
+        &existing_directive.arguments,
         schema,
-        &format!(r#"directive {directive_name}"#),
+        &format!(r#"directive "{directive_name}""#),
         |s| SingleFederationError::DirectiveDefinitionInvalid {
             message: s.to_string(),
         },
     );
 
     // It's ok to say you'll never repeat a repeatable directive. It's not ok to repeat one that isn't.
-    if !existing_directive.repeatable && repeatable {
+    if existing_directive.repeatable && !repeatable {
         arg_errors.push(SingleFederationError::DirectiveDefinitionInvalid {
             message: format!(
-                "Invalid definition for directive {directive_name}: {directive_name} should not be repeatable"
+                r#"Invalid definition for directive "{directive_name}": "{directive_name}" should not be repeatable"#
             ),
         });
     }
@@ -858,11 +862,12 @@ fn ensure_same_directive_structure(
     // Similarly, it's ok to say that you will never use a directive in some locations, but not that
     // you will use it in places not allowed by what is expected.
     // Ensure `locations` is a subset of `existing_directive.locations`.
-    if !locations
+    if !existing_directive
+        .locations
         .iter()
-        .all(|loc| existing_directive.locations.contains(loc))
+        .all(|loc| locations.contains(loc))
     {
-        let actual_locations: Vec<String> = locations.iter().map(|loc| loc.to_string()).collect();
+        let expected_locations: Vec<String> = locations.iter().map(|loc| loc.to_string()).collect();
         let existing_locations: Vec<String> = existing_directive
             .locations
             .iter()
@@ -870,8 +875,8 @@ fn ensure_same_directive_structure(
             .collect();
         arg_errors.push(SingleFederationError::DirectiveDefinitionInvalid {
             message: format!(
-                "Invalid definition for directive {directive_name}: {directive_name} should have locations [{}] but found [{}]",
-                existing_locations.join(", "), actual_locations.join(", ")
+                r#"Invalid definition for directive "{directive_name}": "{directive_name}" should have locations {}, but found (non-subset) {}"#,
+                expected_locations.join(", "), existing_locations.join(", ")
             ),
         });
     }
