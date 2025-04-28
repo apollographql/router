@@ -167,6 +167,13 @@ coprocessor:
 ```
 
 <Note>
+
+`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
+We strongly recommend using `context: deprecated` or `context: all` instead.
+
+</Note>
+
+<Note>
     If you use the `selective` configuration, you'll have to specify new context key names (>=2.x) it doesn't work with deprecated keys. So for example if you try to specify `operation_name` instead of `apollo::supergraph::operation_name` it won't map to the new context key.
 </Note>
 
