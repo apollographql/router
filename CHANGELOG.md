@@ -28,7 +28,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Add compute job pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
 
-The compute job pool is used within the router for compute intensive jobs that should not block the Tokio worker threads.
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
 When this pool becomes saturated it is difficult for users to see why so that they can take action.
 This change adds new metrics to help users understand how long jobs are waiting to be processed.  
 
@@ -48,20 +48,17 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
-### Poll pending compute jobs hang request ([PR #7273](https://github.com/apollographql/router/pull/7273))
+### Fix hanging requests when compute job queue is full ([PR #7273](https://github.com/apollographql/router/pull/7273))
 
-Compute jobs in the router are used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
 
-We previously checked if the compute job queue was full and returned `Poll::Pending` in the tower services.
-However, this will cause requests to hang until timeout.
-
-This PR shifts the logic into `call` and will immediately return a `SERVICE_UNAVAILABLE` response to the user.
+When the compute job queue was full, requests could hang until timeout. Now, the router immediately returns a `SERVICE_UNAVAILABLE` response to the user.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7273
 
 ### Increase compute job pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
 
-Compute jobs in the router are used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
 
 We previously set this queue size to 20 (per thread). However, this may be too small on resource constrained environments.
 
