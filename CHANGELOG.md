@@ -50,7 +50,7 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 
 ### Poll pending compute jobs hang request ([PR #7273](https://github.com/apollographql/router/pull/7273))
 
-Compute jobs in the router are used to execute CPU intensive work outside of the main io worker threads, in particular for QueryParsing, QueryPlanning and Introspection.
+Compute jobs in the router are used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
 
 We previously checked if the compute job queue was full and returned `Poll::Pending` in the tower services.
 However, this will cause requests to hang until timeout.
@@ -61,7 +61,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Increase compute job worker pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
 
-The compute job worker pool is used for CPU-bound tasks, like GraphQL parsing, validation, and query planning. When there are too many jobs to handle in parallel, jobs enter a queue.
+Compute jobs in the router are used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
 
 We previously set this queue size to 20 (per thread). However, this may be too small on resource constrained environments.
 
