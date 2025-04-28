@@ -365,10 +365,7 @@ impl FederationSpecDefinition {
         application: &'doc Node<Directive>,
     ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
         Ok(TagDirectiveArguments {
-            name: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELDS_ARGUMENT_NAME,
-            )?,
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 

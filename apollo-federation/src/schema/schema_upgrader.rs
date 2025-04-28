@@ -1150,8 +1150,22 @@ mod tests {
             .try_into()
             .expect("Expected 2 elements");
 
-        let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap().fields.get("y").unwrap();
-        let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap().fields.get("y").unwrap();
+        let type_a_in_s1 = s1
+            .schema()
+            .schema()
+            .get_object("A")
+            .unwrap()
+            .fields
+            .get("y")
+            .unwrap();
+        let type_a_in_s2 = s2
+            .schema()
+            .schema()
+            .get_object("A")
+            .unwrap()
+            .fields
+            .get("y")
+            .unwrap();
 
         assert_eq!(type_a_in_s1.directives.get_all("tag").count(), 0);
         assert_eq!(
