@@ -320,6 +320,7 @@ pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
     opt_max_headers: Option<usize>,
     opt_max_buf_size: Option<ByteSize>,
+    header_read_timeout: Duration,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -381,7 +382,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
@@ -405,7 +406,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
@@ -439,7 +440,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }

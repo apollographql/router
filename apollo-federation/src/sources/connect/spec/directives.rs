@@ -14,6 +14,8 @@ use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
+use super::schema::PATH_ARGUMENT_NAME;
+use super::schema::QUERY_PARAMS_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
@@ -185,12 +187,14 @@ impl SourceHTTPArguments {
     ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
+        let mut path = None;
+        let mut query = None;
         for (name, value) in values {
             let name = name.as_str();
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
                 let base_url_value = value.as_str().ok_or(internal!(
-                    "`baseURL` field in `@source` directive's `http` field is not a string"
+                    "`baseURL` field in `@source` directive's `http.baseURL` field is not a string"
                 ))?;
 
                 base_url = Some(
@@ -206,6 +210,18 @@ impl SourceHTTPArguments {
                         .try_collect()
                         .map_err(|err| internal!(err.to_string()))?,
                 );
+            } else if name == PATH_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@source` directive's `http.path` field is not a string",
+                    PATH_ARGUMENT_NAME
+                )))?;
+                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@source` directive's `http.queryParams` field is not a string",
+                    QUERY_PARAMS_ARGUMENT_NAME
+                )))?;
+                query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -218,6 +234,8 @@ impl SourceHTTPArguments {
                 "missing `base_url` field in `@source` directive's `http` argument"
             ))?,
             headers: headers.unwrap_or_default(),
+            path,
+            query_params: query,
         })
     }
 }
@@ -299,6 +317,8 @@ impl ConnectHTTPArguments {
         let mut delete = None;
         let mut body = None;
         let mut headers = None;
+        let mut path = None;
+        let mut query_params = None;
         for (name, value) in values {
             let name = name.as_str();
 
@@ -335,6 +355,18 @@ impl ConnectHTTPArguments {
                 delete = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
+            } else if name == PATH_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    PATH_ARGUMENT_NAME
+                )))?;
+                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    QUERY_PARAMS_ARGUMENT_NAME
+                )))?;
+                query_params = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             }
         }
 
@@ -346,6 +378,8 @@ impl ConnectHTTPArguments {
             delete,
             body,
             headers: headers.unwrap_or_default(),
+            path,
+            query_params,
         })
     }
 }
@@ -501,21 +535,7 @@ mod tests {
             SourceDirectiveArguments {
                 name: "json",
                 http: SourceHTTPArguments {
-                    base_url: Url {
-                        scheme: "https",
-                        cannot_be_a_base: false,
-                        username: "",
-                        password: None,
-                        host: Some(
-                            Domain(
-                                "jsonplaceholder.typicode.com",
-                            ),
-                        ),
-                        port: None,
-                        path: "/",
-                        query: None,
-                        fragment: None,
-                    },
+                    base_url: https://jsonplaceholder.typicode.com/,
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -535,6 +555,8 @@ mod tests {
                             ),
                         ),
                     },
+                    path: None,
+                    query_params: None,
                 },
             },
         ]
@@ -557,7 +579,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r#"
+            @r###"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -581,6 +603,8 @@ mod tests {
                         delete: None,
                         body: None,
                         headers: {},
+                        path: None,
+                        query_params: None,
                     },
                 ),
                 selection: Named(
@@ -641,6 +665,8 @@ mod tests {
                         delete: None,
                         body: None,
                         headers: {},
+                        path: None,
+                        query_params: None,
                     },
                 ),
                 selection: Named(
@@ -692,7 +718,7 @@ mod tests {
                 batch: None,
             },
         ]
-        "#
+        "###
         );
     }
 }

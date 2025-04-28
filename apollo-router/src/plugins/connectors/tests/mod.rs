@@ -43,6 +43,7 @@ mod connect_on_type;
 mod mock_api;
 mod quickstart;
 mod req_asserts;
+mod url_properties;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
