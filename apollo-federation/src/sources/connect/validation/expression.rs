@@ -85,6 +85,7 @@ impl<'schema> Context<'schema> {
 
                 if matches!(parent_category, ObjectCategory::Other) {
                     var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::Batch, Shape::from(parent_type));
                 }
 
                 Self {
@@ -144,6 +145,7 @@ impl<'schema> Context<'schema> {
 
                 if matches!(parent_category, ObjectCategory::Other) {
                     var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::Batch, Shape::from(parent_type));
                 }
 
                 Self {
