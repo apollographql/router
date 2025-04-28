@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Compute job spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
+### Add compute job pool spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
 
 The router uses a separate thread pool called "compute jobs" to ensure that requests do not block tokio io worker threads.
 This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to 
