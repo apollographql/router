@@ -327,7 +327,7 @@ async fn it_processes_a_valid_query_batch() {
         assert_eq!(expected_response, data);
 
         assert_histogram_sum!(
-            "apollo.router.operations.batching",
+            "apollo.router.operations.batching.size",
             3,
             "mode" = "batch_http_link"
         );
