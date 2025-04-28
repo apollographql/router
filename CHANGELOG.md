@@ -15,10 +15,10 @@ This PR adds spans to jobs that are on this pool to allow users to see when late
 resource contention within the compute job pool.
 
 * `compute_job`:
-  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
 * `compute_job.execution`
   - `job.age`: `P1`-`P8`
-  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
 
 Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing 
 at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher 
@@ -26,7 +26,7 @@ priority jobs also in the queue.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
 
-### Add compute pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
+### Add compute job pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
 
 The compute job pool is used within the router for compute intensive jobs that should not block the Tokio worker threads.
 When this pool becomes saturated it is difficult for users to see why so that they can take action.
@@ -59,7 +59,7 @@ This PR shifts the logic into `call` and will immediately return a `SERVICE_UNAV
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7273
 
-### Increase compute job worker pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
+### Increase compute job pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
 
 Compute jobs in the router are used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
 
