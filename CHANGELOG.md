@@ -4,6 +4,184 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.5] - 2025-04-28
+
+## 🚀 Features
+
+### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
+
+To help users to diagnose when connections are keeping pipelines hanging around the following metric has been added:
+- `apollo.router.open_connections` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration.
+    - `server.address` - The address that the router is listening on.
+    - `server.port` - The port that the router is listening on if not a unix socket.
+    - `http.connection.state` - Either `active` or `terminating`.
+
+Connections can be held open by clients via keepalive or even just a long-running request, so it's useful to know when this is happening.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7023
+
+### Compute job spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
+
+The router uses a separate thread pool called "compute jobs" to ensure that requests do not block tokio io worker threads.
+This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to 
+resource contention within the compute job pool.
+
+* `compute_job`:
+  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+* `compute_job.execution`
+  - `job.age`: `P1`-`P8`
+  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+
+Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing 
+at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher 
+priority jobs also in the queue.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
+
+## 🐛 Fixes
+
+### Fix potential telemetry deadlock ([PR #7142](https://github.com/apollographql/router/pull/7142))
+
+The `tracing_subscriber` crate uses `RwLock`s to manage access to a `Span`'s `Extensions`. Deadlocks are possible when
+multiple threads access this lock, including with reentrant locks:
+```
+// Thread 1              |  // Thread 2
+let _rg1 = lock.read();  |
+                         |  // will block
+                         |  let _wg = lock.write();
+// may deadlock          |
+let _rg2 = lock.read();  |
+```
+
+This fix removes an opportunity for reentrant locking while extracting a Datadog identifier.
+
+There is also a potential for deadlocks when the root and active spans' `Extensions` are acquired at the same time, if
+multiple threads are attempting to access those `Extensions` but in a different order. This fix removes a few cases
+where multiple spans' `Extensions` are acquired at the same time.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7142
+
+### Add compute pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
+
+The compute job pool is used within the router for compute intensive jobs that should not block the Tokio worker threads.
+When this pool becomes saturated it is difficult for users to see why so that they can take action.
+This change adds new metrics to help users understand how long jobs are waiting to be processed.  
+
+New metrics:
+- `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
+- `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+  - `job.outcome`: (`executed_ok`, `executed_error`, `channel_error`, `rejected_queue_full`, `abandoned`)
+- `apollo.router.compute_jobs.queue.wait.duration` - A histogram of time spent in the compute queue by the job.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.execution.duration` - A histogram of time spent to execute job (excludes time spent in the queue).
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7184
+
+### Connection shutdown timeout 1.x ([PR #7058](https://github.com/apollographql/router/pull/7058))
+
+When a connection is closed we call `graceful_shutdown` on hyper and then await for the connection to close.
+
+Hyper 0.x has various issues around shutdown that may result in us waiting for extended periods for the connection to eventually be closed.
+
+This PR introduces a configurable timeout from the termination signal to actual termination, defaulted to 60 seconds. The connection is forcibly terminated after the timeout is reached.
+
+To configure, set the option in router yaml. It accepts human time durations:
+```
+supergraph:
+  connection_shutdown_timeout: 60s
+```
+
+Note that even after connections have been terminated the router will still hang onto pipelines if `early_cancel` has not been configured to true. The router is trying to complete the request. 
+
+Users can either set `early_cancel` to `true` 
+```
+supergraph:
+  early_cancel: true
+```
+
+AND/OR use traffic shaping timeouts:
+```
+traffic_shaping:
+  router:
+    timeout: 60s
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7058
+
+### Poll pending compute jobs hang request ([PR #7273](https://github.com/apollographql/router/pull/7273))
+
+Compute jobs in the router are used to execute CPU intensive work outside of the main io worker threads, in particular for QueryParsing, QueryPlanning and Introspection.
+
+We currently check in the pipeline if the compute job is full and if it is then it will return `Poll::Pending` in the tower services.
+However, this will cause requests to hang until timeout.
+
+This PR shifts the logic into `call` and will immediately return a `SERVICE_UNAVAILABLE` response to the user.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7273
+
+### Fix crash when an invalid query plan is generated ([PR #7214](https://github.com/apollographql/router/pull/7214))
+
+When an invalid query plan is generated, the router could panic and crash.
+This could happen if there are gaps in the GraphQL validation implementation.
+Now, even if there are unresolved gaps, the router will handle it gracefully and reject the request.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7214
+
+### Increase compute job worker pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
+
+The compute job worker pool is used for CPU-bound tasks, like GraphQL parsing, validation, and query planning. When there are too many jobs to handle in parallel, jobs enter a queue.
+
+We previously set this queue size to 20 (per thread) somewhat arbitrarily. We got some signals that this may be too small.
+
+This patch increases the queue size to 1 000 jobs per thread. For reference, in older router versions before the introduction of the compute job worker pool, the equivalent queue size was *10 000*.
+
+The number is still a bit arbitrary, and subject to more changes in the future as we understand its effects better. Along with some other tweaks to job priorities we expect this to give better behaviour and reject fewer requests needlessly.
+
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7205
+
+### Entity-cache: handle multiple key directives ([PR #7228](https://github.com/apollographql/router/pull/7228))
+
+This PR fixes a bug in entity caching introduced by the fix in https://github.com/apollographql/router/pull/6888 for cases where several `@key` directives with different fields were declared on a type as documented [here](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#managing-types).
+
+For example if you have this kind of entity in your schema:
+
+```graphql
+type Product @key(fields: "upc") @key(fields: "sku") {
+  upc: ID!
+  sku: ID!
+  name: String
+}
+```
+
+By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
+
+### Improve Error Message for Invalid JWT Header Values ([PR #7121](https://github.com/apollographql/router/pull/7121))
+
+Enhanced parsing error messages for JWT Authorization header values now provide developers with clear, actionable feedback while ensuring that no sensitive data is exposed.
+
+Examples of the updated error messages:
+```diff
+-         Header Value: '<invalid value>' is not correctly formatted. prefix should be 'Bearer'
++         Value of 'authorization' JWT header should be prefixed with 'Bearer'
+```
+
+```diff
+-         Header Value: 'Bearer' is not correctly formatted. Missing JWT
++         Value of 'authorization' JWT header has only 'Bearer' prefix but no JWT token
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/7121
+
+
+
 # [1.61.4] - 2025-04-16
 
 ## 🐛 Fixes
