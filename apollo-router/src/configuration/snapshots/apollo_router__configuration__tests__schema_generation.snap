@@ -5326,10 +5326,6 @@ expression: "&schema"
         }
       ]
     },
-<<<<<<< HEAD
-    "SocketEndpoint": {
-      "type": "string"
-=======
     "Server": {
       "additionalProperties": false,
       "properties": {
@@ -5354,7 +5350,9 @@ expression: "&schema"
         }
       },
       "type": "object"
->>>>>>> 1b195743 (test: update configuration test snapshot)
+    },
+    "SocketEndpoint": {
+      "type": "string"
     },
     "Source": {
       "oneOf": [
