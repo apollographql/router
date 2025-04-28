@@ -64,7 +64,9 @@
                 <h3 id="Apache-2.0">Apache License 2.0</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-credential-types</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-async</a></li>
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http-client</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-json</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-query</a></li>
@@ -11430,9 +11432,7 @@ limitations under the License.
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/apollographql/apollo-rs ">apollo-compiler</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-config</a></li>
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-credential-types</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-runtime</a></li>
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http-client</a></li>
                     <li><a href=" https://github.com/awslabs/smithy-rs ">aws-smithy-observability</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-runtime</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-types</a></li>
@@ -12396,37 +12396,6 @@ these terms.
                 <h3 id="ISC">ISC License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
-                    <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
-                </ul>
-                <pre class="license-text">// Copyright 2021 Brian Smith.
-//
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
-//
-// THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND THE AUTHORS DISCLAIM ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
-// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
-use pki_types::CertificateDer;
-
-#[test]
-fn cert_without_extensions_test() {
-    // Check the certificate is valid with
-    // &#x60;openssl x509 -in cert_without_extensions.der -inform DER -text -noout&#x60;
-    let ca &#x3D; CertificateDer::from(&amp;include_bytes!(&quot;cert_without_extensions.der&quot;)[..]);
-    assert!(webpki::EndEntityCert::try_from(&amp;ca).is_ok());
-}
-</pre>
-            </li>
-            <li class="license">
-                <h3 id="ISC">ISC License</h3>
-                <h4>Used by:</h4>
-                <ul class="license-used-by">
                     <li><a href=" https://github.com/acw/simple_asn1 ">simple_asn1</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2017 Adam Wick
@@ -12533,6 +12502,7 @@ THIS SOFTWARE.
                     <li><a href=" https://github.com/aws/aws-lc-rs ">aws-lc-rs</a></li>
                     <li><a href=" https://github.com/aws/aws-lc-rs ">aws-lc-sys</a></li>
                     <li><a href=" https://github.com/jedisct1/rust-bloom-filter ">bloomfilter</a></li>
+                    <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
                     <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
                 </ul>
                 <pre class="license-text">ISC License:
