@@ -979,6 +979,7 @@ pub(crate) fn add_fed1_link_to_schema(
     )
 }
 
+#[allow(unused)]
 pub(crate) fn add_fed2_link_to_schema(
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {

@@ -385,38 +385,6 @@ impl From<&ExtendedType> for TypeDefinitionPosition {
     }
 }
 
-impl From<&ExtendedType> for TypeDefinitionPosition {
-    fn from(ty: &ExtendedType) -> Self {
-        match ty {
-            ExtendedType::Scalar(v) => {
-                TypeDefinitionPosition::Scalar(ScalarTypeDefinitionPosition {
-                    type_name: v.name.clone(),
-                })
-            }
-            ExtendedType::Object(v) => {
-                TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                    type_name: v.name.clone(),
-                })
-            }
-            ExtendedType::Interface(v) => {
-                TypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
-                    type_name: v.name.clone(),
-                })
-            }
-            ExtendedType::Union(v) => TypeDefinitionPosition::Union(UnionTypeDefinitionPosition {
-                type_name: v.name.clone(),
-            }),
-            ExtendedType::Enum(v) => TypeDefinitionPosition::Enum(EnumTypeDefinitionPosition {
-                type_name: v.name.clone(),
-            }),
-            ExtendedType::InputObject(v) => {
-                TypeDefinitionPosition::InputObject(InputObjectTypeDefinitionPosition {
-                    type_name: v.name.clone(),
-                })
-            }
-        }
-    }
-
 fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
 fallible_conversions!(TypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
 fallible_conversions!(TypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);

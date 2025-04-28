@@ -440,6 +440,8 @@ mod link_handling_tests {
 
         directive @federation__override(from: String!) on FIELD_DEFINITION
 
+        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
         type T @key(fields: "k") {
           k: ID!
         }

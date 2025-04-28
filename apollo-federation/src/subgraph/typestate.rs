@@ -15,7 +15,7 @@ use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_I
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::add_fed2_link_to_schema;
+use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -176,15 +176,15 @@ impl Subgraph<Raw> {
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
             false
         } else {
-            // // This must be a Fed 1 schema.
-            // LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
+            // This must be a Fed 1 schema.
+            LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
-            // // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
-            // //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
-            // add_fed1_link_to_schema(&mut schema)?;
-            LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
+            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+            add_fed1_link_to_schema(&mut schema)?;
+            // LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
-            add_fed2_link_to_schema(&mut schema)?;
+            // add_fed2_link_to_schema(&mut schema)?;
             true
         };
 
@@ -530,6 +530,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),
@@ -574,6 +575,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),
