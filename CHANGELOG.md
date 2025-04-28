@@ -193,7 +193,7 @@ By [@sachindshinde](https://github.com/sachindshinde) and [@goto-bus-stop](https
 >
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
-## 🚀 Features
+## 🔍 Debuggability
 
 ### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
 
@@ -223,6 +223,8 @@ To help users to diagnose when connections are keeping pipelines hanging around,
 You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
+
+## 🔒 Security
 
 ### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
 
