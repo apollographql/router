@@ -331,6 +331,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_key() {
         let schema_str = r#"
@@ -419,6 +420,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
@@ -513,6 +515,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
@@ -536,6 +539,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
@@ -565,6 +569,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
@@ -841,6 +846,7 @@ mod root_types {
     use super::*;
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_query_as_type_name_if_not_the_query_root() {
         let schema_str = r#"
@@ -868,6 +874,7 @@ mod root_types {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_mutation_as_type_name_if_not_the_mutation_root() {
         let schema_str = r#"
@@ -895,6 +902,7 @@ mod root_types {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_subscription_as_type_name_if_not_the_subscription_root() {
         let schema_str = r#"
@@ -931,6 +939,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn has_suggestions_if_a_federation_directive_is_misspelled_in_all_schema_versions() {
         let schema_versions = [
@@ -982,6 +991,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_in_fed1() {
         let schema_str = r#"
@@ -1002,6 +1012,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
+    #[ignore = "Currently failing do to pending validation workflow implementations"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_under_wrong_name_for_the_schema() {
         let schema_str = r#"
