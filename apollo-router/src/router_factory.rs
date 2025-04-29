@@ -751,6 +751,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
+    add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");

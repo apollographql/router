@@ -28,6 +28,7 @@ pub(crate) mod content_negotiation;
 mod coprocessor;
 pub(crate) mod csrf;
 pub(crate) mod demand_control;
+pub(crate) mod enhanced_client_awareness;
 pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
