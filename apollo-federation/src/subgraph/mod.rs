@@ -351,6 +351,10 @@ impl SubgraphError {
         &self.error
     }
 
+    pub fn into_inner(self) -> FederationError {
+        self.error
+    }
+
     // Format subgraph errors in the same way as `Rover` does.
     // And return them as a vector of (error_code, error_message) tuples
     // - Gather associated errors from the validation error.
