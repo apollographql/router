@@ -386,7 +386,7 @@ impl RouterService {
                     let response_multipart = match protocol_mode {
                         ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
                         ProtocolMode::Defer => {
-                            Multipart::new(once(ready(response)).chain(body), ProtocolMode::Defer)
+                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
                         }
                     };
 
