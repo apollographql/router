@@ -2,7 +2,7 @@ use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use http::HeaderName;
-use url::Url;
+use http::Uri;
 
 use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::HeaderSource;
@@ -14,15 +14,20 @@ pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
+pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
+
+pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
+pub(crate) const QUERY_PARAMS_ARGUMENT_NAME: Name = name!("queryParams");
 
 pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -48,11 +53,22 @@ pub(crate) struct SourceDirectiveArguments {
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
-    pub(crate) base_url: Url,
+    pub(crate) base_url: Uri,
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+    pub(crate) path: Option<JSONSelection>,
+    pub(crate) query_params: Option<JSONSelection>,
+}
+
+/// Settings for the connector when it is doing a $batch entity resolver
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of max_size.
+    pub(crate) max_size: Option<usize>,
 }
 
 /// Arguments to the `@connect` directive
@@ -85,6 +101,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// identified domain model.) If true, the connector must be defined on a field
     /// of the Query type.
     pub(crate) entity: bool,
+
+    /// Settings for the connector when it is doing a $batch entity resolver
+    pub(crate) batch: Option<ConnectBatchArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
@@ -107,4 +126,9 @@ pub(crate) struct ConnectHTTPArguments {
     ///
     /// Overrides headers from the associated @source by name.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+
+    /// A [`JSONSelection`] that should resolve to an array of strings to append to the path.
+    pub(crate) path: Option<JSONSelection>,
+    /// A [`JSONSelection`] that should resolve to an object to convert to query params.
+    pub(crate) query_params: Option<JSONSelection>,
 }

@@ -48,7 +48,7 @@ improvements, we should adhere to the following principles:
 2. It must be possible to statically determine the output shape (object
    properties, array types, and nested value shapes) produced by a
    `JSONSelection` string. JSON data encountered at runtime may be inherently
-   dynamic and unpredicatable, but we must be able to validate the output shape
+   dynamic and unpredictable, but we must be able to validate the output shape
    matches the GraphQL schema. Because we can assume all input data is some kind
    of JSON, for types whose shape cannot be statically determined, the GraphQL
    `JSON` scalar type can be used as an "any" type, though this should be

@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall: true\nsubgraphs:\n  accounts: false\n\n\nREQUEST:\n{\n  \"data\": null,\n  \"errors\": [\n    {\n      \"message\": \"Account service error\",\n      \"path\": [],\n      \"extensions\": {\n        \"code\": \"ACCOUNT_FAIL\",\n        \"apollo.subgraph.name\": \"accounts\"\n      }\n    }\n  ]\n}"
+expression: actual_responses
+---
+- errors:
+    - message: Subgraph errors redacted
+      path: []

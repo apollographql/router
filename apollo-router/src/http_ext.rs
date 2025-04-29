@@ -19,7 +19,7 @@ use crate::services::APPLICATION_JSON_HEADER_VALUE;
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderName` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.
@@ -46,7 +46,7 @@ pub struct TryIntoHeaderName {
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderValue`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderValue` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.

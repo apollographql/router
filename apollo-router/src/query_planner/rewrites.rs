@@ -21,7 +21,7 @@ use crate::spec::Schema;
 /// Given a path, separates the last element of path and the rest of it and return them as a pair.
 /// This will return `None` if the path is empty.
 fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
-    // If we have a `last()`, then we have a `parent()` too, so unwrapping shoud be safe.
+    // If we have a `last()`, then we have a `parent()` too, so unwrapping should be safe.
     path.last().map(|last| (path.parent().unwrap(), last))
 }
 

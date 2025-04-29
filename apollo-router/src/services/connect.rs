@@ -1,5 +1,6 @@
 //! Connect service request and response types.
 
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -23,6 +24,18 @@ pub(crate) struct Request {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) keys: Option<Valid<FieldSet>>,
+}
+
+impl Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("service_name", &self.service_name)
+            .field("context", &self.context)
+            .field("operation", &self.operation)
+            .field("supergraph_request", &self.supergraph_request)
+            .field("variables", &self.variables.variables)
+            .finish()
+    }
 }
 
 assert_impl_all!(Response: Send);

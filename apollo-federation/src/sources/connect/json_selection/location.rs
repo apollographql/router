@@ -157,7 +157,7 @@ pub(crate) mod strip_ranges {
     use super::WithRange;
 
     /// Including location information in the AST introduces unnecessary
-    /// varation in many tests. StripLoc is a test-only trait allowing
+    /// variation in many tests. StripLoc is a test-only trait allowing
     /// participating AST nodes to remove their own and their descendants'
     /// location information, thereby normalizing the AST for assert_eq!
     /// comparisons.

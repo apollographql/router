@@ -187,6 +187,11 @@ pub struct QueryPlanOptions<'a> {
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.
     pub non_local_selections_limit_enabled: bool,
+    /// Names of subgraphs that are disabled and should be avoided during
+    /// planning. If this is non-empty, query planner may error if it cannot
+    /// find a plan that doesn't use the disabled subgraphs, specifically with
+    /// `SingleFederationError::NoPlanFoundWithDisabledSubgraphs`.
+    pub disabled_subgraph_names: IndexSet<String>,
 }
 
 impl Default for QueryPlanOptions<'_> {
@@ -195,6 +200,7 @@ impl Default for QueryPlanOptions<'_> {
             override_conditions: Vec::new(),
             check_for_cooperative_cancellation: None,
             non_local_selections_limit_enabled: true,
+            disabled_subgraph_names: Default::default(),
         }
     }
 }
@@ -460,6 +466,17 @@ impl QueryPlanner {
             )),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
+            disabled_subgraphs: self
+                .federated_query_graph
+                .subgraphs()
+                .filter_map(|(subgraph, _)| {
+                    if options.disabled_subgraph_names.contains(subgraph.as_ref()) {
+                        Some(subgraph.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
 
         let mut non_local_selection_state = options
@@ -493,10 +510,11 @@ impl QueryPlanner {
             ),
             Some(PlanNode::Sequence(root_node)) if is_subscription => {
                 let Some((primary, rest)) = root_node.nodes.split_first() else {
-                    unreachable!("Sequence must have at least one node");
+                    // TODO(@goto-bus-stop): We could probably guarantee this in the type system
+                    bail!("Invalid query plan: Sequence must have at least one node");
                 };
                 let PlanNode::Fetch(primary) = primary.clone() else {
-                    unreachable!("Primary node of a subscription is not a Fetch");
+                    bail!("Invalid query plan: Primary node of a subscription is not a Fetch");
                 };
                 let rest = PlanNode::Sequence(SequenceNode {
                     nodes: rest.to_vec(),
@@ -509,9 +527,10 @@ impl QueryPlanner {
                 ))
             }
             Some(node) if is_subscription => {
-                unreachable!(
-                    "Unexpected top level PlanNode: '{node:?}' when processing subscription"
-                )
+                bail!(
+                    "Invalid query plan for subscription: unexpected {} at root",
+                    node.node_kind()
+                );
             }
             Some(PlanNode::Fetch(inner)) => Some(TopLevelPlanNode::Fetch(inner)),
             Some(PlanNode::Sequence(inner)) => Some(TopLevelPlanNode::Sequence(inner)),
@@ -628,7 +647,7 @@ fn compute_root_serial_dependency_graph(
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
-            // taken; however, it could be the case that this causes unforseen issues.
+            // taken; however, it could be the case that this causes unforeseen issues.
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,

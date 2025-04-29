@@ -106,7 +106,7 @@ cargo build --profile release-dhat --features dhat-heap
 
 This will create a router in `./target/release-dhat`, which can be run with:
 ```shell
-cargo run --profile release-dhat --feautures dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+cargo run --profile release-dhat --features dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
 ```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can

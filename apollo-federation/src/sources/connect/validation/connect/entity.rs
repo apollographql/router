@@ -101,7 +101,7 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityTypeInvalid,
             message: format!(
-                "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/entity-rules",
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -114,7 +114,7 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityResolverArgumentMismatch,
             message: format!(
-                "`{coordinate}` must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                "`{coordinate}` must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/entity-rules",
                 coordinate = coordinate.connect.element,
             ),
             locations: entity_arg
