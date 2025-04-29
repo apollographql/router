@@ -819,7 +819,7 @@ jobs:
             - run:
                 name: Docker build
                 command: |
-                  # Source of the new image will be ser to the repo URL.
+                  # Source of the new image will be set to the repo URL.
                   # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
                   # Therefore the docker image will have the same permissions as the originating project.
                   # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
@@ -1057,7 +1057,18 @@ workflows:
             parameters:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
-
+      # build a docker image for every PR
+      - build_release:
+          requires:
+            - test
+          nightly: true
+          context:
+            - router
+            - orb-publishing
+          matrix:
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
