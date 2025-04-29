@@ -886,9 +886,6 @@ impl SpecDefinition for FederationSpecDefinition {
 pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
     LazyLock::new(|| FederationSpecDefinition::new(Version { major: 1, minor: 0 }));
 
-pub(crate) static FED_2: LazyLock<FederationSpecDefinition> =
-    LazyLock::new(|| FederationSpecDefinition::new(Version { major: 2, minor: 4 }));
-
 pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
