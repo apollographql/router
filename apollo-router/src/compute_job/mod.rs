@@ -112,6 +112,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
@@ -179,6 +180,11 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
+        tracing::info!(
+            threads = pool_size,
+            queue_capacity = QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size,
+            "compute job thread pool created",
+        );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
@@ -314,7 +320,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_observability() {
-        // In this test we expect the logged message to have
+        // make sure that the queue has been initialized by calling `execute`. if this
+        // step is skipped, the queue will _sometimes_ be initialized in the step below,
+        // which causes an additional log line and a snapshot mismatch.
+        execute(ComputeJobType::Introspection, |_| {})
+            .unwrap()
+            .await;
 
         async {
             let span = info_span!("test_observability");

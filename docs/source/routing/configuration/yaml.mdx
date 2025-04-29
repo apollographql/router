@@ -700,6 +700,18 @@ traffic_shaping:
     timeout: 60s
 ```
 
+### Header Read Timeout
+
+The header read timeout is the amount of time the Router will wait to receive the complete request headers from a client before timing out. It applies both when the connection is fully idle and when a request has been started but sending the headers has not been completed.
+
+By default, the header read timeout is set to 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` configuration option.
+
+```yaml title="router.yaml"
+server:
+  http:
+    header_read_timeout: 30s
+```
+
 ### Plugins
 
 You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:

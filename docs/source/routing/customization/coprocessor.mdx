@@ -136,9 +136,19 @@ coprocessor:
 
 ### Context configuration
 
-You can configure what you want to send from the context to your coprocessor. By default it's disabled (`false`) and doesn't send any context keys to the coprocessor. You now have the ability to give an array
-containing all the context keys you want to send to your coprocessor. Sending only a selective list of context keys will increase the performances because it will lower the size of payloads between the router and coprocessor.
-You can also set `context: deprecated` if you still want to use deprecated context key names from router 1.x. If you want to pass all context keys with new naming just set `context: all`.
+The router request context is used to share data across stages of the request pipeline. The coprocessor can also use this context.
+By default, the context is not sent to the coprocessor (`context: false`).
+You can send _all_ context keys to your coprocessor using `context: all`.
+You can also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
+
+If you're upgrading from router 1.x, the [context key names changed](/docs/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
+
+<Note>
+
+`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
+We strongly recommend using `context: deprecated` or `context: all` instead.
+
+</Note>
 
 Example:
 
@@ -167,14 +177,16 @@ coprocessor:
 ```
 
 <Note>
-    If you use the `selective` configuration, you'll have to specify new context key names (>=2.x) it doesn't work with deprecated keys. So for example if you try to specify `operation_name` instead of `apollo::supergraph::operation_name` it won't map to the new context key.
+
+If you use the `selective` configuration, you must use the new context key names from v2.x. It does not support the `deprecated` keys from v1.x. So for example, if you try to specify `operation_name` instead of `apollo::supergraph::operation_name`, it won't map to the new context key.
+
 </Note>
 
 ### Client configuration
 
 <HttpConnection type="coprocessor" />
 
-For example, to enable h2c (http2 cleartext) communication with a coprocessor you can use this configuration::
+For example, to enable h2c (http2 cleartext) communication with a coprocessor you can use this configuration:
 
 ```yaml title="router.yaml"
 coprocessor:
