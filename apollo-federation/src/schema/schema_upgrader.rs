@@ -311,18 +311,13 @@ impl<'a> SchemaUpgrader<'a> {
             for field in &referencers.object_fields.clone() {
                 let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
-                for directive in field_type.directives.0.iter_mut() {
-                    if directive.name == directive_name {
-                        for arg in directive.make_mut().arguments.iter_mut() {
-                            if arg.name == "fields" {
-                                if let Some(new_fields_string) =
-                                    Self::make_fields_string_if_not(&arg.value)?
-                                {
-                                    *arg.make_mut().value.make_mut() =
-                                        Value::String(new_fields_string);
-                                }
-                                break;
-                            }
+                for directive in field_type.directives.get_all_mut(directive_name) {
+                    if let Some(arg) = directive
+                        .make_mut()
+                        .specified_argument_by_name_mut("fields")
+                    {
+                        if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
+                            *arg.make_mut() = Value::String(new_fields_string);
                         }
                     }
                 }
@@ -335,17 +330,13 @@ impl<'a> SchemaUpgrader<'a> {
         for field in &referencers.object_types.clone() {
             let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
-            for directive in field_type.directives.0.iter_mut() {
-                if directive.name == "key" {
-                    for arg in directive.make_mut().arguments.iter_mut() {
-                        if arg.name == "fields" {
-                            if let Some(new_fields_string) =
-                                Self::make_fields_string_if_not(&arg.value)?
-                            {
-                                *arg.make_mut().value.make_mut() = Value::String(new_fields_string);
-                            }
-                            break;
-                        }
+            for directive in field_type.directives.iter_mut().filter(|d| d.name == "key") {
+                if let Some(arg) = directive
+                    .make_mut()
+                    .specified_argument_by_name_mut("fields")
+                {
+                    if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
+                        *arg.make_mut() = Value::String(new_fields_string);
                     }
                 }
             }
