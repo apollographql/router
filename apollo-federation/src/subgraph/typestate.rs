@@ -254,19 +254,11 @@ impl Subgraph<Expanded> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
 
-    pub fn validate(
-        mut self,
-        rename_root_types: bool,
-    ) -> Result<Subgraph<Validated>, SubgraphError> {
+    pub fn validate(self, rename_root_types: bool) -> Result<Subgraph<Validated>, SubgraphError> {
         let blueprint = FederationBlueprint::new(rename_root_types);
-        blueprint
-            .on_validation(&mut self.state.schema)
+        let schema = blueprint
+            .on_validation(self.state.schema)
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
-        let schema = self
-            .state
-            .schema
-            .validate_or_return_self()
-            .map_err(|t| SubgraphError::new(self.name.clone(), t.1))?;
 
         Ok(Subgraph {
             name: self.name,
