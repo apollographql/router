@@ -1,5 +1,5 @@
 name: 'Delete Oldest Nightly Images'
-run-name: "Deleting ${{ inputs.num_old_versions_to_delete }} oldest nightlies"
+run-name: "{{ github.actor }} is deleting ${{ inputs.num_old_versions_to_delete }} oldest nightlies"
 on:
   workflow_dispatch:
     inputs:
