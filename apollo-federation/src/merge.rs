@@ -1337,7 +1337,7 @@ fn add_core_feature_join(
     supergraph: &mut Schema,
     subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, EnumValue)>,
 ) {
-    // @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    // @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
     supergraph
         .schema_definition
         .make_mut()
@@ -1347,7 +1347,7 @@ fn add_core_feature_join(
             arguments: vec![
                 Node::new(Argument {
                     name: name!("url"),
-                    value: "https://specs.apollo.dev/join/v0.3".into(),
+                    value: "https://specs.apollo.dev/join/v0.5".into(),
                 }),
                 Node::new(Argument {
                     name: name!("for"),
