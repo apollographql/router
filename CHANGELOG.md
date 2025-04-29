@@ -36,10 +36,9 @@ headers:
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7152
 
-### Enable configuation auto migration for minor version bumps ([PR #7162](https://github.com/apollographql/router/pull/7162))
+### Enable configuration auto-migration for minor version bumps ([PR #7162](https://github.com/apollographql/router/pull/7162))
 
-Enable configuration auto migration when running the Router, only when it's migration written for the related version.
-Example: if you're running on Router 2.x, only migrations named `2xxx_*.yaml` will be automatically applied. Previous migrations will have to be applied using `router config upgrade` command. 
+To facilitate configuration evolution within major versions of the router's lifecycles (e.g., within 2.x.x versions), YAML configuration migrations are applied automatically. To avoid configuration drift and facilitate maintenance, when upgrading to a new major version the migrations from the previous major (e.g., 1.x.x) will not be applied automatically. These will need to be applied with `router config upgrade` prior to the upgrade.  To facilitate major version upgrades, we recommend regularly applying the configuration changes using `router config upgrade` and committing those to your version control system.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7162
 
