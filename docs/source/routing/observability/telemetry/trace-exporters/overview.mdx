@@ -8,12 +8,11 @@ context:
 
 Apollo Router supports a collection of tracing exporters:
 
-* [OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/exporters/tracing/otlp) over HTTP or gRPC. Configurations of the OTLP trace exporter are provided for:
-    * [Datadog](/router/configuration/telemetry/exporters/tracing/datadog)
-    * [Dynatrace](/router/configuration/telemetry/exporters/tracing/dynatrace)
-    * [Jaeger](/router/configuration/telemetry/exporters/tracing/jaeger)
-    * [New Relic](/router/configuration/telemetry/exporters/tracing/new-relic)
-
+* [OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/exporters/tracing/otlp) over HTTP or gRPC
+* [Datadog (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/datadog)
+* [Dynatrace (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/dynatrace)
+* [Jaeger (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/jaeger)
+* [New Relic (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/new-relic)
 * [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin).
 
 The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
