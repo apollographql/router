@@ -983,9 +983,6 @@ pub(crate) fn add_fed1_link_to_schema(
 pub(crate) fn add_fed2_link_to_schema(
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
-    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
-    // We can't use `import` argument here since fed1 @core does not support `import`.
-    // We will add imports later (see `fed1_link_imports`).
     SchemaDefinitionPosition.insert_directive(
         schema,
         Component::new(Directive {
