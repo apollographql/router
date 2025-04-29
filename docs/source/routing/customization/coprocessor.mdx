@@ -143,6 +143,13 @@ You can also specify exactly which context keys you wish to send to a coprocesso
 
 If you're upgrading from router 1.x, the [context key names changed](/docs/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
 
+<Note>
+
+`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
+We strongly recommend using `context: deprecated` or `context: all` instead.
+
+</Note>
+
 Example:
 
 ```yaml title="router.yaml"
@@ -168,13 +175,6 @@ coprocessor:
       request:
         context: deprecated # It will send all the context keys with deprecated names (1.x version)
 ```
-
-<Note>
-
-`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
-We strongly recommend using `context: deprecated` or `context: all` instead.
-
-</Note>
 
 <Note>
 
