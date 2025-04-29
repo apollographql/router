@@ -120,7 +120,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.router.request.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -128,7 +128,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.router.response.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -136,7 +136,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -144,7 +144,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -152,7 +152,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.execution.request.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -160,7 +160,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.execution.response.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -168,7 +168,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
         if matches!(
@@ -176,7 +176,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             ContextConf::Deprecated(true)
         ) {
             tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. Use one of the new values, `deprecated` or `all`"
+                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
 
