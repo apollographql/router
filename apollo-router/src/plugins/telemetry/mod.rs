@@ -86,7 +86,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
-use crate::layers::ServiceBuilderExt;
+use crate::layers::{ServiceBuilderExt};
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
@@ -113,7 +113,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-use crate::plugins::telemetry::error_counter::{count_subgraph_errors, count_supergraph_errors};
+use crate::plugins::telemetry::error_counter::{count_execution_errors, count_subgraph_errors, count_supergraph_errors};
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -133,7 +133,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
-use crate::services::ExecutionRequest;
+use crate::services::{ExecutionRequest, ExecutionResponse};
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -731,6 +731,7 @@ impl PluginPrivate for Telemetry {
                         }
 
                         // TODO should I just move this to the above ok? Or maybe we want to count even if we have an Err?
+                        // TODO or move to an and_then() like execution service?
                         if let Ok(resp) = result {
                             result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
                         }
@@ -760,6 +761,9 @@ impl PluginPrivate for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let config = self.config.clone();
+        let config_map_res_first = config.clone();
+
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let operation_kind = req.query_plan.query.operation.kind();
@@ -777,6 +781,14 @@ impl PluginPrivate for Telemetry {
                         "otel.kind" = "INTERNAL",
                         "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
                     ),
+                }
+            })
+            .and_then(move |resp: ExecutionResponse| {
+                // TODO make sure this will still add to the context
+                let config = config_map_res_first.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
                 }
             })
             .service(service)
@@ -887,9 +899,9 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        // TODO merge into above match?
+                        // TODO merge into above match? Move into its own and_then()?
                         if let Ok(resp) = result {
-                            result = Ok(count_subgraph_errors(resp, &config.apollo.errors).await);
+                            result = Ok(count_subgraph_errors(resp, &conf.apollo.errors).await);
                         }
 
                         result

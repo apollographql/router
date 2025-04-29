@@ -44,7 +44,7 @@ pub(crate) async fn count_supergraph_errors(response: SupergraphResponse, errors
     let errors_config = errors_config.clone();
 
     let (parts, stream) = response.response.into_parts();
-    // Clone context again to avoid move issues
+
     let stream = stream.inspect(move |response_body| {
         // TODO do we really need this?
         let ClientRequestAccepts {
@@ -89,6 +89,7 @@ pub(crate) async fn count_supergraph_errors(response: SupergraphResponse, errors
             );
         }
 
+        // Refresh context with the most up-to-date list of errors
         context
             .insert(COUNTED_ERRORS, to_map(&response_body.errors))
             .expect("Unable to insert errors into context.");
@@ -114,7 +115,7 @@ pub(crate) async fn count_execution_errors(response: ExecutionResponse, errors_c
     let errors_config = errors_config.clone();
 
     let (parts, stream) = response.response.into_parts();
-    // Clone context again to avoid move issues
+
     let stream = stream.inspect(move |response_body| {
         if !response_body.errors.is_empty() {
             count_operation_errors(&response_body.errors, &context, &errors_config);
@@ -141,7 +142,7 @@ pub(crate) async fn count_execution_errors(response: ExecutionResponse, errors_c
 
 pub(crate) async fn count_router_errors(response: RouterResponse, errors_config: &ErrorsConfiguration) -> RouterResponse {
     // TODO how do we parse the json response to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER?
-    return  response
+    response
 }
 
 fn to_map(errors: &Vec<Error>) -> HashMap<String, u64> {
