@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
@@ -55,11 +56,14 @@ impl FederationBlueprint {
 
     pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
-        directive: &Directive,
+        directive: &Node<Directive>,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
-            // TODO (FED-428): pass `alias` and `imports`
-            LinkSpecDefinition::latest().add_definitions_to_schema(schema, /*alias*/ None)?;
+            let (alias, imports) =
+                LinkSpecDefinition::extract_alias_and_imports_on_missing_link_directive_definition(
+                    directive,
+                )?;
+            LinkSpecDefinition::latest().add_definitions_to_schema(schema, alias, imports)?;
             Ok(schema.get_directive_definition(&directive.name))
         } else {
             Ok(None)
