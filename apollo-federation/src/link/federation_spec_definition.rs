@@ -979,40 +979,6 @@ pub(crate) fn add_fed1_link_to_schema(
     )
 }
 
-#[allow(unused)]
-pub(crate) fn add_fed2_link_to_schema(
-    schema: &mut FederationSchema,
-) -> Result<(), FederationError> {
-    SchemaDefinitionPosition.insert_directive(
-        schema,
-        Component::new(Directive {
-            name: Identity::link_identity().name,
-            arguments: vec![
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    value: FED_2.url.to_string().into(),
-                }),
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
-                    value: Node::new(Value::List(vec![
-                        Node::new(Value::String("@key".to_string())),
-                        Node::new(Value::String("@requires".to_string())),
-                        Node::new(Value::String("@provides".to_string())),
-                        Node::new(Value::String("@external".to_string())),
-                        Node::new(Value::String("@tag".to_string())),
-                        Node::new(Value::String("@extends".to_string())),
-                        Node::new(Value::String("@shareable".to_string())),
-                        Node::new(Value::String("@inaccessible".to_string())),
-                        Node::new(Value::String("@override".to_string())),
-                        Node::new(Value::String("@composeDirective".to_string())),
-                        Node::new(Value::String("@interfaceObject".to_string())),
-                    ])),
-                }),
-            ],
-        }),
-    )
-}
-
 /// Creates a fake imports for fed 1 link directive.
 /// - Fed 1 does not support `import` argument, but we use it to simulate fed 1 behavior.
 // PORT_NOTE: From `FAKE_FED1_CORE_FEATURE_TO_RENAME_TYPES` in JS
