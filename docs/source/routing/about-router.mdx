@@ -8,7 +8,7 @@ redirectFrom:
 
 ## What is GraphOS Router?
 
-GraphOS Router is the high-performance runtime of the GraphOS platform. It's the single entry point to a graph that's composed via Apollo Federation. GraphOS Router accepts incoming GraphQL client operations, intelligently plans their execution by the different "subgraph" APIs and services, and combines the fetched data into a single client response. 
+GraphOS Router is the runtime of the GraphOS platform. It's the single entry point to a graph that's composed via Apollo Federation. GraphOS Router accepts incoming GraphQL client operations, intelligently plans their execution by the different APIs and services, and combines the fetched data into a single client response. 
 
 <img src="../images/get-started/super-routing-1.svg" class="dark:hidden" />
 <img
@@ -24,7 +24,7 @@ Unlike API gateways that offer capabilities to manage API endpoints, the router 
 
 ### Enables Apollo Connectors
 
-Apollo Connectors are a core part of the router, enabling API orchestration with REST APIs.
+Apollo Connectors are a core feature of the router, enabling API orchestration with REST APIs.
 
 <img src='../images/get-started/connector.svg' class="dark:hidden"/>
 <img src='../images/get-started/connector-dark.svg' class="hidden dark:block"/>
@@ -54,22 +54,6 @@ The GraphOS Router is the gateway and entry point to a federated supergraph. Cli
 
 As the entry point to your supergraph, a GraphOS Router must be able to process the expected load of client operations. The scalability and performance of a router, or a fleet or router instances, can be influenced by their deployment infrastructure.
 
-### Cloud-hosted routers
-
-You can choose for Apollo to provision and manage the runtime infrastructure for your routers. Apollo hosts and deploys each instance of router in the cloud. Each _cloud-hosted router_ instance is fully integrated and configurable within GraphOS.
-
-<img src="../images/get-started/super-routing-2.svg" class="dark:hidden" />
-<img
-  src="../images/get-started/super-routing-2-dark.svg"
-  class="hidden dark:block"
-/>
-
-<Note>
-
-While cloud routers are hosted in the cloud, GraphQL subgraph servers are still hosted in your infrastructure.
-
-</Note>
-
 ### Self-hosted routers
 
 You can choose to manage the runtime infrastructure for your routers by yourself. Using container images of router, you can host and deploy your router instances from your own infrastructure. These _self-hosted router_ instances allow you full control over their deployment.
@@ -88,9 +72,27 @@ For requests in excess of this limit, the router returns an HTTP 503 (Service Un
 
 </Caution>
 
-### Common router core
+### Cloud-hosted routers
+
+You can choose for Apollo to provision and manage the runtime infrastructure for your routers. Apollo hosts and deploys each instance of router in the cloud. Each _cloud-hosted router_ instance is fully integrated and configurable within GraphOS.
+
+<img src="../images/get-started/super-routing-2.svg" class="dark:hidden" />
+<img
+  src="../images/get-started/super-routing-2-dark.svg"
+  class="hidden dark:block"
+/>
+
+<Note>
+
+While cloud routers are hosted in the cloud, GraphQL subgraph servers are still hosted in your infrastructure.
+
+</Note>
+
+## Common router core
 
 Both cloud-hosted and self-hosted routers are powered by the [Apollo Router Core](https://github.com/apollographql/router)—a high-performance router packaged as a standalone binary.
+
+A GraphOS Router is an Apollo Router Core binary with a [licensed GraphOS plan](https://www.apollographql.com/pricing).
 
 ### Router type comparison
 

@@ -1,0 +1,32 @@
+---
+title: Request Limits
+subtitle: Protect your router from requests exceeding network, parser, and operation-based limits 
+redirectFrom:
+  - /router/configuration/operation-limits/
+---
+
+For enhanced security, the GraphOS Router can reject requests that violate any of the following kinds of limits:
+
+- Operation-based semantic limits
+- Network-based limits
+- Parser-based lexical limits
+
+```yaml title="router.yaml"
+limits:
+  # Network-based limits
+  http_max_request_bytes: 2000000 # Default value: 2 MB
+  http1_max_request_headers: 200 # Default value: 100
+  http1_max_request_buf_size: 800kb # Default value: 400kib
+
+  # Parser-based limits
+  parser_max_tokens: 15000 # Default value
+  parser_max_recursion: 500 # Default value
+
+  # Operation-based limits (Enterprise only)
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
+```
+
+Learn more about [configuring request limits](/graphos/routing/security/request-limits).

@@ -234,3 +234,82 @@ If set, the router prints its version number, then exits.
 
 </tbody>
 </table>
+
+### Development mode
+
+The router can be run in development mode by using the `--dev` command-line option.
+
+The `--dev` option is equivalent to running the router with the `--hot-reload` option the following configuration options:
+
+```yaml
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  # Enable with the header, Apollo-Expose-Query-Plan: true
+  experimental.expose_query_plan: true
+```
+
+<Caution>
+
+**Don't set the `--dev` option in production.** If you want to replicate any specific dev mode functionality in production, set the corresponding option in your [YAML config file](#yaml-config-file).
+
+</Caution>
+
+
+## Configuration schema for IDE validation
+
+The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
+
+Generate the schema with the following command:
+
+```bash
+./router config schema > configuration_schema.json
+```
+
+After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
+
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)
+
+## Upgrading your router configuration
+
+New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
+
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.**
+
+If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
+
+```bash
+./router config upgrade <path_to_config.yaml>
+```
+
+You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
+
+```bash
+./router config upgrade --diff <path_to_config.yaml>
+```
+
+## Validating your router configuration
+
+The router can be used to validate an existing configuration file. This can be useful if you want to have a validate step as part of your CI pipeline.
+
+```
+./router config validate <path-to-config-file.yaml>
+```
+
+This command takes a config file and validates it against the router's full supported configuration format.
+
+<Note>
+
+This is a static validation that checks if it is syntactically correct using the JSON schema. The router does additional logical checks on startup against the config that this command does not capture.
+
+</Note>
