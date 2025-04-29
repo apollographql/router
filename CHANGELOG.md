@@ -87,10 +87,10 @@ Apollo client libraries can send the library name and version information in the
 
 By [@calvincestari](https://github.com/calvincestari) in https://github.com/apollographql/router/pull/7264
 
-### Compute job spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
+### Add compute job pool spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
 
-The router uses a separate thread pool called "compute jobs" to ensure that requests do not block tokio io worker threads.
-This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to 
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to
 resource contention within the compute job pool.
 
 * `compute_job`:
@@ -182,7 +182,7 @@ Fixes a bug where enums that were arguments to nested queries were not being rep
 
 By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/6900
 
-### Add compute pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
+### Add compute job pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
 
 The compute job pool is used within the router for compute intensive jobs that should not block the Tokio worker threads.
 When this pool becomes saturated it is difficult for users to see why so that they can take action.
@@ -305,16 +305,13 @@ reported to Apollo error telemetry.
 
 By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/7226
 
-### Increase compute job worker pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
+### Increase compute job pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
 
-The compute job worker pool is used for CPU-bound tasks, like GraphQL parsing, validation, and query planning. When there are too many jobs to handle in parallel, jobs enter a queue.
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
 
-We previously set this queue size to 20 (per thread) somewhat arbitrarily. We got some signals that this may be too small.
+We previously set this queue size to 20 (per thread). However, this may be too small on resource constrained environments.
 
-This patch increases the queue size to 1 000 jobs per thread. For reference, in older router versions before the introduction of the compute job worker pool, the equivalent queue size was *10 000*.
-
-The number is still a bit arbitrary, and subject to more changes in the future as we understand its effects better. Along with some other tweaks to job priorities we expect this to give better behaviour and reject fewer requests needlessly.
-
+This patch increases the queue size to 1,000 jobs per thread. For reference, in older router versions before the introduction of the compute job worker pool, the equivalent queue size was *1,000*.
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7205
 
