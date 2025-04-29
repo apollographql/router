@@ -6,7 +6,7 @@ on:
       num_old_versions_to_delete:
         description: 'Number of oldest images to delete, both nightly/router and helm-charts-nightly/router'
         required: true
-        type:number 
+        type: number 
 jobs:
   delete-images:
     name: Delete images
