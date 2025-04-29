@@ -401,6 +401,69 @@ async fn both_source_and_connect_with_error() {
 }
 
 #[tokio::test]
+async fn partial_source_and_partial_connect() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withpartialconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { partial_source_and_partial_connect { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    // Note that status 500 is NOT included in extensions because connect is overriding source
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Something blew up!",
+          "path": [
+            "partial_source_and_partial_connect"
+          ],
+          "extensions": {
+            "code": "BIG_BOOM",
+            "status": 500,
+            "fromSource": "a",
+            "service": "connectors"
+          }
+        }
+      ]
+    }
+    "#);
+}
+
+#[tokio::test]
 async fn redact_errors_when_include_subgraph_errors_disabled() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

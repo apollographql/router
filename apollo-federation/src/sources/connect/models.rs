@@ -88,22 +88,14 @@ impl ConnectorErrorsSettings {
         connect_errors: Option<&ErrorsArguments>,
         source_errors: Option<&ErrorsArguments>,
     ) -> Self {
-        // `errors` set at @connect always overrides whatever is set at @source
-        let message = if let Some(connect_errors) = connect_errors {
-            connect_errors.message.clone()
-        } else if let Some(source_errors) = source_errors {
-            source_errors.message.clone()
-        } else {
-            None
-        };
-
-        let extensions = if let Some(connect_errors) = connect_errors {
-            connect_errors.extensions.clone()
-        } else if let Some(source_errors) = source_errors {
-            source_errors.extensions.clone()
-        } else {
-            None
-        };
+        let message = connect_errors
+            .and_then(|e| e.message.as_ref())
+            .or_else(|| source_errors.and_then(|e| e.message.as_ref()))
+            .cloned();
+        let extensions = connect_errors
+            .and_then(|e| e.extensions.as_ref())
+            .or_else(|| source_errors.and_then(|e| e.extensions.as_ref()))
+            .cloned();
 
         Self {
             message,
