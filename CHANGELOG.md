@@ -67,7 +67,7 @@ By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/ro
 ### Instrument coprocessor request with http_request span ([Issue #6739](https://github.com/apollographql/router/issues/6739))
 
 Coprocessor requests will now emit an `http_request` span. This span can help to gain
-insight into latency that may be introduced over the network stack when communicating with coprocessor. 
+insight into latency that may be introduced over the network stack when communicating with coprocessor.
 
 Coprocessor span attributes are:
 * `otel.kind`: `CLIENT`
@@ -98,8 +98,8 @@ resource contention within the compute job pool.
   - `job.age`: `P1`-`P8`
   - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
 
-Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing 
-at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher 
+Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing
+at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher
 priority jobs also in the queue.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
@@ -108,7 +108,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 Allow JWT authorization options to support multiple issuers using the same JWKs.
 
-**Configuration change**: any `issuer` defined on currently existing `authentication.router.jwt.jwks` needs to be 
+**Configuration change**: any `issuer` defined on currently existing `authentication.router.jwt.jwks` needs to be
 migrated to an entry in the `issuers` list. For example:
 
 Before:
@@ -128,7 +128,7 @@ authentication:
     jwt:
       jwks:
         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-          issuers: 
+          issuers:
             - https://issuer.one
             - https://issuer.two
 ```
@@ -170,14 +170,14 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 
 ### Check if jwt claims is part of the context before getting the jwt expiration with subscriptions ([PR #7069](https://github.com/apollographql/router/pull/7069))
 
-In https://github.com/apollographql/router/pull/6930 we introduced [logs](https://github.com/apollographql/router/pull/6930/files#diff-7597092ab9d509e0ffcb328691f1dded20f69d849f142628095f0455aa49880cR648) in `jwt_expires_in` function which causes a lot of logs when using subscriptions. 
+In https://github.com/apollographql/router/pull/6930 we introduced [logs](https://github.com/apollographql/router/pull/6930/files#diff-7597092ab9d509e0ffcb328691f1dded20f69d849f142628095f0455aa49880cR648) in `jwt_expires_in` function which causes a lot of logs when using subscriptions.
 It also unveils a bug in the subscription implementation with JWT. Indeed if there was not JWT claims in the context, before we set a timeout set at `Duration::MAX`. Now it's always pending and there's no timeout anymore.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7069
 
 ### Parse nested input types and report them ([PR #6900](https://github.com/apollographql/router/pull/6900))
 
-Fixes a bug where enums that were arguments to nested queries were not being reported. 
+Fixes a bug where enums that were arguments to nested queries were not being reported.
 
 By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/6900
 
@@ -185,7 +185,7 @@ By [@merylc](https://github.com/merylc) in https://github.com/apollographql/rout
 
 The compute job pool is used within the router for compute intensive jobs that should not block the Tokio worker threads.
 When this pool becomes saturated it is difficult for users to see why so that they can take action.
-This change adds new metrics to help users understand how long jobs are waiting to be processed.  
+This change adds new metrics to help users understand how long jobs are waiting to be processed.
 
 New metrics:
 - `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
@@ -259,9 +259,9 @@ supergraph:
   connection_shutdown_timeout: 60s
 ```
 
-Note that even after connections have been terminated the router will still hang onto pipelines if `early_cancel` has not been configured to true. The router is trying to complete the request. 
+Note that even after connections have been terminated the router will still hang onto pipelines if `early_cancel` has not been configured to true. The router is trying to complete the request.
 
-Users can either set `early_cancel` to `true` 
+Users can either set `early_cancel` to `true`
 ```
 supergraph:
   early_cancel: true
@@ -392,13 +392,13 @@ By [@vatsalpatel](https://github.com/vatsalpatel) in https://github.com/apollogr
 
 ### Update Dockerfile exec script to use `#!/bin/bash` instead of `#!/usr/bin/env bash` ([Issue #3517](https://github.com/apollographql/router/issues/3517))
 
-For users of Google Cloud Platform (GCP) Cloud Run platform, using the router's default Docker image was not possible due to an error that would occur during startup: 
+For users of Google Cloud Platform (GCP) Cloud Run platform, using the router's default Docker image was not possible due to an error that would occur during startup:
 
 ```sh
 "/usr/bin/env: 'bash ': No such file or directory"
 ```
 
-To avoid this issue, we've changed the script to use `#!/bin/bash` instead of `#!/usr/bin/env bash`, as we use a fixed Linux distribution in Docker which has the Bash binary located there. 
+To avoid this issue, we've changed the script to use `#!/bin/bash` instead of `#!/usr/bin/env bash`, as we use a fixed Linux distribution in Docker which has the Bash binary located there.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/7198
 
@@ -438,7 +438,7 @@ By [@gwardwell ](https://github.com/gwardwell) in https://github.com/apollograph
 
 ### `include_subgraph_errors` fine grained control ([Issue #6402](https://github.com/apollographql/router/pull/6402)
 
-Update `include_subgraph_errors` with additional configuration options for both global and subgraph levels. This update provides finer control over error messages and extension keys for each subgraph. 
+Update `include_subgraph_errors` with additional configuration options for both global and subgraph levels. This update provides finer control over error messages and extension keys for each subgraph.
 For more details, please read [subgraph error inclusion](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion).
 
 ```yaml
@@ -460,7 +460,7 @@ include_subgraph_errors:
     review: false            # Redact everything.
 
     # Undefined subgraphs inherits default global settings from `all`
-``` 
+```
 
 **Note:** Using a `deny_extensions_keys` approach carries security risks because any sensitive information not explicitly included in the deny list will be exposed to clients. For better security, subgraphs should prefer to redact everything or `allow_extensions_keys` when possible.
 
