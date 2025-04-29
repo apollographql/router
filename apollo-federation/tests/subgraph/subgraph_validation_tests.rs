@@ -331,8 +331,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_non_string_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -420,8 +419,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_key() {
@@ -515,8 +513,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -539,8 +536,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -569,8 +565,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -846,8 +841,6 @@ mod root_types {
     use super::*;
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_query_as_type_name_if_not_the_query_root() {
         let schema_str = r#"
             schema {
@@ -874,8 +867,6 @@ mod root_types {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_mutation_as_type_name_if_not_the_mutation_root() {
         let schema_str = r#"
             schema {
@@ -902,8 +893,6 @@ mod root_types {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_using_subscription_as_type_name_if_not_the_subscription_root() {
         let schema_str = r#"
             schema {
@@ -939,8 +928,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched error counts: 1 != 3"#)]
     fn has_suggestions_if_a_federation_directive_is_misspelled_in_all_schema_versions() {
         let schema_versions = [
             FedVersionSchemaParams {
@@ -991,8 +979,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_in_fed1() {
         let schema_str = r#"
             type T @key(fields: "id") {
@@ -1012,8 +999,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore = "Currently failing do to pending validation workflow implementations"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_under_wrong_name_for_the_schema() {
         let schema_str = r#"
             extend schema
@@ -1580,7 +1566,7 @@ mod link_handling_tests {
 
     #[test]
     fn allows_any_non_scalar_type_in_redefinition_when_expected_type_is_a_scalar() {
-        // Just making sure this don't error out.
+        // Just making sure this doesn't error out.
         build_and_validate(
             r#"
               extend schema
