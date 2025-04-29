@@ -14,7 +14,7 @@ Added support for connector header propagation via YAML config. All of the exist
 Note that if one of these rules conflicts with a header set in your schema, either in `@connect` or `@source`, the value in your Router config will
 take priority and be treated as an override.
 
-```
+```yaml
 headers:
   connector:
     all: # configuration for all connectors across all subgraphs
@@ -46,12 +46,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 Previously, we only allowed expressions in very specific locations in Connectors URIs:
 
-1. A path segment, like `/users/{.id}`
-2. A query parameter's _value_, like `/users?id={.id}`
+1. A path segment, like `/users/{$args.id}`
+2. A query parameter's _value_, like `/users?id={$args.id}`
 
 Expressions can now be used anywhere in or after the path of the URI.
 For example, you can do
-`@connect(http: {GET: "/users?{.filterName}={.filterValue}"})`.
+`@connect(http: {GET: "/users?{$args.filterName}={$args.filterValue}"})`.
 The result of any expression will _always_ be percent encoded.
 
 > Note: Parts of this feature are only available when composing with Apollo Federation v2.11 or above (currently in preview).
@@ -78,7 +78,7 @@ Coprocessor span attributes are:
 * `otel.name`: `<method> <url.full>`
 * `otel.original_name`: `http_request`
 
-By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/6776
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/6776
 
 ### Enables reporting for client libraries that send the library name and version information in operation requests. ([PR #7264](https://github.com/apollographql/router/pull/7264))
 
@@ -93,10 +93,10 @@ This PR adds spans to jobs that are on this pool to allow users to see when late
 resource contention within the compute job pool.
 
 * `compute_job`:
-  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
 * `compute_job.execution`
   - `job.age`: `P1`-`P8`
-  - `job.type`: (`QueryParsing`|`QueryParsing`|`Introspection`)
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
 
 Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing
 at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher
@@ -333,7 +333,7 @@ By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in 
 ### Relax percent encoding for Connectors ([PR #7220](https://github.com/apollographql/router/pull/7220))
 
 Characters outside of `{ }` expressions will no longer be percent encoded unless they are completely invalid for a
-URI. For example, in an expression like `@connect(http: {GET: "/products?filters[category]={.category}"})` the
+URI. For example, in an expression like `@connect(http: {GET: "/products?filters[category]={$args.category}"})` the
 square
 braces `[ ]` will no longer be percent encoded. Any string from within a dynamic `{ }` will still be percent encoded.
 
