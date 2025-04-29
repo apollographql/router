@@ -16,6 +16,7 @@ use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
+use crate::metrics::FutureMetricsExt;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -290,12 +291,22 @@ async fn it_processes_a_valid_query_batch() {
             .await
             .unwrap()
     }
-    // Send a request
-    let response = with_config().await.response;
-    assert_eq!(response.status(), http::StatusCode::OK);
-    let data: serde_json::Value =
-        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
-    assert_eq!(expected_response, data);
+
+    async move {
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let data: serde_json::Value =
+            serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
+        assert_eq!(expected_response, data);
+        assert_histogram_sum!(
+            "apollo.router.operations.batching.size",
+            3,
+            "mode" = "batch_http_link"
+        );
+    }
+    .with_metrics()
+    .await;
 }
 
 #[tokio::test]
