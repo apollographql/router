@@ -6,23 +6,12 @@ description: This quickstart tutorial walks you through installing an Apollo Rou
 
 import ElasticNotice from "../../shared/elastic-notice.mdx";
 
-Hello! Let's run Apollo Router for the very first time.
+Hello! Let's run Apollo Router for the very first time. You will:
 
-You will:
-
-- Learn why the router is a graph's runtime.
 - Download a router binary.
 - Download a supergraph schema.
 - Run the router for your supergraph in development mode.
 - Make a query to the running router.
-
-## Concept: Apollo Router is the graph runtime
-
-Apollo Router is the graph runtime of Apollo. It receives client requests, intelligently orchestrates calls to the various APIs that make up a graph, then bundles the fetched data into a client response.
-
-Because Apollo uses GraphQL and Apollo Federation to define a graph, each router is an endpoint of a GraphQL API. It's the gateway for all client requests to a federated graph, or "supergraph." Like API gateways in general, a router offers a central place to implement cross-cutting concerns, such as authentication, authorization, caching, logging, monitoring, rate limiting, and demand control. These and other features of the router are configurable declaratively via YAML.
-
-You can deploy the router locally or at scale in containers on your own infrastructure. This guide walks you through the basics of running the router locally. 
 
 ## 1. Download and extract the router binary
 
@@ -243,7 +232,7 @@ A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), 
 
 Let's use Sandbox to write and send a query to your graph:
 
-1. Open a browser and go to the URL of the router's Sandbox, `http://127.0.0.1:4000`.
+1. Go to the URL of the router's Sandbox, [`http://127.0.0.1:4000`](http://127.0.0.1:4000).
 
 1. Copy and paste the example query into the **Operation** pane:
 
@@ -276,8 +265,8 @@ That's it! You've successfully sent a query to a router running a development gr
 
 ## Next steps
 
-Now that you know how to run the router in dev mode with a supergraph schema, you can:
+Now that you know how to run the router locally in dev mode with a supergraph schema, you can:
 
-- Explore router's [GraphOS features](/graphos/routing/features)
-- Deploy the router [in your own infrastructure](/graphos/routing/self-hosted/containerization/overview)
-- Learn how to [configure the router](/router/configuration/overview)
+- Understand concepts [about the router](/graphos/routing/about-router).
+- Learn how to [configure the router](/router/configuration/overview).
+- Deploy the router [in your own infrastructure](/graphos/routing/self-hosted/containerization/overview).
