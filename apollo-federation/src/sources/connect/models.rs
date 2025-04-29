@@ -102,6 +102,19 @@ impl ConnectorErrorsSettings {
             extensions,
         }
     }
+
+    pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+        self.message
+            .as_ref()
+            .into_iter()
+            .flat_map(|m| m.variable_references())
+            .chain(
+                self.extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+    }
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -198,20 +211,7 @@ impl Connector {
         let response_references: HashSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
-            .chain(
-                error_settings
-                    .message
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|m| m.variable_references()),
-            )
-            .chain(
-                error_settings
-                    .extensions
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|m| m.variable_references()),
-            )
+            .chain(error_settings.variable_references())
             .collect();
         let response_variables: HashSet<Namespace> = response_references
             .iter()
