@@ -170,8 +170,7 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 
 ### Check if JWT claim is part of the context before getting the JWT expiration with subscriptions ([PR #7069](https://github.com/apollographql/router/pull/7069))
 
-In https://github.com/apollographql/router/pull/6930 we introduced [logs](https://github.com/apollographql/router/pull/6930/files#diff-7597092ab9d509e0ffcb328691f1dded20f69d849f142628095f0455aa49880cR648) in `jwt_expires_in` function which causes a lot of logs when using subscriptions.
-It also unveils a bug in the subscription implementation with JWT. Indeed if there was not JWT claims in the context, before we set a timeout set at `Duration::MAX`. Now it's always pending and there's no timeout anymore.
+In v2.1.0 we introduced [logs](https://github.com/apollographql/router/pull/6930/files#diff-7597092ab9d509e0ffcb328691f1dded20f69d849f142628095f0455aa49880cR648) for the `jwt_expires_in` function which caused an unexpectedly chatty logging when using subscriptions.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7069
 
