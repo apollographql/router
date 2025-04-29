@@ -363,10 +363,7 @@ impl FederationSpecDefinition {
         application: &'doc Node<Directive>,
     ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
         Ok(TagDirectiveArguments {
-            name: directive_required_string_argument(
-                application,
-                &FEDERATION_FIELDS_ARGUMENT_NAME,
-            )?,
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
@@ -753,6 +750,25 @@ impl FederationSpecDefinition {
         )
     }
 
+    fn tag_directive_specification(&self) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            self.version().ge(&Version { major: 2, minor: 0 }),
+            &[
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Scalar,
+                DirectiveLocation::Enum,
+                DirectiveLocation::EnumValue,
+                DirectiveLocation::InputObject,
+                DirectiveLocation::InputFieldDefinition,
+            ],
+            false, // TODO: Fix this
+            None,
+            None,
+        )
+    }
+
     fn override_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
@@ -801,6 +817,18 @@ impl FederationSpecDefinition {
             None,
         )
     }
+
+    fn interface_object_directive_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::Object],
+            false,
+            None,
+            None,
+        )
+    }
 }
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
@@ -830,9 +858,16 @@ impl SpecDefinition for FederationSpecDefinition {
 
         specs.push(Box::new(self.shareable_directive_specification()));
         specs.push(Box::new(self.override_directive_specification()));
+        specs.push(Box::new(self.tag_directive_specification()));
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+            specs.push(Box::new(
+                Self::interface_object_directive_directive_specification(),
+            ));
         }
 
         // TODO: The remaining directives added in later versions are implemented in separate specs,
