@@ -290,12 +290,35 @@ async fn it_processes_a_valid_query_batch() {
             .await
             .unwrap()
     }
+<<<<<<< HEAD
     // Send a request
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::OK);
     let data: serde_json::Value =
         serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
+=======
+    async move {
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let data: serde_json::Value = serde_json::from_slice(
+            &router::body::into_bytes(response.into_body())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(expected_response, data);
+
+        assert_histogram_sum!(
+            "apollo.router.operations.batching.size",
+            3,
+            "mode" = "batch_http_link"
+        );
+    }
+    .with_metrics()
+    .await;
+>>>>>>> 517ec16f (Fix metric `apollo.router.operations.batching.size` (#7306))
 }
 
 #[tokio::test]

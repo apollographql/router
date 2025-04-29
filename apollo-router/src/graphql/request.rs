@@ -199,7 +199,7 @@ impl Request {
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
-                result.len() as u64,
+                entries.len() as u64,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
@@ -227,7 +227,7 @@ impl Request {
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
-                result.len() as u64,
+                entries.len() as u64,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
