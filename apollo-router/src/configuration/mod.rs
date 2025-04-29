@@ -45,6 +45,7 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
+use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
@@ -64,6 +65,7 @@ mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
+pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -135,6 +137,10 @@ pub struct Configuration {
     /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
+
+    /// Configuration for the server
+    #[serde(default)]
+    pub(crate) server: Server,
 
     /// Configuration for the supergraph
     #[serde(default)]
@@ -208,6 +214,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             health_check: HealthCheck,
             sandbox: Sandbox,
             homepage: Homepage,
+            server: Server,
             supergraph: Supergraph,
             cors: Cors,
             plugins: UserPlugins,
@@ -238,6 +245,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             health_check: ad_hoc.health_check,
             sandbox: ad_hoc.sandbox,
             homepage: ad_hoc.homepage,
+            server: ad_hoc.server,
             supergraph: ad_hoc.supergraph,
             cors: ad_hoc.cors,
             tls: ad_hoc.tls,
@@ -291,12 +299,14 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
+        server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_default(),
+            server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
@@ -426,9 +436,11 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
+        server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
+            server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),

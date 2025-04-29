@@ -5326,6 +5326,31 @@ expression: "&schema"
         }
       ]
     },
+    "Server": {
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "$ref": "#/definitions/ServerHttpConfig",
+          "description": "#/definitions/ServerHttpConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ServerHttpConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for HTTP",
+      "properties": {
+        "header_read_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SocketEndpoint": {
       "type": "string"
     },
@@ -8358,6 +8383,10 @@ expression: "&schema"
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
       "description": "#/definitions/Sandbox"
+    },
+    "server": {
+      "$ref": "#/definitions/Server",
+      "description": "#/definitions/Server"
     },
     "subscription": {
       "$ref": "#/definitions/SubscriptionConfig",
