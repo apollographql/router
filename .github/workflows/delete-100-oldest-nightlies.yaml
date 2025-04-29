@@ -4,13 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       num_old_versions_to_delete:
-        description: 'Number of oldest images to delete'
+        description: 'Number of oldest images to delete, both nightly/router and helm-charts-nightly/router'
         required: true
         type:number 
 jobs:
   delete-images:
-    - uses: actions/delete-package-versions@v5
-      with:
-        package-name: 'nightly/router'
-        package-type: 'docker'
-        num-old-versions-to-delete: ${{ inputs.num_old_versions_to_delete }}
+    name: Delete images
+    steps:
+      - name: nightly/docker 
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'nightly/router'
+          package-type: 'container'
+          num-old-versions-to-delete: ${{ inputs.num_old_versions_to_delete }}
+      - name: helm-charts-nightly/router
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'helm-charts-nightly/router'
+          package-type: 'container'
+          num-old-versions-to-delete: ${{ inputs.num_old_versions_to_delete }}
