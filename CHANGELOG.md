@@ -64,25 +64,26 @@ This change allows the router to report usage metrics by persisted query ID to A
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/7166
 
-### Instrument coprocessor request with http_request span ([Issue #6739](https://github.com/apollographql/router/issues/6739))
+### Instrument coprocessor request with `http_request` span ([Issue #6739](https://github.com/apollographql/router/issues/6739))
 
 Coprocessor requests will now emit an `http_request` span. This span can help to gain
 insight into latency that may be introduced over the network stack when communicating with coprocessor.
 
 Coprocessor span attributes are:
-* `otel.kind`: `CLIENT`
-* `http.request.method`: `POST`
-* `server.address`: `<target address>`
-* `server.port`: `<target port>`
-* `url.full`: `<url.full>`
-* `otel.name`: `<method> <url.full>`
-* `otel.original_name`: `http_request`
+
+- `otel.kind`: `CLIENT`
+- `http.request.method`: `POST`
+- `server.address`: `<target address>`
+- `server.port`: `<target port>`
+- `url.full`: `<url.full>`
+- `otel.name`: `<method> <url.full>`
+- `otel.original_name`: `http_request`
 
 By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/6776
 
 ### Enables reporting for client libraries that send the library name and version information in operation requests. ([PR #7264](https://github.com/apollographql/router/pull/7264))
 
-Apollo client libraries can send the library name and version information in the `extensions` key of an operation request. If those values are found in a request the router will include them in the telemetry operation report.
+Apollo client libraries can send the library name and version information in the `extensions` key of an operation request. If those values are found in a request the router will include them in the telemetry operation report sent to Apollo.
 
 By [@calvincestari](https://github.com/calvincestari) in https://github.com/apollographql/router/pull/7264
 
@@ -104,14 +105,15 @@ priority jobs also in the queue.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
 
-### Allow JWT authorization options to support multiple issuers ([Issue #6172](https://github.com/apollographql/router/issues/6172))
+### JWT authorization supports multiple issuers ([Issue #6172](https://github.com/apollographql/router/issues/6172))
 
-Allow JWT authorization options to support multiple issuers using the same JWKs.
+Allow JWT authorization options to support multiple issuers using the same JWKS.
 
 **Configuration change**: any `issuer` defined on currently existing `authentication.router.jwt.jwks` needs to be
-migrated to an entry in the `issuers` list. For example:
+migrated to an entry in the `issuers` list.  This configuration will happen automatically until the next major version of the router. This change can be committed using `./router config upgrade` prior to the next major release.
 
-Before:
+For example, the following configuration:
+
 ```yaml
 authentication:
   router:
@@ -121,7 +123,8 @@ authentication:
           issuer: https://issuer.one
 ```
 
-After:
+Will be changed to contain an array of `issuers` rather than a single `issuer`:
+
 ```yaml
 authentication:
   router:
@@ -313,22 +316,6 @@ This patch increases the queue size to 1,000 jobs per thread. For reference, in 
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7205
 
-### Entity-cache: handle multiple key directives ([PR #7228](https://github.com/apollographql/router/pull/7228))
-
-This PR fixes a bug in entity caching introduced by the fix in https://github.com/apollographql/router/pull/6888 for cases where several `@key` directives with different fields were declared on a type as documented [here](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#managing-types).
-
-For example if you have this kind of entity in your schema:
-
-```graphql
-type Product @key(fields: "upc") @key(fields: "sku") {
-  upc: ID!
-  sku: ID!
-  name: String
-}
-```
-
-By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
-
 ### Relax percent encoding for Connectors ([PR #7220](https://github.com/apollographql/router/pull/7220))
 
 Characters outside of `{ }` expressions will no longer be percent encoded unless they are completely invalid for a
@@ -338,14 +325,15 @@ braces `[ ]` will no longer be percent encoded. Any string from within a dynamic
 
 By [@dylan-apollo](https://github.com/dylan-apollo) in https://github.com/apollographql/router/pull/7220
 
-### Fix Parsing of Coprocessor GraphQL Responses ([PR #7141](https://github.com/apollographql/router/pull/7141))
+### Preserve `data: null` when handling coprocessor GraphQL responses which included `errors` ([PR #7141](https://github.com/apollographql/router/pull/7141))
 
-Previously Router ignored `data: null` property inside GraphQL response returned by coprocessor.
+Previously, Router incorrectly swallowed `data: null` conditions on GraphQL responses returned from a coprocessor.
+
 According to [GraphQL Spectification](https://spec.graphql.org/draft/#sel-FAPHLJCAACEBxlY):
 
-> If an error was raised during the execution that prevented a valid response, the "data" entry in the response should be null.
+> If an error was raised during the execution that prevented a valid response, the "data" entry in the response **should be null**.
 
-That means if coprocessor returned valid execution error, for example:
+That means if coprocessor returned a valid execution error, for example:
 
 ```json
 {
@@ -354,7 +342,7 @@ That means if coprocessor returned valid execution error, for example:
 }
 ```
 
-Router violated above restriction from GraphQL Specification by returning following response to client:
+It was incorrect (and inadvertent) to return the following response to the client:
 
 ```json
 {
@@ -362,28 +350,11 @@ Router violated above restriction from GraphQL Specification by returning follow
 }
 ```
 
-This fix ensures full compliance with the GraphQL specification by preserving the complete structure of error responses from coprocessors.
+This fix ensures compliance with the GraphQL specification in this regard by preserving the complete structure of the response returned from coprocessors.
 
 Contributed by [@IvanGoncharov](https://github.com/IvanGoncharov) in [#7141](https://github.com/apollographql/router/pull/7141)
 
-### Improve Error Message for Invalid JWT Header Values ([PR #7121](https://github.com/apollographql/router/pull/7121))
-
-Enhanced parsing error messages for JWT Authorization header values now provide developers with clear, actionable feedback while ensuring that no sensitive data is exposed.
-
-Examples of the updated error messages:
-```diff
--         Header Value: '<invalid value>' is not correctly formatted. prefix should be 'Bearer'
-+         Value of 'authorization' JWT header should be prefixed with 'Bearer'
-```
-
-```diff
--         Header Value: 'Bearer' is not correctly formatted. Missing JWT
-+         Value of 'authorization' JWT header has only 'Bearer' prefix but no JWT token
-```
-
-By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/7121
-
-### Helm: Correct default telemetry `resource` property in `ConfigMap` (copy #6105) ([Issue #6104](https://github.com/apollographql/router/issues/6104))
+### Helm: Correct default telemetry `resource` property in `ConfigMap` ([Issue #6104](https://github.com/apollographql/router/issues/6104))
 
 The Helm chart was using an outdated value when emitting the `telemetry.exporters.metrics.common.resource.service.name` values.  This has been updated to use the correct (singular) version of `resource` (rather than the incorrect `resources` which was used earlier in 1.x's life-cycle).
 
@@ -397,25 +368,25 @@ For users of Google Cloud Platform (GCP) Cloud Run platform, using the router's 
 "/usr/bin/env: 'bash ': No such file or directory"
 ```
 
-To avoid this issue, we've changed the script to use `#!/bin/bash` instead of `#!/usr/bin/env bash`, as we use a fixed Linux distribution in Docker which has the Bash binary located there.
+To avoid this issue, we've changed the script to use `#!/bin/bash` instead of `#!/usr/bin/env bash`, as we use a fixed Linux distribution in Docker which has the Bash binary located in a fixed location.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/7198
 
 ### Remove "setting resource attributes is not allowed" warning ([PR #7272](https://github.com/apollographql/router/pull/7272))
 
-If Uplink is enabled, Router 2.1.x emits this warning at startup event though no user configuration or other choice is responsible for it:
+If Uplink was enabled, Router 2.1.x emitted this warning at startup even when there was no user configuration responsible for the condition:
 
 ```
 WARN  setting resource attributes is not allowed for Apollo telemetry
 ```
 
-This removes the warning entirely as it’s not particularly helpful.
+The warning is removed entirely.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7272
 
 ## 📃 Configuration
 
-### Add configurable server header read timeout ([PR #7262](https://github.com/apollographql/router/pull/7262))
+### Customization of "header read timeout" ([PR #7262](https://github.com/apollographql/router/pull/7262))
 
 This change exposes the server's header read timeout as the `server.http.header_read_timeout` configuration option.
 
@@ -429,7 +400,7 @@ server:
 
 By [@gwardwell ](https://github.com/gwardwell) in https://github.com/apollographql/router/pull/7262
 
-### `include_subgraph_errors` fine grained control ([Issue #6402](https://github.com/apollographql/router/pull/6402)
+### Fine-grained control over `include_subgraph_errors` ([Issue #6402](https://github.com/apollographql/router/pull/6402)
 
 Update `include_subgraph_errors` with additional configuration options for both global and subgraph levels. This update provides finer control over error messages and extension keys for each subgraph.
 For more details, please read [subgraph error inclusion](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion).
@@ -459,41 +430,37 @@ include_subgraph_errors:
 
 By [@Samjin](https://github.com/Samjin) and [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7164
 
-### Add new configurable delivery pathway for high cardinality Apollo Studio metrics ([PR #7138](https://github.com/apollographql/router/pull/7138))
+### Add new configurable delivery pathway for high cardinality GraphOS Studio metrics ([PR #7138](https://github.com/apollographql/router/pull/7138))
 
-This change provides a secondary pathway for new "realtime" Studio metrics whose delivery interval is configurable due to their higher cardinality. These metrics will respect `telemetry.apollo.batch_processor.scheduled_delay` as configured on the realtime path.
-
-All other Apollo metrics will maintain the previous hardcoded 60s send interval.
+This change provides a secondary pathway for new "realtime" GraphOS Studio metrics whose delivery interval is configurable due to their higher cardinality. These metrics will respect `telemetry.apollo.batch_processor.scheduled_delay` as configured on the realtime path.  All other Apollo metrics will maintain the previous hardcoded 60s send interval.
 
 By [@rregitsky](https://github.com/rregitsky) and [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7138
 
 ## 📚 Documentation
 
-### Added documentation for more GraphQL error codes that can occur during router execution. ([PR #7160](https://github.com/apollographql/router/issues/7160))
+### GraphQL error codes that can occur during router execution ([PR #7160](https://github.com/apollographql/router/issues/7160))
 
 Added documentation for more GraphQL error codes that can occur during router execution, including better differentiation between HTTP status codes and GraphQL error extensions codes.
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7160
 
-### [docs] Update API Gateway tech note ([PR #7261](https://github.com/apollographql/router/pull/7261))
+### Update API Gateway tech note ([PR #7261](https://github.com/apollographql/router/pull/7261))
 
-Update the tech note with more details now that we have connectors
+Update the [Router vs Gateway Tech Note](https://www.apollographql.com/docs/graphos/routing/router-api-gateway-comparison) with more details now that we have connectors
 
 By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/7261
 
-### Document extended errors preview configuration ([PR 7038](https://github.com/apollographql/router/pull/7038))
+### Extended errors preview configuration ([PR 7038](https://github.com/apollographql/router/pull/7038))
 
-Documentation added for extended errors on the GraphOS reporting page.
+We've introduced documentation for [GraphOS extended error reporting](https://www.apollographql.com/docs/graphos/routing/configuration#extended-error-reporting).
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7038
 
-### [docs] Add a note about the new dry run option ([PR #6973](https://github.com/apollographql/router/pull/6973))
+### Add tip about `Apollo-Expose-Query-Plan: dry-run` to Cache warm-up ([PR #6973](https://github.com/apollographql/router/pull/6973))
 
-Linking to the other docs update: https://github.com/apollographql/federation/pull/3226/files
+The [Cache warm-up documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) now flags the availability of the `Apollo-Expose-Query-Plan: dry-run` header.
 
 By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/6973
-
-
 
 # [2.1.3] - 2025-04-16
 
