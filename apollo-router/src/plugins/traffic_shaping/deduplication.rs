@@ -154,11 +154,8 @@ where
                             .map(|response| response.clone())
                             .map_err(|e: &BoxError| e.to_string());
 
-                        // We may get errors here, for instance if a task is cancelled,
-                        // so just ignore the result of send
-                        let _ = tokio::task::spawn_blocking(move || {
-                            tx.send(broadcast_value)
-                        }).await.expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
+                        // Ignore the result of send, receivers may drop...
+                        let _ = tx.send(broadcast_value);
                     }
 
                     return res.map(|response| {
