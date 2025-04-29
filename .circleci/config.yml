@@ -33,7 +33,7 @@ executors:
   arm_linux_build: &arm_linux_build_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.1.0
-    resource_class: arm.large
+    resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
