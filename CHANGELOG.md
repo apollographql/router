@@ -412,12 +412,6 @@ WARN  setting resource attributes is not allowed for Apollo telemetry
 
 This removes the warning entirely as it’s not particularly helpful.
 
-Reproduction:
-
-```
-APOLLO_KEY=secret APOLLO_GRAPH_REF=starstuff@current cargo run
-```
-
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7272
 
 ## 📃 Configuration
