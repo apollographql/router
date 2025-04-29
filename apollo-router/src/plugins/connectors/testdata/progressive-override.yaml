@@ -1,0 +1,56 @@
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.10"
+            import: ["@shareable", "@override"]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+            }
+          )
+
+          type Query {
+            users: [User]
+              @override(from: "graphql", label: "percent(100)")
+              @connect(
+                source: "json"
+                http: {
+                  GET: "/users"
+                }
+                selection: "id name"
+              )
+          }
+
+          type User @shareable {
+            id: ID!
+            name: String
+          }
+
+  graphql:
+    routing_url: https://localhost:4001
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@shareable"]
+          )
+
+        type Query {
+          users: [User]
+        }
+
+        type User @shareable {
+          id: ID!
+          name: String
+        }
