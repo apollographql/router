@@ -135,6 +135,7 @@ pub(super) fn carryover_directives(
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
+
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Scope)),
                     };
@@ -169,6 +170,7 @@ pub(super) fn carryover_directives(
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
+
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Policy)),
                     };
@@ -197,6 +199,7 @@ pub(super) fn carryover_directives(
         name: COST_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let mut insert_link = false;
+
         let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
@@ -218,6 +221,7 @@ pub(super) fn carryover_directives(
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
+
         if insert_link {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
@@ -281,6 +285,7 @@ pub(super) fn carryover_directives(
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
+
         if insert_link {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
