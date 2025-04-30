@@ -248,10 +248,7 @@ impl<'schema> ArgumentVisitor<'schema> {
         &mut self,
         field: &'schema Node<FieldDefinition>,
         entity_type: &'schema Node<ObjectType>,
-    ) -> Result<
-        Vec<Field<'schema>>,
-        <ArgumentVisitor<'schema> as FieldVisitor<Field<'schema>>>::Error,
-    > {
+    ) -> Result<Vec<Field<'schema>>, <Self as FieldVisitor<Field<'schema>>>::Error> {
         // At the root level, visit each argument to the entity field
         field.arguments.iter().filter_map(|arg| {
             if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
@@ -291,10 +288,7 @@ impl<'schema> ArgumentVisitor<'schema> {
         &mut self,
         child_input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-    ) -> Result<
-        Vec<Field<'schema>>,
-        <ArgumentVisitor<'schema> as FieldVisitor<Field<'schema>>>::Error,
-    > {
+    ) -> Result<Vec<Field<'schema>>, <Self as FieldVisitor<Field<'schema>>>::Error> {
         // At the child level, visit each field on the input type
         let ExtendedType::Object(entity_object_type) = entity_type else {
             // Entity type was not an object type - this will be reported by field visitor
