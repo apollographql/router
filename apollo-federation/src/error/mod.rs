@@ -340,8 +340,8 @@ pub enum SingleFederationError {
     NoPlanFoundWithDisabledSubgraphs,
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
-    #[error("\"{type_name}.{field_name}\" is not a list")]
-    ListSizeAppliedToNonList { type_name: Name, field_name: Name },
+    #[error("{message}")]
+    ListSizeAppliedToNonList { message: String },
     #[error("{message}")]
     ListSizeInvalidAssumedSize { message: String },
     #[error("{message}")]

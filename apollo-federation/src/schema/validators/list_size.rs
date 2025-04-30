@@ -1,4 +1,3 @@
-use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
 
@@ -15,7 +14,11 @@ pub(crate) fn validate_list_size_directives(
     for list_size_directive in schema.list_size_directive_applications()? {
         match list_size_directive {
             Ok(list_size) => {
-                validate_applied_to_list(list_size.target, errors);
+                println!(
+                    "Validating @listSize on {}.{}",
+                    list_size.parent_type, list_size.target.name
+                );
+                validate_applied_to_list(&list_size, errors);
                 validate_assumed_size_not_negative(&list_size, errors);
                 validate_slicing_arguments_are_valid_integers(&list_size, errors);
                 validate_sized_fields_are_valid_lists(schema, &list_size, errors);
@@ -28,13 +31,20 @@ pub(crate) fn validate_list_size_directives(
 
 /// Validate that `@listSize` is only applied to lists per
 /// https://ibm.github.io/graphql-specs/cost-spec.html#sec-Valid-List-Size-Target
-fn validate_applied_to_list(target: &FieldDefinition, errors: &mut MultipleFederationErrors) {
-    if !target.ty.is_list() {
+fn validate_applied_to_list(list_size: &ListSizeDirective, errors: &mut MultipleFederationErrors) {
+    let has_sized_fields = list_size
+        .directive
+        .sized_fields
+        .as_ref()
+        .is_some_and(|s| !s.is_empty());
+    if !has_sized_fields && !list_size.target.ty.is_list() {
         errors
             .errors
             .push(SingleFederationError::ListSizeAppliedToNonList {
-                type_name: target.ty.inner_named_type().clone(),
-                field_name: target.name.clone(),
+                message: format!(
+                    "\"{}.{}\" is not a list",
+                    list_size.parent_type, list_size.target.name
+                ),
             });
     }
 }
@@ -58,8 +68,7 @@ fn validate_assumed_size_not_negative(
                 .push(SingleFederationError::ListSizeInvalidAssumedSize {
                     message: format!(
                         "Assumed size of \"{}.{}\" cannot be negative",
-                        list_size.target.ty.inner_named_type(),
-                        list_size.target.name
+                        list_size.parent_type, list_size.target.name
                     ),
                 });
         }
@@ -82,9 +91,8 @@ fn validate_slicing_arguments_are_valid_integers(
                     .errors
                     .push(SingleFederationError::ListSizeInvalidSlicingArgument {
                         message: format!(
-                            "Slicing argument \"{arg_name}\" of \"{}.{}\" must be an Int or Int!",
-                            list_size.target.ty.inner_named_type(),
-                            list_size.target.name
+                            "Slicing argument \"{}.{}({}:)\" must be Int or Int!",
+                            list_size.parent_type, list_size.target.name, arg_name,
                         ),
                     });
             }
@@ -94,8 +102,7 @@ fn validate_slicing_arguments_are_valid_integers(
                 .push(SingleFederationError::ListSizeInvalidSlicingArgument {
                     message: format!(
                         "Slicing argument \"{arg_name}\" is not an argument of \"{}.{}\"",
-                        list_size.target.ty.inner_named_type(),
-                        list_size.target.name
+                        list_size.parent_type, list_size.target.name
                     ),
                 });
         }
@@ -132,9 +139,9 @@ fn validate_sized_fields_are_valid_lists(
             if !field.ty.is_list() {
                 errors
                     .errors
-                    .push(SingleFederationError::ListSizeInvalidSizedField {
+                    .push(SingleFederationError::ListSizeAppliedToNonList {
                         message: format!(
-                            "Sized field \"{target_type}.{field_name}\" is not a list",
+                            "Sized field \"{target_type}.{field_name}\" is not a list"
                         ),
                     });
             }

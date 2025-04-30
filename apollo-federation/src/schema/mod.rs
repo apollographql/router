@@ -620,6 +620,7 @@ impl FederationSchema {
                 Ok(Some(list_size_directive)) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
+                        parent_type: &field_definition_position.type_name,
                         target: field_definition,
                     }));
                 }
@@ -640,6 +641,7 @@ impl FederationSchema {
                 Ok(Some(list_size_directive)) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
+                        parent_type: &field_definition_position.type_name,
                         target: field_definition,
                     }));
                 }
@@ -703,6 +705,8 @@ impl KeyDirective<'_> {
 pub(crate) struct ListSizeDirective<'schema> {
     /// The parsed directive
     directive: cost_spec_definition::ListSizeDirective,
+    /// The parent type of `target`
+    parent_type: &'schema Name,
     /// The schema position to which this directive is applied
     target: &'schema FieldDefinition,
 }

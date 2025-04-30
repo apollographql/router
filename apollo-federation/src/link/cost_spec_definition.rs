@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -14,6 +13,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
+use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -376,8 +376,8 @@ impl CostDirective {
 
 pub struct ListSizeDirective {
     pub assumed_size: Option<i32>,
-    pub slicing_argument_names: Option<HashSet<String>>,
-    pub sized_fields: Option<HashSet<String>>,
+    pub slicing_argument_names: Option<IndexSet<String>>,
+    pub sized_fields: Option<IndexSet<String>>,
     pub require_one_slicing_argument: bool,
 }
 
@@ -407,7 +407,7 @@ impl ListSizeDirective {
             .to_i32()
     }
 
-    fn slicing_argument_names(directive: &Directive) -> Option<HashSet<String>> {
+    fn slicing_argument_names(directive: &Directive) -> Option<IndexSet<String>> {
         let names = directive
             .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)?
             .as_list()?
@@ -418,7 +418,7 @@ impl ListSizeDirective {
         Some(names)
     }
 
-    fn sized_fields(directive: &Directive) -> Option<HashSet<String>> {
+    fn sized_fields(directive: &Directive) -> Option<IndexSet<String>> {
         let fields = directive
             .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)?
             .as_list()?
