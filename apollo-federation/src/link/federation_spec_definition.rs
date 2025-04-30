@@ -860,6 +860,7 @@ impl SpecDefinition for FederationSpecDefinition {
         ];
         if self.is_fed1() {
             specs.push(Box::new(Self::extends_directive_specification()));
+            specs.push(Box::new(self.tag_directive_specification()));
             return specs;
         }
 
