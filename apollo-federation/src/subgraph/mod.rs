@@ -1,7 +1,5 @@
-use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -307,32 +305,6 @@ impl std::fmt::Debug for Subgraph {
     }
 }
 
-pub struct Subgraphs {
-    subgraphs: BTreeMap<String, Arc<Subgraph>>,
-}
-
-#[allow(clippy::new_without_default)]
-impl Subgraphs {
-    pub fn new() -> Self {
-        Subgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    pub fn add(&mut self, subgraph: Subgraph) -> Result<(), String> {
-        if self.subgraphs.contains_key(&subgraph.name) {
-            return Err(format!("A subgraph named {} already exists", subgraph.name));
-        }
-        self.subgraphs
-            .insert(subgraph.name.clone(), Arc::new(subgraph));
-        Ok(())
-    }
-
-    pub fn get(&self, name: &str) -> Option<Arc<Subgraph>> {
-        self.subgraphs.get(name).cloned()
-    }
-}
-
 pub struct ValidSubgraph {
     pub name: String,
     pub url: String,
@@ -377,6 +349,10 @@ impl SubgraphError {
 
     pub fn error(&self) -> &FederationError {
         &self.error
+    }
+
+    pub fn into_inner(self) -> FederationError {
+        self.error
     }
 
     // Format subgraph errors in the same way as `Rover` does.

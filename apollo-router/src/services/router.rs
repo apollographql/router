@@ -23,8 +23,6 @@ use thiserror::Error;
 use tower::BoxError;
 
 use self::body::RouterBody;
-use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
@@ -32,6 +30,8 @@ use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use crate::plugins::content_negotiation::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
@@ -405,14 +405,6 @@ impl Response {
             context.unwrap_or_default(),
         )
     }
-}
-
-#[derive(Clone, Default, Debug)]
-pub(crate) struct ClientRequestAccepts {
-    pub(crate) multipart_defer: bool,
-    pub(crate) multipart_subscription: bool,
-    pub(crate) json: bool,
-    pub(crate) wildcard: bool,
 }
 
 impl<T> From<http::Response<T>> for Response
