@@ -711,10 +711,6 @@ impl Deref for OtlpTraceSpec<'_> {
 }
 
 impl Verifier for OtlpTraceSpec<'_> {
-    fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
-        // TODO
-        Ok(())
-    }
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
     }
@@ -947,6 +943,30 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
+
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!(
+                "$..spans..attributes..[?(@.key == '{key}')].value.*"
+            ))?;
+            let matches_value = binding
+                .iter()
+                .find(|v| match v {
+                    Value::Bool(v) => &(*v).to_string() == *value,
+                    Value::Number(n) => &(*n).to_string() == *value,
+                    Value::String(s) => &s == value,
+                    _ => false,
+                })
+                .is_some();
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 async fn mock_otlp_server_delayed() -> MockServer {
@@ -967,7 +987,7 @@ async fn mock_otlp_server_delayed() -> MockServer {
     mock_server
 }
 
-async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
+pub(crate) async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
     let mock_server = wiremock::MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/traces"))
@@ -991,7 +1011,7 @@ async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockS
 }
 
 impl TraceSpec {
-    async fn validate_otlp_trace(
+    pub(crate) async fn validate_otlp_trace(
         self,
         router: &mut IntegrationTest,
         mock_server: &MockServer,

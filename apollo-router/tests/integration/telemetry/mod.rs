@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use opentelemetry::trace::TraceId;
 
+mod client_override;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod datadog;
 mod events;
@@ -25,6 +26,7 @@ struct TraceSpec {
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
     resources: HashMap<&'static str, &'static str>,
+    attributes: HashMap<&'static str, &'static str>,
 }
 
 #[buildstructor::buildstructor]
@@ -41,6 +43,7 @@ impl TraceSpec {
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
         resources: HashMap<&'static str, &'static str>,
+        attributes: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
             operation_name,
@@ -53,6 +56,7 @@ impl TraceSpec {
             subgraph_sampled,
             trace_id,
             resources,
+            attributes,
         }
     }
 }
