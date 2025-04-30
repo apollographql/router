@@ -84,8 +84,13 @@ pub(crate) async fn count_supergraph_errors(
                 .extensions
                 .get(EXTENSIONS_VALUE_COMPLETION_KEY)
             {
-                // TODO inline this func?
-                count_value_completion_errors(value_completion, &context, &errors_config);
+                if let Some(vc_array) = value_completion.as_array() {
+                    let errors: Vec<graphql::Error> = vc_array
+                        .iter()
+                        .filter_map(graphql::Error::from_value_completion_value)
+                        .collect();
+                    count_operation_errors(&errors, &context, &errors_config);
+                }
             }
         } else if accepts_multipart_defer || accepts_multipart_subscription {
             // TODO can we combine this with above?
@@ -171,15 +176,13 @@ pub(crate) async fn count_router_errors(
         .insert(COUNTED_ERRORS, to_map(&response_body.errors))
         .expect("Unable to insert errors into context.");
 
-    // TODO confirm the count_operation_error_codes() case is handled here
+    // TODO confirm the count_operation_error_codes() INVALID_ACCEPT_HEADER case is handled here
 
     RouterResponse {
         context: response.context,
         response: http::Response::from_parts(parts, router::body::from_bytes(bytes)),
     }
 }
-
-// TODO how do we parse the json response to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER in a count_router_errors()?
 
 fn to_map(errors: &[Error]) -> HashMap<String, u64> {
     let mut map: HashMap<String, u64> = HashMap::new();
@@ -191,20 +194,6 @@ fn to_map(errors: &[Error]) -> HashMap<String, u64> {
     });
 
     map
-}
-
-fn count_value_completion_errors(
-    value_completion: &Value,
-    context: &Context,
-    errors_config: &ErrorsConfiguration,
-) {
-    if let Some(vc_array) = value_completion.as_array() {
-        let errors: Vec<graphql::Error> = vc_array
-            .iter()
-            .filter_map(graphql::Error::from_value_completion_value)
-            .collect();
-        count_operation_errors(&errors, context, errors_config);
-    }
 }
 
 fn count_operation_errors(
