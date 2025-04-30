@@ -56,7 +56,6 @@ enum link__Purpose {
 
 type Product
   @join__type(graph: ONE)
-  @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost:4001/products", body: "ids: $batch.id"}, selection: "id"})
 {
   id: ID!
 }
