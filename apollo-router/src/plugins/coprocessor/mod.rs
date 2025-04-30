@@ -96,9 +96,6 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
 
-        // Enable crypto
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
         let tls_config = rustls::ClientConfig::builder()
             .with_native_roots()?
             .with_no_client_auth();
