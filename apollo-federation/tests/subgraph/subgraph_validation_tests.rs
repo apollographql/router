@@ -383,7 +383,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_provides() {
         let schema_str = r#"
@@ -416,7 +416,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_requires() {
         let schema_str = r#"
@@ -475,7 +475,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
@@ -510,7 +510,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
@@ -569,7 +569,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
@@ -623,7 +623,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interface_field() {
         let schema_str = r#"
@@ -651,7 +651,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_union_field() {
         let schema_str = r#"
@@ -677,7 +677,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_key() {
         let schema_str = r#"
@@ -706,7 +706,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_provides() {
         let schema_str = r#"
@@ -736,7 +736,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_requires() {
         let schema_str = r#"
@@ -762,7 +762,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn can_collect_multiple_errors_in_a_single_fields_argument() {
         let schema_str = r#"
@@ -793,7 +793,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_key() {
         let schema_str = r#"
@@ -817,7 +817,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_provides() {
         let schema_str = r#"
@@ -842,7 +842,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_requires() {
         let schema_str = r#"
@@ -971,7 +971,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"Mismatched error counts: 1 != 3"#)]
     fn has_suggestions_if_a_federation_directive_is_misspelled_in_all_schema_versions() {
         let schema_versions = [
@@ -1023,7 +1023,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"Mismatched errors:"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_in_fed1() {
         let schema_str = r#"
@@ -1044,7 +1044,7 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_under_wrong_name_for_the_schema() {
         let schema_str = r#"
@@ -1834,7 +1834,7 @@ mod interface_object_and_key_on_interfaces_validation_tests {
     use super::*;
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn key_on_interfaces_require_key_on_all_implementations() {
         let doc = r#"
@@ -1936,7 +1936,7 @@ mod interface_object_and_key_on_interfaces_validation_tests {
     }
 
     #[test]
-    #[ignore  = "temporary ignore for build break"]
+    #[ignore = "temporary ignore for build break"]
     #[should_panic(expected = r#"Mismatched errors:"#)]
     fn only_allow_interface_object_on_entity_types() {
         // There is no meaningful way to make @interfaceObject work on a value type at the moment,
