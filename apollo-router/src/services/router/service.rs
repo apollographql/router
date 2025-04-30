@@ -47,14 +47,10 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
-use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -90,7 +86,6 @@ use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
-use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -110,7 +105,6 @@ pub(crate) struct RouterService {
     // instance
     batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
-    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
@@ -120,7 +114,6 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
@@ -131,7 +124,6 @@ impl RouterService {
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
             supergraph_service,
-            apollo_telemetry_config,
         }
     }
 }
@@ -930,7 +922,6 @@ impl RouterCreator {
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
-            TelemetryConfig::apollo(&configuration),
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)

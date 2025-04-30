@@ -67,29 +67,16 @@
 //! );
 //! ```
 
-use std::collections::HashMap;
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 #[cfg(test)]
 use futures::FutureExt;
-use serde_json_bytes::Value;
 
-use crate::Context;
-use crate::apollo_studio_interop::UsageReporting;
-use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
-use crate::graphql;
 use crate::metrics::aggregation::AggregateMeterProvider;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
-use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-use crate::query_planner::APOLLO_OPERATION_ID;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
@@ -1338,27 +1325,6 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
-/// Shared counter for `apollo.router.graphql_error` for consistency
-pub(crate) fn count_graphql_error(count: u64, code: Option<&str>) {
-    match code {
-        None => {
-            u64_counter!(
-                "apollo.router.graphql_error",
-                "Number of GraphQL error responses returned by the router",
-                count
-            );
-        }
-        Some(code) => {
-            u64_counter!(
-                "apollo.router.graphql_error",
-                "Number of GraphQL error responses returned by the router",
-                count,
-                code = code.to_string()
-            );
-        }
-    }
-}
-
 /// Assert that all metrics match an [insta] snapshot.
 ///
 /// Consider using [assert_non_zero_metrics_snapshot] to produce more grokkable snapshots if
@@ -1444,6 +1410,7 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 mod test {
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
+
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
@@ -1772,5 +1739,4 @@ mod test {
         .with_metrics()
         .await;
     }
-
 }

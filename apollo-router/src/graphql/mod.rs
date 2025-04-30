@@ -70,6 +70,13 @@ pub struct Error {
     /// The optional GraphQL extensions for this error.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+    // TODO add attr to mark as counted, skip serialize?
+    // TODO would include_subgraph_errors or a customer's plugin change this?
+    // TODO Does serialization happen btwn layers (which would break this also)?
+    // TODO if customer's are the only cause then maybe we can warn that this could double count.
+    // TODO OR make an "apollo error ID" that is serialized. Use this as hash key in context
+    // TODO make on init, public getter
+    // TODO OR can we store a list of errors in context. Assumes that Eq is actually strict equality
 }
 // Implement getter and getter_mut to not use pub field directly
 
