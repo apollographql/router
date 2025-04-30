@@ -57,7 +57,14 @@ pub(super) fn carryover_directives(
     }
 
     for link in &metadata.links {
-        SchemaDefinitionPosition.insert_directive(to, link.to_directive_application().into())?;
+        let link_already_applied = to
+            .metadata()
+            .and_then(|metadata| metadata.for_identity(&link.url.identity))
+            .is_some();
+        if !link_already_applied {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
     }
 
     // @inaccessible
@@ -263,11 +270,6 @@ pub(super) fn carryover_directives(
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
-
-        if insert_link {
-            SchemaDefinitionPosition
-                .insert_directive(to, link.to_directive_application().into())?;
-        }
     }
 
     // @join__field(contextArguments: ...)
