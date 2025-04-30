@@ -128,7 +128,7 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
                 (
                     Some(b.clone()),
                     if json_type_of_a == json_type_of_b {
-                        vec![]
+                        Vec::new()
                     } else {
                         vec![format!(
                             "Lossy merge replacing {} with {}",

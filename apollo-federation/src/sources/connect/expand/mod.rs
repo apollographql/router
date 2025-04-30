@@ -273,14 +273,16 @@ mod helpers {
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&KEY_DIRECTIVE_NAME))
-                .unwrap_or(KEY_DIRECTIVE_NAME);
+                .map_or(KEY_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&KEY_DIRECTIVE_NAME)
+                });
             let interface_object_name = subgraph
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME))
-                .unwrap_or(INTF_OBJECT_DIRECTIVE_NAME);
+                .map_or(INTF_OBJECT_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME)
+                });
             let extra_excluded = [EXTERNAL_DIRECTIVE_NAME, REQUIRES_DIRECTIVE_NAME]
                 .into_iter()
                 .map(|d| {

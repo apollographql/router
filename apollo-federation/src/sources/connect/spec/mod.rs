@@ -137,7 +137,7 @@ impl ConnectSpec {
             arguments: vec![
                 Argument {
                     name: name!("graphs"),
-                    value: Value::List(vec![]).into(),
+                    value: Value::List(Vec::new()).into(),
                 }
                 .into(),
                 Argument {

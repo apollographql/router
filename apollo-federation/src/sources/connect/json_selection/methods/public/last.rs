@@ -41,10 +41,10 @@ fn last_method(
     }
 
     match data {
-        JSON::Array(array) => (array.last().cloned(), vec![]),
+        JSON::Array(array) => (array.last().cloned(), Vec::new()),
         JSON::String(s) => s.as_str().chars().last().map_or_else(
-            || (None, vec![]),
-            |last| (Some(JSON::String(last.to_string().into())), vec![]),
+            || (None, Vec::new()),
+            |last| (Some(JSON::String(last.to_string().into())), Vec::new()),
         ),
         _ => (
             Some(data.clone()),
@@ -136,7 +136,7 @@ mod tests {
     fn last_should_get_last_element_from_array() {
         assert_eq!(
             selection!("$->last").apply_to(&json!([1, 2, 3])),
-            (Some(json!(3)), vec![]),
+            (Some(json!(3)), Vec::new()),
         );
     }
 

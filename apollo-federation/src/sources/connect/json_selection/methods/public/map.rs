@@ -72,7 +72,9 @@ fn map_method(
         // ->map method the non-array input data.
         first_arg
             .apply_to_path(data, vars, input_path)
-            .and_then_collecting_errors(|value| (Some(JSON::Array(vec![value.clone()])), vec![]))
+            .and_then_collecting_errors(|value| {
+                (Some(JSON::Array(vec![value.clone()])), Vec::new())
+            })
     }
 }
 

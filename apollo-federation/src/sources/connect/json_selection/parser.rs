@@ -372,20 +372,15 @@ impl NamedSelection {
                 .as_ref()
                 .map(|alias| vec![alias.name.as_str()])
                 .unwrap_or_else(|| vec![name.as_str()]),
-            Self::Path { alias, path, .. } =>
-            {
-                #[allow(clippy::if_same_then_else)]
-                if let Some(alias) = alias {
-                    vec![alias.name.as_str()]
-                } else if let Some(sub) = path.next_subselection() {
-                    sub.selections_iter()
-                        .flat_map(|selection| selection.names())
-                        .unique()
-                        .collect()
-                } else {
-                    vec![]
-                }
-            }
+            Self::Path { alias, path, .. } => match (alias, path.next_subselection()) {
+                (Some(alias), _) => vec![alias.name.as_str()],
+                (_, Some(sub)) => sub
+                    .selections_iter()
+                    .flat_map(|selection| selection.names())
+                    .unique()
+                    .collect(),
+                _ => Vec::new(),
+            },
             Self::Group(alias, _) => vec![alias.name.as_str()],
         }
     }
@@ -424,7 +419,7 @@ impl ExternalVarPaths for NamedSelection {
         match self {
             Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => sub.external_var_paths(),
             Self::Path { path, .. } => path.external_var_paths(),
-            _ => vec![],
+            _ => Vec::new(),
         }
     }
 }
@@ -466,7 +461,7 @@ impl PathSelection {
                     let location = parts
                         .last()
                         .map(|part| part.location.clone())
-                        .or(var.range())
+                        .or_else(|| var.range())
                         .map(|location| location.end)
                         .and_then(|end| var.range().map(|location| location.start..end))
                         .unwrap_or_default();
@@ -514,7 +509,7 @@ impl PathSelection {
 
 impl ExternalVarPaths for PathSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
                 if matches!(var_name.as_ref(), KnownVariable::External(_)) {
@@ -795,7 +790,7 @@ impl PathList {
                 parts.extend(rest.variable_path_parts());
                 parts
             }
-            _ => vec![],
+            _ => Vec::new(),
         }
     }
 
@@ -842,7 +837,7 @@ impl PathList {
 
 impl ExternalVarPaths for PathList {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         match self {
             // PathSelection::external_var_paths is responsible for adding all
             // variable &PathSelection items to the set, since this
@@ -931,7 +926,7 @@ impl SubSelection {
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
         // TODO Implement a NamedSelectionIterator to traverse nested selections
         // lazily, rather than using an intermediary vector.
-        let mut selections = vec![];
+        let mut selections = Vec::new();
         for selection in &self.selections {
             match selection {
                 NamedSelection::Path { alias, path, .. } => {
@@ -972,7 +967,7 @@ impl SubSelection {
 
 impl ExternalVarPaths for SubSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         for selection in &self.selections {
             paths.extend(selection.external_var_paths());
         }
@@ -1136,7 +1131,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
     match input_char_indices.next() {
         Some((0, quote @ '\'')) | Some((0, quote @ '"')) => {
             let mut escape_next = false;
-            let mut chars: Vec<char> = vec![];
+            let mut chars: Vec<char> = Vec::new();
             let mut remainder_opt: Option<Span> = None;
 
             for (i, c) in input_char_indices {

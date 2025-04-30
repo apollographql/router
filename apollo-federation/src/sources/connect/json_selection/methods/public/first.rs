@@ -41,10 +41,10 @@ fn first_method(
     }
 
     match data {
-        JSON::Array(array) => (array.first().cloned(), vec![]),
+        JSON::Array(array) => (array.first().cloned(), Vec::new()),
         JSON::String(s) => s.as_str().chars().next().map_or_else(
-            || (None, vec![]),
-            |first| (Some(JSON::String(first.to_string().into())), vec![]),
+            || (None, Vec::new()),
+            |first| (Some(JSON::String(first.to_string().into())), Vec::new()),
         ),
         _ => (
             Some(data.clone()),

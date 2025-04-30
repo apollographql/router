@@ -74,12 +74,3 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
-
-[lints.rust]
-future-incompatible = "warn"
-nonstandard_style = "deny"
-
-[lints.clippy]
-all = { level = "deny", priority = 10 }
-redundant_clone = { level = "deny", priority = 9 }
-manual_while_let_some = { level = "deny", priority = 4 }
