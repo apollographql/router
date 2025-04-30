@@ -990,6 +990,36 @@ async fn test_resources() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "foo")
+        .build()
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foo")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct DatadogTraceSpec {
     trace_spec: TraceSpec,
 }
@@ -1162,7 +1192,25 @@ impl Verifier for DatadogTraceSpec {
         Ok(())
     }
 
-    fn verify_span_attributes(&self, _trace: &Value) -> Result<(), BoxError> {
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!("$..meta..['{key}']"))?;
+            let matches_value = binding
+                .iter()
+                .find(|v| match v {
+                    Value::Bool(v) => &(*v).to_string() == *value,
+                    Value::Number(n) => &(*n).to_string() == *value,
+                    Value::String(s) => &s == value,
+                    _ => false,
+                })
+                .is_some();
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
         Ok(())
     }
 
