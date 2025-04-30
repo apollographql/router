@@ -31,8 +31,8 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Raw;
 use crate::subgraph::typestate::Subgraph;
-use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
+use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
@@ -67,7 +67,10 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Expanded>>, FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
-    if subgraphs.iter().all(|subgraph| !subgraph.is_fed_1()) {
+    if subgraphs
+        .iter()
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+    {
         return Ok(subgraphs);
     }
 
@@ -101,7 +104,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 
     let mut upgraded: HashMap<String, Subgraph<Expanded>> = Default::default();
     for (name, subgraph) in subgraphs.iter() {
-        if subgraph.is_fed_1() {
+        if !subgraph.metadata().is_fed_2_schema() {
             let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
             let new_subgraph = Subgraph::<Raw>::new(
@@ -148,7 +151,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     Ok(subgraphs
         .into_iter()
         .map(|(name, subgraph)| {
-            if subgraph.is_fed_1() {
+            if !subgraph.metadata().is_fed_2_schema() {
                 return upgraded.remove(&name).unwrap();
             }
             subgraph
@@ -198,7 +201,7 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn remove_links_and_reexpand(&mut self) -> Result<(), FederationError> {
-        // for @core, we want to remove both the definition and all references, but for other 
+        // for @core, we want to remove both the definition and all references, but for other
         // federation directives, just remove the definitions
         let directives_to_remove = [
             name!("extends"),
@@ -234,7 +237,9 @@ impl<'a> SchemaUpgrader<'a> {
 
         // now remove other federation types
         let schema = &mut self.schema;
-        if let Some(TypeDefinitionPosition::Enum(enum_obj)) = schema.try_get_type(name!("core__Purpose")) {
+        if let Some(TypeDefinitionPosition::Enum(enum_obj)) =
+            schema.try_get_type(name!("core__Purpose"))
+        {
             enum_obj.remove(schema)?;
         }
         if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
@@ -242,16 +247,21 @@ impl<'a> SchemaUpgrader<'a> {
         {
             scalar_obj.remove(schema)?;
         }
-        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) = schema.try_get_type(name!("_FieldSet")) {
+        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
+            schema.try_get_type(name!("_FieldSet"))
+        {
             scalar_obj.remove(schema)?;
         }
-        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) = schema.try_get_type(name!("_Any")) {
+        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) = schema.try_get_type(name!("_Any"))
+        {
             scalar_obj.remove(schema)?;
         }
         if let Some(TypeDefinitionPosition::Object(obj)) = schema.try_get_type(name!("_Service")) {
             obj.remove(schema)?;
         }
-        if let Some(TypeDefinitionPosition::Union(union_obj)) = schema.try_get_type(name!("_Entity")) {
+        if let Some(TypeDefinitionPosition::Union(union_obj)) =
+            schema.try_get_type(name!("_Entity"))
+        {
             union_obj.remove(schema)?;
         }
         let subgraph = Subgraph::new(
@@ -811,7 +821,7 @@ impl<'a> SchemaUpgrader<'a> {
         let Some(metadata) = &self.schema.subgraph_metadata else {
             return Ok(());
         };
-        
+
         let Some(key_directive_name) = &self.expanded_info.key_directive_name else {
             return Ok(());
         };
@@ -819,12 +829,14 @@ impl<'a> SchemaUpgrader<'a> {
         let shareable_directive_name = metadata
             .federation_spec_definition()
             .shareable_directive_definition(&self.schema)?
-            .name.clone();
+            .name
+            .clone();
 
         let mut fields_to_add_shareable = vec![];
         let mut types_to_add_shareable = vec![];
         for type_pos in self.schema.get_types() {
-            let has_key_directive = type_pos.has_applied_directive(&self.schema, key_directive_name);
+            let has_key_directive =
+                type_pos.has_applied_directive(&self.schema, key_directive_name);
             let is_root_type = Self::is_root_type(&self.schema, &type_pos);
             let TypeDefinitionPosition::Object(obj_pos) = type_pos else {
                 continue;
@@ -835,8 +847,7 @@ impl<'a> SchemaUpgrader<'a> {
                 continue;
             }
             if has_key_directive || is_root_type {
-                let fields = obj_pos.fields(self.schema.schema())?.map(|obj| obj.clone());
-                for field in fields {
+                for field in obj_pos.fields(self.schema.schema())? {
                     let obj_field = FieldDefinitionPosition::Object(field.clone());
                     if metadata.is_field_shareable(&obj_field) {
                         continue;
@@ -845,12 +856,16 @@ impl<'a> SchemaUpgrader<'a> {
                         continue;
                     };
                     let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, info)| {
-                        let field_exists = match self.get_subgraph_by_name(subgraph_name).unwrap().schema().schema().type_field(&field.type_name, &field.field_name) {
-                            Ok(_) => true,
-                            Err(_) => false,
-                        };
-                        
-                        if (subgraph_name != self.expanded_info.subgraph_name.as_str()) && field_exists
+                        let field_exists = self
+                            .get_subgraph_by_name(subgraph_name)
+                            .unwrap()
+                            .schema()
+                            .schema()
+                            .type_field(&field.type_name, &field.field_name)
+                            .is_ok();
+
+                        if (subgraph_name != self.expanded_info.subgraph_name.as_str())
+                            && field_exists
                             && (!info.metadata.is_field_external(&obj_field)
                                 || info.metadata.is_field_partially_external(&obj_field))
                         {
