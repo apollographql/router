@@ -25,7 +25,9 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::key::validate_key_directives;
+use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
 use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
@@ -139,6 +141,9 @@ impl FederationBlueprint {
         validate_requires_directives(schema, meta, &mut error_collector)?;
 
         // TODO: Remaining validations
+
+        validate_cost_directives(schema, &mut error_collector)?;
+        validate_list_size_directives(schema, &mut error_collector)?;
 
         error_collector.into_result()
     }

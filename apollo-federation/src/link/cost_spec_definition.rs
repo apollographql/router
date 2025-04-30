@@ -6,11 +6,14 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Value;
+use apollo_compiler::ty;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -24,6 +27,9 @@ use crate::schema::FederationSchema;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::type_and_directive_specification::ArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
@@ -171,7 +177,9 @@ impl CostSpecDefinition {
     /// Returns the name of the `@cost` directive in the given schema, accounting for import aliases or specification name
     /// prefixes such as `@federation__cost`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
-    fn cost_directive_name(schema: &FederationSchema) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn cost_directive_name(
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
         if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
@@ -184,7 +192,7 @@ impl CostSpecDefinition {
     /// Returns the name of the `@listSize` directive in the given schema, accounting for import aliases or specification name
     /// prefixes such as `@federation__listSize`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
-    fn list_size_directive_name(
+    pub(crate) fn list_size_directive_name(
         schema: &FederationSchema,
     ) -> Result<Option<Name>, FederationError> {
         if let Some(spec) = Self::for_federation_schema(schema) {
@@ -235,6 +243,79 @@ impl CostSpecDefinition {
             Ok(None)
         }
     }
+
+    fn cost_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            COST_DIRECTIVE_NAME,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(Int!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Enum,
+                DirectiveLocation::FieldDefinition,
+                DirectiveLocation::InputFieldDefinition,
+                DirectiveLocation::Object,
+                DirectiveLocation::Scalar,
+            ],
+            false,
+            // TODO: Set up supergraph spec later, but the type is hard to work with at the moment
+            None,
+            None,
+        )
+    }
+
+    fn list_size_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            LIST_SIZE_DIRECTIVE_NAME,
+            &[
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(Int)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!([String!])),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!([String!])),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(Boolean)),
+                        default_value: Some(Value::Boolean(true)),
+                    },
+                    composition_strategy: None,
+                },
+            ],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            // TODO: Set up supergraph spec later, but the type is hard to work with at the moment
+            None,
+            None,
+        )
+    }
 }
 
 impl SpecDefinition for CostSpecDefinition {
@@ -243,11 +324,14 @@ impl SpecDefinition for CostSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![
+            Box::new(Self::cost_directive_specification()),
+            Box::new(Self::list_size_directive_specification()),
+        ]
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![]
     }
 }
 
@@ -267,7 +351,10 @@ impl CostDirective {
         self.weight as f64
     }
 
-    fn from_directives(directive_name: &Name, directives: &DirectiveList) -> Option<Self> {
+    pub(crate) fn from_directives(
+        directive_name: &Name,
+        directives: &DirectiveList,
+    ) -> Option<Self> {
         directives
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
@@ -275,7 +362,7 @@ impl CostDirective {
             .map(|weight| Self { weight })
     }
 
-    fn from_schema_directives(
+    pub(crate) fn from_schema_directives(
         directive_name: &Name,
         directives: &apollo_compiler::schema::DirectiveList,
     ) -> Option<Self> {
