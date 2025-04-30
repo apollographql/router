@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       num_old_versions_to_delete:
-        description: 'Number of oldest images nightly/router to delete'
+        description: 'Number of oldest `nightly/router` images to delete'
         required: true
         type: number 
 jobs:
