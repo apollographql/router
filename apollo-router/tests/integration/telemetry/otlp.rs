@@ -1064,7 +1064,7 @@ async fn mock_otlp_server_delayed() -> MockServer {
     mock_server
 }
 
-pub(crate) async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
+async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
     let mock_server = wiremock::MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/traces"))
@@ -1088,7 +1088,7 @@ pub(crate) async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: 
 }
 
 impl TraceSpec {
-    pub(crate) async fn validate_otlp_trace(
+    async fn validate_otlp_trace(
         self,
         router: &mut IntegrationTest,
         mock_server: &MockServer,
