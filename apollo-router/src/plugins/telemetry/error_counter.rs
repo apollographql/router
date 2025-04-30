@@ -92,11 +92,6 @@ pub(crate) async fn count_supergraph_errors(
             if !response_body.errors.is_empty() {
                 count_operation_errors(&response_body.errors, &context, &errors_config);
             }
-        } else {
-            // TODO supposedly this is unreachable in router service. Will we be able to pick this up in a router service plugin callback instead?
-            // TODO I'm guessing no b/c at the plugin layer, we'd have to parse the response as json.
-            // TODO As is, this feels really bad b/c the error will be defined _AFTER_ we count it in router/service.rs
-            count_operation_error_codes(&["INVALID_ACCEPT_HEADER"], &context, &errors_config);
         }
 
         // Refresh context with the most up-to-date list of errors
@@ -176,6 +171,8 @@ pub(crate) async fn count_router_errors(
         .insert(COUNTED_ERRORS, to_map(&response_body.errors))
         .expect("Unable to insert errors into context.");
 
+    // TODO confirm the count_operation_error_codes() case is handled here
+
     RouterResponse {
         context: response.context,
         response: http::Response::from_parts(parts, router::body::from_bytes(bytes)),
@@ -194,24 +191,6 @@ fn to_map(errors: &[Error]) -> HashMap<String, u64> {
     });
 
     map
-}
-
-fn count_operation_error_codes(
-    codes: &[&str],
-    context: &Context,
-    errors_config: &ErrorsConfiguration,
-) {
-    let errors: Vec<graphql::Error> = codes
-        .iter()
-        .map(|c| {
-            graphql::Error::builder()
-                .message("")
-                .extension_code(*c)
-                .build()
-        })
-        .collect();
-
-    count_operation_errors(&errors, context, errors_config);
 }
 
 fn count_value_completion_errors(
@@ -366,7 +345,6 @@ mod test {
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-    use crate::plugins::telemetry::error_counter::count_operation_error_codes;
     use crate::plugins::telemetry::error_counter::count_operation_errors;
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::query_planner::APOLLO_OPERATION_ID;
@@ -534,147 +512,6 @@ mod test {
                 new_response.context.get_json_value(COUNTED_ERRORS),
                 Some(json!({"GRAPHQL_VALIDATION_FAILED": 1, "CUSTOM_ERROR": 1}))
             )
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_count_operation_error_codes_with_extended_config_enabled() {
-        async {
-            let config = ErrorsConfiguration {
-                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
-                ..Default::default()
-            };
-
-            let context = Context::default();
-            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
-            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
-            let _ = context.insert(OPERATION_KIND, "query".to_string());
-            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
-            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
-
-            count_operation_error_codes(
-                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR", "400"],
-                &context,
-                &config,
-            );
-
-            assert_counter!(
-                "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-            assert_counter!(
-                "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "MY_CUSTOM_ERROR",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-
-            assert_counter!(
-                "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "400",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-
-            assert_counter!(
-                "apollo.router.graphql_error",
-                1,
-                code = "GRAPHQL_VALIDATION_FAILED"
-            );
-            assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
-            assert_counter!("apollo.router.graphql_error", 1, code = "400");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_count_operation_error_codes_with_extended_config_disabled() {
-        async {
-            let config = ErrorsConfiguration {
-                preview_extended_error_metrics: ExtendedErrorMetricsMode::Disabled,
-                ..Default::default()
-            };
-
-            let context = Context::default();
-            count_operation_error_codes(
-                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR", "400"],
-                &context,
-                &config,
-            );
-
-            assert_counter_not_exists!(
-                "apollo.router.operations.error",
-                u64,
-                "apollo.operation.id" = "",
-                "graphql.operation.name" = "",
-                "graphql.operation.type" = "",
-                "apollo.client.name" = "",
-                "apollo.client.version" = "",
-                "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-            assert_counter_not_exists!(
-                "apollo.router.operations.error",
-                u64,
-                "apollo.operation.id" = "",
-                "graphql.operation.name" = "",
-                "graphql.operation.type" = "",
-                "apollo.client.name" = "",
-                "apollo.client.version" = "",
-                "graphql.error.extensions.code" = "MY_CUSTOM_ERROR",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-            assert_counter_not_exists!(
-                "apollo.router.operations.error",
-                u64,
-                "apollo.operation.id" = "",
-                "graphql.operation.name" = "",
-                "graphql.operation.type" = "",
-                "apollo.client.name" = "",
-                "apollo.client.version" = "",
-                "graphql.error.extensions.code" = "400",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-
-            assert_counter!(
-                "apollo.router.graphql_error",
-                1,
-                code = "GRAPHQL_VALIDATION_FAILED"
-            );
-            assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
-            assert_counter!("apollo.router.graphql_error", 1, code = "400");
         }
         .with_metrics()
         .await;
