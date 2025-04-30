@@ -113,7 +113,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-use crate::plugins::telemetry::error_counter::count_execution_errors;
+use crate::plugins::telemetry::error_counter::{count_execution_errors, count_router_errors};
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
@@ -487,7 +487,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let response: Result<router::Response, BoxError> = fut.await;
+                        let mut response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
@@ -564,6 +564,13 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
                         }
+
+                        // TODO should I just move this to the above ok? Or maybe we want to count even if we have an Err?
+                        // TODO or move to an and_then() like execution service?
+                        if let Ok(resp) = response {
+                            response = Ok(count_router_errors(resp, &config.apollo.errors).await);
+                        }
+
 
                         response
                     }

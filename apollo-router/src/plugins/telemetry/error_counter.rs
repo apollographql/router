@@ -19,7 +19,7 @@ use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::services::ExecutionResponse;
+use crate::services::{router, ExecutionResponse, RouterResponse};
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
 use crate::services::router::ClientRequestAccepts;
@@ -148,6 +148,37 @@ pub(crate) async fn count_execution_errors(
     ExecutionResponse {
         context: response.context,
         response: new_response,
+    }
+}
+
+pub(crate) async fn count_router_errors(
+    response: RouterResponse,
+    errors_config: &ErrorsConfiguration,
+) -> RouterResponse {
+    let context = response.context.clone();
+    let errors_config = errors_config.clone();
+
+    let (parts, body) = response.response.into_parts();
+
+    // TODO is this a bad idea? Probably...
+    // Deserialize the response body back into a response obj so we can pull the errors
+    let bytes = router::body::into_bytes(body)
+        .await
+        .unwrap();
+    let response_body: graphql::Response = serde_json::from_slice(&bytes).unwrap();
+
+    if !response_body.errors.is_empty() {
+        count_operation_errors(&response_body.errors, &context, &errors_config);
+    }
+
+    // Refresh context with the most up-to-date list of errors
+    context
+        .insert(COUNTED_ERRORS, to_map(&response_body.errors))
+        .expect("Unable to insert errors into context.");
+
+    RouterResponse {
+        context: response.context,
+        response: http::Response::from_parts(parts, router::body::from_bytes(bytes)),
     }
 }
 
