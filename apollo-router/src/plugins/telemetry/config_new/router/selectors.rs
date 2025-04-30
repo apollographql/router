@@ -1,4 +1,3 @@
-use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sha2::Digest;
@@ -14,6 +13,7 @@ use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
+use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -40,81 +40,6 @@ impl From<&RouterValue> for InstrumentValue<RouterSelector> {
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
-    /// A header from the request
-    RequestHeader {
-        /// The name of the request header.
-        request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// The request method.
-    RequestMethod {
-        /// The request method enabled or not
-        request_method: bool,
-    },
-    /// A value from context.
-    RequestContext {
-        /// The request context key.
-        request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// A header from the response
-    ResponseHeader {
-        /// The name of the request header.
-        response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// A status from the response
-    ResponseStatus {
-        /// The http response status code.
-        response_status: ResponseStatus,
-    },
-    /// The trace ID of the request.
-    TraceId {
-        /// The format of the trace ID.
-        trace_id: TraceIdFormat,
-    },
-    /// Apollo Studio operation id
-    StudioOperationId {
-        /// Apollo Studio operation id
-        studio_operation_id: bool,
-    },
-    /// A value from context.
-    ResponseContext {
-        /// The response context key.
-        response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// The operation name from the query.
-    OperationName {
-        /// The operation name from the query.
-        operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
     /// A value from baggage.
     Baggage {
         /// The name of the baggage item.
@@ -141,20 +66,98 @@ pub(crate) enum RouterSelector {
         #[serde(skip)]
         mocked_env_var: Option<String>,
     },
+    /// Critical error if it happens
+    Error {
+        #[allow(dead_code)]
+        error: ErrorRepr,
+    },
+    /// Boolean set to true if the response body contains graphql error
+    OnGraphQLError { on_graphql_error: bool },
+    /// The operation name from the query.
+    OperationName {
+        /// The operation name from the query.
+        operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
+    /// A header from the request
+    RequestHeader {
+        /// The name of the request header.
+        request_header: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    /// A value from context.
+    RequestContext {
+        /// The request context key.
+        request_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    /// The request method.
+    RequestMethod {
+        /// The request method enabled or not
+        request_method: bool,
+    },
+    /// The body of the response
+    ResponseBody {
+        /// The response body enabled or not
+        response_body: bool,
+    },
+    /// A header from the response
+    ResponseHeader {
+        /// The name of the request header.
+        response_header: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    /// A value from context.
+    ResponseContext {
+        /// The response context key.
+        response_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    /// A status from the response
+    ResponseStatus {
+        /// The http response status code.
+        response_status: ResponseStatus,
+    },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
     },
-    OnGraphQLError {
-        /// Boolean set to true if the response body contains graphql error
-        on_graphql_error: bool,
+    /// Apollo Studio operation id
+    StudioOperationId {
+        /// Apollo Studio operation id
+        studio_operation_id: bool,
     },
-    Error {
-        #[allow(dead_code)]
-        /// Critical error if it happens
-        error: ErrorRepr,
+    /// The trace ID of the request.
+    TraceId {
+        /// The format of the trace ID.
+        trace_id: TraceIdFormat,
     },
 }
 
@@ -219,6 +222,16 @@ impl Selector for RouterSelector {
 
     fn on_response(&self, response: &router::Response) -> Option<opentelemetry::Value> {
         match self {
+            RouterSelector::ResponseBody { response_body } if *response_body => {
+                response
+                    .context
+                    .extensions()
+                    .with_lock(|ext| {
+                        // Clone here in case anything else also needs access to the body
+                        ext.get::<RouterResponseBodyExtensionType>().cloned()
+                    })
+                    .map(|v| opentelemetry::Value::String(v.0.into()))
+            }
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
@@ -327,7 +340,7 @@ impl Selector for RouterSelector {
         }
     }
 
-    fn on_drop(&self) -> Option<Value> {
+    fn on_drop(&self) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -407,6 +420,7 @@ mod test {
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -873,6 +887,28 @@ mod test {
                 )
                 .unwrap(),
             "No Content".into()
+        );
+    }
+
+    #[test]
+    fn router_response_body() {
+        let selector = RouterSelector::ResponseBody {
+            response_body: true,
+        };
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|ext| {
+            ext.insert(RouterResponseBodyExtensionType(
+                r#"{"data": {"data": "res"}}"#.to_string(),
+            ));
+        });
+        let res = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::OK)
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res).unwrap(),
+            r#"{"data": {"data": "res"}}"#.into()
         );
     }
 }

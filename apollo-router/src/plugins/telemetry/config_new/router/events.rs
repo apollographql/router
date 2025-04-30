@@ -23,7 +23,7 @@ use crate::services::router;
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
 #[derive(Default, Clone)]
 pub(crate) struct DisplayRouterResponse(pub(crate) bool);
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
 
 pub(crate) type RouterEvents =
@@ -87,7 +87,8 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                 if let Some(body) = response
                     .context
                     .extensions()
-                    .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
+                    // Clone here in case anything else also needs access to the body
+                    .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
                 {
                     attrs.push(KeyValue::new(
                         HTTP_RESPONSE_BODY,

@@ -64,7 +64,6 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
-use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -277,7 +276,7 @@ impl RouterService {
                     Err(response) => response,
                     Ok(request) => {
                         // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are un-ready by default, so this
+                        // in RouterService::poll_ready. Clones are unready by default, so this
                         // self.supergraph_service is actually not ready, which is why we need to
                         // oneshot it here. That technically breaks backpressure, but because we are
                         // still readying the supergraph service before calling into the router
@@ -294,19 +293,13 @@ impl RouterService {
 
         // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
         // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
-        // or the other, and absolutely not do it inline here.
+        // or the other and absolutely not do it inline here.
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
         } = context
-            .extensions()
-            .with_lock(|lock| lock.get().cloned())
-            .unwrap_or_default();
-
-        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-        let display_router_response: DisplayRouterResponse = context
             .extensions()
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
@@ -366,17 +359,25 @@ impl RouterService {
                             Ok(body)
                         });
                     let body = body?;
+                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                    let display_router_response: DisplayRouterResponse = context
+                        .extensions()
+                        .with_lock(|lock| lock.get().cloned())
+                        .unwrap_or_default();
+
+                    let mut res = router::Response {
+                        response: Response::from_parts(
+                            parts,
+                            router::body::from_bytes(body.clone()),
+                        ),
+                        context,
+                    };
 
                     if display_router_response.0 {
-                        context.extensions().with_lock(|ext| {
-                            ext.insert(RouterResponseBodyExtensionType(body.clone()));
-                        });
+                        res.stash_the_body_in_extensions(body);
                     }
 
-                    Ok(router::Response {
-                        response: http::Response::from_parts(parts, router::body::from_bytes(body)),
-                        context,
-                    })
+                    Ok(res)
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
                         parts.headers.insert(
