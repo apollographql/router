@@ -103,10 +103,6 @@ impl FederationSchema {
         &self.referencers
     }
 
-    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
-        self.subgraph_metadata.as_deref()
-    }
-
     /// Returns all the types in the schema, minus builtins.
     pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> {
         self.schema

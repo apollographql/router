@@ -16,8 +16,6 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use clap::builder::FalseyValueParser;
-#[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
-use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
@@ -57,10 +55,10 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(feature = "dhat-heap")]
-pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+pub(crate) static DHAT_HEAP_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
 
 #[cfg(feature = "dhat-ad-hoc")]
-pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+pub(crate) static DHAT_AD_HOC_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
 
 pub(crate) static APOLLO_ROUTER_DEV_MODE: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
@@ -76,47 +74,31 @@ const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
 fn create_heap_profiler() {
-    unsafe {
-        match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
-            Ok(p) => {
-                println!("heap profiler installed: {:?}", p);
-                libc::atexit(drop_heap_profiler);
-            }
-            Err(e) => eprintln!("heap profiler install failed: {:?}", e),
-        }
-    }
+    *DHAT_HEAP_PROFILER.lock() = Some(dhat::Profiler::new_heap());
+    println!("heap profiler installed");
+    unsafe { libc::atexit(drop_heap_profiler) };
 }
 
 #[cfg(feature = "dhat-heap")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn drop_heap_profiler() {
-    unsafe {
-        if let Some(p) = DHAT_HEAP_PROFILER.take() {
-            drop(p);
-        }
+    if let Some(p) = DHAT_HEAP_PROFILER.lock().take() {
+        drop(p);
     }
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
 fn create_ad_hoc_profiler() {
-    unsafe {
-        match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
-            Ok(p) => {
-                println!("ad-hoc profiler installed: {:?}", p);
-                libc::atexit(drop_ad_hoc_profiler);
-            }
-            Err(e) => eprintln!("ad-hoc profiler install failed: {:?}", e),
-        }
-    }
+    *DHAT_AD_HOC_PROFILER.lock() = Some(dhat::Profiler::new_heap());
+    println!("ad-hoc profiler installed");
+    unsafe { libc::atexit(drop_ad_hoc_profiler) };
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn drop_ad_hoc_profiler() {
-    unsafe {
-        if let Some(p) = DHAT_AD_HOC_PROFILER.take() {
-            drop(p);
-        }
+    if let Some(p) = DHAT_AD_HOC_PROFILER.lock().take() {
+        drop(p);
     }
 }
 
