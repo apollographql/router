@@ -1196,15 +1196,12 @@ impl Verifier for DatadogTraceSpec {
         for (key, value) in self.attributes.iter() {
             // extracts a list of span attribute values with the provided key
             let binding = trace.select_path(&format!("$..meta..['{key}']"))?;
-            let matches_value = binding
-                .iter()
-                .find(|v| match v {
-                    Value::Bool(v) => &(*v).to_string() == *value,
-                    Value::Number(n) => &(*n).to_string() == *value,
-                    Value::String(s) => &s == value,
-                    _ => false,
-                })
-                .is_some();
+            let matches_value = binding.iter().any(|v| match v {
+                Value::Bool(v) => (*v).to_string() == *value,
+                Value::Number(n) => (*n).to_string() == *value,
+                Value::String(s) => s == value,
+                _ => false,
+            });
             if !matches_value {
                 return Err(BoxError::from(format!(
                     "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
