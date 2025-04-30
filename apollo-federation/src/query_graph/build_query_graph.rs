@@ -1170,6 +1170,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1295,6 +1296,7 @@ impl FederatedQueryGraphBuilder {
                                     .type_name()
                                     .clone(),
                                 application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1361,6 +1363,7 @@ impl FederatedQueryGraphBuilder {
                     &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1709,6 +1712,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -2127,6 +2131,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema

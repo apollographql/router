@@ -333,6 +333,23 @@ impl TypeDefinitionPosition {
             }
         }
     }
+
+    /// Remove a directive application.
+    #[allow(unused)]
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Object(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Interface(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Union(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Enum(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::InputObject(type_) => type_.remove_directive(schema, directive),
+        }
+    }
 }
 
 impl From<&ExtendedType> for TypeDefinitionPosition {
@@ -1599,6 +1616,24 @@ impl ScalarTypeDefinitionPosition {
             Vec::new()
         }
     }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
+    }
 }
 
 impl Display for ScalarTypeDefinitionPosition {
@@ -2142,6 +2177,24 @@ impl ObjectTypeDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 }
 
@@ -3328,6 +3381,24 @@ impl InterfaceTypeDefinitionPosition {
             Vec::new()
         }
     }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -4373,6 +4444,24 @@ impl UnionTypeDefinitionPosition {
             Vec::new()
         }
     }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
+    }
 }
 
 impl Display for UnionTypeDefinitionPosition {
@@ -4776,6 +4865,24 @@ impl EnumTypeDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 }
 
@@ -5316,6 +5423,24 @@ impl InputObjectTypeDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn remove_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: &Component<Directive>,
+    ) {
+        let Some(obj) = self.try_make_mut(&mut schema.schema) else {
+            return;
+        };
+        if !obj.directives.iter().any(|other_directive| {
+            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
+        }) {
+            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
+        }
+        obj.make_mut()
+            .directives
+            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 }
 
