@@ -372,15 +372,18 @@ impl NamedSelection {
                 .as_ref()
                 .map(|alias| vec![alias.name.as_str()])
                 .unwrap_or_else(|| vec![name.as_str()]),
-            Self::Path { alias, path, .. } => match (alias, path.next_subselection()) {
-                (Some(alias), _) => vec![alias.name.as_str()],
-                (_, Some(sub)) => sub
-                    .selections_iter()
-                    .flat_map(|selection| selection.names())
-                    .unique()
-                    .collect(),
-                _ => Vec::new(),
-            },
+            Self::Path { alias, path, .. } => {
+                if let Some(alias) = alias {
+                    vec![alias.name.as_str()]
+                } else if let Some(sub) = path.next_subselection() {
+                    sub.selections_iter()
+                        .flat_map(|selection| selection.names())
+                        .unique()
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
             Self::Group(alias, _) => vec![alias.name.as_str()],
         }
     }
