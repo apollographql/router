@@ -518,6 +518,7 @@ mod tests {
                 name!("requires"),
                 name!("skip"),
                 name!("specifiedBy"),
+                name!("tag"),
             ]
         );
     }
