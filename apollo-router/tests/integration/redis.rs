@@ -26,6 +26,7 @@ use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
+use apollo_router::services::router::body::from_bytes;
 use apollo_router::services::supergraph;
 use fred::cmd;
 use fred::prelude::*;
@@ -551,7 +552,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             }
         }))
         .unwrap()
-        .extra_plugin(subgraphs)
+        .extra_plugin(subgraphs.clone())
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
         .build_supergraph()
         .await
@@ -578,6 +579,115 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+    const SECRET_SHARED_KEY: &str = "supersecret";
+    let http_service = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_entity_cache": {
+                "enabled": true,
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": true,
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "2s"
+                        },
+                        "invalidation": {
+                            "enabled": true,
+                            "shared_key": SECRET_SHARED_KEY
+                        }
+                    },
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s",
+                            "invalidation": {
+                                "enabled": true,
+                                "shared_key": SECRET_SHARED_KEY
+                            }
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s",
+                            "invalidation": {
+                                "enabled": true,
+                                "shared_key": SECRET_SHARED_KEY
+                            }
+                        }
+                    }
+                }
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "supergraph": {
+                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+                "generate_query_fragments": false,
+            }
+        }))
+        .unwrap()
+        .extra_plugin(subgraphs.clone())
+        .schema(include_str!("../fixtures/supergraph-auth.graphql"))
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let request = http::Request::builder()
+        .uri("http://127.0.0.1:4000/invalidation")
+        .method(http::Method::POST)
+        .header(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )
+        .header(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_static(SECRET_SHARED_KEY),
+        )
+        .body(from_bytes(
+            serde_json::to_vec(&vec![json!({
+                "subgraph": "reviews",
+                "kind": "entity",
+                "type": "Product",
+                "key": {
+                    "upc": "3"
+                }
+            })])
+            .unwrap(),
+        ))
+        .unwrap();
+    let response = http_service.oneshot(request).await.unwrap();
+    let response_status = response.status();
+    let mut resp: serde_json::Value = serde_json::from_str(
+        &apollo_router::services::router::body::into_string(response.into_body())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        resp.as_object_mut()
+            .unwrap()
+            .get("count")
+            .unwrap()
+            .as_u64()
+            .unwrap(),
+        1u64
+    );
+    assert!(response_status.is_success());
+
+    // This should be in error because we invalidated this entity
+    assert!(client
+        .get::<String, _>("version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await.is_err());
+    // This entry should still be in redis because we didn't invalidate this entry
+    assert!(client
+          .get::<String, _>("version:1.0:subgraph:products:type:Query:hash:30cf92cd31bc204de344385c8f6d90a53da6c9180d80e8f7979a5bc19cd96055:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .await.is_ok());
 
     client.quit().await.unwrap();
     // calling quit ends the connection and event listener tasks
