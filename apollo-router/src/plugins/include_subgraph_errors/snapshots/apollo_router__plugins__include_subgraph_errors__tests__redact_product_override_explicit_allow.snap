@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall: true\nsubgraphs:\n  products: false\n\n\nREQUEST:\n{\n  \"data\": {\n    \"topProducts\": null\n  },\n  \"errors\": [\n    {\n      \"message\": \"Could not query products\",\n      \"path\": [],\n      \"extensions\": {\n        \"test\": \"value\",\n        \"code\": \"FETCH_ERROR\",\n        \"apollo.subgraph.name\": \"products\"\n      }\n    }\n  ]\n}"
+expression: actual_responses
+---
+- data:
+    topProducts: ~
+  errors:
+    - message: Subgraph errors redacted
+      path: []

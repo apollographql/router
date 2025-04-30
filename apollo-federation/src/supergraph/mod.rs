@@ -14,6 +14,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -1651,12 +1652,12 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
     Ok(())
 }
 
-const FEDERATION_ANY_TYPE_NAME: Name = name!("_Any");
+pub(crate) const FEDERATION_ANY_TYPE_NAME: Name = name!("_Any");
 const FEDERATION_SERVICE_TYPE_NAME: Name = name!("_Service");
 const FEDERATION_SDL_FIELD_NAME: Name = name!("sdl");
-const FEDERATION_ENTITY_TYPE_NAME: Name = name!("_Entity");
-const FEDERATION_SERVICE_FIELD_NAME: Name = name!("_service");
-const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
+pub(crate) const FEDERATION_ENTITY_TYPE_NAME: Name = name!("_Entity");
+pub(crate) const FEDERATION_SERVICE_FIELD_NAME: Name = name!("_service");
+pub(crate) const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
 pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
@@ -1665,11 +1666,11 @@ pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
 pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
 pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");
 
-const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecification {
+pub(crate) const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecification {
     name: FEDERATION_ANY_TYPE_NAME,
 };
 
-const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
+pub(crate) const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: FEDERATION_SERVICE_TYPE_NAME,
     fields: |_schema| {
         [FieldSpecification {
@@ -1681,7 +1682,7 @@ const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     },
 };
 
-const QUERY_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
+pub(crate) const EMPTY_QUERY_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: GRAPHQL_QUERY_TYPE_NAME,
     fields: |_schema| Default::default(), // empty Query (fields should be added later)
 };
@@ -1724,7 +1725,7 @@ fn add_federation_operations(
     if has_entity_type {
         UnionTypeSpecification {
             name: FEDERATION_ENTITY_TYPE_NAME,
-            members: |_| entity_members.clone(),
+            members: Box::new(move |_| entity_members.clone()),
         }
         .check_or_add(&mut subgraph.schema, None)?;
     }
@@ -1734,10 +1735,10 @@ fn add_federation_operations(
         root_kind: SchemaRootDefinitionKind::Query,
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
-        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
+        EMPTY_QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
         query_root_pos.insert(
             &mut subgraph.schema,
-            ComponentName::from(QUERY_TYPE_SPEC.name),
+            ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name),
         )?;
     }
 
@@ -1798,7 +1799,7 @@ fn add_federation_operations(
 /// impact on later query planning, because it sometimes make us try type-exploding some interfaces
 /// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
 /// understood something, and warning about that fact through an error is more helpful.
-fn remove_inactive_requires_and_provides_from_subgraph(
+pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
     supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
@@ -1928,12 +1929,20 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
         )?;
+
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
             } else {
-                let fields = fields.serialize().no_indent().to_string();
+                let fields = FieldSet {
+                    sources: Default::default(),
+                    selection_set: fields,
+                }
+                .serialize()
+                .no_indent()
+                .to_string();
+
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {
                         federation_spec_definition.provides_directive(schema, fields)?

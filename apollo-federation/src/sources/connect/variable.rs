@@ -44,6 +44,8 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::Context,
                     Namespace::Status,
                     Namespace::This,
+                    Namespace::Request,
+                    Namespace::Response,
                 ]
             }
         }
@@ -90,6 +92,8 @@ pub enum Namespace {
     Status,
     This,
     Batch,
+    Request,
+    Response,
 }
 
 impl Namespace {
@@ -101,6 +105,8 @@ impl Namespace {
             Self::Status => "$status",
             Self::This => "$this",
             Self::Batch => "$batch",
+            Self::Request => "$request",
+            Self::Response => "$response",
         }
     }
 }
@@ -116,6 +122,8 @@ impl FromStr for Namespace {
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
             "$batch" => Ok(Self::Batch),
+            "$request" => Ok(Self::Request),
+            "$response" => Ok(Self::Response),
             _ => Err(()),
         }
     }
@@ -136,9 +144,9 @@ impl Display for Namespace {
 /// A variable reference. Consists of a namespace starting with a `$` and an optional path
 /// separated by '.' characters.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableReference<'a, N: FromStr + ToString> {
+pub struct VariableReference<'a, N: FromStr + ToString> {
     /// The namespace of the variable - `$this`, `$args`, `$status`, etc.
-    pub(crate) namespace: VariableNamespace<N>,
+    pub namespace: VariableNamespace<N>,
 
     /// The path elements of this reference. For example, the reference `$this.a.b.c`
     /// has path elements `a`, `b`, `c`. May be empty in some cases, as in the reference `$status`.
@@ -161,8 +169,8 @@ impl<N: FromStr + ToString> Display for VariableReference<'_, N> {
 
 /// A namespace in a variable reference, like `$this` in `$this.a.b.c`
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableNamespace<N: FromStr + ToString> {
-    pub(crate) namespace: N,
+pub struct VariableNamespace<N: FromStr + ToString> {
+    pub namespace: N,
     pub(crate) location: Range<usize>,
 }
 

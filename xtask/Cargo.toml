@@ -38,13 +38,13 @@ tar = "0.4"
 tempfile = "3"
 tinytemplate = "1.2.1"
 tokio = { version = "1.36.0", features = ["full"] }
-which = "6.0.1"
+which = "7.0.0"
 walkdir = "2.4.0"
 xshell = "0.2.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = "0.22"
-zip = { version = "0.6", default-features = false }
+zip = { version = "2.0", default-features = false }
 
 [dev-dependencies]
 insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }

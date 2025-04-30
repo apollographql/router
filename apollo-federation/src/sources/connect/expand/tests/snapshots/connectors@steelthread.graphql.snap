@@ -21,41 +21,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -96,6 +80,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -114,88 +105,68 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
-                    StringTemplate {
-                        parts: [
-                            Expression(
-                                Expression {
-                                    expression: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users/",
+                            location: 0..7,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
                                                     WithRange {
-                                                        node: $args,
+                                                        node: Field(
+                                                            "id",
+                                                        ),
                                                         range: Some(
-                                                            0..5,
+                                                            6..8,
                                                         ),
                                                     },
                                                     WithRange {
-                                                        node: Key(
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "id",
-                                                                ),
-                                                                range: Some(
-                                                                    6..8,
-                                                                ),
-                                                            },
-                                                            WithRange {
-                                                                node: Empty,
-                                                                range: Some(
-                                                                    8..8,
-                                                                ),
-                                                            },
-                                                        ),
+                                                        node: Empty,
                                                         range: Some(
-                                                            5..8,
+                                                            8..8,
                                                         ),
                                                     },
                                                 ),
                                                 range: Some(
-                                                    0..8,
+                                                    5..8,
                                                 ),
                                             },
-                                        },
-                                    ),
-                                    location: 8..16,
+                                        ),
+                                        range: Some(
+                                            0..8,
+                                        ),
+                                    },
                                 },
                             ),
-                        ],
-                    },
+                            location: 8..16,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -252,6 +223,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
@@ -270,88 +248,68 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
-                    StringTemplate {
-                        parts: [
-                            Expression(
-                                Expression {
-                                    expression: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users/",
+                            location: 0..7,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
                                                     WithRange {
-                                                        node: $this,
+                                                        node: Field(
+                                                            "c",
+                                                        ),
                                                         range: Some(
-                                                            0..5,
+                                                            6..7,
                                                         ),
                                                     },
                                                     WithRange {
-                                                        node: Key(
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "c",
-                                                                ),
-                                                                range: Some(
-                                                                    6..7,
-                                                                ),
-                                                            },
-                                                            WithRange {
-                                                                node: Empty,
-                                                                range: Some(
-                                                                    7..7,
-                                                                ),
-                                                            },
-                                                        ),
+                                                        node: Empty,
                                                         range: Some(
-                                                            5..7,
+                                                            7..7,
                                                         ),
                                                     },
                                                 ),
                                                 range: Some(
-                                                    0..7,
+                                                    5..7,
                                                 ),
                                             },
-                                        },
-                                    ),
-                                    location: 8..15,
+                                        ),
+                                        range: Some(
+                                            0..7,
+                                        ),
+                                    },
                                 },
                             ),
-                        ],
-                    },
+                            location: 8..15,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Path(
             PathSelection {
@@ -401,5 +359,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             $this,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }
