@@ -498,6 +498,12 @@ In addition, you will find `docker` and `helm` assets:
  - [docker](https://github.com/apollographql/router/pkgs/container/nightly%2Frouter)
  - [helm](https://github.com/apollographql/router/pkgs/container/helm-charts-nightly%2Frouter)
 
+### Deleting old nightly artifacts
+To clean up old nightly `docker` assets:
+
+1. Select the [Github Action to trigger image deletion](https://github.com/apollographql/router/actions/workflows/delete-oldest-nightlies.yaml)
+2. Specify the number of images to delete. This will delete _oldest_ images first.
+
 ## Troubleshooting a release
 
 Mistakes happen. Most of these release steps are recoverable if you mess up.
