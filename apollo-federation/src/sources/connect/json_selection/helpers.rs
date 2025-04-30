@@ -67,7 +67,7 @@ pub(crate) fn span_is_all_spaces_or_comments(input: Span) -> bool {
     }
 }
 
-pub(crate) fn json_type_name(v: &JSON) -> &str {
+pub(crate) const fn json_type_name(v: &JSON) -> &str {
     match v {
         JSON::Array(_) => "array",
         JSON::Object(_) => "object",
@@ -128,7 +128,7 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
                 (
                     Some(b.clone()),
                     if json_type_of_a == json_type_of_b {
-                        vec![]
+                        Vec::new()
                     } else {
                         vec![format!(
                             "Lossy merge replacing {} with {}",

@@ -41,14 +41,11 @@ fn first_method(
     }
 
     match data {
-        JSON::Array(array) => (array.first().cloned(), vec![]),
-        JSON::String(s) => {
-            if let Some(first) = s.as_str().chars().next() {
-                (Some(JSON::String(first.to_string().into())), vec![])
-            } else {
-                (None, vec![])
-            }
-        }
+        JSON::Array(array) => (array.first().cloned(), Vec::new()),
+        JSON::String(s) => s.as_str().chars().next().map_or_else(
+            || (None, Vec::new()),
+            |first| (Some(JSON::String(first.to_string().into())), Vec::new()),
+        ),
         _ => (
             Some(data.clone()),
             vec![ApplyToError::new(
@@ -88,15 +85,11 @@ fn first_shape(
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
         ShapeCase::String(None) => Shape::string(locations),
-        ShapeCase::Array { prefix, tail } => {
-            if let Some(first) = prefix.first() {
-                first.clone()
-            } else if tail.is_none() {
-                Shape::none()
-            } else {
-                Shape::one([tail.clone(), Shape::none()], locations)
-            }
-        }
+        ShapeCase::Array { prefix, tail } => match (prefix.first(), tail) {
+            (Some(first), _) => first.clone(),
+            (_, tail) if tail.is_none() => Shape::none(),
+            _ => Shape::one([tail.clone(), Shape::none()], locations),
+        },
         ShapeCase::Name(_, _) => input_shape.item(0, locations),
         ShapeCase::Unknown => Shape::unknown(locations),
         // When there is no obvious first element, ->first gives us the input
