@@ -22,7 +22,7 @@ use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::{router, ExecutionResponse, RouterResponse};
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
-use crate::services::router::ClientRequestAccepts;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 pub(crate) async fn count_subgraph_errors(
@@ -371,7 +371,7 @@ mod test {
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::SupergraphResponse;
-    use crate::services::router::ClientRequestAccepts;
+    use crate::plugins::content_negotiation::ClientRequestAccepts;
 
     #[tokio::test]
     async fn test_count_errors_with_no_previously_counted_errors() {
