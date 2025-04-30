@@ -56,15 +56,9 @@ pub(super) fn carryover_directives(
         SchemaDefinitionPosition.insert_directive(to, spec.join_directive_application().into())?;
     }
 
-    for link in &metadata.links {
-        let link_already_applied = to
-            .metadata()
-            .and_then(|metadata| metadata.for_identity(&link.url.identity))
-            .is_some();
-        if !link_already_applied {
-            SchemaDefinitionPosition
-                .insert_directive(to, link.to_directive_application().into())?;
-        }
+    // @link for connect
+    if let Some(link) = metadata.for_identity(&ConnectSpec::identity()) {
+        SchemaDefinitionPosition.insert_directive(to, link.to_directive_application().into())?;
     }
 
     // @inaccessible
@@ -82,6 +76,8 @@ pub(super) fn carryover_directives(
                         .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
                         .is_none()
                 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
@@ -99,6 +95,8 @@ pub(super) fn carryover_directives(
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
@@ -116,6 +114,8 @@ pub(super) fn carryover_directives(
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
@@ -133,6 +133,8 @@ pub(super) fn carryover_directives(
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Scope)),
                     };
@@ -165,6 +167,8 @@ pub(super) fn carryover_directives(
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Policy)),
                     };
@@ -192,11 +196,13 @@ pub(super) fn carryover_directives(
         domain: APOLLO_SPEC_DOMAIN.to_string(),
         name: COST_DIRECTIVE_NAME_IN_SPEC,
     }) {
+        let mut insert_link = false;
         let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    insert_link = true;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
@@ -207,10 +213,15 @@ pub(super) fn carryover_directives(
             .get_directive(&directive_name)
             .and_then(|referencers| {
                 if referencers.len() > 0 {
+                    insert_link = true;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
+        if insert_link {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
     }
 
     // compose directive
@@ -270,6 +281,10 @@ pub(super) fn carryover_directives(
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
+        if insert_link {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
     }
 
     // @join__field(contextArguments: ...)
@@ -650,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_carryover() {
-        let sdl = include_str!("./tests/schemas/ignore/directives.graphql");
+        let sdl = include_str!("./tests/schemas/expand/directives.graphql");
         let schema = Schema::parse(sdl, "directives.graphql").expect("parse failed");
         let supergraph_schema = FederationSchema::new(schema).expect("federation schema failed");
         let subgraphs = extract_subgraphs_from_supergraph(&supergraph_schema, None)
