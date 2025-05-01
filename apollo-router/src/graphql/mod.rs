@@ -6,7 +6,7 @@ mod visitor;
 
 use std::fmt;
 use std::pin::Pin;
-
+use std::str::FromStr;
 use apollo_compiler::response::GraphQLError as CompilerExecutionError;
 use apollo_compiler::response::ResponseDataPathSegment;
 use futures::Stream;
@@ -20,6 +20,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
+use uuid::Uuid;
 pub(crate) use visitor::ResponseVisitor;
 
 use crate::json_ext::Object;
@@ -70,6 +71,11 @@ pub struct Error {
     /// The optional GraphQL extensions for this error.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+
+    // TODO do we need to implement a random one for default?
+    /// A unique identifier for this error
+    apollo_id: Uuid
+
     // TODO add attr to mark as counted, skip serialize?
     // TODO would include_subgraph_errors or a customer's plugin change this?
     // TODO Does serialization happen btwn layers (which would break this also)?
@@ -120,6 +126,7 @@ impl Error {
         extension_code: T,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         mut extensions: JsonMap<ByteString, Value>,
+        apollo_id: Option<Uuid>
     ) -> Self {
         extensions
             .entry("code")
@@ -129,10 +136,13 @@ impl Error {
             locations,
             path,
             extensions,
+            apollo_id: apollo_id.unwrap_or_else(|| Uuid::new_v4())
         }
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
+        let _value_str = value.to_string(); // TODO temp debug remove
+
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: format!("invalid error within `errors`: {}", error),
         })?;
@@ -167,12 +177,24 @@ impl Error {
             .map_err(|err| MalformedResponseError {
                 reason: format!("invalid `path` within error: {}", err),
             })?;
+        // TODO confirm camelcase key
+        let apollo_id = match extract_key_value_from_object!(object, "apolloId", Value::String(s) => s)
+        {
+            Ok(Some(s)) => Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
+                reason: format!("invalid `apolloId` within error: {}", err)
+            }),
+            Ok(None) => Ok(Uuid::new_v4()),
+            Err(err) => Err(MalformedResponseError {
+                reason: format!("invalid `apolloId` within error: {}", err),
+            }),
+        }?;
 
         Ok(Error {
             message,
             locations,
             path,
             extensions,
+            apollo_id
         })
     }
 
@@ -208,7 +230,21 @@ impl Error {
             locations,
             path,
             extensions,
+            apollo_id: Uuid::new_v4()
         })
+    }
+
+    pub fn extension_code(&self) -> Option<String> {
+        self.extensions.get("code").and_then(|c| match c {
+            Value::String(s) => Some(s.as_str().to_owned()),
+            Value::Bool(b) => Some(format!("{b}")),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Null | Value::Array(_) | Value::Object(_) => None,
+        })
+    }
+
+    pub fn apollo_id(&self) -> Uuid {
+        self.apollo_id
     }
 }
 
@@ -289,6 +325,7 @@ impl From<CompilerExecutionError> for Error {
             locations,
             path,
             extensions,
+            apollo_id: Uuid::new_v4()
         }
     }
 }

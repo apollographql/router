@@ -8,11 +8,11 @@ use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use serde::Deserialize;
 use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
+use crate::json_ext::Path;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -131,15 +131,13 @@ async fn apq_request(
                 Ok(request)
             } else {
                 tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
-                let errors = vec![crate::error::Error {
-                    message: "provided sha does not match query".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: serde_json_bytes::from_value(json!({
-                      "code": "PERSISTED_QUERY_HASH_MISMATCH",
-                    }))
-                    .unwrap(),
-                }];
+                let errors = vec![crate::error::Error::builder()
+                    .message("provided sha does not match query".to_string())
+                    .locations(Default::default())
+                    .path(Path::default())
+                    .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
+                    .build(),
+                ];
                 let res = SupergraphResponse::builder()
                     .status_code(StatusCode::BAD_REQUEST)
                     .data(Value::default())
@@ -164,15 +162,13 @@ async fn apq_request(
             } else {
                 let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);
                 tracing::trace!("apq: cache miss");
-                let errors = vec![crate::error::Error {
-                    message: "PersistedQueryNotFound".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: serde_json_bytes::from_value(json!({
-                      "code": "PERSISTED_QUERY_NOT_FOUND",
-                    }))
-                    .unwrap(),
-                }];
+                let errors = vec![crate::error::Error::builder()
+                    .message("PersistedQueryNotFound".to_string())
+                    .locations(Default::default())
+                    .path(Path::default())
+                    .extension_code("PERSISTED_QUERY_NOT_FOUND")
+                    .build(),
+                ];
                 let res = SupergraphResponse::builder()
                     .data(Value::default())
                     .errors(errors)
@@ -217,15 +213,13 @@ async fn disabled_apq_request(
         .extensions
         .contains_key("persistedQuery")
     {
-        let errors = vec![crate::error::Error {
-            message: "PersistedQueryNotSupported".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::from_value(json!({
-              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-            }))
-            .unwrap(),
-        }];
+        let errors = vec![crate::error::Error::builder()
+            .message("PersistedQueryNotSupported".to_string())
+            .locations(Default::default())
+            .path(Path::default())
+            .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
+            .build(),
+        ];
         let res = SupergraphResponse::builder()
             .data(Value::default())
             .errors(errors)
@@ -263,15 +257,12 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = Error {
-            message: "PersistedQueryNotFound".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::from_value(json!({
-              "code": "PERSISTED_QUERY_NOT_FOUND",
-            }))
-            .unwrap(),
-        };
+        let expected_apq_miss_error = Error::builder()
+            .message("PersistedQueryNotFound".to_string())
+            .locations(Default::default())
+            .path(Path::default())
+            .extension_code("PERSISTED_QUERY_NOT_FOUND")
+            .build();
 
         let mut router_service = from_supergraph_mock_callback(move |req| {
             let body = req.supergraph_request.body();
@@ -389,15 +380,12 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = Error {
-            message: "PersistedQueryNotFound".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::from_value(json!({
-              "code": "PERSISTED_QUERY_NOT_FOUND",
-            }))
-            .unwrap(),
-        };
+        let expected_apq_miss_error = Error::builder()
+            .message("PersistedQueryNotFound".to_string())
+            .locations(Default::default())
+            .path(Path::default())
+            .extension_code("PERSISTED_QUERY_NOT_FOUND")
+            .build();
 
         let mut router_service = from_supergraph_mock_callback(move |req| {
             let body = req.supergraph_request.body();
@@ -491,15 +479,12 @@ mod apq_tests {
             .await
             .unwrap()
             .unwrap();
-        let expected_apq_insert_failed_error = Error {
-            message: "provided sha does not match query".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::from_value(json!({
-              "code": "PERSISTED_QUERY_HASH_MISMATCH",
-            }))
-            .unwrap(),
-        };
+        let expected_apq_insert_failed_error = Error::builder()
+            .message("provided sha does not match query".to_string())
+            .locations(Default::default())
+            .path(Path::default())
+            .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
+            .build();
         assert_eq!(graphql_response.errors[0], expected_apq_insert_failed_error);
 
         // apq insert failed, this call will miss
@@ -522,15 +507,12 @@ mod apq_tests {
 
     #[tokio::test]
     async fn return_not_supported_when_disabled() {
-        let expected_apq_miss_error = Error {
-            message: "PersistedQueryNotSupported".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::from_value(json!({
-              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-            }))
-            .unwrap(),
-        };
+        let expected_apq_miss_error =Error::builder()
+            .message("PersistedQueryNotSupported".to_string())
+            .locations(Default::default())
+            .path(Path::default())
+            .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
+            .build();
 
         let mut config = Configuration::default();
         config.apq.enabled = false;

@@ -154,12 +154,16 @@ impl FetchError {
             }
         }
 
-        Error {
-            message: self.to_string(),
-            locations: Default::default(),
-            path,
-            extensions: value.as_object().unwrap().to_owned(),
-        }
+        Error::builder()
+            .message(self.to_string())
+            .locations(Vec::default())
+            .and_path(path)
+            // Extension code is required, but is only used if extensions doesn't have it. We always
+            // have a  code so this value will be ignored.
+            // TODO better way to unwrap the actual code from value just in case?
+            .extension_code("")
+            .extensions(value.as_object().unwrap().to_owned())
+            .build()
     }
 
     /// Convert the error to an appropriate response.

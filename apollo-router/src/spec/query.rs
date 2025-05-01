@@ -370,11 +370,14 @@ impl Query {
                                 ),
                                 _ => todo!(),
                             };
-                            parameters.errors.push(Error {
-                                message,
-                                path: Some(Path::from_response_slice(path)),
-                                ..Error::default()
-                            });
+                            parameters.errors.push(
+                                Error::builder()
+                                    .message(message)
+                                    .path(Path::from_response_slice(path))
+                                    // TODO this doesn't precisely match previous behavior
+                                    .extension_code("")
+                                    .build()
+                               );
 
                             Err(InvalidValue)
                         } else {
@@ -643,14 +646,17 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            parameters.errors.push(Error {
-                                message: format!(
-                                    "Cannot return null for non-nullable field {current_type}.{}",
-                                    field_name.as_str()
-                                ),
-                                path: Some(Path::from_response_slice(path)),
-                                ..Error::default()
-                            });
+                            parameters.errors.push(
+                                Error::builder()
+                                    .message(format!(
+                                        "Cannot return null for non-nullable field {current_type}.{}",
+                                        field_name.as_str()
+                                    ))
+                                    .path(Path::from_response_slice(path))
+                                    // TODO this doesn't precisely match previous behavior
+                                    .extension_code("")
+                                    .build()
+                            );
 
                             return Err(InvalidValue);
                         }
@@ -799,14 +805,16 @@ impl Query {
                         path.pop();
                         res?
                     } else if field_type.is_non_null() {
-                        parameters.errors.push(Error {
-                            message: format!(
+                        parameters.errors.push(Error::builder()
+                            .message(format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 root_type_name
-                            ),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                            ))
+                            .path(Path::from_response_slice(path))
+                            // TODO this doesn't precisely match previous behavior
+                            .extension_code("")
+                            .build()
+                        );
                         return Err(InvalidValue);
                     } else {
                         output.insert(field_name.clone(), Value::Null);

@@ -5,7 +5,6 @@ use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use serde::de::DeserializeOwned;
-use serde_json_bytes::Value;
 
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
@@ -188,7 +187,7 @@ fn to_map(errors: &[Error]) -> HashMap<String, u64> {
     let mut map: HashMap<String, u64> = HashMap::new();
     errors.iter().for_each(|error| {
         // TODO hash the full error more uniquely
-        map.entry(get_code(error).unwrap_or_default())
+        map.entry(error.extension_code().unwrap_or_default())
             .and_modify(|count| *count += 1)
             .or_insert(1);
     });
@@ -201,6 +200,9 @@ fn count_operation_errors(
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
+    let _id_str = errors[0].apollo_id().to_string(); // TODO DEBUG REMOVE
+    let _msg_str = errors[0].message.clone(); // TODO DEBUG REMOVE
+
     let previously_counted_errors_map: HashMap<String, u64> =
         unwrap_from_context(context, COUNTED_ERRORS);
 
@@ -229,7 +231,7 @@ fn count_operation_errors(
     // TODO how do we account for redacted errors when comparing? Likely skip them completely (they will have been counted with correct codes in subgraph layer)
     let mut diff_map = previously_counted_errors_map.clone();
     for error in errors {
-        let code = get_code(error).unwrap_or_default();
+        let code = error.extension_code().unwrap_or_default();
 
         // If we already counted this error in a previous layer, then skip counting it again
         if let Some(count) = diff_map.get_mut(&code) {
@@ -296,15 +298,6 @@ fn unwrap_from_context<V: Default + DeserializeOwned>(context: &Context, key: &s
         .get::<_, V>(key) // -> Option<Result<T, E>>
         .unwrap_or_default() // -> Result<T, E> (defaults to Ok(T::default()))
         .unwrap_or_default() // -> T (defaults on Err)
-}
-
-fn get_code(error: &Error) -> Option<String> {
-    error.extensions.get("code").and_then(|c| match c {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::Bool(b) => Some(format!("{b}")),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Null | Value::Array(_) | Value::Object(_) => None,
-    })
 }
 
 fn count_graphql_error(count: u64, code: String) {

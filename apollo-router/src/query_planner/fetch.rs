@@ -362,16 +362,24 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(Error {
-                                        locations: error.locations.clone(),
+                                    errors.push(Error::builder()
+                                        .locations(error.locations.clone())
                                         // append to the entitiy's path the error's path without
                                         //`_entities` and the index
-                                        path: Some(Path::from_iter(
-                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                        )),
-                                        message: error.message.clone(),
-                                        extensions: error.extensions.clone(),
-                                    })
+                                        .path(
+                                            Path::from_iter(
+                                                values_path
+                                                    .0
+                                                    .iter()
+                                                    .chain(&path.0[2..])
+                                                    .cloned(),
+                                            )
+                                        )
+                                        .message(error.message.clone())
+                                        .extension_code(error.extension_code().unwrap_or_default())
+                                        .extensions(error.extensions.clone())
+                                        .build()
+                                    )
                                 }
                             }
                             _ => {
@@ -450,12 +458,14 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error {
-                        locations: error.locations,
-                        path: Some(path),
-                        message: error.message,
-                        extensions: error.extensions,
-                    }
+                    Error::builder()
+                        .locations(error.locations.clone())
+                        .path(path)
+                        .message(error.message.clone())
+                        .extension_code(error.extension_code().unwrap_or_default())
+                        .extensions(error.extensions.clone())
+                        .apollo_id(error.apollo_id())
+                        .build()
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();

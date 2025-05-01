@@ -911,6 +911,7 @@ impl PluginPrivate for Telemetry {
 
                         // TODO merge into above match? Move into its own and_then()?
                         if let Ok(resp) = result {
+                            // TODO handle Err() case?
                             result = Ok(count_subgraph_errors(resp, &conf.apollo.errors).await);
                         }
 
