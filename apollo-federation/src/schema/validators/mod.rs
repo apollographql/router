@@ -19,6 +19,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod context;
+pub(crate) mod from_context;
 pub(crate) mod external;
 pub(crate) mod key;
 pub(crate) mod provides;
