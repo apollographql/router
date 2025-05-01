@@ -258,7 +258,7 @@ mod fieldset_based_directives {
 
     // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -286,7 +286,7 @@ mod fieldset_based_directives {
 
     // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[should_panic(expected = r#"Mismatched error counts: 2 != 1"#)]
     fn rejects_requires_on_interfaces() {
         let schema_str = r#"
             type Query {

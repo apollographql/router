@@ -40,7 +40,7 @@ pub(crate) fn validate_requires_directives(
             Ok(requires) => match requires.parse_fields(schema.schema()) {
                 Ok(fields) => {
                     for rule in fieldset_rules.iter() {
-                        rule.visit(&requires.target.type_name, &fields, errors);
+                        rule.visit(requires.target.type_name(), &fields, errors);
                     }
                 }
                 Err(e) => errors.push(e.into()),

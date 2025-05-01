@@ -12,7 +12,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
@@ -41,6 +40,7 @@ use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -486,7 +486,8 @@ impl FederationSchema {
             .get_directive(&provides_directive_definition.name)?;
 
         let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
-        for field_definition_position in &provides_directive_referencers.object_fields {
+        for field_definition_position in provides_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
@@ -497,7 +498,7 @@ impl FederationSchema {
                             .provides_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| ProvidesDirective {
                             arguments: args,
-                            target: field_definition_position,
+                            target: field_definition_position.clone(),
                             target_return_type: field_definition.ty.inner_named_type(),
                         }));
                     }
@@ -518,18 +519,19 @@ impl FederationSchema {
             .get_directive(&requires_directive_definition.name)?;
 
         let mut applications = Vec::new();
-        for field_definition_position in &requires_directive_referencers.object_fields {
+        for field_definition_position in requires_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
-                    for provides_directive_application in
+                    for directive_application in
                         directives.get_all(&requires_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .requires_directive_arguments(provides_directive_application);
+                        let arguments =
+                            federation_spec.requires_directive_arguments(directive_application);
                         applications.push(arguments.map(|args| RequiresDirective {
                             arguments: args,
-                            target: field_definition_position,
+                            target: field_definition_position.clone(),
                         }));
                     }
                 }
@@ -643,7 +645,9 @@ pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
-    target: &'schema ObjectFieldDefinitionPosition,
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
 }
@@ -664,7 +668,9 @@ pub(crate) struct RequiresDirective<'schema> {
     /// The parsed arguments of this `@requires` application
     arguments: RequiresDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
-    target: &'schema ObjectFieldDefinitionPosition,
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
 }
 
 impl HasFields for RequiresDirective<'_> {
@@ -673,7 +679,7 @@ impl HasFields for RequiresDirective<'_> {
     }
 
     fn target_type(&self) -> &Name {
-        &self.target.type_name
+        self.target.type_name()
     }
 }
 
