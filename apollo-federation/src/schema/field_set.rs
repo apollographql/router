@@ -57,15 +57,25 @@ pub(crate) fn parse_field_set(
     schema: &ValidFederationSchema,
     parent_type_name: NamedType,
     field_set: &str,
+    validate: bool,
 ) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse_and_validate(
-        schema.schema(),
-        parent_type_name,
-        field_set,
-        "field_set.graphql",
-    )?;
+    let field_set = if validate {
+        FieldSet::parse_and_validate(
+            schema.schema(),
+            parent_type_name,
+            field_set,
+            "field_set.graphql",
+        )?
+    } else {
+        Valid::assume_valid(FieldSet::parse(
+            schema.schema(),
+            parent_type_name,
+            field_set,
+            "field_set.graphql",
+        )?)
+    };
 
     // A field set should not contain any named fragments.
     let fragments = Default::default();
@@ -75,7 +85,9 @@ pub(crate) fn parse_field_set(
             Ok(()))?;
 
     // Validate that the field set has no aliases.
-    check_absence_of_aliases(&selection_set)?;
+    if validate {
+        check_absence_of_aliases(&selection_set)?;
+    }
 
     Ok(selection_set)
 }
@@ -225,8 +237,9 @@ mod tests {
         let supergraph = Supergraph::new(schema_str).expect("Expected supergraph schema to parse");
         // Note: `Supergraph::new` does not error out on aliases in field sets.
         // We call `parse_field_set` directly to test the alias error.
-        let err = super::parse_field_set(&supergraph.schema, Name::new("T").unwrap(), "r1: r")
-            .expect_err("Expected alias error");
+        let err =
+            super::parse_field_set(&supergraph.schema, Name::new("T").unwrap(), "r1: r", true)
+                .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),
             r#"Cannot use alias "r1" in "r1: r": aliases are not currently supported in the used directive"#

@@ -74,11 +74,9 @@ fn valid_query_plan() {
         .to_api_schema(api_options)
         .expect("api schema should be valid");
     let qp_config = apollo_federation::query_plan::query_planner::QueryPlannerConfig::default();
-    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
-        &supergraph,
-        qp_config.clone(),
-    )
-    .expect("query planner should be created");
+    let planner =
+        apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, qp_config)
+            .expect("query planner should be created");
     let stats = dhat::HeapStats::get();
     dhat::assert!(stats.max_bytes < MAX_BYTES_QUERY_PLANNER);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_QUERY_PLANNER);

@@ -213,7 +213,7 @@ impl ArrowMethod {
         }
     }
 
-    pub(super) fn is_public(&self) -> bool {
+    pub(super) const fn is_public(&self) -> bool {
         // This set controls which ->methods are exposed for use in connector
         // schemas. Non-public methods are still implemented and tested, but
         // will not be returned from lookup_arrow_method outside of tests.

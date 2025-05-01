@@ -48,19 +48,9 @@ impl FeatureGateEnforcementReport {
             .supergraph_schema()
             .schema_definition
             .directives
-            .get_all("join__directive")
-            .filter(|join| {
-                join.specified_argument_by_name("name")
-                    .and_then(|name| name.as_str())
-                    .map(|name| name == LINK_DIRECTIVE_NAME)
-                    .unwrap_or_default()
-            })
-            .filter_map(|join| {
-                join.specified_argument_by_name("args")
-                    .and_then(|arg| arg.as_object())
-            })
+            .get_all(LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
-                ParsedLinkSpec::from_join_directive_args(link).map(|maybe_spec| {
+                ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
                     maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
                 })?
             })
