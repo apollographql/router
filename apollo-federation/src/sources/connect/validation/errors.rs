@@ -239,8 +239,9 @@ impl Display for ErrorsMessageCoordinate<'_> {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_MESSAGE_ARGUMENT_NAME}:)`",
-                    directive_name = source.directive.name
+                    "`@{directive_name}(name: \"{source_name}\" {ERRORS_ARGUMENT_NAME}.{ERRORS_MESSAGE_ARGUMENT_NAME}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
                 )
             }
             ErrorsCoordinate::Connect { connect } => {
@@ -352,8 +353,9 @@ impl Display for ErrorsExtensionsCoordinate<'_> {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
-                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}.{ERRORS_EXTENSIONS_ARGUMENT_NAME}:)`",
-                    directive_name = source.directive.name
+                    "`@{directive_name}(name: \"{source_name}\" {ERRORS_ARGUMENT_NAME}.{ERRORS_EXTENSIONS_ARGUMENT_NAME}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
                 )
             }
             ErrorsCoordinate::Connect { connect } => {

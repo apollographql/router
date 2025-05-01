@@ -159,7 +159,6 @@ impl RawResponse {
             } => {
                 let mut extensions = None;
 
-                // Do we have errors settings for this connector?
                 let inputs = LazyCell::new(|| {
                     key.inputs().merge(
                         &connector.response_variables,

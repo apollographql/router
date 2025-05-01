@@ -1,5 +1,9 @@
 //! Validates `@source` directives
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::parser::SourceMap;
@@ -73,7 +77,10 @@ impl<'schema> SourceDirective<'schema> {
         errors.extend(
             Errors::parse(
                 ErrorsCoordinate::Source {
-                    source: SourceDirectiveCoordinate { directive },
+                    source: SourceDirectiveCoordinate {
+                        directive,
+                        name: name.unwrap_or_default(),
+                    },
                 },
                 schema,
             )
@@ -139,7 +146,7 @@ impl<'schema> SourceDirective<'schema> {
 }
 
 /// The `name` argument of a `@source` directive.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub(super) struct SourceName<'schema>(&'schema str);
 
 impl<'schema> SourceName<'schema> {
@@ -228,6 +235,18 @@ impl<'schema> SourceName<'schema> {
 
     pub(crate) fn as_str(&self) -> &str {
         self.0
+    }
+}
+
+impl Default for SourceName<'_> {
+    fn default() -> Self {
+        Self("")
+    }
+}
+
+impl Display for SourceName<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
