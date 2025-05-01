@@ -1,5 +1,4 @@
 use apollo_compiler::collections::IndexMap;
-use itertools::Itertools;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -86,7 +85,7 @@ fn join_not_null_method(
                     }
                 }
             }
-            joined.iter().join(separator.as_str())
+            joined.join(separator.as_str())
         }
         // Single values are emitted as strings with no separator
         _ => match to_string(data, method_name) {
