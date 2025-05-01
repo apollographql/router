@@ -203,6 +203,9 @@ pub(super) fn get_freeform_graphql_behavior(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::configuration::Apq;
+    use crate::configuration::PersistedQueries;
+    use crate::configuration::PersistedQueriesSafelist;
     use crate::services::layers::persisted_queries::manifest::ManifestOperation;
 
     #[test]
@@ -216,6 +219,11 @@ mod tests {
             ManifestOperation {
                 id: "invalid-syntax".to_string(),
                 body: "}}}".to_string(),
+                client_name: None,
+            },
+            ManifestOperation {
+                id: "multiple-ops".to_string(),
+                body: "query Op1 { a b } query Op2 { b a }".to_string(),
                 client_name: None,
             },
         ]));
@@ -234,6 +242,9 @@ mod tests {
             "#comment\n  fragment, B on U  , { b    c }    query SomeOp {  ...A ...B }  fragment    \nA on T { a }"
         ));
 
+        // Reordering operation definitions matches
+        assert!(is_allowed("query Op2 { b a } query Op1 { a b }"));
+
         // Reordering fields does not match!
         assert!(!is_allowed(
             "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{c b  } # yeah"
@@ -244,5 +255,62 @@ mod tests {
 
         // ... unless they precisely match a safelisted document that also has invalid syntax.
         assert!(is_allowed("}}}"));
+    }
+
+    fn freeform_behavior_from_pq_options(
+        safe_list: bool,
+        require_id: Option<bool>,
+        log_unknown: Option<bool>,
+    ) -> FreeformGraphQLBehavior {
+        let manifest = &PersistedQueryManifest::from(vec![ManifestOperation {
+            id: "valid-syntax".to_string(),
+            body: "query SomeOp { a b }".to_string(),
+            client_name: None,
+        }]);
+
+        let config = Configuration::builder()
+            .persisted_query(
+                PersistedQueries::builder()
+                    .enabled(true)
+                    .safelist(
+                        PersistedQueriesSafelist::builder()
+                            .enabled(safe_list)
+                            .require_id(require_id.unwrap_or_default())
+                            .build(),
+                    )
+                    .log_unknown(log_unknown.unwrap_or_default())
+                    .build(),
+            )
+            .apq(Apq::fake_new(Some(false)))
+            .build()
+            .unwrap();
+        get_freeform_graphql_behavior(&config, manifest)
+    }
+
+    #[test]
+    fn test_get_freeform_graphql_behavior() {
+        // safelist disabled
+        assert!(matches!(
+            freeform_behavior_from_pq_options(false, None, None),
+            FreeformGraphQLBehavior::AllowAll { .. }
+        ));
+
+        // safelist disabled, log_unknown enabled
+        assert!(matches!(
+            freeform_behavior_from_pq_options(false, None, Some(true)),
+            FreeformGraphQLBehavior::LogUnlessInSafelist { .. }
+        ));
+
+        // safelist enabled, id required
+        assert!(matches!(
+            freeform_behavior_from_pq_options(true, Some(true), None),
+            FreeformGraphQLBehavior::DenyAll { .. }
+        ));
+
+        // safelist enabled, id not required
+        assert!(matches!(
+            freeform_behavior_from_pq_options(true, None, None),
+            FreeformGraphQLBehavior::AllowIfInSafelist { .. }
+        ));
     }
 }

@@ -52,6 +52,7 @@ impl Lint {
             "clippy",
             "--all",
             "--all-targets",
+            "--all-features",
             "--no-deps",
             "--",
             "-D",

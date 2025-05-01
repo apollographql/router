@@ -55,7 +55,6 @@ use tower::Service;
 use tower::ServiceExt;
 use tower::service_fn;
 
-pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
 use crate::ApolloRouterError;
 use crate::Configuration;
@@ -71,11 +70,11 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::content_negotiation::MULTIPART_DEFER_ACCEPT_HEADER_VALUE;
+use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -1724,7 +1723,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
+        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
         .send()
         .await
         .unwrap();
@@ -1732,7 +1731,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
     );
 
     let first = response.chunk().await.unwrap().unwrap();
@@ -1784,7 +1783,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
+        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
         .send()
         .await
         .unwrap();
@@ -1792,7 +1791,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
     );
 
     let first = response.chunk().await.unwrap().unwrap();
@@ -2095,7 +2094,7 @@ async fn test_defer_is_not_buffered() {
     // `counts` is `[2, 2]` since both parts have to be generated on the server side
     // before the first one reaches the client.
     //
-    // Conversly, observing the value `1` after receiving the first part
+    // Conversely, observing the value `1` after receiving the first part
     // means the didn’t wait for all parts to be in the compression buffer
     // before sending any.
     assert_eq!(counts, [1, 2]);

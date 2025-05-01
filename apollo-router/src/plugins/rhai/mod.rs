@@ -119,7 +119,10 @@ impl Plugin for Rhai {
             ServiceStep::Router(shared_service.clone()),
             self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "RouterService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -137,7 +140,10 @@ impl Plugin for Rhai {
             ServiceStep::Supergraph(shared_service.clone()),
             self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "SupergraphService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -155,7 +161,10 @@ impl Plugin for Rhai {
             ServiceStep::Execution(shared_service.clone()),
             self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "ExecutionService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -173,7 +182,11 @@ impl Plugin for Rhai {
             ServiceStep::Subgraph(shared_service.clone()),
             self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "SubgraphService",
+                subgraph = name,
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }

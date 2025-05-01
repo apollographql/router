@@ -272,7 +272,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -318,7 +318,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -330,7 +330,7 @@ mod tests {
                 String::from("test"),
                 Subgraph {
                     ttl: None,
-                    enabled: true,
+                    enabled: Some(true),
                     redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {

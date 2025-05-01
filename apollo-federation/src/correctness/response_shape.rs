@@ -1273,6 +1273,29 @@ fn get_fragment_type_condition(
     })
 }
 
+/// Used for field sets like `@key`/`@requires` fields.
+pub fn compute_response_shape_for_selection_set(
+    schema: &ValidFederationSchema,
+    selection_set: &SelectionSet,
+) -> Result<ResponseShape, FederationError> {
+    let type_condition = &selection_set.ty;
+    let Some(normalized_type_condition) =
+        NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?
+    else {
+        bail!("Unexpected empty type condition for field set: {type_condition}")
+    };
+    let context = ResponseShapeContext {
+        schema: schema.clone(),
+        fragment_defs: Default::default(), // empty
+        parent_type: type_condition.clone(),
+        type_condition: normalized_type_condition,
+        inherited_clause: Clause::default(), // empty
+        current_clause: Clause::default(),   // empty
+        skip_introspection: false,           // false by default
+    };
+    context.process_selection_set(selection_set)
+}
+
 //==================================================================================================
 // ResponseShape display
 // - This section is only for display and thus untrusted.

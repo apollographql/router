@@ -57,7 +57,7 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@composeDirective"])
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@composeDirective", "@context", "@fromContext"])
           @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
 
@@ -67,4 +67,16 @@ subgraphs:
         type Query {
           overridden: String
           customAgain: String @custom1
+          z: Z
+        }
+
+        type Z @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          y: String
+          x: X
+        }
+
+        type X @key(fields: "id") {
+          id: ID!
+          w(z: String @fromContext(field: "$$ctx { y }")): String
         }

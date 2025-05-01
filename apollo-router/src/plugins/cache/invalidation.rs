@@ -5,7 +5,6 @@ use fred::error::RedisError;
 use fred::types::Scanner;
 use futures::StreamExt;
 use futures::stream;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,7 +17,6 @@ use tracing::Instrument;
 
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
-use crate::cache::redis::RedisKey;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 use crate::plugins::cache::entity::hash_entity_key;
 
@@ -109,7 +107,8 @@ impl Invalidation {
             key_prefix
         );
 
-        let mut stream = redis_storage.scan(key_prefix.clone(), Some(self.scan_count));
+        let mut stream =
+            redis_storage.scan_with_namespaced_results(key_prefix.clone(), Some(self.scan_count));
         let mut count = 0u64;
         let mut error = None;
 
@@ -124,15 +123,13 @@ impl Invalidation {
                     error = Some(e);
                     break;
                 }
-                Ok(scan_res) => {
-                    if let Some(keys) = scan_res.results() {
-                        let keys = keys
-                            .iter()
-                            .filter_map(|k| k.as_str())
-                            .map(|k| RedisKey(k.to_string()))
-                            .collect::<Vec<_>>();
+                Ok(mut scan_res) => {
+                    if let Some(keys) = scan_res.take_results() {
                         if !keys.is_empty() {
-                            let deleted = redis_storage.delete(keys).await.unwrap_or(0) as u64;
+                            let deleted = redis_storage
+                                .delete_from_scan_result(keys)
+                                .await
+                                .unwrap_or(0) as u64;
                             count += deleted;
                         }
                     }
@@ -189,7 +186,7 @@ impl Invalidation {
 
                 f64_histogram!(
                     "apollo.router.cache.invalidation.duration",
-                    "Duration of the invalidation event execution.",
+                    "Duration of the invalidation event execution, in seconds.",
                     start.elapsed().as_secs_f64()
                 );
                 res
@@ -227,7 +224,7 @@ pub(crate) enum InvalidationRequest {
     Entity {
         subgraph: String,
         r#type: String,
-        key: IndexMap<ByteString, Value>,
+        key: serde_json_bytes::Map<ByteString, Value>,
     },
 }
 

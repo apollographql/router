@@ -12,7 +12,7 @@ use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::services::router::ClientRequestAccepts;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -3246,7 +3246,7 @@ async fn id_scalar_can_overflow_i32() {
         .await
         .unwrap();
     // The router did not panic or respond with an early validation error.
-    // Instead it did a subgraph fetch, which recieved the correct ID variable without rounding:
+    // Instead it did a subgraph fetch, which received the correct ID variable without rounding:
     assert_eq!(
         response.errors[0].extensions["reason"].as_str().unwrap(),
         "$id = 9007199254740993"

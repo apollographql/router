@@ -48,7 +48,7 @@ pub enum ExpansionResult {
 /// with standard query planning concepts while still enforcing connector-specific rules. To do so,
 /// each connector is separated into its own unique subgraph with relevant GraphQL directives to enforce
 /// field dependencies and response structures. This allows for satisfiability and validation to piggy-back
-/// off of existing functionality in a reproducable way.
+/// off of existing functionality in a reproducible way.
 pub fn expand_connectors(
     supergraph_str: &str,
     api_schema_options: &ApiSchemaOptions,
@@ -195,7 +195,6 @@ mod helpers {
     use apollo_compiler::schema::ComponentOrigin;
     use apollo_compiler::schema::DirectiveList;
     use apollo_compiler::schema::EnumType;
-    use apollo_compiler::schema::ExtendedType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
     use apollo_compiler::ty;
@@ -255,7 +254,7 @@ mod helpers {
     }
 
     impl<'a> Expander<'a> {
-        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Expander<'a> {
+        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Self {
             let connect_name = ConnectSpec::connect_directive_name(link);
             let source_name = ConnectSpec::source_directive_name(link);
 
@@ -274,14 +273,16 @@ mod helpers {
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&KEY_DIRECTIVE_NAME))
-                .unwrap_or(KEY_DIRECTIVE_NAME);
+                .map_or(KEY_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&KEY_DIRECTIVE_NAME)
+                });
             let interface_object_name = subgraph
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME))
-                .unwrap_or(INTF_OBJECT_DIRECTIVE_NAME);
+                .map_or(INTF_OBJECT_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME)
+                });
             let extra_excluded = [EXTERNAL_DIRECTIVE_NAME, REQUIRES_DIRECTIVE_NAME]
                 .into_iter()
                 .map(|d| {
@@ -330,161 +331,134 @@ mod helpers {
                 .as_ref()
                 .map(|m| m.name.clone());
 
-            if let ConnectedElement::Field {
-                field_def,
-                parent_type,
-            } = connector
+            let element = connector
                 .id
                 .directive
                 .element(self.original_schema.schema())
                 .map_err(|_| {
                     FederationError::internal("Elements for connector position not found")
-                })?
-            {
-                let field_type = self
-                    .original_schema
-                    .get_type(field_def.ty.inner_named_type().clone())?;
+                })?;
 
-                // We'll need to make sure that we always process the inputs first, since they need to be present
-                // before any dependent types
-                self.process_inputs(&mut schema, &field_def.arguments)?;
+            match element {
+                ConnectedElement::Field {
+                    field_def,
+                    parent_type,
+                    ..
+                } => {
+                    let field_type = self
+                        .original_schema
+                        .get_type(field_def.ty.inner_named_type().clone())?;
 
-                // Actually process the type annotated with the connector, making sure to walk nested types
-                match field_type {
-                    TypeDefinitionPosition::Object(object) => {
-                        SchemaVisitor::new(
-                            self.original_schema,
+                    // We'll need to make sure that we always process the inputs first, since they need to be present
+                    // before any dependent types
+                    self.process_inputs(&mut schema, &field_def.arguments)?;
+
+                    // Actually process the type annotated with the connector, making sure to walk nested types
+                    match field_type {
+                        TypeDefinitionPosition::Object(object) => {
+                            SchemaVisitor::new(
+                                self.original_schema,
+                                &mut schema,
+                                &self.directive_deny_list,
+                            )
+                            .walk((
+                                object,
+                                connector
+                                    .selection
+                                    .next_subselection()
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        FederationError::internal(
+                                            "empty selections are not allowed",
+                                        )
+                                    })?,
+                            ))?;
+                        }
+
+                        TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => {
+                            self.insert_custom_leaf(&mut schema, &field_type)?;
+                        }
+
+                        TypeDefinitionPosition::Interface(interface) => {
+                            return Err(FederationError::internal(format!(
+                                "connect directives not yet supported on interfaces: found on {}",
+                                interface.type_name
+                            )));
+                        }
+                        TypeDefinitionPosition::Union(union) => {
+                            return Err(FederationError::internal(format!(
+                                "connect directives not yet supported on union: found on {}",
+                                union.type_name
+                            )));
+                        }
+                        TypeDefinitionPosition::InputObject(input) => {
+                            return Err(FederationError::internal(format!(
+                                "connect directives not yet supported on inputs: found on {}",
+                                input.type_name
+                            )));
+                        }
+                    };
+
+                    // Add the root type for this connector, optionally inserting a dummy query root
+                    // if the connector is not defined within a field on a Query (since a subgraph is invalid
+                    // without at least a root-level Query)
+
+                    let parent_pos = ObjectTypeDefinitionPosition {
+                        type_name: parent_type.name.clone(),
+                    };
+
+                    self.insert_object_and_field(&mut schema, &parent_pos, field_def)?;
+                    self.ensure_query_root_type(
+                        &mut schema,
+                        &query_alias,
+                        Some(&parent_type.name),
+                    )?;
+                    if let Some(mutation_alias) = mutation_alias {
+                        self.ensure_mutation_root_type(
                             &mut schema,
-                            &self.directive_deny_list,
-                        )
-                        .walk((
-                            object,
-                            connector.selection.next_subselection().cloned().ok_or(
-                                FederationError::internal("empty selections are not allowed"),
-                            )?,
-                        ))?;
-                    }
-
-                    TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => {
-                        self.insert_custom_leaf(&mut schema, &field_type)?;
-                    }
-
-                    TypeDefinitionPosition::Interface(interface) => {
-                        return Err(FederationError::internal(format!(
-                            "connect directives not yet supported on interfaces: found on {}",
-                            interface.type_name
-                        )));
-                    }
-                    TypeDefinitionPosition::Union(union) => {
-                        return Err(FederationError::internal(format!(
-                            "connect directives not yet supported on union: found on {}",
-                            union.type_name
-                        )));
-                    }
-                    TypeDefinitionPosition::InputObject(input) => {
-                        return Err(FederationError::internal(format!(
-                            "connect directives not yet supported on inputs: found on {}",
-                            input.type_name
-                        )));
-                    }
-                };
-
-                // Add the root type for this connector, optionally inserting a dummy query root
-                // if the connector is not defined within a field on a Query (since a subgraph is invalid
-                // without at least a root-level Query)
-                let ExtendedType::Object(parent_object) = parent_type else {
-                    return Err(FederationError::internal(
-                        "connect directives on interfaces is not yet supported",
-                    ));
-                };
-
-                let parent_pos = ObjectTypeDefinitionPosition {
-                    type_name: parent_object.name.clone(),
-                };
-
-                self.insert_query_for_field(&mut schema, &query_alias, &parent_pos, field_def)?;
-
-                let query_root = SchemaRootDefinitionPosition {
-                    root_kind: SchemaRootDefinitionKind::Query,
-                };
-                query_root.insert(
-                    &mut schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: query_alias,
-                    },
-                )?;
-
-                if let Some(mutation_alias) = mutation_alias {
-                    // only add the mutation root definition if we've added the
-                    // type to this schema
-                    if schema.get_type(mutation_alias.clone()).is_ok() {
-                        let mutation_root = SchemaRootDefinitionPosition {
-                            root_kind: SchemaRootDefinitionKind::Mutation,
-                        };
-                        mutation_root.insert(
-                            &mut schema,
-                            ComponentName {
-                                origin: ComponentOrigin::Definition,
-                                name: mutation_alias,
-                            },
+                            &mutation_alias,
+                            &parent_type.name,
                         )?;
                     }
+
+                    // Process any outputs needed by the connector
+                    self.process_outputs(
+                        &mut schema,
+                        connector,
+                        parent_type.name.clone(),
+                        field_def.ty.inner_named_type().clone(),
+                    )?;
                 }
+                ConnectedElement::Type { type_def } => {
+                    SchemaVisitor::new(
+                        self.original_schema,
+                        &mut schema,
+                        &self.directive_deny_list,
+                    )
+                    .walk((
+                        ObjectTypeDefinitionPosition {
+                            type_name: type_def.name.clone(),
+                        },
+                        connector
+                            .selection
+                            .next_subselection()
+                            .cloned()
+                            .ok_or_else(|| {
+                                FederationError::internal("empty selections are not allowed")
+                            })?,
+                    ))?;
 
-                // Process any outputs needed by the connector
-                self.process_outputs(
-                    &mut schema,
-                    connector,
-                    parent_object.name.clone(),
-                    field_def.ty.inner_named_type().clone(),
-                )?;
-            } else {
-                // TODO — replace this with real expansion
-                let query_object = ObjectTypeDefinitionPosition {
-                    type_name: query_alias.clone(),
-                };
+                    // we need a Query root field to be valid
+                    self.ensure_query_root_type(&mut schema, &query_alias, None)?;
 
-                query_object.pre_insert(&mut schema)?;
-                query_object.insert(
-                    &mut schema,
-                    Node::new(ObjectType {
-                        description: None,
-                        name: query_alias.clone(),
-                        implements_interfaces: IndexSet::with_hasher(Default::default()),
-                        directives: DirectiveList::new(),
-                        fields: IndexMap::default(),
-                    }),
-                )?;
-
-                let field_def = FieldDefinition {
-                    description: None,
-                    name: name!("_"),
-                    arguments: Vec::new(),
-                    ty: ty!(ID),
-                    directives: ast::DirectiveList(vec![Node::new(Directive {
-                        name: name!("federation__inaccessible"),
-                        arguments: Vec::new(),
-                    })]),
-                };
-
-                let field_pos = ObjectFieldDefinitionPosition {
-                    type_name: query_alias.clone(),
-                    field_name: field_def.name.clone(),
-                };
-
-                field_pos.insert(&mut schema, field_def.into())?;
-
-                let query_root = SchemaRootDefinitionPosition {
-                    root_kind: SchemaRootDefinitionKind::Query,
-                };
-                query_root.insert(
-                    &mut schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: query_alias,
-                    },
-                )?;
+                    // Process any outputs needed by the connector
+                    self.process_outputs(
+                        &mut schema,
+                        connector,
+                        type_def.name.clone(),
+                        type_def.name.clone(),
+                    )?;
+                }
             }
 
             Ok(schema)
@@ -546,7 +520,7 @@ mod helpers {
             };
 
             let parent_type = self.original_schema.get_type(parent_type_name)?;
-            let output_type = to_schema.get_type(output_type_name.clone())?;
+            let output_type = to_schema.get_type(output_type_name)?;
             let key_for_type = match &connector.entity_resolver {
                 Some(EntityResolver::Explicit) => output_type,
                 _ => parent_type,
@@ -575,9 +549,7 @@ mod helpers {
                 parsed
                     .next_subselection()
                     .cloned()
-                    .ok_or(FederationError::internal(
-                        "empty selections are not allowed",
-                    ))?,
+                    .ok_or_else(|| FederationError::internal("empty selections are not allowed"))?,
             ))?;
 
             // This actually adds the key fields if necessary, which is only
@@ -743,10 +715,54 @@ mod helpers {
             }
         }
 
-        /// Insert a query root for a connect field
+        /// Insert the parent type and field definition for a connector
+        fn insert_object_and_field(
+            &self,
+            to_schema: &mut FederationSchema,
+            field_parent: &ObjectTypeDefinitionPosition,
+            field: impl AsRef<FieldDefinition>,
+        ) -> Result<(), FederationError> {
+            let original = field.as_ref();
+
+            let parent_type = field_parent.get(self.original_schema.schema())?;
+
+            try_pre_insert!(to_schema, field_parent)?;
+            let field_def = FieldDefinition {
+                description: original.description.clone(),
+                name: original.name.clone(),
+                arguments: original.arguments.clone(),
+                ty: original.ty.clone(),
+                directives: filter_directives(&self.directive_deny_list, &original.directives),
+            };
+            try_insert!(
+                to_schema,
+                field_parent,
+                Node::new(ObjectType {
+                    description: parent_type.description.clone(),
+                    name: parent_type.name.clone(),
+                    implements_interfaces: parent_type.implements_interfaces.clone(),
+                    directives: filter_directives(
+                        &self.directive_deny_list,
+                        &parent_type.directives,
+                    ),
+                    fields: Default::default()
+                })
+            )?;
+
+            let pos = ObjectFieldDefinitionPosition {
+                type_name: parent_type.name.clone(),
+                field_name: field_def.name.clone(),
+            };
+
+            pos.insert(to_schema, field_def.into())?;
+
+            Ok(())
+        }
+
+        /// Insert a query root type for a connect field
         ///
-        /// This method will handle creating a dummy query root as shown below when the
-        /// parent type is _not_ a root-level Query to pass schema validation.
+        /// If the connector is not defined on a Query root field, we'll need to
+        /// construct a dummy field to make a valid schema.
         ///
         /// ```graphql
         /// type Query {
@@ -755,95 +771,80 @@ mod helpers {
         /// ```
         ///
         /// Note: This would probably be better off expanding the query to have
-        /// an __entities vs. adding an inaccessible field.
-        fn insert_query_for_field(
+        /// an _entities vs. adding an inaccessible field.
+        fn ensure_query_root_type(
             &self,
             to_schema: &mut FederationSchema,
             query_alias: &Name,
-            field_parent: &ObjectTypeDefinitionPosition,
-            field: impl AsRef<FieldDefinition>,
+            parent_type_name: Option<&Name>,
         ) -> Result<(), FederationError> {
-            // Prime the query type
-            let query = ObjectTypeDefinitionPosition {
-                type_name: query_alias.clone(),
-            };
-
-            // Now we'll need to know what field to add to the query root. In the case
-            // where the parent of the field on the original schema was not the root
-            // Query object, the field added is a dummy inaccessible field and the actual
-            // parent root is created and upserted. Otherwise, the query will contain the field specified.
-            let original = field.as_ref();
-            let field = if field_parent.type_name != *query_alias {
-                // We'll need to upsert the actual type for the field's parent
-                let parent_type = field_parent.get(self.original_schema.schema())?;
-
-                try_pre_insert!(to_schema, field_parent)?;
-                let field_def = FieldDefinition {
-                    description: original.description.clone(),
-                    name: original.name.clone(),
-                    arguments: original.arguments.clone(),
-                    ty: original.ty.clone(),
-                    directives: filter_directives(&self.directive_deny_list, &original.directives),
-                };
-                try_insert!(
-                    to_schema,
-                    field_parent,
-                    Node::new(ObjectType {
-                        description: parent_type.description.clone(),
-                        name: parent_type.name.clone(),
-                        implements_interfaces: parent_type.implements_interfaces.clone(),
-                        directives: filter_directives(
-                            &self.directive_deny_list,
-                            &parent_type.directives,
-                        ),
-                        // don't insert field def here. if the type already existed
-                        // which happens with circular references, then this defintion
-                        // won't be used.
-                        fields: Default::default()
-                    })
-                )?;
-
-                let pos = ObjectFieldDefinitionPosition {
-                    type_name: parent_type.name.clone(),
-                    field_name: field_def.name.clone(),
+            if parent_type_name.is_none_or(|name| name != query_alias) {
+                let query = ObjectTypeDefinitionPosition {
+                    type_name: query_alias.clone(),
                 };
 
-                pos.insert(to_schema, field_def.into())?;
-
-                // Return the dummy field to add to the root Query
-                FieldDefinition {
+                let dummy_field_def = FieldDefinition {
                     description: None,
                     name: name!("_"),
                     arguments: Vec::new(),
-                    ty: ast::Type::Named(ast::NamedType::new("ID")?),
+                    ty: ty!(ID),
                     directives: ast::DirectiveList(vec![Node::new(Directive {
                         name: name!("federation__inaccessible"),
                         arguments: Vec::new(),
                     })]),
-                }
-            } else {
-                FieldDefinition {
-                    description: original.description.clone(),
-                    name: original.name.clone(),
-                    arguments: original.arguments.clone(),
-                    ty: original.ty.clone(),
-                    directives: filter_directives(&self.directive_deny_list, &original.directives),
-                }
-            };
+                };
 
-            // Insert the root Query
-            // Note: This should error if Query is already defined, as it shouldn't be
-            query.pre_insert(to_schema)?;
-            query.insert(
+                query.pre_insert(to_schema)?;
+                query.insert(
+                    to_schema,
+                    Node::new(ObjectType {
+                        description: None,
+                        name: query_alias.clone(),
+                        implements_interfaces: IndexSet::with_hasher(Default::default()),
+                        directives: DirectiveList::new(),
+                        fields: IndexMap::from_iter([(
+                            dummy_field_def.name.clone(),
+                            Component::new(dummy_field_def),
+                        )]),
+                    }),
+                )?;
+            }
+
+            SchemaRootDefinitionPosition {
+                root_kind: SchemaRootDefinitionKind::Query,
+            }
+            .insert(
                 to_schema,
-                Node::new(ObjectType {
-                    description: None,
+                ComponentName {
+                    origin: ComponentOrigin::Definition,
                     name: query_alias.clone(),
-                    implements_interfaces: IndexSet::with_hasher(Default::default()),
-                    directives: DirectiveList::new(),
-                    fields: IndexMap::from_iter([(field.name.clone(), Component::new(field))]),
-                }),
+                },
             )?;
+
+            Ok(())
+        }
+
+        /// Adds the mutation root type to the schema definition if necessary
+        fn ensure_mutation_root_type(
+            &self,
+            to_schema: &mut FederationSchema,
+            mutation_alias: &Name,
+            parent_type_name: &Name,
+        ) -> Result<(), FederationError> {
+            if mutation_alias == parent_type_name
+                && to_schema.get_type(mutation_alias.clone()).is_ok()
+            {
+                let mutation_root = SchemaRootDefinitionPosition {
+                    root_kind: SchemaRootDefinitionKind::Mutation,
+                };
+                mutation_root.insert(
+                    to_schema,
+                    ComponentName {
+                        origin: ComponentOrigin::Definition,
+                        name: mutation_alias.clone(),
+                    },
+                )?;
+            }
 
             Ok(())
         }

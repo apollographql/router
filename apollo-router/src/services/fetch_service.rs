@@ -135,6 +135,14 @@ impl FetchService {
         let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
+            let connector = schema
+                .connectors
+                .as_ref()
+                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
+                .ok_or("no connector found for service")?;
+
+            let keys = connector.resolvable_key(schema.supergraph_schema())?;
+
             let (_parts, response) = match connector_service_factory
                 .create()
                 .oneshot(
@@ -144,11 +152,12 @@ impl FetchService {
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
+                        .and_keys(keys)
                         .build(),
                 )
                 .await
                 .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
-                .add_subgraph_name(subgraph_name.as_str())
+                .with_subgraph_name(subgraph_name.as_str())
             {
                 Err(e) => {
                     return Ok((Value::default(), vec![e]));

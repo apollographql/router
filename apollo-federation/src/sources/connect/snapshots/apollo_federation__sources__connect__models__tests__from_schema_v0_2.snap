@@ -33,37 +33,17 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/posts",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {
@@ -86,6 +66,10 @@ expression: "&connectors"
                 ),
             },
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -138,9 +122,16 @@ expression: "&connectors"
         spec: V0_2,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     ConnectId {
-        label: "connectors.json http: GET /posts?id=1",
+        label: "connectors.json http: POST /posts",
         subgraph_name: "connectors",
         source_name: Some(
             "json",
@@ -154,7 +145,7 @@ expression: "&connectors"
         ),
     }: Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /posts?id=1",
+            label: "connectors.json http: POST /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -169,62 +160,19 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
-                ],
-                query: [
-                    (
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "id",
-                                        location: 7..9,
-                                    },
-                                ),
-                            ],
-                        },
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "1",
-                                        location: 10..11,
-                                    },
-                                ),
-                            ],
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/posts",
+                            location: 0..6,
                         },
                     ),
                 ],
             },
-            method: Get,
+            method: Post,
             headers: {
                 "authtoken": From(
                     "x-auth-token",
@@ -244,7 +192,75 @@ expression: "&connectors"
                     ),
                 ),
             },
-            body: None,
+            body: Some(
+                Named(
+                    SubSelection {
+                        selections: [
+                            Path {
+                                alias: Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "ids",
+                                            ),
+                                            range: Some(
+                                                0..3,
+                                            ),
+                                        },
+                                        range: Some(
+                                            0..4,
+                                        ),
+                                    },
+                                ),
+                                inline: false,
+                                path: PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $batch,
+                                                range: Some(
+                                                    5..11,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "id",
+                                                        ),
+                                                        range: Some(
+                                                            12..14,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            14..14,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    11..14,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            5..14,
+                                        ),
+                                    },
+                                },
+                            },
+                        ],
+                        range: Some(
+                            0..14,
+                        ),
+                    },
+                ),
+            ),
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -293,9 +309,20 @@ expression: "&connectors"
         ),
         config: None,
         max_requests: None,
-        entity_resolver: None,
+        entity_resolver: Some(
+            TypeBatch,
+        ),
         spec: V0_2,
-        request_variables: {},
+        request_variables: {
+            $batch,
+        },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

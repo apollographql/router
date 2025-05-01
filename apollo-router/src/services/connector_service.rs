@@ -167,9 +167,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             }
             if let Some(source_name) = connector.id.source_name.as_ref() {
                 span.record("apollo.connector.source.name", source_name);
-                if let Ok(detail) =
-                    serde_json::to_string(&serde_json::json!({ "baseURL": transport.source_url }))
-                {
+                if let Ok(detail) = serde_json::to_string(
+                    &serde_json::json!({ "baseURL": transport.source_url.as_ref().map(|uri| uri.to_string()) }),
+                ) {
                     span.record("apollo.connector.source.detail", detail);
                 }
             }

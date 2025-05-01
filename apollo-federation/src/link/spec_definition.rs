@@ -7,6 +7,7 @@ use apollo_compiler::Node;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -135,17 +136,21 @@ pub(crate) trait SpecDefinition {
     }
 
     fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let link = self.link_in_schema(schema)?;
+        ensure!(
+            link.is_some(),
+            "The {self_url} specification should have been added to the schema before this is called",
+            self_url = self.url()
+        );
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for type_spec in self.type_specs() {
-            // TODO: In JS, `check_or_add` take in the "feature" (ie. the link), and we'll likely need to
-            // do the same here and below to account for renamed directives and imports
-            if let Err(err) = type_spec.check_or_add(schema) {
+            if let Err(err) = type_spec.check_or_add(schema, link.as_ref()) {
                 errors.push(err);
             }
         }
 
         for directive_spec in self.directive_specs() {
-            if let Err(err) = directive_spec.check_or_add(schema) {
+            if let Err(err) = directive_spec.check_or_add(schema, link.as_ref()) {
                 errors.push(err);
             }
         }

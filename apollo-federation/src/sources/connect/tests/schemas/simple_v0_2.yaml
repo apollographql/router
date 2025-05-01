@@ -27,7 +27,7 @@ subgraphs:
             )
         }
 
-        type Post @connect(source: "json", http: { GET: "/posts?id=1" }, selection: "id title body") {
+        type Post @connect(source: "json", http: { POST: "/posts", body: "ids: $$batch.id" }, selection: "id title body") {
           id: ID!
           title: String
           body: String

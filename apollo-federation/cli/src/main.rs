@@ -18,6 +18,7 @@ use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::subgraph;
+use apollo_federation::subgraph::typestate;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
@@ -91,6 +92,11 @@ enum Command {
     Compose {
         /// Path(s) to subgraph schemas.
         schemas: Vec<PathBuf>,
+    },
+    /// Expand and validate a subgraph schema and print the result
+    Subgraph {
+        /// The path to the subgraph schema file, or `-` for stdin
+        subgraph_schema: PathBuf,
     },
     /// Extract subgraph schemas from a supergraph schema to stdout (or in a directory if specified)
     Extract {
@@ -171,6 +177,7 @@ fn main() -> ExitCode {
             planner,
         } => cmd_plan(&query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
+        Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
             supergraph_schema,
@@ -310,16 +317,29 @@ fn cmd_plan(
     match result {
         Ok(_) => Ok(()),
         Err(CorrectnessError::FederationError(e)) => Err(e),
-        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!(
-            "Response shape from query plan does not match response shape from input operation:\n{}",
-            e.description()
-        )),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
     }
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     load_supergraph(file_paths)?;
     println!("[SUCCESS]");
+    Ok(())
+}
+
+fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
+    let doc_str = read_input(file_path);
+    let name = file_path
+        .file_name()
+        .and_then(|name| name.to_str().map(|x| x.to_string()));
+    let name = name.unwrap_or("subgraph".to_string());
+    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
+        .expect("valid schema")
+        .expand_links()
+        .expect("expanded subgraph to be valid")
+        .validate(true)
+        .map_err(|e| e.into_inner())?;
+    println!("{}", subgraph.schema_string());
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 use apollo_compiler::ExecutableDocument;
 
+use super::query_plan_analysis::AnalysisContext;
 use super::query_plan_analysis::interpret_query_plan;
 use super::response_shape::ResponseShape;
 use super::*;
@@ -101,7 +102,7 @@ type T implements I
 }
 "#;
 
-fn plan_response_shape(op_str: &str) -> ResponseShape {
+pub(crate) fn plan_response_shape_with_schema(schema_str: &str, op_str: &str) -> ResponseShape {
     // Initialization
     let config = query_planner::QueryPlannerConfig {
         generate_query_fragments: false,
@@ -111,7 +112,7 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
         },
         ..Default::default()
     };
-    let supergraph = crate::Supergraph::new(SCHEMA_STR).unwrap();
+    let supergraph = crate::Supergraph::new(schema_str).unwrap();
     let planner = query_planner::QueryPlanner::new(&supergraph, config).unwrap();
 
     // Parse the schema and operation
@@ -127,13 +128,15 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
     // Compare response shapes
     let op_rs = response_shape::compute_response_shape_for_operation(&op, api_schema).unwrap();
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&op).unwrap();
-    let plan_rs = interpret_query_plan(&supergraph.schema, &root_type, &query_plan).unwrap();
+    let supergraph_schema = planner.supergraph_schema();
     let subgraphs_by_name = supergraph
         .extract_subgraphs()
         .unwrap()
         .into_iter()
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
+    let context = AnalysisContext::new(supergraph_schema.clone(), &subgraphs_by_name);
+    let plan_rs = interpret_query_plan(&context, &root_type, &query_plan).unwrap();
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
     let assumption = response_shape::Clause::default(); // empty assumption at the top level
     assert!(
@@ -142,6 +145,10 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
     );
 
     plan_rs
+}
+
+fn plan_response_shape(op_str: &str) -> ResponseShape {
+    plan_response_shape_with_schema(SCHEMA_STR, op_str)
 }
 
 //=================================================================================================

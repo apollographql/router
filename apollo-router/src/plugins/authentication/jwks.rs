@@ -50,10 +50,12 @@ pub(super) struct JwksManager {
     _drop_signal: Arc<oneshot::Sender<()>>,
 }
 
+pub(super) type Issuers = HashSet<String>;
+
 #[derive(Clone)]
 pub(super) struct JwksConfig {
     pub(super) url: Url,
-    pub(super) issuer: Option<String>,
+    pub(super) issuers: Option<Issuers>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
     pub(super) headers: Vec<Header>,
@@ -62,7 +64,7 @@ pub(super) struct JwksConfig {
 #[derive(Clone)]
 pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
-    pub(super) issuer: Option<String>,
+    pub(super) issuers: Option<Issuers>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
@@ -263,7 +265,7 @@ impl Iterator for Iter<'_> {
                     if let Some(jwks) = map.get(&config.url) {
                         return Some(JwkSetInfo {
                             jwks: jwks.clone(),
-                            issuer: config.issuer.clone(),
+                            issuers: config.issuers.clone(),
                             algorithms: config.algorithms.clone(),
                         });
                     }
@@ -287,13 +289,13 @@ pub(super) struct JWTCriteria {
 pub(super) fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Option<Vec<(Option<String>, Jwk)>> {
+) -> Option<Vec<(Option<Issuers>, Jwk)>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
-        issuer,
+        issuers,
         algorithms,
     } in jwks_manager.iter_jwks()
     {
@@ -402,7 +404,7 @@ pub(super) fn search_jwks(
                 found_highest_score = true;
             }
 
-            candidates.push((key_score, (issuer.clone(), key)));
+            candidates.push((key_score, (issuers.clone(), key)));
         }
     }
 
@@ -485,8 +487,8 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 return if ignore_other_prefixes {
                     None
                 } else {
-                    Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed.to_owned(),
+                    Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name.to_owned(),
                         value_prefix.to_owned(),
                     )))
                 };
@@ -496,8 +498,8 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 // check for whitespace — we've already trimmed, so this means the request has a
                 // prefix that shouldn't exist
                 if jwt_value.contains(' ') {
-                    return Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed.to_owned(),
+                    return Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name.to_owned(),
                         value_prefix.to_owned(),
                     )));
                 }
@@ -508,7 +510,10 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 // Otherwise, we need to split our string in (at most 2) sections.
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
-                    return Some(Err(AuthenticationError::MissingJWT(jwt_value.to_owned())));
+                    return Some(Err(AuthenticationError::MissingJWTToken(
+                        name.to_owned(),
+                        value_prefix.to_owned(),
+                    )));
                 }
 
                 // We have our jwt
@@ -545,11 +550,11 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
 
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<(Option<String>, Jwk)>,
+    keys: Vec<(Option<Issuers>, Jwk)>,
     criteria: JWTCriteria,
-) -> Result<(Option<String>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+) -> Result<(Option<Issuers>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for (issuer, jwk) in keys.into_iter() {
+    for (issuers, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
             Ok(k) => k,
             Err(e) => {
@@ -590,7 +595,7 @@ pub(super) fn decode_jwt(
         validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuer, v)),
+            Ok(v) => return Ok((issuers, v)),
             Err(e) => {
                 tracing::trace!("JWT decoding failed with error `{e}`");
                 error = Some((
@@ -617,40 +622,44 @@ pub(super) fn decode_jwt(
 }
 
 pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
-    let claims = context
+    context
         .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
-        .ok()
-        .flatten();
-    let ts_opt = claims
-        .as_ref()
-        .and_then(|x: &serde_json::Value| match x.as_object() {
-            Some(claims) => claims.get("exp")?.as_i64(),
-            None => {
-                tracing::error!("expected JWT claims to be an object");
-                None
+        .unwrap_or_else(|err| {
+            tracing::error!("could not read JWT claims: {err}");
+            None
+        })
+        .flatten()
+        .and_then(|claims_value: Option<serde_json::Value>| {
+            let claims_obj = claims_value.as_ref()?.as_object();
+            // Extract the expiry claim from the JWT
+            let exp = match claims_obj {
+                Some(exp) => exp.get("exp"),
+                None => {
+                    tracing::error!("expected JWT claims to be an object");
+                    None
+                }
+            };
+            // Ensure the expiry claim is an integer
+            match exp.and_then(|it| it.as_i64()) {
+                Some(ts) => Some(ts),
+                None => {
+                    tracing::error!("expected JWT 'exp' (expiry) claim to be an integer");
+                    None
+                }
             }
-        });
-
-    match ts_opt {
-        Some(ts) => {
+        })
+        .map(|exp| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("we should not run before EPOCH")
+                .expect("no time travel allowed")
                 .as_secs() as i64;
-            if now < ts {
-                Duration::from_secs((ts - now) as u64)
+            if now < exp {
+                Duration::from_secs((exp - now) as u64)
             } else {
                 Duration::ZERO
             }
-        }
-        None => {
-            tracing::error!(
-                "expected JWT 'exp' (expiry) claim to be an integer, defaulting to maximum duration"
-            );
-            Duration::MAX
-        }
-    }
+        })
+        .unwrap_or(Duration::MAX)
 }
 
 // Apparently the `jsonwebtoken` crate now has 2 different enums for algorithms
@@ -687,5 +696,86 @@ fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
         Algorithm::PS384 => KeyAlgorithm::PS384,
         Algorithm::PS512 => KeyAlgorithm::PS512,
         Algorithm::EdDSA => KeyAlgorithm::EdDSA,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+    use std::time::UNIX_EPOCH;
+
+    use serde_json_bytes::json;
+
+    use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+    use super::Context;
+    use super::jwt_expires_in;
+
+    #[test]
+    fn test_exp_defaults_to_max_when_no_jwt_claims_present() {
+        let context = Context::new();
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_jwt_claims_not_object() {
+        let context = Context::new();
+        context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!("not an object"));
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+
+        assert!(logs_contain("expected JWT claims to be an object"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_not_integer() {
+        let context = Context::new();
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": "\"not an integer\""
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+
+        assert!(logs_contain(
+            "expected JWT 'exp' (expiry) claim to be an integer"
+        ));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_is_valid_but_expired() {
+        let context = Context::new();
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": 0
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::ZERO);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_is_valid() {
+        let context = Context::new();
+        let exp = UNIX_EPOCH.elapsed().unwrap().as_secs() + 3600;
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": exp
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::from_secs(3600));
     }
 }

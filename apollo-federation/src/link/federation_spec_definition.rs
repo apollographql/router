@@ -1,29 +1,43 @@
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::Type;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
+use apollo_compiler::ty;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
+use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::position::SchemaDefinitionPosition;
+use crate::schema::type_and_directive_specification::ArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
+pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
 pub(crate) const FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC: Name = name!("extends");
@@ -34,7 +48,11 @@ pub(crate) const FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("shar
 pub(crate) const FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC: Name = name!("override");
 pub(crate) const FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("fromContext");
+pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
+pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
+    name!("composeDirective");
 
+pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
@@ -50,6 +68,10 @@ pub(crate) struct KeyDirectiveArguments<'doc> {
 
 pub(crate) struct RequiresDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
+}
+
+pub(crate) struct TagDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
 }
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
@@ -82,6 +104,32 @@ impl FederationSpecDefinition {
                 version,
             },
         }
+    }
+
+    // PORT_NOTE: a port of `federationSpec` from JS
+    pub(crate) fn for_version(version: &Version) -> Result<&'static Self, FederationError> {
+        FEDERATION_VERSIONS
+            .find(version)
+            .ok_or_else(|| internal_error!("Unknown Federation spec version: {version}"))
+    }
+
+    // PORT_NOTE: a port of `latestFederationSpec`, which is defined as `federationSpec()` in JS.
+    pub(crate) fn latest() -> &'static Self {
+        // Note: The `unwrap()` calls won't panic, since `FEDERATION_VERSIONS` will always have at
+        // least one version.
+        let latest_version = FEDERATION_VERSIONS.versions().last().unwrap();
+        Self::for_version(latest_version).unwrap()
+    }
+
+    /// Some users rely on auto-expanding fed v1 graphs with fed v2 directives. While technically
+    /// we should only expand @tag directive from v2 definitions, we will continue expanding other
+    /// directives (up to v2.4) to ensure backwards compatibility.
+    pub(crate) fn auto_expanded_federation_spec() -> &'static Self {
+        Self::for_version(&Version { major: 2, minor: 4 }).unwrap()
+    }
+
+    pub(crate) fn is_fed1(&self) -> bool {
+        self.version().satisfies(&Version { major: 1, minor: 0 })
     }
 
     pub(crate) fn entity_type_definition<'schema>(
@@ -221,6 +269,13 @@ impl FederationSpecDefinition {
             })
     }
 
+    pub(crate) fn external_directive_name_in_schema(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
+        self.directive_name_in_schema(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn external_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -242,7 +297,7 @@ impl FederationSpecDefinition {
         reason: Option<String>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)?
+            .external_directive_name_in_schema(schema)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -253,6 +308,42 @@ impl FederationSpecDefinition {
                 value: Node::new(Value::String(reason)),
             }));
         }
+        Ok(Directive {
+            name: name_in_schema,
+            arguments,
+        })
+    }
+
+    pub(crate) fn tag_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }.into()
+            })
+    }
+
+    #[allow(unused)]
+    pub(crate) fn tag_directive(
+        &self,
+        schema: &FederationSchema,
+        name: String,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find federation spec in schema".to_owned(),
+            })?;
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_NAME_ARGUMENT_NAME,
+            value: Node::new(Value::String(name)),
+        })];
         Ok(Directive {
             name: name_in_schema,
             arguments,
@@ -272,6 +363,15 @@ impl FederationSpecDefinition {
                     ),
                 }.into()
             })
+    }
+
+    pub(crate) fn tag_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
+        Ok(TagDirectiveArguments {
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
+        })
     }
 
     pub(crate) fn requires_directive(
@@ -351,6 +451,13 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn shareable_directive_name_in_schema(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
+        self.directive_name_in_schema(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn shareable_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -369,7 +476,7 @@ impl FederationSpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)?
+            .shareable_directive_name_in_schema(schema)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -539,6 +646,204 @@ impl FederationSpecDefinition {
             )?,
         })
     }
+
+    fn key_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+            &[
+                Self::fields_argument_specification(),
+                Self::resolvable_argument_specification(),
+            ],
+            true,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn fields_argument_specification() -> DirectiveArgumentSpecification {
+        DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_FIELDS_ARGUMENT_NAME,
+                get_type: |schema, _| field_set_type(schema),
+                default_value: None,
+            },
+            composition_strategy: None,
+        }
+    }
+
+    fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
+        DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+                get_type: |_, _| Ok(ty!(Boolean)),
+                default_value: Some(Value::Boolean(true)),
+            },
+            composition_strategy: None,
+        }
+    }
+
+    fn requires_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
+            &[Self::fields_argument_specification()],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn provides_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
+            &[Self::fields_argument_specification()],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn external_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_REASON_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
+            ],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn extends_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn shareable_directive_specification(&self) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            self.version().ge(&Version { major: 2, minor: 2 }),
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
+            ],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn tag_directive_specification(&self) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            self.version().ge(&Version { major: 2, minor: 0 }),
+            &[
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Scalar,
+                DirectiveLocation::Enum,
+                DirectiveLocation::EnumValue,
+                DirectiveLocation::InputObject,
+                DirectiveLocation::InputFieldDefinition,
+            ],
+            false, // TODO: Fix this
+            None,
+            None,
+        )
+    }
+
+    fn override_directive_specification(&self) -> DirectiveSpecification {
+        let mut args = vec![DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_FROM_ARGUMENT_NAME,
+                get_type: |_, _| Ok(ty!(String!)),
+                default_value: None,
+            },
+            composition_strategy: None,
+        }];
+        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+        }
+        DirectiveSpecification::new(
+            FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
+            &args,
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn compose_directive_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_NAME_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            true,
+            &[DirectiveLocation::Schema],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn interface_object_directive_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::Object],
+            false,
+            None,
+            None,
+        )
+    }
+}
+
+fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
+    // PORT_NOTE: `schema.subgraph_metadata` is not accessible, since it's not validated, yet.
+    // PORT_NOTE: No counterpart for metadata.fieldSetType. Use FederationSchema::field_set_type.
+    schema
+        .field_set_type()
+        .map(|pos| Type::non_null(Type::Named(pos.type_name)))
 }
 
 impl SpecDefinition for FederationSpecDefinition {
@@ -547,11 +852,41 @@ impl SpecDefinition for FederationSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = vec![
+            Box::new(Self::key_directive_specification()),
+            Box::new(Self::requires_directive_specification()),
+            Box::new(Self::provides_directive_specification()),
+            Box::new(Self::external_directive_specification()),
+        ];
+        if self.is_fed1() {
+            specs.push(Box::new(Self::extends_directive_specification()));
+            return specs;
+        }
+
+        specs.push(Box::new(self.shareable_directive_specification()));
+        specs.push(Box::new(self.override_directive_specification()));
+        specs.push(Box::new(self.tag_directive_specification()));
+
+        if self.version().satisfies(&Version { major: 2, minor: 1 }) {
+            specs.push(Box::new(Self::compose_directive_directive_specification()));
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+            specs.push(Box::new(
+                Self::interface_object_directive_directive_specification(),
+            ));
+        }
+
+        // TODO: The remaining directives added in later versions are implemented in separate specs,
+        // which still need to be ported over
+
+        specs
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![Box::new(ScalarTypeSpecification {
+            name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+        })]
     }
 }
 
@@ -612,13 +947,64 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
         .as_ref()
         .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
     {
-        Ok(FEDERATION_VERSIONS
+        if FED_1.url.version == federation_link.url.version {
+            return Ok(&FED_1);
+        }
+        FEDERATION_VERSIONS
             .find(&federation_link.url.version)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: "Subgraph unexpectedly does not use a supported federation spec version"
-                    .to_owned(),
-            })?)
+            .ok_or_else(|| internal_error!(
+                "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
+                federation_link.url.version,
+            ))
     } else {
+        // No federation link found in schema. The default is v1.0.
         Ok(&FED_1)
     }
+}
+
+/// Adds a bootstrap fed 1 link directive to the schema.
+pub(crate) fn add_fed1_link_to_schema(
+    schema: &mut FederationSchema,
+) -> Result<(), FederationError> {
+    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
+    // We can't use `import` argument here since fed1 @core does not support `import`.
+    // We will add imports later (see `fed1_link_imports`).
+    SchemaDefinitionPosition.insert_directive(
+        schema,
+        Component::new(Directive {
+            name: Identity::core_identity().name,
+            arguments: vec![Node::new(Argument {
+                name: LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME,
+                value: FED_1.url.to_string().into(),
+            })],
+        }),
+    )
+}
+
+/// Creates a fake imports for fed 1 link directive.
+/// - Fed 1 does not support `import` argument, but we use it to simulate fed 1 behavior.
+// PORT_NOTE: From `FAKE_FED1_CORE_FEATURE_TO_RENAME_TYPES` in JS
+// Federation 1 has that specificity that it wasn't using @link to name-space federation elements,
+// and so to "distinguish" the few federation type names, it prefixed those with a `_`. That is,
+// the `FieldSet` type was named `_FieldSet` in federation1. To handle this without too much effort,
+// we use a fake `Link` with imports for all the fed1 types to use those specific "aliases"
+// and we pass it when adding those types. This allows to reuse the same `TypeSpecification` objects
+// for both fed1 and fed2.
+pub(crate) fn fed1_link_imports() -> Vec<Arc<link::Import>> {
+    let type_specs = FED_1.type_specs();
+    let directive_specs = FED_1.directive_specs();
+    let type_imports = type_specs.iter().map(|spec| link::Import {
+        element: spec.name().clone(),
+        is_directive: false,
+        alias: Some(Name::new_unchecked(&format!("_{}", spec.name()))),
+    });
+    let directive_imports = directive_specs.iter().map(|spec| link::Import {
+        element: spec.name().clone(),
+        is_directive: true,
+        alias: None,
+    });
+    type_imports
+        .chain(directive_imports)
+        .map(Arc::new)
+        .collect()
 }

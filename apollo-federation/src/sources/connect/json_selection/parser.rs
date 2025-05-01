@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use apollo_compiler::collections::IndexSet;
+use itertools::Itertools;
 use nom::IResult;
 use nom::Slice;
 use nom::branch::alt;
@@ -29,6 +29,7 @@ use super::location::WithRange;
 use super::location::merge_ranges;
 use super::location::new_span;
 use super::location::ranged_span;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
@@ -80,7 +81,7 @@ pub(crate) trait ExternalVarPaths {
 // JSONSelection     ::= PathSelection | NakedSubSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum JSONSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
@@ -92,7 +93,8 @@ pub enum JSONSelection {
 // To keep JSONSelection::parse consumers from depending on details of the nom
 // error types, JSONSelection::parse reports this custom error type. Other
 // ::parse methods still internally report nom::error::Error for the most part.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+#[error("{message}: {fragment}")]
 pub struct JSONSelectionParseError {
     // The message will be a meaningful error message in many cases, but may
     // fall back to a formatted nom::error::ErrorKind in some cases, e.g. when
@@ -111,20 +113,9 @@ pub struct JSONSelectionParseError {
     pub offset: usize,
 }
 
-impl std::error::Error for JSONSelectionParseError {}
-
-impl Display for JSONSelectionParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.message, self.fragment)
-    }
-}
-
 impl JSONSelection {
     pub fn empty() -> Self {
-        JSONSelection::Named(SubSelection {
-            selections: vec![],
-            ..Default::default()
-        })
+        JSONSelection::Named(SubSelection::default())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -155,20 +146,14 @@ impl JSONSelection {
             }
 
             Err(e) => match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => {
-                    Err(JSONSelectionParseError {
-                        message: if let Some(message_str) = e.input.extra {
-                            message_str.to_string()
-                        } else {
-                            // These errors aren't the most user-friendly, but
-                            // with any luck we can gradually replace them with
-                            // custom error messages over time.
-                            format!("nom::error::ErrorKind::{:?}", e.code)
-                        },
-                        fragment: e.input.fragment().to_string(),
-                        offset: e.input.location_offset(),
-                    })
-                }
+                nom::Err::Error(e) | nom::Err::Failure(e) => Err(JSONSelectionParseError {
+                    message: e.input.extra.map_or_else(
+                        || format!("nom::error::ErrorKind::{:?}", e.code),
+                        |message_str| message_str.to_string(),
+                    ),
+                    fragment: e.input.fragment().to_string(),
+                    offset: e.input.location_offset(),
+                }),
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
             },
@@ -231,11 +216,10 @@ impl JSONSelection {
         }
     }
 
-    pub fn external_variables<N: FromStr + ToString>(&self) -> impl Iterator<Item = N> {
+    pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
-            .map(|var_ref| var_ref.namespace.namespace)
     }
 }
 
@@ -384,27 +368,20 @@ impl NamedSelection {
 
     pub(crate) fn names(&self) -> Vec<&str> {
         match self {
-            Self::Field(alias, name, _) => {
-                if let Some(alias) = alias {
-                    vec![alias.name.as_str()]
-                } else {
-                    vec![name.as_str()]
-                }
-            }
+            Self::Field(alias, name, _) => alias
+                .as_ref()
+                .map(|alias| vec![alias.name.as_str()])
+                .unwrap_or_else(|| vec![name.as_str()]),
             Self::Path { alias, path, .. } => {
-                #[allow(clippy::if_same_then_else)]
                 if let Some(alias) = alias {
                     vec![alias.name.as_str()]
                 } else if let Some(sub) = path.next_subselection() {
-                    // Flatten and deduplicate the names of the NamedSelection
-                    // items in the SubSelection.
-                    let mut name_set = IndexSet::default();
-                    for selection in sub.selections_iter() {
-                        name_set.extend(selection.names());
-                    }
-                    name_set.into_iter().collect()
+                    sub.selections_iter()
+                        .flat_map(|selection| selection.names())
+                        .unique()
+                        .collect()
                 } else {
-                    vec![]
+                    Vec::new()
                 }
             }
             Self::Group(alias, _) => vec![alias.name.as_str()],
@@ -445,7 +422,7 @@ impl ExternalVarPaths for NamedSelection {
         match self {
             Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => sub.external_var_paths(),
             Self::Path { path, .. } => path.external_var_paths(),
-            _ => vec![],
+            _ => Vec::new(),
         }
     }
 }
@@ -487,7 +464,7 @@ impl PathSelection {
                     let location = parts
                         .last()
                         .map(|part| part.location.clone())
-                        .or(var.range())
+                        .or_else(|| var.range())
                         .map(|location| location.end)
                         .and_then(|end| var.range().map(|location| location.start..end))
                         .unwrap_or_default();
@@ -535,7 +512,7 @@ impl PathSelection {
 
 impl ExternalVarPaths for PathSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
                 if matches!(var_name.as_ref(), KnownVariable::External(_)) {
@@ -663,15 +640,14 @@ impl PathList {
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
                     let known_var = KnownVariable::from_str(full_name.as_str());
-                    let var_range = merge_ranges(dollar_range.clone(), var.range());
+                    let var_range = merge_ranges(dollar_range, var.range());
                     let ranged_known_var = WithRange::new(known_var, var_range);
                     Ok((
                         remainder,
                         WithRange::new(Self::Var(ranged_known_var, rest), full_range),
                     ))
                 } else {
-                    let ranged_dollar_var =
-                        WithRange::new(KnownVariable::Dollar, dollar_range.clone());
+                    let ranged_dollar_var = WithRange::new(KnownVariable::Dollar, dollar_range);
                     Ok((
                         remainder,
                         WithRange::new(Self::Var(ranged_dollar_var, rest), full_range),
@@ -817,7 +793,7 @@ impl PathList {
                 parts.extend(rest.variable_path_parts());
                 parts
             }
-            _ => vec![],
+            _ => Vec::new(),
         }
     }
 
@@ -864,7 +840,7 @@ impl PathList {
 
 impl ExternalVarPaths for PathList {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         match self {
             // PathSelection::external_var_paths is responsible for adding all
             // variable &PathSelection items to the set, since this
@@ -953,7 +929,7 @@ impl SubSelection {
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
         // TODO Implement a NamedSelectionIterator to traverse nested selections
         // lazily, rather than using an intermediary vector.
-        let mut selections = vec![];
+        let mut selections = Vec::new();
         for selection in &self.selections {
             match selection {
                 NamedSelection::Path { alias, path, .. } => {
@@ -994,7 +970,7 @@ impl SubSelection {
 
 impl ExternalVarPaths for SubSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        let mut paths = vec![];
+        let mut paths = Vec::new();
         for selection in &self.selections {
             paths.extend(selection.external_var_paths());
         }
@@ -1158,7 +1134,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
     match input_char_indices.next() {
         Some((0, quote @ '\'')) | Some((0, quote @ '"')) => {
             let mut escape_next = false;
-            let mut chars: Vec<char> = vec![];
+            let mut chars: Vec<char> = Vec::new();
             let mut remainder_opt: Option<Span> = None;
 
             for (i, c) in input_char_indices {
@@ -1181,17 +1157,17 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
                 chars.push(c);
             }
 
-            if let Some(remainder) = remainder_opt {
-                Ok((
-                    remainder,
-                    WithRange::new(
-                        chars.iter().collect::<String>(),
-                        Some(start..remainder.location_offset()),
-                    ),
-                ))
-            } else {
-                Err(nom_fail_message(input, "Unterminated string literal"))
-            }
+            remainder_opt
+                .ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
+                .map(|remainder| {
+                    (
+                        remainder,
+                        WithRange::new(
+                            chars.iter().collect::<String>(),
+                            Some(start..remainder.location_offset()),
+                        ),
+                    )
+                })
         }
 
         _ => Err(nom_error_message(input, "Not a string literal")),
@@ -1260,7 +1236,10 @@ mod tests {
     fn test_identifier() {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(name.as_ref(), expected_name);
         }
 
@@ -1297,7 +1276,10 @@ mod tests {
     fn test_string_literal() {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(lit.as_ref(), expected);
         }
         check("'hello world'", "hello world");
@@ -1311,7 +1293,10 @@ mod tests {
     fn test_key() {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(key.as_ref(), expected);
         }
 
@@ -1326,7 +1311,10 @@ mod tests {
     fn test_alias() {
         fn check(input: &str, alias: &str) {
             let (remainder, parsed) = Alias::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(parsed.name(), alias);
         }
 
@@ -1341,7 +1329,10 @@ mod tests {
     fn test_named_selection() {
         fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
             let (remainder, selection) = NamedSelection::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             let selection = selection.strip_ranges();
             assert_eq!(selection, expected);
             assert_eq!(selection.names(), names);
@@ -1667,7 +1658,10 @@ mod tests {
     #[track_caller]
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
-        assert!(span_is_all_spaces_or_comments(remainder));
+        assert!(
+            span_is_all_spaces_or_comments(remainder),
+            "remainder is `{remainder}`"
+        );
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
             selection!(input).strip_ranges(),
@@ -1713,7 +1707,7 @@ mod tests {
             check_path_selection("$.hello. world", expected.clone());
             check_path_selection("$.hello . world", expected.clone());
             check_path_selection("$ . hello . world", expected.clone());
-            check_path_selection(" $ . hello . world ", expected.clone());
+            check_path_selection(" $ . hello . world ", expected);
         }
 
         {
@@ -1728,7 +1722,7 @@ mod tests {
             check_path_selection("hello .world", expected.clone());
             check_path_selection("hello. world", expected.clone());
             check_path_selection("hello . world", expected.clone());
-            check_path_selection(" hello . world ", expected.clone());
+            check_path_selection(" hello . world ", expected);
         }
 
         {
@@ -1751,7 +1745,7 @@ mod tests {
             check_path_selection("hello .world { hello }", expected.clone());
             check_path_selection("hello. world { hello }", expected.clone());
             check_path_selection("hello . world { hello }", expected.clone());
-            check_path_selection(" hello . world { hello } ", expected.clone());
+            check_path_selection(" hello . world { hello } ", expected);
         }
 
         {
@@ -1786,7 +1780,7 @@ mod tests {
             );
             check_path_selection(
                 " nested . 'string literal' . \"property\" . name ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1827,7 +1821,7 @@ mod tests {
             );
             check_path_selection(
                 " nested . \"string literal\" { leggo: 'my ego' } ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1871,7 +1865,7 @@ mod tests {
             );
             check_path_selection(
                 " $ . results { 'quoted without alias' { id 'n a m e' } } ",
-                expected.clone(),
+                expected,
             );
         }
 
@@ -1915,7 +1909,7 @@ mod tests {
             );
             check_path_selection(
                 " $ . results { 'non-identifier alias' : 'quoted with alias' { id 'n a m e': name } } ",
-                expected.clone(),
+                expected,
             );
         }
     }
@@ -2493,7 +2487,7 @@ mod tests {
             check_path_selection("data->query($.a, $.b, $.c )", expected.clone());
             check_path_selection("data->query($.a, $.b, $.c,)", expected.clone());
             check_path_selection("data->query($.a, $.b, $.c ,)", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c , )", expected.clone());
+            check_path_selection("data->query($.a, $.b, $.c , )", expected);
         }
 
         {
@@ -2535,7 +2529,7 @@ mod tests {
             check_path_selection("data.x->concat([data.y, data.z,])", expected.clone());
             check_path_selection("data.x->concat([data.y, data.z , ])", expected.clone());
             check_path_selection("data.x->concat([data.y, data.z,],)", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected);
         }
 
         check_path_selection(
@@ -2719,7 +2713,10 @@ mod tests {
     fn test_subselection() {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(new_span(input)).unwrap();
-            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                span_is_all_spaces_or_comments(remainder),
+                "remainder is `{remainder}`"
+            );
             assert_eq!(parsed.strip_ranges(), expected);
         }
 

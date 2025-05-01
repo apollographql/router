@@ -22,11 +22,12 @@ mod http;
 mod link;
 mod schema;
 mod source;
-mod variable;
 
 use std::fmt::Display;
 use std::ops::Range;
+use std::str::FromStr;
 
+use ::http::Uri;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -36,7 +37,6 @@ use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
-use url::Url;
 
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::validation::connect::fields_seen_by_all_connects;
@@ -145,7 +145,7 @@ fn parse_url<Coordinate: Display + Copy>(
             .into_iter()
             .collect(),
     })?;
-    let url = Url::parse(str_value.as_str()).map_err(|inner| Message {
+    let url = Uri::from_str(str_value.as_str()).map_err(|inner| Message {
         code: Code::InvalidUrl,
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
         locations: value
@@ -153,7 +153,7 @@ fn parse_url<Coordinate: Display + Copy>(
             .into_iter()
             .collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, str_value, schema)
+    http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
 }
 
 type DirectiveName = Name;
@@ -263,10 +263,16 @@ pub enum Code {
     UnknownConnectorsVersion,
     /// Feature unavailable
     FeatureUnavailable,
+    /// When `@connect` is applied to a type, `entity` can't be set to `false`
+    ConnectOnTypeMustBeEntity,
+    /// `@connect` cannot be applied to a query, mutation, or subscription root type
+    ConnectOnRoot,
+    /// Using both `$batch` and `$this` is not allowed
+    ConnectBatchAndThis,
 }
 
 impl Code {
-    pub const fn severity(&self) -> Severity {
+    pub fn severity(&self) -> Severity {
         match self {
             Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
             _ => Severity::Error,

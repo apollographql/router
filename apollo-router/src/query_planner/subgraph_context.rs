@@ -202,7 +202,7 @@ impl<'a> SubgraphContext<'a> {
 }
 
 // Take the existing subgraph operation and rewrite it to use aliasing. This will occur in the case
-// where we are collecting entites and different entities may have different variables passed to the resolver.
+// where we are collecting entities and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
     subgraph_operation: &SerializableDocument,
     contextual_arguments: &ContextualArguments,
@@ -324,7 +324,7 @@ fn transform_selection_set(
         });
 }
 
-// transforms the variable name on the field argment
+// transforms the variable name on the field argument
 fn transform_field_arguments(
     arguments_in_selection: &mut [Node<ast::Argument>],
     arguments: &HashSet<String>,

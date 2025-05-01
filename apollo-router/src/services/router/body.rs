@@ -20,14 +20,14 @@ pub(crate) async fn into_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> 
 // and convert types
 
 /// Create an empty RouterBody
-pub(crate) fn empty() -> UnsyncBoxBody<Bytes, AxumError> {
+pub(crate) fn empty() -> RouterBody {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
         .boxed_unsync()
 }
 
 /// Create a Full RouterBody using the supplied chunk
-pub(crate) fn from_bytes<T: Into<Bytes>>(chunk: T) -> UnsyncBoxBody<Bytes, AxumError> {
+pub fn from_bytes<T: Into<Bytes>>(chunk: T) -> RouterBody {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed_unsync()

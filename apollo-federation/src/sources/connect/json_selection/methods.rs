@@ -5,7 +5,6 @@ use shape::location::SourceId;
 
 use super::ApplyToError;
 use super::MethodArgs;
-use super::PathList;
 use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
@@ -59,7 +58,7 @@ pub(super) enum ArrowMethod {
 macro_rules! impl_arrow_method {
     ($struct_name:ident, $impl_fn_name:ident, $shape_fn_name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub(super) struct $struct_name;
+        pub(crate) struct $struct_name;
         impl $crate::sources::connect::json_selection::methods::ArrowMethodImpl for $struct_name {
             fn apply(
                 &self,
@@ -68,9 +67,8 @@ macro_rules! impl_arrow_method {
                 data: &JSON,
                 vars: &VarsWithPathsMap,
                 input_path: &InputPath<JSON>,
-                tail: &WithRange<PathList>,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
-                $impl_fn_name(method_name, method_args, data, vars, input_path, tail)
+                $impl_fn_name(method_name, method_args, data, vars, input_path)
             }
 
             fn shape(
@@ -104,7 +102,6 @@ pub(super) trait ArrowMethodImpl {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        tail: &WithRange<PathList>,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     fn shape(
@@ -213,7 +210,7 @@ impl ArrowMethod {
         }
     }
 
-    pub(super) fn is_public(&self) -> bool {
+    pub(super) const fn is_public(&self) -> bool {
         // This set controls which ->methods are exposed for use in connector
         // schemas. Non-public methods are still implemented and tested, but
         // will not be returned from lookup_arrow_method outside of tests.

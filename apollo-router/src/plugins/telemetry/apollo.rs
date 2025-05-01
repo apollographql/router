@@ -15,6 +15,7 @@ use serde::ser::SerializeMap;
 use url::Url;
 use uuid::Uuid;
 
+use super::apollo_exporter::proto::reports::QueryMetadata;
 use super::config::ApolloMetricsReferenceMode;
 use super::config::ApolloSignatureNormalizationAlgorithm;
 use super::config::Sampler;
@@ -492,6 +493,7 @@ pub(crate) struct TracesAndStats {
     #[serde(with = "vectorize")]
     pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub(crate) query_metadata: Option<QueryMetadata>,
 }
 
 impl From<TracesAndStats>
@@ -502,7 +504,7 @@ impl From<TracesAndStats>
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
             referenced_fields_by_type: stats.referenced_fields_by_type,
             trace: stats.traces,
-            ..Default::default()
+            query_metadata: stats.query_metadata,
         }
     }
 }
@@ -514,8 +516,10 @@ impl AddAssign<SingleStats> for TracesAndStats {
             .entry(stats.stats_with_context.context.clone())
             .or_default() += stats.stats_with_context;
 
-        // No merging required here because references fields by type will always be the same for each stats report key.
+        // No merging required here because references fields by type and metadata will always be the same for
+        // each stats report key.
         self.referenced_fields_by_type = stats.referenced_fields_by_type;
+        self.query_metadata = stats.query_metadata;
     }
 }
 

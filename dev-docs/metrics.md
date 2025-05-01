@@ -113,6 +113,33 @@ meter_provider()
   .init();
 ```
 
+### Units
+
+When adding new metrics, the `_with_unit` variant macros should be used. Units should conform to the
+[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units),
+some of which has been copied here for reference:
+
+* Instruments that measure a count of something should use annotations with curly braces to
+  give additional meaning. For example, use `{packet}`, `{error}`, `{request}`, etc., not `packet`,
+  `error`, `request`, etc.
+* Other instrument units should be specified using the UCUM case-sensitive (`c/s`) variant. For
+  example, `Cel` for the unit with full name "degree Celsius".
+* When instruments are measuring durations, seconds (i.e. `s`) should be used.
+* Instruments should use non-prefixed units (i.e. `By` instead of `MiBy`) unless there is good
+  technical reason to not do so.
+
+We have not yet modified the existing metrics because some metric exporters (notably
+Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
+change for customers. Ideally this will be accomplished in router 3.
+
+Examples of Prometheus metric renaming; note that annotations are not appended to the metric names:
+
+```rust
+u64_counter!("apollo.test", "test description", 1); // apollo_test
+u64_counter_with_unit!("apollo.test.requests", "test description", "{request}", 1); // apollo_test_requests
+f64_counter_with_unit!("apollo.test.total_duration", "test description", "s", 1); // apollo_test_total_duration_seconds
+```
+
 ### Testing
 When using the macro in a test you will need a different pattern depending on if you are writing a sync or async test.
 
@@ -154,6 +181,32 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         .with_metrics()
         .await;
     }
+```
+
+Note: this relies on metrics being updated within the same thread. Metrics that are updated from multiple threads will
+not be collected correctly.
+
+```rust
+#[tokio::test]
+async fn test_spawned_metric_resolution() {
+    async {
+        u64_counter!("apollo.router.test", "metric", 1);
+        assert_counter!("apollo.router.test", 1);
+
+        tokio::spawn(async move {
+            u64_counter!("apollo.router.test", "metric", 2);
+        })
+        .await
+        .unwrap();
+
+        // In real operations, this metric resolves to a total of 3!
+        // However, in testing, it will resolve to 1, because the second incrementation happens in another thread.
+        // assert_counter!("apollo.router.test", 3);
+        assert_counter!("apollo.router.test", 1);
+    }
+    .with_metrics()
+    .await;
+}
 ```
 
 ## Callsite instrument caching

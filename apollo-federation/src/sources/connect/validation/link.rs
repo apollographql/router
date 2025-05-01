@@ -6,7 +6,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
-use strum::IntoEnumIterator;
+use itertools::Itertools;
 
 use crate::link::Link;
 use crate::sources::connect::ConnectSpec;
@@ -35,8 +35,7 @@ impl<'schema> ConnectLink<'schema> {
 
         let spec = match ConnectSpec::try_from(&link.url.version) {
             Err(err) => {
-                let available_versions: Vec<_> =
-                    ConnectSpec::iter().map(ConnectSpec::as_str).collect();
+                let available_versions = ConnectSpec::available();
                 let message = if available_versions.len() == 1 {
                     // TODO: No need to branch here once multiple spec versions are available
                     format!("{err}; should be {version}.", version = ConnectSpec::V0_1)
@@ -44,7 +43,11 @@ impl<'schema> ConnectLink<'schema> {
                     // This won't happen today, but it's prepping for 0.2 so we don't forget
                     format!(
                         "{err}; should be one of {available_versions}.",
-                        available_versions = available_versions.join(", "),
+                        available_versions = available_versions
+                            .iter()
+                            .copied()
+                            .map(ConnectSpec::as_str)
+                            .join(", "),
                     )
                 };
                 return Some(Err(Message {

@@ -56,18 +56,16 @@ impl<'schema> EntityKeyChecker<'schema> {
 
         for (key, directive, _) in &self.resolvable_keys {
             let for_type = self.entity_connectors.get(&key.selection_set.ty);
-            let key_exists = for_type
-                .map(|connectors| {
-                    connectors
-                        .iter()
-                        .any(|connector| field_set_is_subset(key, connector))
-                })
-                .unwrap_or(false);
+            let key_exists = for_type.is_some_and(|connectors| {
+                connectors
+                    .iter()
+                    .any(|connector| field_set_is_subset(key, connector))
+            });
             if !key_exists {
                 messages.push(Message {
                     code: Code::MissingEntityConnector,
                     message: format!(
-                        "Entity resolution for `@key(fields: \"{}\")` on `{}` is not implemented by a connector. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                        "Entity resolution for `@key(fields: \"{}\")` on `{}` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
                         directive.argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, schema).ok().and_then(|arg| arg.as_str()).unwrap_or_default(),
                         key.selection_set.ty,
                     ),
@@ -130,7 +128,7 @@ pub(crate) fn field_set_error(
             variables.iter().join("`, `"),
             type_name
         ),
-        locations: vec![],
+        locations: Vec::new(),
     }
 }
 

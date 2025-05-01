@@ -822,7 +822,7 @@ impl FetchDependencyGraph {
         // 1. is for the same subgraph
         // 2. has the same merge_at
         // 3. is for the same entity type (we don't reuse nodes for different entities just yet,
-        //    as this can create unecessary dependencies that gets in the way of some optimizations;
+        //    as this can create unnecessary dependencies that gets in the way of some optimizations;
         //    the final optimizations in `reduceAndOptimize` will however later merge nodes
         //    on the same subgraph and mergeAt when possible).
         // 4. is not part of our conditions or our conditions ancestors
@@ -915,7 +915,7 @@ impl FetchDependencyGraph {
             parent_node_id,
             child_id,
             Arc::new(FetchDependencyGraphEdge {
-                path: path_in_parent.clone(),
+                path: path_in_parent,
             }),
         );
     }
@@ -940,7 +940,7 @@ impl FetchDependencyGraph {
             return true;
         }
 
-        // No risk of inifite loop as the graph is acyclic:
+        // No risk of infinite loop as the graph is acyclic:
         let mut to_check = haystack.clone();
         while let Some(next) = to_check.pop() {
             for parent in self.parents_of(next) {
@@ -3034,7 +3034,7 @@ fn operation_for_entities_fetch(
         .into());
     }
 
-    let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
+    let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY));
 
     let entities_call = Selection::from_element(
         OpPathElement::Field(Field {
@@ -3851,7 +3851,7 @@ fn compute_nodes_for_op_path_element<'a>(
         // If the operation contains other directives or a non-trivial type condition,
         // we need to preserve it and so we add operation.
         // Otherwise, we just skip it as a minor optimization (it makes the subgraph query
-        // slighly smaller and on complex queries, it might also deduplicate similar selections).
+        // slightly smaller and on complex queries, it might also deduplicate similar selections).
         return Ok(ComputeNodesStackItem {
             tree: &child.tree,
             node_id: stack_item.node_id,
@@ -4233,7 +4233,7 @@ fn wrap_selection_with_type_and_conditions<T>(
             InlineFragment {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
-                type_condition_position: Some(type_condition.clone()),
+                type_condition_position: Some(type_condition),
                 directives: Default::default(), // None
                 selection_id: SelectionId::new(),
             },
@@ -4461,7 +4461,7 @@ fn handle_conditions_tree(
                 };
                 let defer_ref = fetch_node.defer_ref.clone();
                 let copied_node_id =
-                    dependency_graph.new_key_node(&subgraph_name, merge_at, defer_ref.clone())?;
+                    dependency_graph.new_key_node(&subgraph_name, merge_at, defer_ref)?;
                 dependency_graph.add_parent(copied_node_id, parent.clone());
                 dependency_graph.copy_inputs(copied_node_id, fetch_node_id)?;
                 Some((copied_node_id, parent))
@@ -4738,7 +4738,7 @@ fn create_post_requires_node(
             // should already have a key in its inputs, so we don't need to add that).
             let inputs = inputs_for_require(
                 dependency_graph,
-                entity_type_position.clone(),
+                entity_type_position,
                 entity_type_schema,
                 query_graph_edge_id,
                 context,
@@ -4816,7 +4816,7 @@ fn create_post_requires_node(
         created_nodes.insert(post_requires_node_id);
         let initial_fetch_path = create_fetch_initial_path(
             &dependency_graph.supergraph_schema,
-            &entity_type_position.clone().into(),
+            &entity_type_position.into(),
             context,
         )?;
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
@@ -4874,7 +4874,7 @@ fn create_post_requires_node(
         created_nodes.insert(post_requires_node_id);
         let initial_fetch_path = create_fetch_initial_path(
             &dependency_graph.supergraph_schema,
-            &entity_type_position.clone().into(),
+            &entity_type_position.into(),
             context,
         )?;
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
@@ -5118,7 +5118,7 @@ mod tests {
         )
         .unwrap();
 
-        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
         let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
@@ -5180,7 +5180,7 @@ mod tests {
         )
         .unwrap();
 
-        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
         let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));

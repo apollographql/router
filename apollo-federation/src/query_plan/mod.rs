@@ -247,3 +247,17 @@ pub enum QueryPathElement {
     Field { response_key: Name },
     InlineFragment { type_condition: Name },
 }
+
+impl PlanNode {
+    /// Returns the kind of plan node this is as a human-readable string. Exact output not guaranteed.
+    fn node_kind(&self) -> &'static str {
+        match self {
+            Self::Fetch(_) => "Fetch",
+            Self::Sequence(_) => "Sequence",
+            Self::Parallel(_) => "Parallel",
+            Self::Flatten(_) => "Flatten",
+            Self::Defer(_) => "Defer",
+            Self::Condition(_) => "Condition",
+        }
+    }
+}

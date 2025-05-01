@@ -404,7 +404,7 @@ pub struct LinkedElement {
     pub import: Option<Arc<Import>>,
 }
 
-#[derive(Default, Eq, PartialEq, Debug)]
+#[derive(Clone, Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
@@ -414,6 +414,7 @@ pub struct LinksMetadata {
 }
 
 impl LinksMetadata {
+    // PORT_NOTE: Call this as a replacement for `CoreFeatures.coreItself` from JS.
     pub(crate) fn link_spec_definition(
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {

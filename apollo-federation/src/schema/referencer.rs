@@ -4,6 +4,7 @@ use apollo_compiler::collections::IndexSet;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -59,10 +60,7 @@ impl Referencers {
         name: &str,
     ) -> Result<&DirectiveReferencers, FederationError> {
         self.directives.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Directive referencers unexpectedly missing directive".to_owned(),
-            }
-            .into()
+            internal_error!("Directive referencers unexpectedly missing directive `{name}`")
         })
     }
 }
@@ -86,12 +84,30 @@ pub(crate) struct ObjectTypeReferencers {
     pub(crate) union_types: IndexSet<UnionTypeDefinitionPosition>,
 }
 
+impl ObjectTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.schema_roots.len()
+            + self.object_fields.len()
+            + self.interface_fields.len()
+            + self.union_types.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InterfaceTypeReferencers {
     pub(crate) object_types: IndexSet<ObjectTypeDefinitionPosition>,
     pub(crate) object_fields: IndexSet<ObjectFieldDefinitionPosition>,
     pub(crate) interface_types: IndexSet<InterfaceTypeDefinitionPosition>,
     pub(crate) interface_fields: IndexSet<InterfaceFieldDefinitionPosition>,
+}
+
+impl InterfaceTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_types.len()
+            + self.object_fields.len()
+            + self.interface_types.len()
+            + self.interface_fields.len()
+    }
 }
 
 #[derive(Debug, Clone, Default)]

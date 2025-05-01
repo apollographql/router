@@ -751,6 +751,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
+    add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -761,12 +762,18 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
+    add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
+
+    // Because this plugin intercepts subgraph requests
+    // and does not forward them to the next service in the chain,
+    // it needs to intervene after user plugins for users plugins to run at all.
+    add_optional_apollo_plugin!("experimental_mock_subgraphs");
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.

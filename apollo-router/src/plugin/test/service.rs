@@ -18,6 +18,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::connector;
 use crate::services::router::Body;
 #[cfg(test)]
 use crate::spec::Schema;
@@ -108,6 +109,11 @@ mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
+mock_service!(
+    Connector,
+    connector::request_service::Request,
+    connector::request_service::Response
+);
 mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
 
 // This type is introduced to update internal uses of mocked http services, because the HttpClientService

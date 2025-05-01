@@ -13,11 +13,11 @@ pub(crate) enum AuthenticationError {
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
-    /// Header Value: '{0}' is not correctly formatted. prefix should be '{1}'
-    InvalidPrefix(String, String),
+    /// Value of '{0}' JWT header should be prefixed with '{1}'
+    InvalidJWTPrefix(String, String),
 
-    /// Header Value: '{0}' is not correctly formatted. Missing JWT
-    MissingJWT(String),
+    /// Value of '{0}' JWT header has only '{1}' prefix but no JWT token
+    MissingJWTToken(String, String),
 
     /// '{0}' is not a valid JWT header: {1}
     InvalidHeader(String, JWTError),
@@ -40,7 +40,7 @@ pub(crate) enum AuthenticationError {
     /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
     CannotFindSuitableKey(Algorithm, Option<String>),
 
-    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
+    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from JWKS configured to only accept from '{expected}'
     InvalidIssuer { expected: String, token: String },
 
     /// Unsupported key algorithm: {0}
@@ -78,8 +78,8 @@ impl AuthenticationError {
     pub(crate) fn as_context_object(&self) -> ErrorContext {
         let (code, reason) = match self {
             AuthenticationError::CannotConvertToString => ("CANNOT_CONVERT_TO_STRING", None),
-            AuthenticationError::InvalidPrefix(_, _) => ("INVALID_PREFIX", None),
-            AuthenticationError::MissingJWT(_) => ("MISSING_JWT", None),
+            AuthenticationError::InvalidJWTPrefix(_, _) => ("INVALID_PREFIX", None),
+            AuthenticationError::MissingJWTToken(_, _) => ("MISSING_JWT", None),
             AuthenticationError::InvalidHeader(_, jwt_err) => {
                 ("INVALID_HEADER", Some(jwt_error_to_reason(jwt_err).into()))
             }

@@ -22,7 +22,7 @@ pub(crate) struct VariableContext<'schema> {
 }
 
 impl<'schema> VariableContext<'schema> {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         element: &'schema ConnectedElement<'schema>,
         phase: Phase,
         target: Target,
@@ -44,6 +44,8 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::Context,
                     Namespace::Status,
                     Namespace::This,
+                    Namespace::Request,
+                    Namespace::Response,
                 ]
             }
         }
@@ -59,7 +61,7 @@ impl<'schema> VariableContext<'schema> {
     }
 
     /// Get the error code for this context
-    pub(crate) fn error_code(&self) -> Code {
+    pub(crate) const fn error_code(&self) -> Code {
         match self.target {
             Target::Body => Code::InvalidSelection,
         }
@@ -89,16 +91,22 @@ pub enum Namespace {
     Context,
     Status,
     This,
+    Batch,
+    Request,
+    Response,
 }
 
 impl Namespace {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Args => "$args",
             Self::Config => "$config",
             Self::Context => "$context",
             Self::Status => "$status",
             Self::This => "$this",
+            Self::Batch => "$batch",
+            Self::Request => "$request",
+            Self::Response => "$response",
         }
     }
 }
@@ -113,6 +121,9 @@ impl FromStr for Namespace {
             "$context" => Ok(Self::Context),
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
+            "$batch" => Ok(Self::Batch),
+            "$request" => Ok(Self::Request),
+            "$response" => Ok(Self::Response),
             _ => Err(()),
         }
     }
@@ -133,9 +144,9 @@ impl Display for Namespace {
 /// A variable reference. Consists of a namespace starting with a `$` and an optional path
 /// separated by '.' characters.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableReference<'a, N: FromStr + ToString> {
+pub struct VariableReference<'a, N: FromStr + ToString> {
     /// The namespace of the variable - `$this`, `$args`, `$status`, etc.
-    pub(crate) namespace: VariableNamespace<N>,
+    pub namespace: VariableNamespace<N>,
 
     /// The path elements of this reference. For example, the reference `$this.a.b.c`
     /// has path elements `a`, `b`, `c`. May be empty in some cases, as in the reference `$status`.
@@ -158,8 +169,8 @@ impl<N: FromStr + ToString> Display for VariableReference<'_, N> {
 
 /// A namespace in a variable reference, like `$this` in `$this.a.b.c`
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariableNamespace<N: FromStr + ToString> {
-    pub(crate) namespace: N,
+pub struct VariableNamespace<N: FromStr + ToString> {
+    pub namespace: N,
     pub(crate) location: Range<usize>,
 }
 
@@ -171,7 +182,7 @@ pub(crate) struct VariablePathPart<'a> {
 }
 
 impl VariablePathPart<'_> {
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         self.part
     }
 }

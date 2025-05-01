@@ -7,6 +7,7 @@ schema
   @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+  @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
   @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", {name: "@originalName", as: "@custom3"}])
   @link(url: "http://bugfix/weird/v1.0", import: ["@weird"])
 {
@@ -14,6 +15,10 @@ schema
 }
 
 directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
 
 directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
@@ -50,6 +55,8 @@ directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINIT
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
 directive @weird on FIELD | FIELD_DEFINITION
+
+scalar context__ContextFieldValue
 
 input join__ContextArgument {
   name: String!
@@ -98,6 +105,7 @@ type Query
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
   weird: [String] @join__field(graph: ONE) @weird @listSize(assumedSize: 99)
   customAgain: String @join__field(graph: TWO) @custom1
+  z: Z @join__field(graph: TWO)
 }
 
 scalar requiresScopes__Scope
@@ -107,4 +115,20 @@ type T
   @custom2
 {
   field: String @custom3 @cost(weight: 5)
+}
+
+type X
+  @join__type(graph: TWO, key: "id")
+{
+  id: ID!
+  w: String @join__field(graph: TWO, contextArguments: [{context: "two__ctx", name: "z", type: "String", selection: " { y }"}])
+}
+
+type Z
+  @join__type(graph: TWO, key: "id")
+  @context(name: "two__ctx")
+{
+  id: ID!
+  y: String
+  x: X
 }

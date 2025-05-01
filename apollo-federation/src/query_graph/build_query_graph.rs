@@ -32,6 +32,7 @@ use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -77,6 +78,7 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let query_graph =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
@@ -112,6 +114,7 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -131,7 +134,7 @@ impl BaseQueryGraphBuilder {
             .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::default());
+            .insert(source, IndexMap::default());
         Self { query_graph }
     }
 
@@ -379,12 +382,12 @@ impl SchemaQueryGraphBuilder {
                 if self.subgraph.is_some() {
                     self.maybe_add_interface_fields_edges(pos.clone(), node)?;
                 }
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             OutputTypeDefinitionPosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             // Any other case (scalar or enum; input objects are not possible here) is terminal and
             // has no edges to consider.
@@ -1002,6 +1005,10 @@ impl FederatedQueryGraphBuilder {
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes metadata for estimating the count
+        // of non_local_selections.
+        self.base.query_graph.non_local_selection_metadata =
+            precompute_non_local_selection_metadata(&self.base.query_graph)?;
         Ok(self.base.build())
     }
 
@@ -1163,6 +1170,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1288,6 +1296,7 @@ impl FederatedQueryGraphBuilder {
                                     .type_name()
                                     .clone(),
                                 application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1354,6 +1363,7 @@ impl FederatedQueryGraphBuilder {
                     &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1702,6 +1712,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -2120,6 +2131,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -2510,7 +2525,7 @@ mod tests {
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
             source: SCHEMA_NAME.into(),
-            field_definition_position: field_pos.clone().into(),
+            field_definition_position: field_pos.into(),
             is_part_of_provides: false,
         };
         let mut tails = query_graph

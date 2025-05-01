@@ -57,13 +57,30 @@ enum Action {
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UpgradeMode {
+    /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
+    Major,
+    /// Upgrade using migrations for minor version (eg: from router 2.x to router 2.y)
+    Minor,
+}
+
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
     log_warnings: bool,
+    upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
+    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
-    for filename in Asset::iter().sorted().filter(|f| f.ends_with(".yaml")) {
+    let files = Asset::iter().sorted().filter(|f| {
+        if matches!(upgrade_mode, UpgradeMode::Major) {
+            f.ends_with(".yaml")
+        } else {
+            f.ends_with(".yaml") && f.starts_with(CURRENT_MAJOR_VERSION)
+        }
+    });
+    for filename in files {
         if let Some(migration) = Asset::get(&filename) {
             let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
                 ConfigurationError::MigrationFailure {
@@ -186,12 +203,13 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     Ok(new_config)
 }
 
+/// Used for upgrade command
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
         serde_yaml::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
             error: format!("Failed to parse config: {}", error),
         })?;
-    let upgraded_config = upgrade_configuration(&parsed_config, true)?;
+    let upgraded_config = upgrade_configuration(&parsed_config, true, UpgradeMode::Major)?;
     let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|error| {
         ConfigurationError::MigrationFailure {
             error: format!("Failed to serialize upgraded config: {}", error),

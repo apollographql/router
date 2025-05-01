@@ -13,6 +13,7 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
@@ -79,7 +80,17 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         .iter()
         .filter(|d| d.name == *link_name_in_schema);
     for application in link_applications {
-        let link = Arc::new(Link::from_directive_application(application)?);
+        let mut link = Link::from_directive_application(application)?;
+        if link.url.identity == Identity::federation_identity() && link.url.version.major == 1 {
+            // add fake imports for the fed1 federation link.
+            if !link.imports.is_empty() {
+                return Err(LinkError::BootstrapError(format!(
+                    "fed1 @link should not have imports: {link}",
+                )));
+            }
+            link.imports = fed1_link_imports();
+        }
+        let link = Arc::new(link);
         links.push(Arc::clone(&link));
         if by_identity
             .insert(link.url.identity.clone(), Arc::clone(&link))

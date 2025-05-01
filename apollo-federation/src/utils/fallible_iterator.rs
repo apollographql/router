@@ -9,16 +9,16 @@ use itertools::Itertools;
 /// `filter`) might yield a `Result` containing the value you actually want/need, but fallible can
 /// also refer to the stream of items that you're iterating over (or both!). As much as possible, I
 /// will use the following naming scheme in order to keep these ideas consistent:
-///  - If the iterator yeilds an arbitary `T` and the operation that you wish to apply is of the
+///  - If the iterator yields an arbitrary `T` and the operation that you wish to apply is of the
 ///    form `T -> Result`, then it will named `fallible_*`.
-///  - If the iterator yields `Result<T>` and the operation is of the form `T -> U` (for arbitary
+///  - If the iterator yields `Result<T>` and the operation is of the form `T -> U` (for arbitrary
 ///    `U`), then it will named `*_ok`.
 ///  - If both iterator and operation yield `Result`, then it will named `and_then_*` (more on that
 ///    fewer down).
 ///
 /// The first category mostly describes combinators that take closures that need specific types,
 /// such as `filter` and things in the `any`/`all`/`find`/`fold` family. There are several
-/// expirement features in `std` that offer similar functionalities.
+/// experiment features in `std` that offer similar functionalities.
 ///
 /// The second category is mostly taken care of by `Itertools`. While they are not currently
 /// implemented here (or in `Itertools`), this category would also contain methods like `*_err`
@@ -48,7 +48,7 @@ use itertools::Itertools;
 /// Lastly, if you come across something that fits what this trait is trying to do and you have a
 /// usecase for but that is not served by already, feel free to expand the functionalities!
 // TODO: In std, methods like `all` and `any` are actually just specializations of `try_fold` using
-// bools and `FlowControl`. When initially writting this, I, @TylerBloom, didn't take the time to
+// bools and `FlowControl`. When initially writing this, I, @TylerBloom, didn't take the time to
 // write equalivalent folding methods. Should they be implemented in the future, we should rework
 // existing methods to use them.
 pub(crate) trait FallibleIterator: Sized + Itertools {
@@ -85,7 +85,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     // might be useful at some point.
 
     /// This method functions similarly to `Iterator::filter` but where the existing iterator
-    /// yeilds `Result`s and the given predicate also returns `Result`s.
+    /// yields `Result`s and the given predicate also returns `Result`s.
     ///
     /// The predicate is only called if the existing iterator yields `Ok`. `Err`s are ignored.
     /// Should the predicate return an `Err`, the `Ok` value was replaced with the `Err`. This
@@ -119,7 +119,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// This method functions similarly to `Iterator::all` but where the given predicate returns
     /// `Result`s.
     ///
-    /// Like `Iterator::all`, this function short-curcuits but will short-curcuit if the predicate
+    /// Like `Iterator::all`, this function short-circuits but will short-circuit if the predicate
     /// returns anything other than `Ok(true)`. If the first item that is not `Ok(true)` is
     /// `Ok(false)`, the returned value will be `Ok(false)`. If that item is `Err`, than that `Err`
     /// is returned.
@@ -157,7 +157,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// This method functions similarly to `Iterator::any` but where the given predicate returns
     /// `Result`s.
     ///
-    /// Like `Iterator::any`, this function short-curcuits but will short-curcuit if the predicate
+    /// Like `Iterator::any`, this function short-circuits but will short-circuit if the predicate
     /// returns anything other than `Ok(false)`. If the first item that is not `Ok(false)` is
     /// `Ok(true)`, the returned value will be `Ok(true)`. If that item is `Err`, than that `Err`
     /// is returned.
@@ -195,9 +195,9 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// This method functions similarly to `FallibleIterator::fallible_any` but inverted. The
     /// existing iterator yields `Result`s but the predicate is not fallible.
     ///
-    /// Like `FallibleIterator::fallible_any`, this function short-curcuits but will short-curcuit
+    /// Like `FallibleIterator::fallible_any`, this function short-circuits but will short-circuit
     /// if it encounters an `Err` or `true`. If the existing iterator yields an `Err`, this
-    /// function short-curcuits, does not call the predicate, and returns that `Err`. If the value
+    /// function short-circuits, does not call the predicate, and returns that `Err`. If the value
     /// is `Ok`, it is given to the predicate. If the predicate returns `true`, this method returns
     /// `Ok(true)`.
     ///

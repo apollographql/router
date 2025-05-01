@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
@@ -22,6 +23,7 @@ use http::header::UPGRADE;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use serde_json_bytes::path::JsonPathInst;
 use tower::BoxError;
 use tower::Layer;
@@ -29,21 +31,22 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
-use crate::register_plugin;
 use crate::services::SubgraphRequest;
+use crate::services::connector;
+use crate::services::connector::request_service::TransportRequest;
 use crate::services::subgraph;
 
-register_plugin!("apollo", "headers", Headers);
+register_private_plugin!("apollo", "headers", Headers);
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct HeadersLocation {
     /// Propagate/Insert/Remove headers from request
@@ -179,6 +182,18 @@ enum Propagate {
     },
 }
 
+#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ConnectorHeadersConfiguration {
+    /// Map of subgraph_name.connector_source_name to configuration
+    #[serde(default)]
+    sources: HashMap<String, HeadersLocation>,
+
+    /// Options applying to all sources across all subgraphs
+    #[serde(default)]
+    all: Option<HeadersLocation>,
+}
+
 /// Configuration for header propagation
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
@@ -187,16 +202,19 @@ struct Config {
     all: Option<HeadersLocation>,
     /// Rules to specific subgraphs
     subgraphs: HashMap<String, HeadersLocation>,
+    /// Rules for connectors
+    connector: ConnectorHeadersConfiguration,
 }
 
 struct Headers {
     all_operations: Arc<Vec<Operation>>,
     subgraph_operations: HashMap<String, Arc<Vec<Operation>>>,
-    reserved_headers: Arc<HashSet<&'static HeaderName>>,
+    all_connector_operations: Arc<Vec<Operation>>,
+    connector_source_operations: HashMap<String, Arc<Vec<Operation>>>,
 }
 
 #[async_trait::async_trait]
-impl Plugin for Headers {
+impl PluginPrivate for Headers {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -216,11 +234,30 @@ impl Plugin for Headers {
                 (subgraph_name.clone(), Arc::new(operations))
             })
             .collect();
+        let all_connector_operations: Vec<Operation> = init
+            .config
+            .connector
+            .all
+            .as_ref()
+            .map(|a| a.request.clone())
+            .unwrap_or_default();
+        let connector_source_operations = init
+            .config
+            .connector
+            .sources
+            .iter()
+            .map(|(subgraph_name, op)| {
+                let mut operations = operations.clone();
+                operations.append(&mut op.request.clone());
+                (subgraph_name.clone(), Arc::new(operations))
+            })
+            .collect();
 
         Ok(Headers {
             all_operations: Arc::new(operations),
+            all_connector_operations: Arc::new(all_connector_operations),
             subgraph_operations,
-            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
+            connector_source_operations,
         })
     }
 
@@ -231,7 +268,22 @@ impl Plugin for Headers {
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| self.all_operations.clone()),
-                self.reserved_headers.clone(),
+            ))
+            .service(service)
+            .boxed()
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        ServiceBuilder::new()
+            .layer(HeadersLayer::new(
+                self.connector_source_operations
+                    .get(&source_name)
+                    .cloned()
+                    .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
             .service(service)
             .boxed()
@@ -240,18 +292,11 @@ impl Plugin for Headers {
 
 struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
-    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
 impl HeadersLayer {
-    fn new(
-        operations: Arc<Vec<Operation>>,
-        reserved_headers: Arc<HashSet<&'static HeaderName>>,
-    ) -> Self {
-        Self {
-            operations,
-            reserved_headers,
-        }
+    fn new(operations: Arc<Vec<Operation>>) -> Self {
+        Self { operations }
     }
 }
 
@@ -262,14 +307,12 @@ impl<S> Layer<S> for HeadersLayer {
         HeadersService {
             inner,
             operations: self.operations.clone(),
-            reserved_headers: self.reserved_headers.clone(),
         }
     }
 }
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
-    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
 // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
@@ -307,159 +350,234 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        self.modify_request(&mut req);
+        self.modify_subgraph_request(&mut req);
+        self.inner.call(req)
+    }
+}
+
+impl<S> Service<connector::request_service::Request> for HeadersService<S>
+where
+    S: Service<connector::request_service::Request>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
+        self.modify_connector_request(&mut req);
         self.inner.call(req)
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_request(&self, req: &mut SubgraphRequest) {
-        let mut already_propagated: HashSet<&str> = HashSet::new();
-        let mut body_to_value = None;
+    fn modify_subgraph_request(&self, req: &mut SubgraphRequest) {
+        let mut already_propagated: HashSet<String> = HashSet::new();
+
+        let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
+        let supergraph_headers = req.supergraph_request.headers();
+        let context = &req.context;
+        let headers_mut = req.subgraph_request.headers_mut();
 
         for operation in &*self.operations {
-            match operation {
-                Operation::Insert(insert_config) => match insert_config {
-                    Insert::Static(static_insert) => {
-                        req.subgraph_request
-                            .headers_mut()
-                            .insert(&static_insert.name, static_insert.value.clone());
+            operation.process_header_rules(
+                &mut already_propagated,
+                supergraph_headers,
+                &body_to_value,
+                context,
+                headers_mut,
+            );
+        }
+    }
+
+    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
+        let mut already_propagated: HashSet<String> = HashSet::new();
+
+        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+        let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
+        let supergraph_headers = req.supergraph_request.headers();
+        let context = &req.context;
+        let headers_mut = http_request.inner.headers_mut();
+
+        for operation in &*self.operations {
+            operation.process_header_rules(
+                &mut already_propagated,
+                supergraph_headers,
+                &body_to_value,
+                context,
+                headers_mut,
+            );
+        }
+    }
+}
+
+impl Operation {
+    fn process_header_rules(
+        &self,
+        already_propagated: &mut HashSet<String>,
+        supergraph_headers: &HeaderMap,
+        body_to_value: &Option<Value>,
+        context: &crate::Context,
+        headers_mut: &mut HeaderMap,
+    ) {
+        match self {
+            Operation::Insert(insert) => {
+                insert.process_header_rules(body_to_value, context, headers_mut)
+            }
+            Operation::Remove(remove) => remove.process_header_rules(headers_mut),
+            Operation::Propagate(propagate) => {
+                propagate.process_header_rules(already_propagated, supergraph_headers, headers_mut)
+            }
+        }
+    }
+}
+
+impl Insert {
+    fn process_header_rules(
+        &self,
+        body_to_value: &Option<Value>,
+        context: &crate::Context,
+        headers_mut: &mut HeaderMap,
+    ) {
+        match self {
+            Insert::Static(insert_static) => {
+                headers_mut.insert(&insert_static.name, insert_static.value.clone());
+            }
+            Insert::FromContext(insert_from_context) => {
+                if let Some(val) = context
+                    .get::<_, String>(&insert_from_context.from_context)
+                    .ok()
+                    .flatten()
+                {
+                    match HeaderValue::from_str(&val) {
+                        Ok(header_value) => {
+                            headers_mut.insert(&insert_from_context.name, header_value);
+                        }
+                        Err(err) => {
+                            tracing::error!(
+                                "cannot convert from the context into a header value for header name '{}': {:?}",
+                                insert_from_context.name,
+                                err
+                            );
+                        }
                     }
-                    Insert::FromContext(insert_from_context) => {
-                        if let Some(val) = req
-                            .context
-                            .get::<_, String>(&insert_from_context.from_context)
-                            .ok()
-                            .flatten()
+                }
+            }
+            Insert::FromBody(from_body) => {
+                if let Some(body_to_value) = &body_to_value {
+                    let output = from_body.path.find(body_to_value);
+                    if let serde_json_bytes::Value::Null = output {
+                        if let Some(default_val) = &from_body.default {
+                            headers_mut.insert(&from_body.name, default_val.clone());
+                        }
+                    } else {
+                        let header_value = if let serde_json_bytes::Value::String(val_str) = output
                         {
-                            match HeaderValue::from_str(&val) {
-                                Ok(header_value) => {
-                                    req.subgraph_request
-                                        .headers_mut()
-                                        .insert(&insert_from_context.name, header_value);
-                                }
-                                Err(err) => {
-                                    tracing::error!(
-                                        "cannot convert from the context into a header value for header name '{}': {:?}",
-                                        insert_from_context.name,
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Insert::FromBody(from_body) => {
-                        if body_to_value.is_none() {
-                            body_to_value =
-                                serde_json_bytes::value::to_value(req.supergraph_request.body())
-                                    .ok();
-                        }
-
-                        if let Some(body_to_value) = &body_to_value {
-                            let output = from_body.path.find(body_to_value);
-                            if let serde_json_bytes::Value::Null = output {
-                                if let Some(default_val) = &from_body.default {
-                                    req.subgraph_request
-                                        .headers_mut()
-                                        .insert(&from_body.name, default_val.clone());
-                                }
-                            } else {
-                                let header_value =
-                                    if let serde_json_bytes::Value::String(val_str) = output {
-                                        val_str.as_str().to_string()
-                                    } else {
-                                        output.to_string()
-                                    };
-                                match HeaderValue::from_str(&header_value) {
-                                    Ok(header_value) => {
-                                        req.subgraph_request
-                                            .headers_mut()
-                                            .insert(&from_body.name, header_value);
-                                    }
-                                    Err(err) => {
-                                        let header_name = &from_body.name;
-                                        tracing::error!(%header_name, ?err, "cannot convert from the body into a header value for header name");
-                                    }
-                                }
-                            }
-                        } else if let Some(default_val) = &from_body.default {
-                            req.subgraph_request
-                                .headers_mut()
-                                .insert(&from_body.name, default_val.clone());
-                        }
-                    }
-                },
-                Operation::Remove(Remove::Named(name)) => {
-                    req.subgraph_request.headers_mut().remove(name);
-                }
-                Operation::Remove(Remove::Matching(matching)) => {
-                    let headers = req.subgraph_request.headers_mut();
-                    let new_headers = headers
-                        .drain()
-                        .filter_map(|(name, value)| {
-                            name.and_then(|name| {
-                                (self.reserved_headers.contains(&name)
-                                    || !matching.is_match(name.as_str()))
-                                .then_some((name, value))
-                            })
-                        })
-                        .collect();
-
-                    let _ = std::mem::replace(headers, new_headers);
-                }
-                Operation::Propagate(Propagate::Named {
-                    named,
-                    rename,
-                    default,
-                }) => {
-                    let target_header = rename.as_ref().unwrap_or(named);
-                    if !already_propagated.contains(target_header.as_str()) {
-                        let headers = req.subgraph_request.headers_mut();
-                        let values = req.supergraph_request.headers().get_all(named);
-                        if values.iter().count() == 0 {
-                            if let Some(default) = default {
-                                headers.append(target_header, default.clone());
-                                already_propagated.insert(target_header.as_str());
-                            }
+                            val_str.as_str().to_string()
                         } else {
-                            for value in values {
-                                headers.append(target_header, value.clone());
-                                already_propagated.insert(target_header.as_str());
+                            output.to_string()
+                        };
+                        match HeaderValue::from_str(&header_value) {
+                            Ok(header_value) => {
+                                headers_mut.insert(&from_body.name, header_value);
+                            }
+                            Err(err) => {
+                                let header_name = &from_body.name;
+                                tracing::error!(%header_name, ?err, "cannot convert from the body into a header value for header name");
                             }
                         }
                     }
+                } else if let Some(default_val) = &from_body.default {
+                    headers_mut.insert(&from_body.name, default_val.clone());
                 }
-                Operation::Propagate(Propagate::Matching { matching }) => {
-                    let mut previous_name = None;
-                    let headers = req.subgraph_request.headers_mut();
-                    req.supergraph_request
-                        .headers()
-                        .iter()
-                        .filter(|(name, _)| {
-                            !self.reserved_headers.contains(*name)
-                                && matching.is_match(name.as_str())
-                        })
-                        .for_each(|(name, value)| {
-                            if !already_propagated.contains(name.as_str()) {
-                                headers.append(name, value.clone());
+            }
+        }
+    }
+}
 
-                                // we have to this because don't want to propagate headers that are accounted for in the
-                                // `already_propagated` set, but in the iteration here we might go through the same header
-                                // multiple times
-                                match previous_name {
-                                    None => previous_name = Some(name),
-                                    Some(previous) => {
-                                        if previous != name {
-                                            already_propagated.insert(previous.as_str());
-                                            previous_name = Some(name);
-                                        }
+impl Remove {
+    fn process_header_rules(&self, headers_mut: &mut HeaderMap) {
+        match self {
+            Remove::Named(name) => {
+                headers_mut.remove(name);
+            }
+            Remove::Matching(matching) => {
+                let new_headers = headers_mut
+                    .drain()
+                    .filter_map(|(name, value)| {
+                        name.and_then(|name| {
+                            (RESERVED_HEADERS.contains(&name) || !matching.is_match(name.as_str()))
+                                .then_some((name, value))
+                        })
+                    })
+                    .collect();
+
+                let _ = std::mem::replace(headers_mut, new_headers);
+            }
+        }
+    }
+}
+
+impl Propagate {
+    fn process_header_rules(
+        &self,
+        already_propagated: &mut HashSet<String>,
+        supergraph_headers: &HeaderMap,
+        headers_mut: &mut HeaderMap,
+    ) {
+        match self {
+            Propagate::Named {
+                named,
+                rename,
+                default,
+            } => {
+                let target_header = rename.as_ref().unwrap_or(named);
+                if !already_propagated.contains(target_header.as_str()) {
+                    let values = supergraph_headers.get_all(named);
+                    if values.iter().count() == 0 {
+                        if let Some(default) = default {
+                            headers_mut.append(target_header, default.clone());
+                            already_propagated.insert(target_header.to_string());
+                        }
+                    } else {
+                        for value in values {
+                            headers_mut.append(target_header, value.clone());
+                            already_propagated.insert(target_header.to_string());
+                        }
+                    }
+                }
+            }
+            Propagate::Matching { matching } => {
+                let mut previous_name = None;
+
+                supergraph_headers
+                    .iter()
+                    .filter(|(name, _)| {
+                        !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
+                    })
+                    .for_each(|(name, value)| {
+                        if !already_propagated.contains(name.as_str()) {
+                            headers_mut.append(name, value.clone());
+
+                            // we have to this because don't want to propagate headers that are accounted for in the
+                            // `already_propagated` set, but in the iteration here we might go through the same header
+                            // multiple times
+                            match previous_name {
+                                None => previous_name = Some(name),
+                                Some(previous) => {
+                                    if previous != name {
+                                        already_propagated.insert(previous.to_string());
+                                        previous_name = Some(name);
                                     }
                                 }
                             }
-                        });
-                    if let Some(name) = previous_name {
-                        already_propagated.insert(name.as_str());
-                    }
+                        }
+                    });
+                if let Some(name) = previous_name {
+                    already_propagated.insert(name.to_string());
                 }
             }
         }
@@ -472,6 +590,14 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
+    use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
 
@@ -479,11 +605,14 @@ mod test {
     use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
+    use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::connector::request_service::transport::http::HttpRequest;
 
     #[test]
     fn test_subgraph_config() {
@@ -610,16 +739,46 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
+            InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            }))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_static() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("c", "d"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
+            InsertStatic {
+                name: "c".try_into()?,
+                value: "d".try_into()?,
+            },
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -638,18 +797,46 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromContext(
-                InsertFromContext {
-                    name: "header_from_context".try_into()?,
-                    from_context: "my_key".to_string(),
-                },
-            ))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
+            Insert::FromContext(InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            }),
+        )]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_from_context() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_context", "my_value_from_context"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
+            Insert::FromContext(InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            }),
+        )]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -668,17 +855,48 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str("$.operationName").unwrap(),
                 default: None,
-            }))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "myCoolValue"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JsonPathInst::from_str("$.myCoolField").unwrap(),
+                default: None,
+            },
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -697,17 +915,49 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str(".operationName").unwrap(),
                 default: None,
-            }))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_from_request_body_with_old_access_json_notation()
+    -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "myCoolValue"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JsonPathInst::from_str(".myCoolField").unwrap(),
+                default: None,
+            },
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -719,13 +969,33 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_remove_exact() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -737,15 +1007,33 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
-                "a[ab]",
-            )?))]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
+            Regex::from_str("a[ab]")?,
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_remove_matching() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
+            Regex::from_str("a[ab]")?,
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -766,15 +1054,44 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_propagate_matching() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("da", "vda"),
+                    ("db", "vdb"),
+                    ("db", "vdb2"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
+                matching: Regex::from_str("d[ab]")?,
+            })]))
+            .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -793,17 +1110,46 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_propagate_exact() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("da", "vda"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: None,
+                default: None,
+            })]))
+            .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -822,17 +1168,46 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connect_propagate_exact_rename() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ea", "vda"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("ea".try_into()?),
+                default: None,
+            })]))
+            .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -852,30 +1227,71 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("rb".try_into()?),
-                    default: None,
-                }),
-                // This should not take effect as the header is already propagated
-                Operation::Propagate(Propagate::Named {
-                    named: "db".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-            ]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("rb".try_into()?),
+                default: None,
+            }),
+            // This should not take effect as the header is already propagated
+            Operation::Propagate(Propagate::Named {
+                named: "db".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+        ]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_propagate_multiple() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ra", "vda"),
+                    ("rb", "vda"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("rb".try_into()?),
+                default: None,
+            }),
+            // This should not take effect as the header is already propagated
+            Operation::Propagate(Propagate::Named {
+                named: "db".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+        ]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -894,17 +1310,46 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]),
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_propagate_exact_default() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ea", "defaulted"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+                named: "ea".try_into()?,
+                rename: None,
+                default: Some("defaulted".try_into()?),
+            })]))
+            .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -915,7 +1360,6 @@ mod test {
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
-            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
         };
 
         let mut request = SubgraphRequest {
@@ -958,7 +1402,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_request(&mut request);
+        service.modify_subgraph_request(&mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -998,7 +1442,6 @@ mod test {
                     matching: Regex::from_str("dc")?,
                 }),
             ]),
-            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
         };
 
         let mut request = SubgraphRequest {
@@ -1031,7 +1474,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_request(&mut request);
+        service.modify_subgraph_request(&mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -1053,6 +1496,49 @@ mod test {
             req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
+    }
+
+    fn example_connector_response(
+        _req: connector::request_service::Request,
+    ) -> Result<connector::request_service::Response, BoxError> {
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("f").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+        };
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        Ok(connector::request_service::Response::test_builder()
+            .context(Context::new())
+            .connector(Arc::new(connector))
+            .response_key(key)
+            .problems(Default::default())
+            .data(json!(""))
+            .build())
     }
 
     fn example_request() -> SubgraphRequest {
@@ -1098,6 +1584,88 @@ mod test {
         }
     }
 
+    fn example_connector_request() -> connector::request_service::Request {
+        let ctx = Context::new();
+        ctx.insert("my_key", "my_value_from_context".to_string())
+            .unwrap();
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("f").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+        };
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let request = http::Request::builder()
+            .header("aa", "vaa")
+            .header("ab", "vab")
+            .header("ac", "vac")
+            .header(HOST, "rhost")
+            .header(CONTENT_LENGTH, "22")
+            .header(CONTENT_TYPE, "graphql")
+            .body(
+                json!({
+                    "myCoolField": "myCoolValue"
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+        let http_request = HttpRequest {
+            inner: request,
+            debug: None,
+        };
+
+        connector::request_service::Request {
+            context: ctx,
+            connector: Arc::new(connector),
+            service_name: String::from("test"),
+            transport_request: http_request.into(),
+            key,
+            mapping_problems: Default::default(),
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header("db", "vdb2")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+        }
+    }
+
     impl SubgraphRequest {
         fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
             let mut headers = headers.clone();
@@ -1116,6 +1684,25 @@ mod test {
         }
     }
 
+    impl connector::request_service::Request {
+        fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+            let mut headers = headers.clone();
+            headers.push((HOST.as_str(), "rhost"));
+            headers.push((CONTENT_LENGTH.as_str(), "22"));
+            headers.push((CONTENT_TYPE.as_str(), "graphql"));
+            let TransportRequest::Http(ref http_request) = self.transport_request;
+            let actual_headers = http_request
+                .inner
+                .headers()
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+                .collect::<HashSet<_>>();
+            assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
+
+            true
+        }
+    }
+
     async fn assert_headers(
         config: &'static str,
         input: Vec<(&'static str, &'static str)>,
@@ -1124,7 +1711,8 @@ mod test {
         let test_harness = PluginTestHarness::<Headers>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let service = test_harness.subgraph_service("test", move |r| {
             let output = output.clone();
             async move {

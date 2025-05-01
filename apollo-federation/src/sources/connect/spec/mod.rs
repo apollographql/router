@@ -52,6 +52,14 @@ pub enum ConnectSpec {
     V0_2,
 }
 
+impl PartialOrd for ConnectSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_version: Version = (*self).into();
+        let other_version: Version = (*other).into();
+        self_version.partial_cmp(&other_version)
+    }
+}
+
 impl ConnectSpec {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -129,7 +137,7 @@ impl ConnectSpec {
             arguments: vec![
                 Argument {
                     name: name!("graphs"),
-                    value: Value::List(vec![]).into(),
+                    value: Value::List(Vec::new()).into(),
                 }
                 .into(),
                 Argument {
@@ -150,10 +158,18 @@ impl ConnectSpec {
         }
     }
 
-    pub(crate) fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
+    pub(crate) const fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
         match self {
             ConnectSpec::V0_1 => CONNECT_V0_1_LOCATIONS,
             ConnectSpec::V0_2 => CONNECT_V0_2_LOCATIONS,
+        }
+    }
+
+    pub(crate) const fn available() -> &'static [ConnectSpec] {
+        if cfg!(any(feature = "connect_v0.2", test)) {
+            &[ConnectSpec::V0_1, ConnectSpec::V0_2]
+        } else {
+            &[ConnectSpec::V0_1]
         }
     }
 }
@@ -163,6 +179,7 @@ impl TryFrom<&Version> for ConnectSpec {
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
+            #[cfg(any(feature = "connect_v0.2", test))]
             (0, 2) => Ok(Self::V0_2),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),

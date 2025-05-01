@@ -220,6 +220,7 @@ impl PluginInit<serde_json::Value> {
 #[derive(Clone)]
 pub struct PluginFactory {
     pub(crate) name: String,
+    pub(crate) hidden_from_config_json_schema: bool,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -249,6 +250,7 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
+            hidden_from_config_json_schema: false,
             instance_factory: |init| {
                 Box::pin(async move {
                     let init = init.with_deserialized_config()?;
@@ -262,7 +264,6 @@ impl PluginFactory {
     }
 
     /// Create a plugin factory.
-    #[allow(dead_code)]
     pub(crate) fn new_private<P: PluginPrivate>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
             name.to_string()
@@ -272,6 +273,7 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
+            hidden_from_config_json_schema: P::HIDDEN_FROM_CONFIG_JSON_SCHEMA,
             instance_factory: |init| {
                 Box::pin(async move {
                     let init = init.with_deserialized_config()?;
@@ -537,6 +539,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
     type Config: JsonSchema + DeserializeOwned + Send;
+
+    const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
