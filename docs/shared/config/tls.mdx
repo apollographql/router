@@ -1,0 +1,27 @@
+### `tls`
+
+TLS related configuration options.
+
+
+
+```yaml title="tls"
+tls:
+  connector:
+    all:
+      certificate_authorities: null
+      client_authentication:
+        certificate_chain: example_certificate_chain
+        key: example_key
+    sources: {}
+  subgraph:
+    all:
+      certificate_authorities: null
+      client_authentication:
+        certificate_chain: example_certificate_chain
+        key: example_key
+    subgraphs: {}
+  supergraph:
+    certificate: example_certificate
+    certificate_chain: example_certificate_chain
+    key: example_key
+```

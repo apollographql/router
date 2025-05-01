@@ -1,0 +1,17 @@
+### `health_check`
+
+Configuration options pertaining to the health component.
+
+
+
+```yaml title="health_check"
+health_check:
+  enabled: true
+  listen: example_listen
+  path: /health
+  readiness:
+    allowed: 100
+    interval:
+      sampling: 0s
+      unready: null
+```

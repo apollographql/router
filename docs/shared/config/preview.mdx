@@ -1,0 +1,63 @@
+### `preview_entity_cache`
+
+Configuration for entity caching
+
+
+
+```yaml title="preview_entity_cache"
+preview_entity_cache:
+  enabled: false
+  expose_keys_in_context: false
+  invalidation:
+    concurrent_requests: 10
+    listen: example_listen
+    path: example_path
+    scan_count: 1000
+  metrics:
+    enabled: false
+    separate_per_type: false
+    ttl: 30s
+  subgraph:
+    all:
+      enabled: true
+      invalidation:
+        enabled: false
+        shared_key: ''
+      private_id: null
+      redis:
+        namespace: example_namespace
+        password: example_password
+        pool_size: 1
+        required_to_start: false
+        reset_ttl: true
+        timeout: null
+        tls:
+          certificate_authorities: null
+          client_authentication:
+            certificate_chain: example_certificate_chain
+            key: example_key
+        ttl: null
+        urls:
+        - http://example.com/urls_item
+        username: example_username
+      ttl: 30s
+    subgraphs: {}
+```
+
+### `preview_file_uploads`
+
+Configuration for File Uploads plugin
+
+
+
+```yaml title="preview_file_uploads"
+preview_file_uploads:
+  enabled: false
+  protocols:
+    multipart:
+      enabled: true
+      limits:
+        max_file_size: example_max_file_size
+        max_files: 0
+      mode: stream
+```
