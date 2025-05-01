@@ -277,7 +277,7 @@ pub enum Code {
 }
 
 impl Code {
-    pub const fn severity(&self) -> Severity {
+    pub fn severity(&self) -> Severity {
         match self {
             Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
             _ => Severity::Error,

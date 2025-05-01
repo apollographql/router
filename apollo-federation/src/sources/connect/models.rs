@@ -124,7 +124,7 @@ pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 /// A connector can be used as a potential entity resolver for a type, with
 /// extra validation rules based on the transport args and field position within
 /// a schema.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityResolver {
     /// The user defined a connector on a field that acts as an entity resolver
     Explicit,
@@ -317,7 +317,7 @@ impl Connector {
             .id
             .source_name
             .clone()
-            .unwrap_or(self.id.synthetic_name());
+            .unwrap_or_else(|| self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
     }
 }

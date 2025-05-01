@@ -161,13 +161,13 @@ impl SourceDirectiveArguments {
             let arg_name = arg.name.as_str();
 
             if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
-                name = Some(arg.value.as_str().ok_or(internal!(
-                    "`name` field in `@source` directive is not a string"
-                ))?);
+                name = Some(arg.value.as_str().ok_or_else(|| {
+                    internal!("`name` field in `@source` directive is not a string")
+                })?);
             } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@source` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@source` directive is not an object")
+                })?;
                 let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
 
                 http = Some(http_value);
@@ -187,9 +187,9 @@ impl SourceDirectiveArguments {
 
         Ok(Self {
             name: name
-                .ok_or(internal!("missing `name` field in `@source` directive"))?
+                .ok_or_else(|| internal!("missing `name` field in `@source` directive"))?
                 .to_string(),
-            http: http.ok_or(internal!("missing `http` field in `@source` directive"))?,
+            http: http.ok_or_else(|| internal!("missing `http` field in `@source` directive"))?,
             errors,
         })
     }
@@ -208,7 +208,7 @@ impl SourceHTTPArguments {
             let name = name.as_str();
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_str().ok_or(internal!(
+                let base_url_value = value.as_str().ok_or_else(|| internal!(
                     "`baseURL` field in `@source` directive's `http.baseURL` field is not a string"
                 ))?;
 
@@ -226,13 +226,15 @@ impl SourceHTTPArguments {
                         .map_err(|err| internal!(err.to_string()))?,
                 );
             } else if name == PATH_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@source` directive's `http.path` field is not a string",
-                    PATH_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@source` directive's `http.path` field is not a string",
+                        PATH_ARGUMENT_NAME
+                    ))
+                })?;
                 path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
+                let value = value.as_str().ok_or_else(|| internal!(format!(
                     "`{}` field in `@source` directive's `http.queryParams` field is not a string",
                     QUERY_PARAMS_ARGUMENT_NAME
                 )))?;
@@ -245,9 +247,9 @@ impl SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url.ok_or(internal!(
-                "missing `base_url` field in `@source` directive's `http` argument"
-            ))?,
+            base_url: base_url.ok_or_else(|| {
+                internal!("missing `base_url` field in `@source` directive's `http` argument")
+            })?,
             headers: headers.unwrap_or_default(),
             path,
             query_params: query,
@@ -308,21 +310,21 @@ impl ConnectDirectiveArguments {
             let arg_name = arg.name.as_str();
 
             if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
-                let source_value = arg.value.as_str().ok_or(internal!(
-                    "`source` field in `@source` directive is not a string"
-                ))?;
+                let source_value = arg.value.as_str().ok_or_else(|| {
+                    internal!("`source` field in `@source` directive is not a string")
+                })?;
 
                 source = Some(source_value);
             } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@connect` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@connect` directive is not an object")
+                })?;
 
                 http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@connect` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@connect` directive is not an object")
+                })?;
 
                 batch = Some(ConnectBatchArguments::from_values(http_value)?);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
@@ -334,15 +336,15 @@ impl ConnectDirectiveArguments {
 
                 errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
-                let selection_value = arg.value.as_str().ok_or(internal!(
-                    "`selection` field in `@connect` directive is not a string"
-                ))?;
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    internal!("`selection` field in `@connect` directive is not a string")
+                })?;
                 selection =
                     Some(JSONSelection::parse(selection_value).map_err(|e| internal!(e.message))?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
-                let entity_value = arg.value.to_bool().ok_or(internal!(
-                    "`entity` field in `@connect` directive is not a boolean"
-                ))?;
+                let entity_value = arg.value.to_bool().ok_or_else(|| {
+                    internal!("`entity` field in `@connect` directive is not a boolean")
+                })?;
 
                 entity = Some(entity_value);
             } else {
@@ -356,7 +358,8 @@ impl ConnectDirectiveArguments {
             position,
             source: source.map(|s| s.to_string()),
             http,
-            selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
+            selection: selection
+                .ok_or_else(|| internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
             batch,
             errors,
@@ -382,9 +385,9 @@ impl ConnectHTTPArguments {
             let name = name.as_str();
 
             if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
-                let body_value = value.as_str().ok_or(internal!(
-                    "`body` field in `@connect` directive's `http` field is not a string"
-                ))?;
+                let body_value = value.as_str().ok_or_else(|| {
+                    internal!("`body` field in `@connect` directive's `http` field is not a string")
+                })?;
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
@@ -395,36 +398,40 @@ impl ConnectHTTPArguments {
                         .map_err(|err| internal!(err.to_string()))?,
                 );
             } else if name == "GET" {
-                get = Some(value.as_str().ok_or(internal!(
+                get = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "POST" {
-                post = Some(value.as_str().ok_or(internal!(
+                post = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PATCH" {
-                patch = Some(value.as_str().ok_or(internal!(
+                patch = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PUT" {
-                put = Some(value.as_str().ok_or(internal!(
+                put = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "DELETE" {
-                delete = Some(value.as_str().ok_or(internal!(
+                delete = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == PATH_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
-                    PATH_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@connect` directive's `http` field is not a string",
+                        PATH_ARGUMENT_NAME
+                    ))
+                })?;
                 path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
-                    QUERY_PARAMS_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@connect` directive's `http` field is not a string",
+                        QUERY_PARAMS_ARGUMENT_NAME
+                    ))
+                })?;
                 query_params = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             }
         }
@@ -450,7 +457,7 @@ impl ConnectBatchArguments {
             let name = name.as_str();
 
             if name == "maxSize" {
-                let max_size_int = Some(value.to_i32().ok_or(internal!(
+                let max_size_int = Some(value.to_i32().ok_or_else(|| internal!(
                     "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
                 ))?);
                 // Convert the int to a usize since it is used for chunking an array later.

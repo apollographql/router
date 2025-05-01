@@ -56,6 +56,11 @@ pub(super) fn carryover_directives(
         SchemaDefinitionPosition.insert_directive(to, spec.join_directive_application().into())?;
     }
 
+    // @link for connect
+    if let Some(link) = metadata.for_identity(&ConnectSpec::identity()) {
+        SchemaDefinitionPosition.insert_directive(to, link.to_directive_application().into())?;
+    }
+
     // @inaccessible
 
     if let Some(link) = metadata.for_identity(&Identity::inaccessible_identity()) {
@@ -665,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_carryover() {
-        let sdl = include_str!("./tests/schemas/ignore/directives.graphql");
+        let sdl = include_str!("./tests/schemas/expand/directives.graphql");
         let schema = Schema::parse(sdl, "directives.graphql").expect("parse failed");
         let supergraph_schema = FederationSchema::new(schema).expect("federation schema failed");
         let subgraphs = extract_subgraphs_from_supergraph(&supergraph_schema, None)

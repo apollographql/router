@@ -3572,7 +3572,7 @@ impl OpGraphPath {
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos {
                             if supergraph_schema
-                                .possible_runtime_types(type_condition_pos.clone().into())?
+                                .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
                             {
                                 debug!("Type is a super-type of the current type. No edge to take");
