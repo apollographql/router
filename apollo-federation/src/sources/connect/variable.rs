@@ -22,7 +22,7 @@ pub(crate) struct VariableContext<'schema> {
 }
 
 impl<'schema> VariableContext<'schema> {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         element: &'schema ConnectedElement<'schema>,
         phase: Phase,
         target: Target,
@@ -61,7 +61,7 @@ impl<'schema> VariableContext<'schema> {
     }
 
     /// Get the error code for this context
-    pub(crate) fn error_code(&self) -> Code {
+    pub(crate) const fn error_code(&self) -> Code {
         match self.target {
             Target::Body => Code::InvalidSelection,
         }
@@ -97,7 +97,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Args => "$args",
             Self::Config => "$config",
@@ -182,7 +182,7 @@ pub(crate) struct VariablePathPart<'a> {
 }
 
 impl VariablePathPart<'_> {
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         self.part
     }
 }

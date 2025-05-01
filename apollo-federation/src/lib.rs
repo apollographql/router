@@ -61,6 +61,7 @@ use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
 use crate::schema::ValidFederationSchema;
+use crate::sources::connect::ConnectSpec;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
@@ -116,6 +117,9 @@ pub(crate) fn validate_supergraph(
             }
         })
     }).transpose()?;
+    if let Some(connect_link) = metadata.for_identity(&ConnectSpec::identity()) {
+        ConnectSpec::try_from(&connect_link.url.version)?;
+    }
     Ok((
         link_spec_definition,
         join_spec_definition,
@@ -123,6 +127,7 @@ pub(crate) fn validate_supergraph(
     ))
 }
 
+#[derive(Debug)]
 pub struct Supergraph {
     pub schema: ValidFederationSchema,
 }
@@ -176,4 +181,41 @@ const _: () = {
 /// Returns if the type of the node is a scalar or enum.
 pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
+}
+
+#[cfg(test)]
+mod test_supergraph {
+    use pretty_assertions::assert_str_eq;
+
+    use super::*;
+
+    #[test]
+    fn validates_connect_spec_is_known() {
+        let res = Supergraph::new(
+            r#"
+        extend schema @link(url: "https://specs.apollo.dev/connect/v99.99")
+        
+        # Required stuff for the supergraph to parse at all, not what we're testing
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        scalar link__Import
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+        type Query {required: ID!}
+    "#,
+        )
+        .expect_err("Unknown spec version did not cause error");
+        assert_str_eq!(res.to_string(), "Unknown connect version: 99.99");
+    }
 }
