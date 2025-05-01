@@ -39,7 +39,7 @@ fn and_method(
             }
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
             errors.extend(arg_errors);
-            result = value_opt.map(|value| is_truthy(&value)).unwrap_or(false);
+            result = value_opt.is_some_and(|value| is_truthy(&value));
         }
 
         (Some(JSON::Bool(result)), errors)
