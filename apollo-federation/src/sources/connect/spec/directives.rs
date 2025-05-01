@@ -172,9 +172,9 @@ impl SourceDirectiveArguments {
 
                 http = Some(http_value);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`errors` field in `@source` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@source` directive is not an object")
+                })?;
                 let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
 
                 errors = Some(errors_value);
@@ -265,13 +265,13 @@ impl ErrorsArguments {
             let name = name.as_str();
 
             if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
-                let message_value = value.as_str().ok_or(internal!(format!(
+                let message_value = value.as_str().ok_or_else(|| internal!(format!(
                     "`message` field in `@{directive_name}` directive's `errors` field is not a string")
                 ))?;
                 message =
                     Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
             } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
-                let extensions_value = value.as_str().ok_or(internal!(format!(
+                let extensions_value = value.as_str().ok_or_else(|| internal!(format!(
                     "`extensions` field in `@{directive_name}` directive's `errors` field is not a string")
                 ))?;
                 extensions =
@@ -328,9 +328,9 @@ impl ConnectDirectiveArguments {
 
                 batch = Some(ConnectBatchArguments::from_values(http_value)?);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`errors` field in `@connect` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@connect` directive is not an object")
+                })?;
 
                 let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
 

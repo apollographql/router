@@ -146,7 +146,7 @@ impl<'schema> SourceDirective<'schema> {
 }
 
 /// The `name` argument of a `@source` directive.
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Default)]
 pub(super) struct SourceName<'schema>(&'schema str);
 
 impl<'schema> SourceName<'schema> {
@@ -235,12 +235,6 @@ impl<'schema> SourceName<'schema> {
 
     pub(crate) fn as_str(&self) -> &str {
         self.0
-    }
-}
-
-impl Default for SourceName<'_> {
-    fn default() -> Self {
-        Self("")
     }
 }
 

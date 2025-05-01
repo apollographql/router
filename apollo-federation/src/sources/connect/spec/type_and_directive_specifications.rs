@@ -470,7 +470,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: ERRORS_ARGUMENT_NAME.clone(),
+                    name: ERRORS_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = s
                             .metadata()
