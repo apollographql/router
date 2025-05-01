@@ -121,9 +121,7 @@ impl AWSSigV4Config {
 
         match self {
             Self::DefaultChain(config) => {
-                let aws_config =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .region(region.clone());
+                let aws_config = credentials_chain_builder().region(region.clone());
 
                 let aws_config = if let Some(profile_name) = &config.profile_name {
                     aws_config.profile_name(profile_name.as_str())
@@ -139,21 +137,7 @@ impl AWSSigV4Config {
                 }
             }
             Self::Hardcoded(config) => {
-                let chain =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .imds_client(
-                            imds::Client::builder()
-                                .configure(
-                                    &ProviderConfig::default().with_http_client(
-                                        aws_smithy_http_client::Builder::new()
-                                            .tls_provider(Provider::Rustls(CryptoMode::Ring))
-                                            .build_https(),
-                                    ),
-                                )
-                                .build(),
-                        )
-                        .build()
-                        .await;
+                let chain = credentials_chain_builder().build().await;
                 if let Some(assume_role_provider) = role_provider_builder {
                     Arc::new(assume_role_provider.build_from_provider(chain).await)
                 } else {
@@ -184,6 +168,20 @@ impl AWSSigV4Config {
             Self::Hardcoded(config) => config.assume_role.clone(),
         }
     }
+}
+
+fn credentials_chain_builder() -> aws_config::default_provider::credentials::Builder {
+    aws_config::default_provider::credentials::DefaultCredentialsChain::builder().imds_client(
+        imds::Client::builder()
+            .configure(
+                &ProviderConfig::default().with_http_client(
+                    aws_smithy_http_client::Builder::new()
+                        .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                        .build_https(),
+                ),
+            )
+            .build(),
+    )
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
