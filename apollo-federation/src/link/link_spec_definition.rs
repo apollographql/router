@@ -127,7 +127,6 @@ impl LinkSpecDefinition {
     /// Add `self` (the @link spec definition) and a directive application of it to the schema.
     // Note: we may want to allow some `import` as argument to this method. When we do, we need to
     // watch for imports of `Purpose` and `Import` and add the types under their imported name.
-    #[allow(dead_code)]
     pub(crate) fn add_to_schema(
         &self,
         schema: &mut FederationSchema,
@@ -221,7 +220,7 @@ impl LinkSpecDefinition {
             )
     }
 
-    #[allow(dead_code)]
+    #[allow(unused)]
     pub(crate) fn fed1_latest() -> &'static Self {
         // Note: The `unwrap()` calls won't panic, since `CORE_VERSIONS` will always have at
         // least one version.

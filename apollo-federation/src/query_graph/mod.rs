@@ -742,6 +742,7 @@ impl QueryGraph {
                     subgraph_schema,
                     composite_type_position.type_name().clone(),
                     key_value.fields,
+                    true,
                 )
             })
             .find_ok(|selection| !external_metadata.selects_any_external_field(selection))
@@ -979,7 +980,7 @@ impl QueryGraph {
                 key.specified_argument_by_name("fields")
                     .and_then(|arg| arg.as_str())
             })
-            .map(|value| parse_field_set(schema, ty.name().clone(), value))
+            .map(|value| parse_field_set(schema, ty.name().clone(), value, true))
             .find_ok(|selection| {
                 !metadata
                     .external_metadata()
