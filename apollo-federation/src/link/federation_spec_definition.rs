@@ -836,6 +836,25 @@ impl FederationSpecDefinition {
             None,
         )
     }
+
+    fn context_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_NAME_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface, DirectiveLocation::Union],
+            false,
+            None,
+            None,
+        )
+    }
 }
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
@@ -876,6 +895,10 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.push(Box::new(
                 Self::interface_object_directive_directive_specification(),
             ));
+        }
+        
+        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+            specs.push(Box::new(Self::context_directive_specification()));
         }
 
         // TODO: The remaining directives added in later versions are implemented in separate specs,

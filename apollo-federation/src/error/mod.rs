@@ -338,6 +338,10 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("Context name \"{name}\" may not contain an underscore.")]
+    ContextNameContainsUnderscore { name: String },
+    #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
+    ContextNameInvalid { name: String },
 }
 
 impl SingleFederationError {
@@ -536,6 +540,8 @@ impl SingleFederationError {
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
             }
+            SingleFederationError::ContextNameContainsUnderscore { .. } => ErrorCode::Internal,
+            SingleFederationError::ContextNameInvalid { .. } => ErrorCode::Internal,
         }
     }
 
