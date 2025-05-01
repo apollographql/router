@@ -29,6 +29,7 @@ use crate::schema::field_set::parse_field_set;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::external::validate_external_directives;
 use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::provides::validate_provides_directives;
