@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use aws_config::imds;
+use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::provider::error::CredentialsError;
@@ -11,6 +13,8 @@ use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_sigv4::http_request::sign;
+use aws_smithy_http_client::tls::Provider;
+use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
 use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
@@ -137,6 +141,17 @@ impl AWSSigV4Config {
             Self::Hardcoded(config) => {
                 let chain =
                     aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                        .imds_client(
+                            imds::Client::builder()
+                                .configure(
+                                    &ProviderConfig::default().with_http_client(
+                                        aws_smithy_http_client::Builder::new()
+                                            .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                            .build_https(),
+                                    ),
+                                )
+                                .build(),
+                        )
                         .build()
                         .await;
                 if let Some(assume_role_provider) = role_provider_builder {
