@@ -28,3 +28,5 @@ mod or;
 pub(crate) use or::OrMethod;
 mod and;
 pub(crate) use and::AndMethod;
+mod format;
+pub(crate) use format::FormatMethod;
