@@ -62,7 +62,7 @@ fn join_not_null_method(
             JSON::String(byte_string) => Ok(Some(byte_string.as_str().to_string())),
             JSON::Null => Ok(None),
             JSON::Array(_) | JSON::Object(_) => Err(format!(
-                "Method ->{} requires an array of scalars values as input",
+                "Method ->{} requires an array of scalar values as input",
                 method_name
             )),
         }
