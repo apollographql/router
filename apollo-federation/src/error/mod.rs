@@ -342,6 +342,12 @@ pub enum SingleFederationError {
     ContextNameContainsUnderscore { name: String },
     #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
     ContextNameInvalid { name: String },
+    #[error("{message}")]
+    ContextNotSet { message: String },
+    #[error("{message}")]
+    NoContextInSelection { message: String },
+    #[error("{message}")]
+    ContextNoResolvableKey { message: String },
 }
 
 impl SingleFederationError {
@@ -542,6 +548,9 @@ impl SingleFederationError {
             }
             SingleFederationError::ContextNameContainsUnderscore { .. } => ErrorCode::Internal,
             SingleFederationError::ContextNameInvalid { .. } => ErrorCode::Internal,
+            SingleFederationError::ContextNotSet { .. } => ErrorCode::Internal,
+            SingleFederationError::NoContextInSelection { .. } => ErrorCode::Internal,
+            SingleFederationError::ContextNoResolvableKey { .. } => ErrorCode::Internal,
         }
     }
 
