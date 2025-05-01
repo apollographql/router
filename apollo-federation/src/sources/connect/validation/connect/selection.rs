@@ -224,7 +224,7 @@ struct SelectionValidator<'schema> {
 }
 
 impl<'schema> SelectionValidator<'schema> {
-    fn new(
+    const fn new(
         schema: &'schema SchemaInfo<'schema>,
         root: PathPart<'schema>,
         string: GraphQLString<'schema>,
@@ -349,7 +349,7 @@ enum PathPart<'a> {
 }
 
 impl PathPart<'_> {
-    fn ty(&self) -> &Node<ObjectType> {
+    const fn ty(&self) -> &Node<ObjectType> {
         match self {
             PathPart::Root(ty) => ty,
             PathPart::Field { ty, .. } => ty,

@@ -325,7 +325,7 @@ fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), Federa
 
     // Add `Query._service` (if not already present)
     let service_field_pos = ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
+        type_name: query_root_type_name,
         field_name: FEDERATION_SERVICE_FIELD_NAME,
     };
     if service_field_pos.try_get(schema.schema()).is_none() {

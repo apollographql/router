@@ -43,7 +43,7 @@ fn json_stringify_method(
     }
 
     match serde_json::to_string(data) {
-        Ok(val) => (Some(JSON::String(val.into())), vec![]),
+        Ok(val) => (Some(JSON::String(val.into())), Vec::new()),
         Err(err) => (
             None,
             vec![ApplyToError::new(

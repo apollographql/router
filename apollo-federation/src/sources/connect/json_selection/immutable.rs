@@ -15,8 +15,8 @@ struct AppendPath<T: Clone> {
 }
 
 impl<T: Clone> InputPath<T> {
-    pub(crate) fn empty() -> InputPath<T> {
-        InputPath { path: None }
+    pub(crate) const fn empty() -> Self {
+        Self { path: None }
     }
 
     pub(crate) fn append(&self, last: T) -> Self {
