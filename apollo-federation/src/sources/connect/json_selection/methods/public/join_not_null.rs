@@ -1,4 +1,5 @@
 use apollo_compiler::collections::IndexMap;
+use itertools::Itertools;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -55,53 +56,50 @@ fn join_not_null_method(
         return (None, warnings);
     };
 
-    fn to_string(value: &JSON, method_name: &str) -> (Option<String>, Option<String>) {
+    fn to_string(value: &JSON, method_name: &str) -> Result<Option<String>, String> {
         match value {
-            JSON::Bool(b) => (
-                Some(b.then_some("true").unwrap_or("false").to_string()),
-                None,
-            ),
-            JSON::Number(number) => (Some(number.to_string()), None),
-            JSON::String(byte_string) => (Some(byte_string.as_str().to_string()), None),
-            JSON::Null => (None, None),
-            JSON::Array(_) | JSON::Object(_) => (
-                Some("".to_string()),
-                Some(format!(
-                    "Method ->{} requires an array of scalars values as input",
-                    method_name
-                )),
-            ),
+            JSON::Bool(b) => Ok(Some(b.then_some("true").unwrap_or("false").to_string())),
+            JSON::Number(number) => Ok(Some(number.to_string())),
+            JSON::String(byte_string) => Ok(Some(byte_string.as_str().to_string())),
+            JSON::Null => Ok(None),
+            JSON::Array(_) | JSON::Object(_) => Err(format!(
+                "Method ->{} requires an array of scalars values as input",
+                method_name
+            )),
         }
     }
 
     let joined = match data {
-        JSON::Array(values) => values
-            .iter()
-            .map(|s| to_string(s, method_name.as_ref()))
-            .flat_map(|(value, err)| {
-                if let Some(err) = err {
-                    warnings.push(ApplyToError::new(
-                        err.to_string(),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    ));
+        JSON::Array(values) => {
+            let mut joined = Vec::with_capacity(values.len());
+            for value in values {
+                match to_string(value, method_name) {
+                    Ok(Some(value)) => joined.push(value),
+                    Ok(None) => {}
+                    Err(err) => {
+                        warnings.push(ApplyToError::new(
+                            err,
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ));
+                        return (None, warnings);
+                    }
                 }
-                value
-            })
-            .collect::<Vec<_>>()
-            .join(separator),
+            }
+            joined.iter().join(separator.as_str())
+        }
         // Single values are emitted as strings with no separator
-        _ => {
-            let (value, err) = to_string(data, method_name);
-            if let Some(err) = err {
+        _ => match to_string(data, method_name) {
+            Ok(value) => value.unwrap_or_else(|| "".to_string()),
+            Err(err) => {
                 warnings.push(ApplyToError::new(
-                    err.to_string(),
+                    err,
                     input_path.to_vec(),
                     method_name.range(),
                 ));
+                return (None, warnings);
             }
-            value.unwrap_or("".to_string())
-        }
+        },
     };
 
     (Some(JSON::String(joined.into())), warnings)
@@ -222,18 +220,14 @@ mod tests {
     }
 
     #[rstest::rstest]
-    #[case(json!({"a": 1}), json!(""), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
-    #[case(json!([{"a": 1}, {"a": 2}]), json!(","), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
-    #[case(json!([[1, 2]]), json!(""), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
-    fn join_not_null_warnings(
-        #[case] input: JSON,
-        #[case] expected: JSON,
-        #[case] expected_warnings: Vec<&str>,
-    ) {
+    #[case(json!({"a": 1}), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
+    #[case(json!([{"a": 1}, {"a": 2}]), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
+    #[case(json!([[1, 2]]), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
+    fn join_not_null_warnings(#[case] input: JSON, #[case] expected_warnings: Vec<&str>) {
         use itertools::Itertools;
 
         let (result, warnings) = selection!("$->joinNotNull(',')").apply_to(&input);
-        assert_eq!(result, Some(expected));
+        assert_eq!(result, None);
         assert_eq!(
             warnings.iter().map(|w| w.message()).collect_vec(),
             expected_warnings
