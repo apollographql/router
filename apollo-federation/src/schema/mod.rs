@@ -407,8 +407,10 @@ impl FederationSchema {
                     let directives = &interface_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args, target: interface_field_argument_position.clone().into() }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: interface_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -422,8 +424,10 @@ impl FederationSchema {
                     let directives = &object_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args, target: object_field_argument_position.clone().into() }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: object_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),

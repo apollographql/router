@@ -95,9 +95,9 @@ impl ContextValidator for DenyInvalidContextName {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::typestate::Subgraph;
-    use crate::subgraph::typestate::Expanded;
     use crate::subgraph::SubgraphError;
+    use crate::subgraph::typestate::Expanded;
+    use crate::subgraph::typestate::Subgraph;
 
     enum BuildOption {
         AsIs,

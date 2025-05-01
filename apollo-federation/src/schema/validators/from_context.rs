@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::schema::FederationSchema;
 use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::FederationSchema;
 use crate::utils::FallibleIterator;
 
 pub(crate) fn validate_from_context_directives(
@@ -27,18 +27,18 @@ pub(crate) fn validate_from_context_directives(
                 // Parse context and selection from the field value
                 let field = from_context.arguments.field.to_string();
                 let (context, selection) = parse_context(&field);
-                
+
                 // Apply each validation rule
                 for rule in from_context_rules.iter() {
                     rule.validate(&from_context.target, schema, &context, &selection, errors)?;
                 }
-                
+
                 // TODO: Add validate_field_value when needed
             }
             Err(e) => errors.push(e),
         }
     }
-    
+
     Ok(())
 }
 
@@ -53,6 +53,7 @@ fn parse_context(field: &str) -> (String, String) {
     }
 }
 
+#[allow(dead_code)]
 fn validate_field_value(
     _context: &str,
     _selection: &str,
@@ -65,36 +66,16 @@ fn validate_field_value(
     todo!("Implement validateFieldValue");
 }
 
-/// Trait for accessing properties of @fromContext directive applications
-trait FromContextDirectiveApplication {
-    fn target_coordinate(&self) -> String;
-    fn is_on_directive_definition(&self) -> bool;
-    fn is_on_abstract_type(&self) -> bool;
-    fn implements_interface_field(&self) -> bool;
-    fn has_default_value(&self) -> bool;
-    fn has_resolvable_key(&self) -> bool;
-    fn object_type_name(&self) -> Name;
-}
-
 /// Trait for @fromContext directive validators
 trait FromContextValidator {
     fn validate(
-        &self, 
+        &self,
         target: &FieldArgumentDefinitionPosition,
         schema: &FederationSchema,
         context: &str,
         selection: &str,
-        errors: &mut MultipleFederationErrors
+        errors: &mut MultipleFederationErrors,
     ) -> Result<(), FederationError>;
-}
-
-/// Validator that denies @fromContext on directive definitions
-struct DenyOnDirectiveDefinition {}
-
-impl DenyOnDirectiveDefinition {
-    fn new() -> Self {
-        Self {}
-    }
 }
 
 /// Validator that denies @fromContext on abstract types
@@ -156,7 +137,9 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                 let obj = position.parent().parent().get(schema.schema())?;
                 let field = position.parent().field_name;
                 for implemented in &obj.implements_interfaces {
-                    let itf = InterfaceTypeDefinitionPosition { type_name: implemented.name.clone() };
+                    let itf = InterfaceTypeDefinitionPosition {
+                        type_name: implemented.name.clone(),
+                    };
                     let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
                     if field.is_some() {
                         errors.push(
@@ -170,19 +153,10 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                         );
                     }
                 }
-            },
+            }
             _ => {}
         }
         Ok(())
-    }
-}
-
-/// Validator that denies @fromContext arguments with default values
-struct DenyWithDefaultValue {}
-
-impl DenyWithDefaultValue {
-    fn new() -> Self {
-        Self {}
     }
 }
 
@@ -254,12 +228,21 @@ impl FromContextValidator for RequireResolvableKey {
             FieldArgumentDefinitionPosition::Object(position) => {
                 let parent = position.parent().parent();
                 if let Some(metadata) = &schema.subgraph_metadata {
-                    let key_directive = metadata.federation_spec_definition().key_directive_definition(schema)?;
+                    let key_directive = metadata
+                        .federation_spec_definition()
+                        .key_directive_definition(schema)?;
                     let keys_on_type = parent.get_applied_directives(schema, &key_directive.name);
-                    if !keys_on_type.iter().fallible_filter(|application| -> Result<bool, FederationError> {
-                        let arguments = metadata.federation_spec_definition().key_directive_arguments(application)?;
-                        Ok(arguments.resolvable)
-                    }).collect::<Result<Vec<_>, _>>()?.is_empty() {
+                    if !keys_on_type
+                        .iter()
+                        .fallible_filter(|application| -> Result<bool, FederationError> {
+                            let arguments = metadata
+                                .federation_spec_definition()
+                                .key_directive_arguments(application)?;
+                            Ok(arguments.resolvable)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .is_empty()
+                    {
                         errors.push(
                             SingleFederationError::ContextNoResolvableKey {
                                 message: format!(
@@ -271,7 +254,7 @@ impl FromContextValidator for RequireResolvableKey {
                         );
                     }
                 }
-            },
+            }
             _ => {}
         }
         Ok(())

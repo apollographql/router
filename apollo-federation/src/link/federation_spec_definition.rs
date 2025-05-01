@@ -849,13 +849,17 @@ impl FederationSpecDefinition {
                 composition_strategy: None,
             }],
             false,
-            &[DirectiveLocation::Object, DirectiveLocation::Interface, DirectiveLocation::Union],
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::Union,
+            ],
             false,
             None,
             None,
         )
     }
-    
+
     // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
@@ -920,7 +924,7 @@ impl SpecDefinition for FederationSpecDefinition {
                 Self::interface_object_directive_directive_specification(),
             ));
         }
-        
+
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             specs.push(Box::new(Self::context_directive_specification()));
             specs.push(Box::new(Self::from_context_directive_specification()));
