@@ -144,7 +144,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_Query_t2_0": Connector {
@@ -336,7 +337,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_Query_unselected_0": Connector {
@@ -479,7 +481,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_T_r1_0": Connector {
@@ -610,7 +613,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_T_r2_0": Connector {
@@ -790,7 +794,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_T_r3_0": Connector {
@@ -965,7 +970,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_T_r4_0": Connector {
@@ -1117,7 +1123,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_T_r5_0": Connector {
@@ -1313,7 +1320,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
 }

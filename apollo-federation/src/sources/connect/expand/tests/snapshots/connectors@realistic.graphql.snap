@@ -286,7 +286,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
@@ -440,7 +441,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "connectors_Query_usersByCompany_0": Connector {
@@ -644,7 +646,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "connectors_Query_user_0": Connector {
@@ -1007,7 +1010,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
 }

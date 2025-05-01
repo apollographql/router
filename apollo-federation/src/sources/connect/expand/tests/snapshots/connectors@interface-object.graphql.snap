@@ -132,7 +132,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "connectors_Query_itfs_0": Connector {
@@ -220,7 +221,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "connectors_Query_itf_0": Connector {
@@ -367,7 +369,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
 }

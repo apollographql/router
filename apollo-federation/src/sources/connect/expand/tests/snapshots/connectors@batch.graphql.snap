@@ -77,7 +77,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
     "one_User_0": Connector {
@@ -245,7 +246,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
 }

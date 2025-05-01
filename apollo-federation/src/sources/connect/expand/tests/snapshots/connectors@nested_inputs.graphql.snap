@@ -267,7 +267,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
         ),
         error_settings: ConnectorErrorsSettings {
             message: None,
-            extensions: None,
+            source_extensions: None,
+            connect_extensions: None,
         },
     },
 }

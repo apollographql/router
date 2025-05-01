@@ -126,6 +126,12 @@ async fn only_source_with_error() {
             "only_source"
           ],
           "extensions": {
+            "http": {
+              "status": 500
+            },
+            "connector": {
+              "coordinate": "connectors:Query.only_source@connect[0]"
+            },
             "code": "BIG_BOOM",
             "status": 500,
             "fromSource": "a",
@@ -258,6 +264,12 @@ async fn only_connect_with_error() {
             "only_connect"
           ],
           "extensions": {
+            "http": {
+              "status": 500
+            },
+            "connector": {
+              "coordinate": "connectors:Query.only_connect@connect[0]"
+            },
             "code": "BIG_BOOM",
             "status": 500,
             "service": "connectors"
@@ -390,7 +402,15 @@ async fn both_source_and_connect_with_error() {
             "both_source_and_connect"
           ],
           "extensions": {
+            "http": {
+              "status": 500
+            },
+            "connector": {
+              "coordinate": "connectors:Query.both_source_and_connect@connect[0]"
+            },
             "code": "BIG_BOOM",
+            "status": 500,
+            "fromSource": "a",
             "fromConnect": "b",
             "service": "connectors"
           }
@@ -452,6 +472,12 @@ async fn partial_source_and_partial_connect() {
             "partial_source_and_partial_connect"
           ],
           "extensions": {
+            "http": {
+              "status": 500
+            },
+            "connector": {
+              "coordinate": "connectors:Query.partial_source_and_partial_connect@connect[0]"
+            },
             "code": "BIG_BOOM",
             "status": 500,
             "fromSource": "a",
@@ -574,6 +600,12 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
             "only_source"
           ],
           "extensions": {
+            "http": {
+              "status": 500
+            },
+            "connector": {
+              "coordinate": "connectors:Query.only_source@connect[0]"
+            },
             "code": "BIG_BOOM",
             "status": 500,
             "fromSource": "a",

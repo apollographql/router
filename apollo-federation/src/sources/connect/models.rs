@@ -80,7 +80,8 @@ impl ConnectorBatchSettings {
 #[derive(Debug, Clone, Default)]
 pub struct ConnectorErrorsSettings {
     pub message: Option<JSONSelection>,
-    pub extensions: Option<JSONSelection>,
+    pub source_extensions: Option<JSONSelection>,
+    pub connect_extensions: Option<JSONSelection>,
 }
 
 impl ConnectorErrorsSettings {
@@ -92,14 +93,13 @@ impl ConnectorErrorsSettings {
             .and_then(|e| e.message.as_ref())
             .or_else(|| source_errors.and_then(|e| e.message.as_ref()))
             .cloned();
-        let extensions = connect_errors
-            .and_then(|e| e.extensions.as_ref())
-            .or_else(|| source_errors.and_then(|e| e.extensions.as_ref()))
-            .cloned();
+        let source_extensions = source_errors.and_then(|e| e.extensions.as_ref()).cloned();
+        let connect_extensions = connect_errors.and_then(|e| e.extensions.as_ref()).cloned();
 
         Self {
             message,
-            extensions,
+            source_extensions,
+            connect_extensions,
         }
     }
 
@@ -109,7 +109,13 @@ impl ConnectorErrorsSettings {
             .into_iter()
             .flat_map(|m| m.variable_references())
             .chain(
-                self.extensions
+                self.source_extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+            .chain(
+                self.connect_extensions
                     .as_ref()
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
@@ -527,7 +533,8 @@ mod tests {
                 ),
                 error_settings: ConnectorErrorsSettings {
                     message: None,
-                    extensions: None,
+                    source_extensions: None,
+                    connect_extensions: None,
                 },
             },
             ConnectId {
@@ -658,7 +665,8 @@ mod tests {
                 ),
                 error_settings: ConnectorErrorsSettings {
                     message: None,
-                    extensions: None,
+                    source_extensions: None,
+                    connect_extensions: None,
                 },
             },
         }
