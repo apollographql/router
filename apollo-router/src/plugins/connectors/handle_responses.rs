@@ -5,7 +5,9 @@ use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use itertools::Itertools;
+use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -477,8 +479,8 @@ async fn deserialize_response<T: HttpBody>(
 
     let make_err = |path: Path| {
         graphql::Error::builder()
-            .message("Request failed".to_string())
-            .extension_code("CONNECTOR_FETCH")
+            .message("Response deserialization failed".to_string())
+            .extension_code("CONNECTOR_DESERIALIZE")
             .extension("service", connector.id.subgraph_name.clone())
             .extension(
                 "http",
@@ -597,17 +599,49 @@ async fn deserialize_response<T: HttpBody>(
         }
     }
 
-    match serde_json::from_slice::<Value>(body) {
-        Ok(json_data) => Ok(json_data),
-        Err(_) => {
-            if let Some(debug_context) = debug_context {
-                debug_context
-                    .lock()
-                    .push_invalid_response(debug_request.clone(), parts, body);
-            }
+    let content_type = parts
+        .headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.parse::<Mime>().ok());
 
-            Err(make_err(path))
+    if content_type.is_none()
+        || content_type
+            .as_ref()
+            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
+    {
+        // Treat any JSON-y like content types as JSON
+        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
+        match serde_json::from_slice::<Value>(body) {
+            Ok(json_data) => Ok(json_data),
+            Err(_) => {
+                if let Some(debug_context) = debug_context {
+                    debug_context
+                        .lock()
+                        .push_invalid_response(debug_request.clone(), parts, body);
+                }
+                Err(make_err(path))
+            }
         }
+    } else if content_type
+        .as_ref()
+        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
+    {
+        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
+        match std::str::from_utf8(body).map(|text| Value::String(text.into())) {
+            Ok(json_data) => Ok(json_data),
+            Err(_) => {
+                if let Some(debug_context) = debug_context {
+                    debug_context
+                        .lock()
+                        .push_invalid_response(debug_request.clone(), parts, body);
+                }
+                Err(make_err(path))
+            }
+        }
+    } else {
+        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
+        Ok(Value::Null)
     }
 }
 
@@ -1230,7 +1264,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1255,7 +1289,7 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "Request failed",
+                            message: "Response deserialization failed",
                             locations: [],
                             path: Some(
                                 Path(
@@ -1283,7 +1317,7 @@ mod tests {
                                     ),
                                 }),
                                 "code": String(
-                                    "CONNECTOR_FETCH",
+                                    "CONNECTOR_DESERIALIZE",
                                 ),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
@@ -1371,7 +1405,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
