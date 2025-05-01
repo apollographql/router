@@ -1,7 +1,7 @@
 ---
 title: Apollo Router Quickstart
-subtitle: Run a router binary locally
-description: This quickstart tutorial walks you through installing an Apollo Router binary, running it with an example supergraph schema, and making test queries with Apollo Sandbox
+subtitle: Run a router binary
+description: This quickstart tutorial walks you through installing an Apollo Router binary, running it with an example supergraph schema and a YAML configuration file, and making test queries with Apollo Sandbox.
 ---
 
 import ElasticNotice from "../../shared/elastic-notice.mdx";
@@ -10,7 +10,8 @@ Hello! Let's run Apollo Router for the very first time. You will:
 
 - Download and install a router binary.
 - Download a supergraph schema.
-- Run the router for your supergraph in development mode.
+- Create and edit a YAML configuration file.
+- Run the router in development mode, with your configuration and for your supergraph.
 - Make a query to the running router.
 
 ## 1. Install router binary
@@ -189,14 +190,33 @@ type User
 
 </ExpansionPanel>
 
-## 3. Run the router
+## 3. Create and edit YAML configuration file
 
-Running the router in development mode enables some useful development-only features. Let's now run the router in dev mode, using the supergraph schema you saved: 
+The router's many features are configurable via a YAML configuration file. You set your options declaratively in YAML, then point your router to it at startup.
 
-1. Run the router with command-line options, which enable dev mode and provide a path to your supergraph schema:
+Let's customize a common setting: the router's _supergraph listen address_. It's the network address and port on which the router receives client requests. By default the address is `127.0.0.1:4000`. For this guide, let's change the port to `5555`.
+
+1. Create a file named `router.yaml`. Open it for editing.
+1. Add the following configuration for `supergraph.listen` that sets it to `127.0.0.1:5555`:
+
+  ```yaml title="router.yaml"
+  supergraph:
+    listen: 127.0.0.1:5555
+  ```
+
+## 4. Run the router
+
+When you're developing with the router locally and in non-production environments, it's useful to run the router in _development mode_, or dev mode. Dev mode is a collection of router configuration settings that make development easier.
+
+Let's run the router in dev mode. We'll use both the supergraph schema and YAML configuration files you saved: 
+
+1. Run the router with command-line options:
+    - `--dev` enables dev mode
+    - `--config` provides the path to your YAML configuration file
+    - `--supergraph` provides the path to your supergraph schema
 
     ```sh
-    ./router --dev --supergraph supergraph-schema.graphql
+    ./router --dev --supergraph supergraph-schema.graphql --config router.yaml
     ```
 
 1. Check that your router is running, with output similar to the example: 
@@ -212,7 +232,7 @@ Running the router in development mode enables some useful development-only feat
     2025-04-25T21:54:05.988144Z INFO  state machine transitioned event="NoMoreLicense" state=Startup previous_state="Startup"
     2025-04-25T21:54:06.010232Z INFO  Health check exposed at http://127.0.0.1:8088/health
     2025-04-25T21:54:06.010717Z WARN  Connector debugging is enabled, this may expose sensitive information.
-    2025-04-25T21:54:06.405064Z INFO  GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
+    2025-04-25T21:54:06.405064Z INFO  GraphQL endpoint exposed at http://127.0.0.1:5555/ 🚀
     2025-04-25T21:54:06.405628Z INFO  You're using some "experimental" features of the Apollo Router (those which have their configuration prefixed by "experimental_").
     We may make breaking changes in future releases. To help us design the stable version we need your feedback.
     Here is a list of links where you can give your opinion:
@@ -230,11 +250,11 @@ Running the router in development mode enables some useful development-only feat
 
 A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server running a development instance of your graph. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your development graph. 
 
-Let's use Sandbox to write and send a query to your graph:
+Let's use Sandbox and its Explorer IDE to write a query and send it to your graph:
 
-1. Go to the URL of the router's Sandbox, [`http://127.0.0.1:4000`](http://127.0.0.1:4000).
+1. Go to the URL of the router's Sandbox, [`http://127.0.0.1:5555`](http://127.0.0.1:5555). The Explorer IDE should be running.
 
-1. Copy and paste the example query into the **Operation** pane:
+1. Copy and paste the example query into the **Operation** pane of Explorer:
 
   ```graphql
   query Query {
@@ -251,7 +271,7 @@ Let's use Sandbox to write and send a query to your graph:
   }
 ```
 
-1. Click **Query** to run the query, then check its response in the **Response** pane.
+1. Click **Query** to run the query, then check for its response in the **Response** pane.
 
   <img
     className="screenshot"
