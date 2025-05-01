@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::schema::position::FieldArgumentDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
+use crate::utils::FallibleIterator;
 
 pub(crate) fn validate_from_context_directives(
     schema: &FederationSchema,
@@ -12,10 +15,8 @@ pub(crate) fn validate_from_context_directives(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     let from_context_rules: Vec<Box<dyn FromContextValidator>> = vec![
-        Box::new(DenyOnDirectiveDefinition::new()),
         Box::new(DenyOnAbstractType::new()),
         Box::new(DenyOnInterfaceImplementation::new()),
-        Box::new(DenyWithDefaultValue::new()),
         Box::new(RequireContextExists::new(context_map.clone())),
         Box::new(RequireResolvableKey::new()),
     ];
@@ -29,7 +30,7 @@ pub(crate) fn validate_from_context_directives(
                 
                 // Apply each validation rule
                 for rule in from_context_rules.iter() {
-                    rule.validate(&from_context, &context, &selection, errors);
+                    rule.validate(&from_context.target, schema, &context, &selection, errors)?;
                 }
                 
                 // TODO: Add validate_field_value when needed
@@ -41,6 +42,7 @@ pub(crate) fn validate_from_context_directives(
     Ok(())
 }
 
+// TODO: Make this match the regex from JS
 fn parse_context(field: &str) -> (String, String) {
     // Split the context reference into context name and selection path
     let parts: Vec<&str> = field.splitn(2, '.').collect();
@@ -54,7 +56,7 @@ fn parse_context(field: &str) -> (String, String) {
 fn validate_field_value(
     _context: &str,
     _selection: &str,
-    _from_context: &impl FromContextDirectiveApplication,
+    _target: &FieldArgumentDefinitionPosition,
     _set_context_locations: &[Name],
     _schema: &FederationSchema,
     _errors: &mut MultipleFederationErrors,
@@ -78,11 +80,12 @@ trait FromContextDirectiveApplication {
 trait FromContextValidator {
     fn validate(
         &self, 
-        from_context: &impl FromContextDirectiveApplication,
+        target: &FieldArgumentDefinitionPosition,
+        schema: &FederationSchema,
         context: &str,
         selection: &str,
         errors: &mut MultipleFederationErrors
-    );
+    ) -> Result<(), FederationError>;
 }
 
 /// Validator that denies @fromContext on directive definitions
@@ -91,28 +94,6 @@ struct DenyOnDirectiveDefinition {}
 impl DenyOnDirectiveDefinition {
     fn new() -> Self {
         Self {}
-    }
-}
-
-impl FromContextValidator for DenyOnDirectiveDefinition {
-    fn validate(
-        &self,
-        from_context: &impl FromContextDirectiveApplication,
-        _context: &str,
-        _selection: &str,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        if from_context.is_on_directive_definition() {
-            errors.push(
-                SingleFederationError::ContextNotSet {
-                    message: format!(
-                        "@fromContext argument cannot be used on a directive definition \"{}\".",
-                        from_context.target_coordinate()
-                    ),
-                }
-                .into(),
-            );
-        }
     }
 }
 
@@ -128,22 +109,27 @@ impl DenyOnAbstractType {
 impl FromContextValidator for DenyOnAbstractType {
     fn validate(
         &self,
-        from_context: &impl FromContextDirectiveApplication,
+        target: &FieldArgumentDefinitionPosition,
+        _schema: &FederationSchema,
         _context: &str,
         _selection: &str,
         errors: &mut MultipleFederationErrors,
-    ) {
-        if from_context.is_on_abstract_type() {
-            errors.push(
+    ) -> Result<(), FederationError> {
+        match target {
+            FieldArgumentDefinitionPosition::Interface(_) => {
+                errors.push(
                 SingleFederationError::ContextNotSet {
                     message: format!(
                         "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
-                        from_context.target_coordinate()
+                        as_coordinate(target)
                     ),
-                }
-                .into(),
-            );
+                    }
+                    .into(),
+                );
+            }
+            _ => {}
         }
+        Ok(())
     }
 }
 
@@ -159,22 +145,35 @@ impl DenyOnInterfaceImplementation {
 impl FromContextValidator for DenyOnInterfaceImplementation {
     fn validate(
         &self,
-        from_context: &impl FromContextDirectiveApplication,
+        target: &FieldArgumentDefinitionPosition,
+        schema: &FederationSchema,
         _context: &str,
         _selection: &str,
         errors: &mut MultipleFederationErrors,
-    ) {
-        if from_context.implements_interface_field() {
-            errors.push(
-                SingleFederationError::ContextNotSet {
-                    message: format!(
-                        "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
-                        from_context.target_coordinate()
-                    ),
+    ) -> Result<(), FederationError> {
+        match target {
+            FieldArgumentDefinitionPosition::Object(position) => {
+                let obj = position.parent().parent().get(schema.schema())?;
+                let field = position.parent().field_name;
+                for implemented in &obj.implements_interfaces {
+                    let itf = InterfaceTypeDefinitionPosition { type_name: implemented.name.clone() };
+                    let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
+                    if field.is_some() {
+                        errors.push(
+                            SingleFederationError::ContextNotSet {
+                                message: format!(
+                                    "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
+                                    as_coordinate(target)
+                                ),
+                            }
+                            .into(),
+                        );
+                    }
                 }
-                .into(),
-            );
+            },
+            _ => {}
         }
+        Ok(())
     }
 }
 
@@ -184,28 +183,6 @@ struct DenyWithDefaultValue {}
 impl DenyWithDefaultValue {
     fn new() -> Self {
         Self {}
-    }
-}
-
-impl FromContextValidator for DenyWithDefaultValue {
-    fn validate(
-        &self,
-        from_context: &impl FromContextDirectiveApplication,
-        _context: &str,
-        _selection: &str,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        if from_context.has_default_value() {
-            errors.push(
-                SingleFederationError::ContextNotSet {
-                    message: format!(
-                        "@fromContext arguments may not have a default value: \"{}\".",
-                        from_context.target_coordinate()
-                    ),
-                }
-                .into(),
-            );
-        }
     }
 }
 
@@ -223,16 +200,17 @@ impl RequireContextExists {
 impl FromContextValidator for RequireContextExists {
     fn validate(
         &self,
-        from_context: &impl FromContextDirectiveApplication,
+        target: &FieldArgumentDefinitionPosition,
+        _schema: &FederationSchema,
         context: &str,
         selection: &str,
         errors: &mut MultipleFederationErrors,
-    ) {
+    ) -> Result<(), FederationError> {
         if context.is_empty() || selection.is_empty() {
             errors.push(
                 SingleFederationError::NoContextInSelection {
                     message: format!(
-                        "@fromContext argument does not reference a context \"{}.{}\".",
+                        "@fromContext argument does not reference a context \"${} {}\".",
                         context, selection
                     ),
                 }
@@ -244,12 +222,13 @@ impl FromContextValidator for RequireContextExists {
                     message: format!(
                         "Context \"{}\" is used at location \"{}\" but is never set.",
                         context,
-                        from_context.target_coordinate()
+                        as_coordinate(target)
                     ),
                 }
                 .into(),
             );
         }
+        Ok(())
     }
 }
 
@@ -265,21 +244,47 @@ impl RequireResolvableKey {
 impl FromContextValidator for RequireResolvableKey {
     fn validate(
         &self,
-        from_context: &impl FromContextDirectiveApplication,
+        target: &FieldArgumentDefinitionPosition,
+        schema: &FederationSchema,
         _context: &str,
         _selection: &str,
         errors: &mut MultipleFederationErrors,
-    ) {
-        if !from_context.has_resolvable_key() {
-            errors.push(
-                SingleFederationError::ContextNoResolvableKey {
-                    message: format!(
-                        "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                        from_context.object_type_name()
-                    ),
+    ) -> Result<(), FederationError> {
+        match target {
+            FieldArgumentDefinitionPosition::Object(position) => {
+                let parent = position.parent().parent();
+                if let Some(metadata) = &schema.subgraph_metadata {
+                    let key_directive = metadata.federation_spec_definition().key_directive_definition(schema)?;
+                    let keys_on_type = parent.get_applied_directives(schema, &key_directive.name);
+                    if !keys_on_type.iter().fallible_filter(|application| -> Result<bool, FederationError> {
+                        let arguments = metadata.federation_spec_definition().key_directive_arguments(application)?;
+                        Ok(arguments.resolvable)
+                    }).collect::<Result<Vec<_>, _>>()?.is_empty() {
+                        errors.push(
+                            SingleFederationError::ContextNoResolvableKey {
+                                message: format!(
+                                    "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
+                                    as_coordinate(target)
+                                ),
+                            }
+                            .into(),
+                        );
+                    }
                 }
-                .into(),
-            );
+            },
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
+    match target {
+        FieldArgumentDefinitionPosition::Object(position) => {
+            format!("{}.{}", position.type_name, position.field_name)
+        }
+        FieldArgumentDefinitionPosition::Interface(position) => {
+            format!("{}.{}", position.type_name, position.field_name)
         }
     }
 }
