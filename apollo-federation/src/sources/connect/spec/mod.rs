@@ -17,7 +17,6 @@
 mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
-pub(crate) mod versions;
 
 use std::fmt::Display;
 
