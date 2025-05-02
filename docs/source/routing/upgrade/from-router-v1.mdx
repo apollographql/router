@@ -325,13 +325,14 @@ Various metrics in router 2.x have been renamed to conform to the OpenTelemetry 
 | `apollo_router_cache_miss_time` | `apollo.router.cache.miss.time` |
 | `apollo_router_state_change_total` | `apollo.router.state.change.total` |
 | `apollo_router_span_lru_size` | `apollo.router.exporter.span.lru.size` * |
-| `apollo_router_session_count_active` | `apollo.router.session.count.active` |
 | `apollo_router_uplink_fetch_count_total` | `apollo.router.uplink.fetch.count.total` |
 | `apollo_router_uplink_fetch_duration_seconds` | `apollo.router.uplink.fetch.duration.seconds`|
 
 <Note>
 
 \* `apollo.router.exporter.span.lru.size` now also has an additional `exporter` prefix.
+
+\* `apollo_router_session_count_active` was removed and replaced by `http.server.active_requests`. 
 
 </Note>
 
