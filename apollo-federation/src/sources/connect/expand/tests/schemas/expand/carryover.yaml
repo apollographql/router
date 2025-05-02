@@ -69,6 +69,7 @@ subgraphs:
         }
 
         # bug fix: this won't compose until it's fixed and released in federation
+        # the graphql file is currently hand-edited to add these definitions
         directive @custom on OBJECT | FIELD_DEFINITION
         # directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
         # scalar custom__Scalar
