@@ -47,9 +47,9 @@ impl ConnectorPosition {
                             None
                         }
                     })
-                    .ok_or(FederationError::internal(
-                        "Parent type for connector not found",
-                    ))?,
+                    .ok_or_else(|| {
+                        FederationError::internal("Parent type for connector not found")
+                    })?,
                 field_def: pos.field.get(schema).map_err(|_| {
                     FederationError::internal("Field definition for connector not found")
                 })?,
@@ -72,7 +72,7 @@ impl ConnectorPosition {
                             None
                         }
                     })
-                    .ok_or(FederationError::internal("Type for connector not found"))?,
+                    .ok_or_else(|| FederationError::internal("Type for connector not found"))?,
             }),
         }
     }

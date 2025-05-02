@@ -8,16 +8,27 @@ use itertools::Itertools;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::HasFields;
 use crate::schema::KeyDirective;
+use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_type;
 
 pub(crate) fn validate_key_directives(
     schema: &FederationSchema,
+    meta: &SubgraphMetadata,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
+    let directive_name = meta
+        .federation_spec_definition()
+        .directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)?
+        .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
+
     let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<Baggage = KeyDirective>>> = vec![
         Box::new(DenyUnionAndInterfaceFields::new(schema.schema())),
         Box::new(DenyAliases::new()),
@@ -25,28 +36,41 @@ pub(crate) fn validate_key_directives(
         Box::new(DenyFieldsWithArguments::new()),
     ];
 
+    let allow_on_interface =
+        meta.federation_spec_definition().version() >= &Version { major: 2, minor: 3 };
+
     for key_directive in schema.key_directive_applications()? {
         match key_directive {
-            Ok(key) => match key.parse_fields(schema.schema()) {
-                Ok(fields) => {
-                    let existing_error_count = errors.errors.len();
-                    for rule in fieldset_rules.iter() {
-                        rule.visit(key.target.type_name(), &fields, &key, errors);
-                    }
+            Ok(key) => {
+                if !allow_on_interface {
+                    deny_unsupported_directive_on_interface_type(
+                        &directive_name,
+                        &key,
+                        schema,
+                        errors,
+                    );
+                }
+                match key.parse_fields(schema.schema()) {
+                    Ok(fields) => {
+                        let existing_error_count = errors.errors.len();
+                        for rule in fieldset_rules.iter() {
+                            rule.visit(key.target.type_name(), &fields, &key, errors);
+                        }
 
-                    // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
-                    // but if we get to this point without errors, we want to make sure it's still a valid selection.
-                    let did_not_find_errors = existing_error_count == errors.errors.len();
-                    if did_not_find_errors {
-                        if let Err(validation_error) =
-                            fields.validate(Valid::assume_valid_ref(schema.schema()))
-                        {
-                            errors.push(validation_error.into());
+                        // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
+                        // but if we get to this point without errors, we want to make sure it's still a valid selection.
+                        let did_not_find_errors = existing_error_count == errors.errors.len();
+                        if did_not_find_errors {
+                            if let Err(validation_error) =
+                                fields.validate(Valid::assume_valid_ref(schema.schema()))
+                            {
+                                errors.push(validation_error.into());
+                            }
                         }
                     }
+                    Err(e) => errors.push(e.into()),
                 }
-                Err(e) => errors.push(e.into()),
-            },
+            }
             Err(e) => errors.push(e),
         }
     }

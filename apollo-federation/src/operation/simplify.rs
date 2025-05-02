@@ -147,7 +147,7 @@ impl InlineFragmentSelection {
                     // Note: Rebasing after flattening, since rebasing before that can error out.
                     //       Or, `flatten_unnecessary_fragments` could `rebase` at the same time.
                     let selection_set = if useless_fragment {
-                        selection_set.clone()
+                        selection_set
                     } else {
                         selection_set.rebase_on(parent_type, schema)?
                     };
@@ -248,7 +248,7 @@ impl InlineFragmentSelection {
                 let rebased_inline_fragment =
                     self.inline_fragment.rebase_on(parent_type, schema)?;
 
-                let mut nonliftable_selections = selection_set.selections.clone();
+                let mut nonliftable_selections = selection_set.selections;
                 Arc::make_mut(&mut nonliftable_selections)
                     .retain(|k, _| !liftable_selections.contains_key(k));
 

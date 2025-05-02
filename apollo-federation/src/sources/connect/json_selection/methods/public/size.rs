@@ -44,17 +44,17 @@ fn size_method(
     match data {
         JSON::Array(array) => {
             let size = array.len() as i64;
-            (Some(JSON::Number(size.into())), vec![])
+            (Some(JSON::Number(size.into())), Vec::new())
         }
         JSON::String(s) => {
             let size = s.as_str().len() as i64;
-            (Some(JSON::Number(size.into())), vec![])
+            (Some(JSON::Number(size.into())), Vec::new())
         }
         // Though we can't ask for ->first or ->last or ->at(n) on an object, we
         // can safely return how many properties the object has for ->size.
         JSON::Object(map) => {
             let size = map.len() as i64;
-            (Some(JSON::Number(size.into())), vec![])
+            (Some(JSON::Number(size.into())), Vec::new())
         }
         _ => (
             None,

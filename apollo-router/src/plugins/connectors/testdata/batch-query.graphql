@@ -2,7 +2,8 @@ schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION)
-  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@source", "@connect"]})
+  @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"]})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "http://localhost:4001/api"}})
 {
   query: Query
 }
@@ -37,7 +38,7 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  ONE @join__graph(name: "one", url: "http://none")
+  CONNECTORS @join__graph(name: "connectors", url: "http://none")
 }
 
 scalar link__Import
@@ -54,14 +55,17 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Product
-  @join__type(graph: ONE)
+type Query
+  @join__type(graph: CONNECTORS)
 {
-  id: ID!
+  users: [User!]! @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id"})
 }
 
-type Query
-  @join__type(graph: ONE)
+type User
+  @join__type(graph: CONNECTORS)
+  @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/user-details?ids={$batch.id->joinNotNull(',')}"}, selection: "id name username"})
 {
-  products: [Product] @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost:4001/products"}, selection: "id"})
+  id: ID!
+  name: String
+  username: String
 }

@@ -12,11 +12,11 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::HasFields;
 use crate::schema::ProvidesDirective;
-use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_field;
 
 pub(crate) fn validate_provides_directives(
     schema: &FederationSchema,
@@ -42,15 +42,21 @@ pub(crate) fn validate_provides_directives(
     for provides_directive in schema.provides_directive_applications()? {
         match provides_directive {
             Ok(provides) => {
+                deny_unsupported_directive_on_interface_field(
+                    &provides_directive_name,
+                    &provides,
+                    schema,
+                    errors,
+                );
+
                 // PORT NOTE: In JS, these two checks are done inside the `targetTypeExtractor`.
-                if metadata
-                    .is_field_external(&FieldDefinitionPosition::Object(provides.target.clone()))
-                {
+                if metadata.is_field_external(&provides.target.clone().into()) {
                     errors.errors.push(
                         SingleFederationError::ExternalCollisionWithAnotherDirective {
                             message: format!(
                                 "Cannot have both @provides and @external on field \"{}.{}\"",
-                                provides.target.type_name, provides.target.field_name
+                                provides.target.type_name(),
+                                provides.target.field_name()
                             ),
                         },
                     );
@@ -62,7 +68,7 @@ pub(crate) fn validate_provides_directives(
                     .get(provides.target_return_type.as_str())
                     .is_some_and(|t| t.is_object() || t.is_interface() || t.is_union())
                 {
-                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\" which is not a Composite Type", provides.target.type_name, provides.target.field_name, provides.target_return_type) });
+                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\" which is not a Composite Type", provides.target.type_name(), provides.target.field_name(), provides.target_return_type) });
                     continue;
                 }
 
@@ -123,8 +129,8 @@ impl<'a> SchemaFieldSetValidator for DenyAliases<'a> {
         // version of composition.
         if let Some(alias) = field.alias.as_ref() {
             errors.errors.push(SingleFederationError::ProvidesInvalidFields {
-                target_type: baggage.target.type_name.clone(),
-                target_field: baggage.target.field_name.clone(),
+                target_type: baggage.target.type_name().clone(),
+                target_field: baggage.target.field_name().clone(),
                 application: baggage.schema_directive.to_string(),
                 message: format!("Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @provides", field.name),
             });
@@ -154,8 +160,8 @@ impl<'a> DenyFieldsWithDirectiveApplicationsInProvides<'a> {
 impl DenyFieldsWithDirectiveApplications for DenyFieldsWithDirectiveApplicationsInProvides<'_> {
     fn error(&self, directives: &DirectiveList, baggage: &Self::Baggage) -> SingleFederationError {
         SingleFederationError::ProvidesHasDirectiveInFieldsArg {
-            target_type: baggage.target.type_name.clone(),
-            target_field: baggage.target.field_name.clone(),
+            target_type: baggage.target.type_name().clone(),
+            target_field: baggage.target.field_name().clone(),
             application: baggage.schema_directive.to_string(),
             applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
         }
@@ -215,8 +221,8 @@ impl<'a> SchemaFieldSetValidator for DenyFieldsWithArguments<'a> {
             errors
                 .errors
                 .push(SingleFederationError::ProvidesFieldsHasArgs {
-                    target_type: baggage.target.type_name.clone(),
-                    target_field: baggage.target.field_name.clone(),
+                    target_type: baggage.target.type_name().clone(),
+                    target_field: baggage.target.field_name().clone(),
                     application: baggage.schema_directive.to_string(),
                     type_name: parent_ty.to_string(),
                     field_name: field.name.to_string(),
@@ -267,8 +273,8 @@ impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInProvides<'
 
     fn error(&self, message: String, baggage: &Self::Baggage) -> SingleFederationError {
         SingleFederationError::ProvidesFieldsMissingExternal {
-            target_type: baggage.target.type_name.clone(),
-            target_field: baggage.target.field_name.clone(),
+            target_type: baggage.target.type_name().clone(),
+            target_field: baggage.target.field_name().clone(),
             application: baggage.schema_directive.to_string(),
             message,
         }

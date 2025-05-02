@@ -158,17 +158,26 @@ impl LitExpr {
         }
         number.push_str(num.as_str());
 
-        if let Ok(lit_number) = number.parse().map(Self::Number) {
-            let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
-            Ok((suffix, WithRange::new(lit_number, range)))
-        } else {
-            Err(nom_error_message(
-                input,
-                // We could include the faulty number in the error message, but
-                // it will also appear at the beginning of the input span.
-                "Failed to parse numeric literal",
-            ))
-        }
+        number.parse().map(Self::Number).map_or_else(
+            |_| {
+                // CONSIDER USING THIS ERROR? now that we have access to them?
+                Err(nom_error_message(
+                    input,
+                    // We could include the faulty number in the error message, but
+                    // it will also appear at the beginning of the input span.
+                    "Failed to parse numeric literal",
+                ))
+            },
+            |lit_number| {
+                Ok((
+                    suffix,
+                    WithRange::new(
+                        lit_number,
+                        merge_ranges(neg.and_then(|n| n.range()), num.range()),
+                    ),
+                ))
+            },
+        )
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
@@ -487,7 +496,7 @@ mod tests {
             });
 
             check_parse("a.b.c", expected.clone());
-            check_parse(" a . b . c ", expected.clone());
+            check_parse(" a . b . c ", expected);
         }
 
         {
@@ -503,7 +512,7 @@ mod tests {
                 .into_with_range(),
             });
             check_parse("$.data", expected.clone());
-            check_parse(" $ . data ", expected.clone());
+            check_parse(" $ . data ", expected);
         }
 
         {
@@ -568,7 +577,7 @@ mod tests {
                 b . c ,
                 d . e . f ,
             ]"#,
-                expected.clone(),
+                expected,
             );
         }
 
@@ -629,7 +638,7 @@ mod tests {
                 a : $args . a ,
                 b : $this . b
             ,} "#,
-                expected.clone(),
+                expected,
             );
         }
     }

@@ -16,7 +16,6 @@ use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
-use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
@@ -130,27 +129,8 @@ impl<'schema> Connect<'schema> {
             .map(|coordinate| Self::parse(coordinate, schema, source_names))
             .partition_result();
 
-        let mut messages: Vec<Message> = messages.into_iter().flatten().collect();
+        let messages: Vec<Message> = messages.into_iter().flatten().collect();
 
-        // TODO: find a better place for feature gates like this
-        if schema.connect_link.spec == ConnectSpec::V0_1
-            && connects
-                .iter()
-                .any(|connect| matches!(connect.coordinate.element, ConnectedElement::Type { .. }))
-        {
-            messages.push(Message {
-                code: Code::FeatureUnavailable,
-                message: format!(
-                    "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
-                    object_name = object.name,
-                    connect_directive_name = schema.connect_directive_name(),
-                ),
-                locations: object
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
         (connects, messages)
     }
 

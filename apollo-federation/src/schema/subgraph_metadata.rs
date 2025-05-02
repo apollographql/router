@@ -183,7 +183,7 @@ impl SubgraphMetadata {
             // which can report it with a better error message.
             if let Ok(fields) = collect_target_fields_from_field_set(
                 unwrap_schema(schema),
-                requires_directive.target.type_name.clone(),
+                requires_directive.target.type_name().clone(),
                 requires_directive.arguments.fields,
                 false,
             ) {

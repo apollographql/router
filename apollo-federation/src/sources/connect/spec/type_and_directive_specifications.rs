@@ -44,7 +44,6 @@ use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
     link: &Link,
-    spec: &ConnectSpec,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     // the `get_type` closure expects a SingleFederationError, so we can't
@@ -71,21 +70,21 @@ pub(super) fn check_or_add(
     let http_header_mapping_field_list = vec![
         InputValueDefinition {
             description: None,
-            name: HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.clone(),
+            name: HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME,
             ty: ty!(String!).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME.clone(),
+            name: HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME,
             ty: ty!(String).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.clone(),
+            name: HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME,
             ty: ty!([String!]).into(),
             default_value: None,
             directives: Default::default(),
@@ -153,14 +152,14 @@ pub(super) fn check_or_add(
         },
         InputValueDefinition {
             description: None,
-            name: CONNECT_BODY_ARGUMENT_NAME.clone(),
+            name: CONNECT_BODY_ARGUMENT_NAME,
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: HEADERS_ARGUMENT_NAME.clone(),
+            name: HEADERS_ARGUMENT_NAME,
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -173,14 +172,14 @@ pub(super) fn check_or_add(
     connect_http_field_list.extend([
         InputValueDefinition {
             description: None,
-            name: PATH_ARGUMENT_NAME.clone(),
+            name: PATH_ARGUMENT_NAME,
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            name: QUERY_PARAMS_ARGUMENT_NAME,
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
@@ -252,7 +251,7 @@ pub(super) fn check_or_add(
         &[
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: CONNECT_SOURCE_ARGUMENT_NAME.clone(),
+                    name: CONNECT_SOURCE_ARGUMENT_NAME,
                     get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
@@ -260,7 +259,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: HTTP_ARGUMENT_NAME.clone(),
+                    name: HTTP_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = s
                             .metadata()
@@ -276,7 +275,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: BATCH_ARGUMENT_NAME.clone(),
+                    name: BATCH_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = s
                             .metadata()
@@ -292,7 +291,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: CONNECT_SELECTION_ARGUMENT_NAME.clone(),
+                    name: CONNECT_SELECTION_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = s
                             .metadata()
@@ -308,7 +307,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: CONNECT_ENTITY_ARGUMENT_NAME.clone(),
+                    name: CONNECT_ENTITY_ARGUMENT_NAME,
                     get_type: |_, _| Ok(Type::Named(name!(Boolean))),
                     default_value: Some(Value::Boolean(false)),
                 },
@@ -316,7 +315,10 @@ pub(super) fn check_or_add(
             },
         ],
         true,
-        spec.connect_directive_locations(),
+        &[
+            DirectiveLocation::FieldDefinition,
+            DirectiveLocation::Object,
+        ],
         false,
         None,
         None,
@@ -327,14 +329,14 @@ pub(super) fn check_or_add(
     let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
-            name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
+            name: SOURCE_BASE_URL_ARGUMENT_NAME,
             ty: ty!(String!).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: HEADERS_ARGUMENT_NAME.clone(),
+            name: HEADERS_ARGUMENT_NAME,
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -347,14 +349,14 @@ pub(super) fn check_or_add(
     source_http_field_list.extend([
         InputValueDefinition {
             description: None,
-            name: PATH_ARGUMENT_NAME.clone(),
+            name: PATH_ARGUMENT_NAME,
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            name: QUERY_PARAMS_ARGUMENT_NAME,
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
@@ -392,7 +394,7 @@ pub(super) fn check_or_add(
         &[
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: SOURCE_NAME_ARGUMENT_NAME.clone(),
+                    name: SOURCE_NAME_ARGUMENT_NAME,
                     get_type: |_, _| Ok(ty!(String!)),
                     default_value: None,
                 },
@@ -400,7 +402,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: HTTP_ARGUMENT_NAME.clone(),
+                    name: HTTP_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = s
                             .metadata()
@@ -468,7 +470,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
@@ -479,7 +481,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
 
@@ -548,7 +550,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {

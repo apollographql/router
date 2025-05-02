@@ -16,6 +16,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_field;
 
 pub(crate) fn validate_requires_directives(
     schema: &FederationSchema,
@@ -39,26 +40,34 @@ pub(crate) fn validate_requires_directives(
 
     for requires_directive in schema.requires_directive_applications()? {
         match requires_directive {
-            Ok(requires) => match requires.parse_fields(schema.schema()) {
-                Ok(fields) => {
-                    let existing_error_count = errors.errors.len();
-                    for rule in fieldset_rules.iter() {
-                        rule.visit(&requires.target.type_name, &fields, &requires, errors);
-                    }
+            Ok(requires) => {
+                deny_unsupported_directive_on_interface_field(
+                    &requires_directive_name,
+                    &requires,
+                    schema,
+                    errors,
+                );
+                match requires.parse_fields(schema.schema()) {
+                    Ok(fields) => {
+                        let existing_error_count = errors.errors.len();
+                        for rule in fieldset_rules.iter() {
+                            rule.visit(&requires.target.type_name(), &fields, &requires, errors);
+                        }
 
-                    // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
-                    // but if we get to this point without errors, we want to make sure it's still a valid selection.
-                    let did_not_find_errors = existing_error_count == errors.errors.len();
-                    if did_not_find_errors {
-                        if let Err(validation_error) =
-                            fields.validate(Valid::assume_valid_ref(schema.schema()))
-                        {
-                            errors.push(validation_error.into());
+                        // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
+                        // but if we get to this point without errors, we want to make sure it's still a valid selection.
+                        let did_not_find_errors = existing_error_count == errors.errors.len();
+                        if did_not_find_errors {
+                            if let Err(validation_error) =
+                                fields.validate(Valid::assume_valid_ref(schema.schema()))
+                            {
+                                errors.push(validation_error.into());
+                            }
                         }
                     }
+                    Err(e) => errors.push(e.into()),
                 }
-                Err(e) => errors.push(e.into()),
-            },
+            }
             Err(e) => errors.push(e),
         }
     }
@@ -94,8 +103,8 @@ impl<'a> SchemaFieldSetValidator for DenyAliases<'a> {
         // version of composition.
         if let Some(alias) = field.alias.as_ref() {
             errors.errors.push(SingleFederationError::RequiresInvalidFields {
-                target_type: baggage.target.type_name.clone(),
-                target_field: baggage.target.field_name.clone(),
+                target_type: baggage.target.type_name().clone(),
+                target_field: baggage.target.field_name().clone(),
                 application: baggage.schema_directive.to_string(),
                 message: format!("Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @requires", field.name),
             });
@@ -125,8 +134,8 @@ impl<'a> DenyFieldsWithDirectiveApplicationsInRequires<'a> {
 impl DenyFieldsWithDirectiveApplications for DenyFieldsWithDirectiveApplicationsInRequires<'_> {
     fn error(&self, directives: &DirectiveList, baggage: &Self::Baggage) -> SingleFederationError {
         SingleFederationError::RequiresHasDirectiveInFieldsArg {
-            target_type: baggage.target.type_name.clone(),
-            target_field: baggage.target.field_name.clone(),
+            target_type: baggage.target.type_name().clone(),
+            target_field: baggage.target.field_name().clone(),
             application: baggage.schema_directive.to_string(),
             applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
         }
@@ -196,7 +205,7 @@ impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInRequires<'
     fn error(&self, message: String, baggage: &Self::Baggage) -> SingleFederationError {
         SingleFederationError::RequiresFieldsMissingExternal {
             target_type: baggage.target_type().clone(),
-            target_field: baggage.target.field_name.clone(),
+            target_field: baggage.target.field_name().clone(),
             application: baggage.schema_directive.to_string(),
             message,
         }
