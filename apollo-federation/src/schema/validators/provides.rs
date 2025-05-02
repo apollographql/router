@@ -14,6 +14,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_field;
 
 pub(crate) fn validate_provides_directives(
     schema: &FederationSchema,
@@ -39,6 +40,13 @@ pub(crate) fn validate_provides_directives(
     for provides_directive in schema.provides_directive_applications()? {
         match provides_directive {
             Ok(provides) => {
+                deny_unsupported_directive_on_interface_field(
+                    &provides_directive_name,
+                    &provides,
+                    schema,
+                    errors,
+                );
+
                 // PORT NOTE: In JS, these two checks are done inside the `targetTypeExtractor`.
                 if metadata.is_field_external(&provides.target.clone().into()) {
                     errors.errors.push(
