@@ -182,33 +182,6 @@ impl RawResponse {
                     "Request failed".to_string()
                 };
 
-                // Do we have error extensions mapping set for this connector? Check both source and connect so we can "merge" them together
-                let mut source_extensions = None;
-                let mut connect_extensions = None;
-                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    source_extensions = res.and_then(|e| match e {
-                        Value::Object(map) => Some(map),
-                        _ => None,
-                    });
-                }
-
-                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    connect_extensions = res.and_then(|e| match e {
-                        Value::Object(map) => Some(map),
-                        _ => None,
-                    });
-                }
-
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
                 let mut error = graphql::Error::builder()
                     .message(message)
@@ -231,12 +204,24 @@ impl RawResponse {
                         )])),
                     );
 
-                // If we have extensions calculated by the JSONSelection, we will need to grab the code + the remaining extensions and map them to the error object
+                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
                 // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
                 // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
                 // can't make sense of it in the if/else due to how the builder is constructed.
                 let mut extension_code = "CONNECTOR_FETCH".to_string();
-                if let Some(extensions) = source_extensions {
+                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) =
+                        extensions_selection.apply_with_vars(&data, &inputs);
+
+                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+                    let extensions = res
+                        .and_then(|e| match e {
+                            Value::Object(map) => Some(map),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+
                     if let Some(code) = extensions.get("code") {
                         extension_code = code.as_str().unwrap_or_default().to_string();
                     }
@@ -245,7 +230,20 @@ impl RawResponse {
                         error = error.extension(key.clone(), value.clone());
                     }
                 }
-                if let Some(extensions) = connect_extensions {
+
+                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) =
+                        extensions_selection.apply_with_vars(&data, &inputs);
+
+                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+                    let extensions = res
+                        .and_then(|e| match e {
+                            Value::Object(map) => Some(map),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+
                     if let Some(code) = extensions.get("code") {
                         extension_code = code.as_str().unwrap_or_default().to_string();
                     }
@@ -254,6 +252,7 @@ impl RawResponse {
                         error = error.extension(key.clone(), value.clone());
                     }
                 }
+
                 // Now we can finally build the actual error!
                 let error = error
                     .extension_code(extension_code)
