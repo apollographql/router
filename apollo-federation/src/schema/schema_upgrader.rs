@@ -7,6 +7,7 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -15,6 +16,7 @@ use super::FederationSchema;
 use super::TypeDefinitionPosition;
 use super::compute_subgraph_metadata;
 use super::field_set::collect_target_fields_from_field_set;
+use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
@@ -26,10 +28,10 @@ use crate::internal_error;
 use crate::schema::SubgraphMetadata;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Raw;
 use crate::subgraph::typestate::Subgraph;
+use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
 
@@ -51,6 +53,7 @@ struct TypeInfo {
 #[derive(Debug)]
 struct ExpandedSubgraphInfo {
     subgraph_name: String,
+    subgraph_url: String,
     key_directive_name: Option<Name>,
     requires_directive_name: Option<Name>,
     provides_directive_name: Option<Name>,
@@ -64,7 +67,10 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Expanded>>, FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
-    if subgraphs.iter().all(|subgraph| !subgraph.is_fed_1()) {
+    if subgraphs
+        .iter()
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+    {
         return Ok(subgraphs);
     }
 
@@ -98,7 +104,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 
     let mut upgraded: HashMap<String, Subgraph<Expanded>> = Default::default();
     for (name, subgraph) in subgraphs.iter() {
-        if subgraph.is_fed_1() {
+        if !subgraph.metadata().is_fed_2_schema() {
             let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
             let new_subgraph = Subgraph::<Raw>::new(
@@ -145,7 +151,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     Ok(subgraphs
         .into_iter()
         .map(|(name, subgraph)| {
-            if subgraph.is_fed_1() {
+            if !subgraph.metadata().is_fed_2_schema() {
                 return upgraded.remove(&name).unwrap();
             }
             subgraph
@@ -173,6 +179,7 @@ impl<'a> SchemaUpgrader<'a> {
             schema,
             expanded_info: ExpandedSubgraphInfo {
                 subgraph_name: original_subgraph.name.clone(),
+                subgraph_url: original_subgraph.url.clone(),
                 key_directive_name: original_subgraph.key_directive_name()?.clone(),
                 requires_directive_name: original_subgraph.requires_directive_name()?.clone(),
                 provides_directive_name: original_subgraph.provides_directive_name()?.clone(),
@@ -193,6 +200,81 @@ impl<'a> SchemaUpgrader<'a> {
         })
     }
 
+    fn remove_links_and_reexpand(&mut self) -> Result<(), FederationError> {
+        // for @core, we want to remove both the definition and all references, but for other
+        // federation directives, just remove the definitions
+        let directives_to_remove = [
+            name!("extends"),
+            name!("key"),
+            name!("provides"),
+            name!("requires"),
+            name!("external"),
+            name!("tag"),
+        ];
+
+        let definitions: Vec<DirectiveDefinitionPosition> =
+            self.schema.get_directive_definitions().collect();
+        for definition in &definitions {
+            if directives_to_remove.contains(&definition.directive_name) {
+                self.schema
+                    .schema
+                    .directive_definitions
+                    .shift_remove(&definition.directive_name);
+                self.schema
+                    .referencers
+                    .directives
+                    .shift_remove(&definition.directive_name)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Schema missing referencers for directive \"{}\"",
+                            &definition.directive_name
+                        ),
+                    })?;
+            } else if definition.directive_name == name!("core") {
+                definition.remove(&mut self.schema)?;
+            }
+        }
+
+        // now remove other federation types
+        let schema = &mut self.schema;
+        if let Some(TypeDefinitionPosition::Enum(enum_obj)) =
+            schema.try_get_type(name!("core__Purpose"))
+        {
+            enum_obj.remove(schema)?;
+        }
+        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
+            schema.try_get_type(name!("core__Import"))
+        {
+            scalar_obj.remove(schema)?;
+        }
+        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
+            schema.try_get_type(name!("_FieldSet"))
+        {
+            scalar_obj.remove(schema)?;
+        }
+        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) = schema.try_get_type(name!("_Any"))
+        {
+            scalar_obj.remove(schema)?;
+        }
+        if let Some(TypeDefinitionPosition::Object(obj)) = schema.try_get_type(name!("_Service")) {
+            obj.remove(schema)?;
+        }
+        if let Some(TypeDefinitionPosition::Union(union_obj)) =
+            schema.try_get_type(name!("_Entity"))
+        {
+            union_obj.remove(schema)?;
+        }
+        let subgraph = Subgraph::new(
+            self.expanded_info.subgraph_name.as_str(),
+            self.expanded_info.subgraph_url.as_str(),
+            schema.schema.clone(), // TODO: It's unfortunate that we have to do multiple clones here. Ideally we'd allow subgraph to accept and release ownership
+        )
+        .into_fed2_subgraph()?
+        .expand_links()?;
+        self.schema = subgraph.schema().clone();
+        Ok(())
+    }
+
     // function to get subgraph from list of subgraphs by name. Right now it will just iterate, but perhaps the struct should be a HashMap eventually
     fn get_subgraph_by_name(&self, name: &String) -> Option<&Subgraph<Expanded>> {
         self.subgraphs.get(name)
@@ -206,6 +288,8 @@ impl<'a> SchemaUpgrader<'a> {
         // Fix federation directive arguments (fields) to ensure they're proper strings
         // Note: Implementation simplified for compilation purposes
         self.fix_federation_directives_arguments()?;
+
+        self.remove_links_and_reexpand()?;
 
         self.remove_external_on_interface();
 
@@ -734,35 +818,36 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn add_shareable(&mut self) -> Result<(), FederationError> {
-        let schema = &mut self.schema;
-        let Some(metadata) = &schema.subgraph_metadata else {
+        let Some(metadata) = &self.schema.subgraph_metadata else {
             return Ok(());
         };
 
-        // Get key directive and shareable directive from the metadata
-        let key_directive = metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?;
+        let Some(key_directive_name) = &self.expanded_info.key_directive_name else {
+            return Ok(());
+        };
 
-        let shareable_directive = metadata
+        let shareable_directive_name = metadata
             .federation_spec_definition()
-            .shareable_directive_definition(schema)?;
+            .shareable_directive_definition(&self.schema)?
+            .name
+            .clone();
 
         let mut fields_to_add_shareable = vec![];
         let mut types_to_add_shareable = vec![];
-        for type_pos in schema.get_types() {
-            let has_key_directive = type_pos.has_applied_directive(schema, &key_directive.name);
-            let is_root_type = Self::is_root_type(schema, &type_pos);
+        for type_pos in self.schema.get_types() {
+            let has_key_directive =
+                type_pos.has_applied_directive(&self.schema, key_directive_name);
+            let is_root_type = Self::is_root_type(&self.schema, &type_pos);
             let TypeDefinitionPosition::Object(obj_pos) = type_pos else {
                 continue;
             };
             let obj_name = &obj_pos.type_name;
             // Skip Subscription root type - no shareable needed
-            if obj_pos.type_name.as_str() == SchemaRootDefinitionKind::Subscription.to_string() {
+            if obj_pos.type_name == GRAPHQL_SUBSCRIPTION_TYPE_NAME {
                 continue;
             }
             if has_key_directive || is_root_type {
-                for field in obj_pos.fields(schema.schema())? {
+                for field in obj_pos.fields(self.schema.schema())? {
                     let obj_field = FieldDefinitionPosition::Object(field.clone());
                     if metadata.is_field_shareable(&obj_field) {
                         continue;
@@ -770,10 +855,18 @@ impl<'a> SchemaUpgrader<'a> {
                     let Some(entries) = self.object_type_map.get(obj_name) else {
                         continue;
                     };
-
                     let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, info)| {
-                        if subgraph_name != self.expanded_info.subgraph_name.as_str()
-                            && (info.metadata.is_field_external(&obj_field)
+                        let field_exists = self
+                            .get_subgraph_by_name(subgraph_name)
+                            .unwrap()
+                            .schema()
+                            .schema()
+                            .type_field(&field.type_name, &field.field_name)
+                            .is_ok();
+
+                        if (subgraph_name != self.expanded_info.subgraph_name.as_str())
+                            && field_exists
+                            && (!info.metadata.is_field_external(&obj_field)
                                 || info.metadata.is_field_partially_external(&obj_field))
                         {
                             return true;
@@ -781,7 +874,7 @@ impl<'a> SchemaUpgrader<'a> {
                         false
                     });
                     if type_in_other_subgraphs
-                        && !obj_field.has_applied_directive(schema, &shareable_directive.name)
+                        && !obj_field.has_applied_directive(&self.schema, &shareable_directive_name)
                     {
                         fields_to_add_shareable.push(field.clone());
                     }
@@ -797,16 +890,15 @@ impl<'a> SchemaUpgrader<'a> {
                     false
                 });
                 if type_in_other_subgraphs
-                    && !obj_pos.has_applied_directive(schema, &shareable_directive.name)
+                    && !obj_pos.has_applied_directive(&self.schema, &shareable_directive_name)
                 {
                     types_to_add_shareable.push(obj_pos.clone());
                 }
             }
         }
-        let shareable_directive_name = shareable_directive.name.clone();
         for pos in &fields_to_add_shareable {
             pos.insert_directive(
-                schema,
+                &mut self.schema,
                 Node::new(Directive {
                     name: shareable_directive_name.clone(),
                     arguments: vec![],
@@ -815,7 +907,7 @@ impl<'a> SchemaUpgrader<'a> {
         }
         for pos in &types_to_add_shareable {
             pos.insert_directive(
-                schema,
+                &mut self.schema,
                 Component::new(Directive {
                     name: shareable_directive_name.clone(),
                     arguments: vec![],
@@ -882,7 +974,7 @@ impl<'a> SchemaUpgrader<'a> {
                                 if used_in_other_definitions? {
                                     // remove @tag
                                     to_delete.push((
-                                        target.clone(),
+                                        target,
                                         application.directive.clone(),
                                     ));
                                 }
@@ -916,7 +1008,6 @@ mod tests {
     const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
 
     #[test]
-    #[ignore]
     fn upgrades_complex_schema() {
         let s1 = Subgraph::parse(
             "s1",
@@ -976,7 +1067,7 @@ mod tests {
 
         insta::assert_snapshot!(
             s1.schema().schema().to_string(), @r###"
-            schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+            schema @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@tag", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/link/v1.0") {
               query: Query
             }
 
@@ -1002,8 +1093,8 @@ mod tests {
 
             type Query {
               products: [Product!]! @provides(fields: "description")
-              _entities(representations: [_Any!]!): [_Entity]!
-              _service: _Service!
+              _entities(representations: [_Any!]!): [_Entity]! @shareable
+              _service: _Service! @shareable
             }
 
             interface I {
@@ -1103,7 +1194,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn remove_tag_on_external_field_if_found_on_definition() {
         let s1 = Subgraph::parse(
             "s1",
@@ -1172,7 +1262,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn reject_interface_object_usage_if_not_all_subgraphs_are_fed2() {
         // Note that this test both validates the rejection of fed1 subgraph when @interfaceObject is used somewhere, but also
         // illustrate why we do so: fed1 schema can use @key on interface for backward compatibility, but it is ignored and
@@ -1227,7 +1316,6 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
     }
 
     #[test]
-    #[ignore]
     fn handles_addition_of_shareable_when_external_is_used_on_type() {
         let s1 = Subgraph::parse(
             "s1",
@@ -1288,7 +1376,6 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
     }
 
     #[test]
-    #[ignore]
     fn fully_upgrades_schema_with_no_link_directives() {
         let subgraph = Subgraph::parse(
             "subgraph",
@@ -1327,7 +1414,7 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
         insta::assert_snapshot!(
             subgraph.schema().schema().to_string(),
             @r###"
-            schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+            schema @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@tag", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/link/v1.0") {
               query: Query
             }
             
@@ -1381,7 +1468,6 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
     }
 
     #[test]
-    #[ignore]
     fn does_not_add_shareable_to_subscriptions() {
         let subgraph1 = Subgraph::parse(
             "subgraph1",
@@ -1422,7 +1508,6 @@ Details: The @interfaceObject directive can only be used if all subgraphs have f
                 .expect("upgrades schema")
                 .try_into()
                 .expect("Expected 2 elements");
-
         assert!(
             !subgraph1
                 .schema()

@@ -303,7 +303,7 @@ pub enum HTTPMethod {
 
 impl HTTPMethod {
     #[inline]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             HTTPMethod::Get => "GET",
             HTTPMethod::Post => "POST",
@@ -364,18 +364,16 @@ impl<'a> Header<'a> {
         node: &'a Node<ast::Value>,
         allowed_headers: &AllowedHeaders,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
-        if let Some(values) = node.as_list() {
-            values
+        match (node.as_list(), node.as_object()) {
+            (Some(values), _) => values
                 .iter()
                 .map(|v| Self::from_single(v, allowed_headers))
-                .collect()
-        } else if node.as_object().is_some() {
-            vec![Self::from_single(node, allowed_headers)]
-        } else {
-            vec![Err(HeaderParseError::Other {
+                .collect(),
+            (None, Some(_)) => vec![Self::from_single(node, allowed_headers)],
+            _ => vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
                 node,
-            })]
+            })],
         }
     }
 

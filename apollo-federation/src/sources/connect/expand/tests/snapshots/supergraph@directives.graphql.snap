@@ -1,9 +1,9 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
-input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/carryover.graphql
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/directives.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"]) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", {name: "@originalName", as: "@custom3"}]) @link(url: "http://bugfix/weird/v1.0", import: ["@weird"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
   query: Query
 }
 
@@ -33,7 +33,17 @@ directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINIT
 
 directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
-directive @custom on OBJECT | FIELD_DEFINITION
+directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
+directive @custom1 on OBJECT | FIELD_DEFINITION
+
+directive @custom2 on OBJECT | FIELD_DEFINITION
+
+directive @custom3 on OBJECT | FIELD_DEFINITION
+
+directive @weird on FIELD | FIELD_DEFINITION
 
 directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
@@ -62,33 +72,25 @@ input join__ContextArgument {
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  ONE_QUERY_T_0 @join__graph(name: "one_Query_t_0", url: "none")
-  ONE_QUERY_TS_0 @join__graph(name: "one_Query_ts_0", url: "none")
-  ONE_T_R_0 @join__graph(name: "one_T_r_0", url: "none")
+  ONE @join__graph(name: "one", url: "none")
   TWO @join__graph(name: "two", url: "none")
 }
 
-type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0, key: "id") @join__type(graph: TWO, key: "id") {
-  authenticated: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @authenticated
-  custom: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @custom
-  hidden: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @inaccessible
-  id: ID! @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_TS_0, type: "ID!") @join__field(graph: ONE_T_R_0, type: "ID!") @join__field(graph: TWO, type: "ID!")
-  overridden: String @join__field(graph: ONE_QUERY_T_0, override: "two", overrideLabel: "label", type: "String") @join__field(graph: ONE_QUERY_TS_0, override: "two", overrideLabel: "label", type: "String") @join__field(graph: TWO, type: "String")
-  policy: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @policy(policies: [["admin"]])
-  requiresScopes: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @requiresScopes(scopes: ["scope"])
-  tagged: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @tag(name: "tag")
-  r: R @join__field(graph: ONE_T_R_0, type: "R")
-}
-
-type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0) @join__type(graph: TWO) {
-  t(id: ID): T @join__field(graph: ONE_QUERY_T_0, type: "T")
-  ts: [T] @join__field(graph: ONE_QUERY_TS_0, type: "[T]")
-  _: ID @inaccessible @join__field(graph: ONE_T_R_0, type: "ID")
+type Query @join__type(graph: ONE) @join__type(graph: TWO) {
+  tagged: String @join__field(graph: ONE, type: "String") @tag(name: "tag")
+  hidden: String @join__field(graph: ONE, type: "String") @inaccessible
+  custom: T @join__field(graph: ONE, type: "T") @custom1
+  authenticated: String @join__field(graph: ONE, type: "String") @authenticated
+  requiresScopes: String @join__field(graph: ONE, type: "String") @requiresScopes(scopes: ["scope"])
+  policy: String @join__field(graph: ONE, type: "String") @policy(policies: [["admin"]])
+  overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label", type: "String") @join__field(graph: TWO, type: "String")
+  weird: [String] @join__field(graph: ONE, type: "[String]") @listSize(assumedSize: 99) @weird
+  customAgain: String @join__field(graph: TWO, type: "String") @custom1
   z: Z @join__field(graph: TWO, type: "Z")
 }
 
-type R @join__type(graph: ONE_T_R_0) {
-  id: ID! @join__field(graph: ONE_T_R_0, type: "ID!")
+type T @join__type(graph: ONE) @custom2 {
+  field: String @join__field(graph: ONE, type: "String") @cost(weight: 5) @custom3
 }
 
 type X @join__type(graph: TWO, key: "id") {
