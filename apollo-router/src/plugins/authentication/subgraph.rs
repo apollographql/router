@@ -14,7 +14,6 @@ use aws_sigv4::http_request::SigningSettings;
 use aws_sigv4::http_request::sign;
 use aws_smithy_async::rt::sleep::SharedAsyncSleep;
 use aws_smithy_async::rt::sleep::TokioSleep;
-use aws_smithy_async::rt::sleep::default_async_sleep;
 use aws_smithy_async::time::SystemTimeSource;
 use aws_smithy_http_client::tls::Provider;
 use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
