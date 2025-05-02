@@ -1,3 +1,4 @@
+use encoding_rs::WINDOWS_1252;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -112,6 +113,114 @@ async fn text_body_maps_raw_value() {
       "data": {
         "raw": "test from server"
       }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn text_body_maps_with_non_utf8_charset() {
+    let (body, ..) = WINDOWS_1252.encode("test from server");
+    let body = body.into_owned();
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/raw"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(body, "text/plain; charset=windows-1252"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/content-type.graphql"),
+        &mock_server.uri(),
+        "query { raw }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "raw": "test from server"
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn text_body_maps_with_non_utf8_charset_using_invalid_utf8_bytes() {
+    let bytes = [0x80]; // valid in Windows-1252 (e.g., €), invalid in UTF-8
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/raw"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(bytes, "text/plain; charset=windows-1252"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/content-type.graphql"),
+        &mock_server.uri(),
+        "query { raw }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "raw": "€"
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn text_body_errors_on_invalid_chars_in_charset() {
+    let bytes = [0xC0, 0xAF]; // invalid UTF-8 sequence
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/raw"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(bytes, "text/plain; charset=utf-8"))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/content-type.graphql"),
+        &mock_server.uri(),
+        "query { raw }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Response deserialization failed",
+          "path": [
+            "raw"
+          ],
+          "extensions": {
+            "service": "connectors",
+            "http": {
+              "status": 200
+            },
+            "connector": {
+              "coordinate": "connectors:Query.raw@connect[0]"
+            },
+            "code": "CONNECTOR_DESERIALIZE"
+          }
+        }
+      ]
     }
     "#);
 }
