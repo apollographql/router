@@ -174,8 +174,8 @@ impl RawResponse {
                     // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
                     let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
 
-                    res.unwrap_or_else(|| Value::Null)
-                        .as_str()
+                    res.as_ref()
+                        .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string()
                 } else {
