@@ -7,6 +7,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
@@ -25,6 +26,7 @@ use crate::link::Link;
 use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_SERVICE_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -444,13 +446,28 @@ impl FederationSchema {
                 Ok(object_type) => {
                     let directives = &object_type.directives;
                     for directive in directives.get_all(&key_directive_definition.name) {
-                        let arguments = federation_spec.key_directive_arguments(directive);
-                        applications.push(arguments.map(|args| KeyDirective {
-                            arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
-                            target: object_type_position.clone().into(),
-                        }));
+                        if !matches!(
+                            directive
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.key_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(SingleFederationError::KeyInvalidFieldsType {
+                                target_type: object_type_position.type_name.clone(),
+                                application: directive.to_string(),
+                            }
+                            .into()))
+                        } else {
+                            let arguments = federation_spec.key_directive_arguments(directive);
+                            applications.push(arguments.map(|args| KeyDirective {
+                                arguments: args,
+                                schema_directive: directive,
+                                sibling_directives: directives,
+                                target: object_type_position.clone().into(),
+                            }));
+                        }
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -493,13 +510,32 @@ impl FederationSchema {
                     for provides_directive_application in
                         directives.get_all(&provides_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .provides_directive_arguments(provides_directive_application);
-                        applications.push(arguments.map(|args| ProvidesDirective {
-                            arguments: args,
-                            target: field_definition_position,
-                            target_return_type: field_definition.ty.inner_named_type(),
-                        }));
+                        if !matches!(
+                            provides_directive_application
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.provides_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(
+                                SingleFederationError::ProvidesInvalidFieldsType {
+                                    target_type: field_definition_position.type_name.clone(),
+                                    target_field: field_definition_position.field_name.clone(),
+                                    application: provides_directive_application.to_string(),
+                                }
+                                .into(),
+                            ))
+                        } else {
+                            let arguments = federation_spec
+                                .provides_directive_arguments(provides_directive_application);
+                            applications.push(arguments.map(|args| ProvidesDirective {
+                                arguments: args,
+                                schema_directive: provides_directive_application,
+                                target: field_definition_position,
+                                target_return_type: field_definition.ty.inner_named_type(),
+                            }));
+                        }
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -522,15 +558,34 @@ impl FederationSchema {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
-                    for provides_directive_application in
+                    for requires_directive_application in
                         directives.get_all(&requires_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .requires_directive_arguments(provides_directive_application);
-                        applications.push(arguments.map(|args| RequiresDirective {
-                            arguments: args,
-                            target: field_definition_position,
-                        }));
+                        if !matches!(
+                            requires_directive_application
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.requires_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(
+                                SingleFederationError::RequiresInvalidFieldsType {
+                                    target_type: field_definition_position.type_name.clone(),
+                                    target_field: field_definition_position.field_name.clone(),
+                                    application: requires_directive_application.to_string(),
+                                }
+                                .into(),
+                            ))
+                        } else {
+                            let arguments = federation_spec
+                                .requires_directive_arguments(requires_directive_application);
+                            applications.push(arguments.map(|args| RequiresDirective {
+                                arguments: args,
+                                schema_directive: requires_directive_application,
+                                target: field_definition_position,
+                            }));
+                        }
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -642,6 +697,8 @@ impl KeyDirective<'_> {
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema Node<Directive>,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
     /// The return type of the target field
@@ -663,6 +720,8 @@ impl HasFields for ProvidesDirective<'_> {
 pub(crate) struct RequiresDirective<'schema> {
     /// The parsed arguments of this `@requires` application
     arguments: RequiresDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema Node<Directive>,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
 }
@@ -690,8 +749,8 @@ pub(crate) trait HasFields {
     fn fields(&self) -> &str;
     fn target_type(&self) -> &Name;
 
-    fn parse_fields(&self, schema: &Schema) -> Result<Valid<FieldSet>, WithErrors<FieldSet>> {
-        FieldSet::parse_and_validate(
+    fn parse_fields(&self, schema: &Schema) -> Result<FieldSet, WithErrors<FieldSet>> {
+        FieldSet::parse(
             Valid::assume_valid_ref(schema),
             self.target_type().clone(),
             self.fields(),

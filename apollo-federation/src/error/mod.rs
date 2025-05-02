@@ -155,23 +155,38 @@ pub enum SingleFederationError {
     #[error("{message}")]
     UnknownLinkVersion { message: String },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+        "On type \"{target_type}\", for {application}: field {type_name}.{field_name} cannot be included because it has arguments (fields with argument are not allowed in @key)"
     )]
     KeyFieldsHasArgs {
+        target_type: Name,
+        application: String,
         type_name: String,
         field_name: String,
     },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+        "On field \"{target_type}.{target_field}\", for {application}: field {type_name}.{field_name} cannot be included because it has arguments (fields with argument are not allowed in @provides)"
     )]
     ProvidesFieldsHasArgs {
+        target_type: Name,
+        target_field: Name,
+        application: String,
         type_name: String,
         field_name: String,
     },
-    #[error("{message}")]
-    ProvidesFieldsMissingExternal { message: String },
-    #[error("{message}")]
-    RequiresFieldsMissingExternal { message: String },
+    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    ProvidesFieldsMissingExternal {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    RequiresFieldsMissingExternal {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        message: String,
+    },
     #[error("{message}")]
     KeyUnsupportedOnInterface { message: String },
     #[error("{message}")]
@@ -179,17 +194,31 @@ pub enum SingleFederationError {
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
     #[error(
-        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+        "On type \"{target_type}\", for {application}: cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
     )]
-    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    KeyHasDirectiveInFieldsArg {
+        target_type: Name,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+        "On field \"{target_type}.{target_field}\", for {application}: cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
     )]
-    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    ProvidesHasDirectiveInFieldsArg {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+        "On field \"{target_type}.{target_field}\", for {application}: cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
     )]
-    RequiresHasDirectiveInFieldsArg { applied_directives: String },
+    RequiresHasDirectiveInFieldsArg {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        applied_directives: String,
+    },
     #[error("{message}")]
     ExternalUnused { message: String },
     #[error(
@@ -198,20 +227,55 @@ pub enum SingleFederationError {
     TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
-    #[error("{message}")]
-    KeyInvalidFieldsType { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFieldsType { message: String },
-    #[error("{message}")]
-    RequiresInvalidFieldsType { message: String },
-    #[error("{message}")]
-    KeyInvalidFields { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFields { message: String },
-    #[error("{message}")]
-    RequiresInvalidFields { message: String },
-    #[error("{message}")]
-    KeyFieldsSelectInvalidType { message: String },
+    #[error(
+        "On type \"{target_type}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    KeyInvalidFieldsType {
+        target_type: Name,
+        application: String,
+    },
+    #[error(
+        "On field \"{target_type}.{target_field}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    ProvidesInvalidFieldsType {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+    },
+    #[error(
+        "On field \"{target_type}.{target_field}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    RequiresInvalidFieldsType {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyInvalidFields {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    ProvidesInvalidFields {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    RequiresInvalidFields {
+        target_type: Name,
+        target_field: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyFieldsSelectInvalidType {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
     #[error(
         "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
     )]

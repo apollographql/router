@@ -135,12 +135,16 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for key_directive in applications.into_iter().filter_map(|res| res.ok()) {
-            key_fields.extend(collect_target_fields_from_field_set(
+            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
+            // which can report it with a better error message.
+            if let Ok(fields) = collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 key_directive.target.type_name().clone(),
                 key_directive.arguments.fields,
                 false,
-            )?);
+            ) {
+                key_fields.extend(fields);
+            }
         }
         Ok(key_fields)
     }
@@ -153,12 +157,16 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for provides_directive in applications.into_iter().filter_map(|res| res.ok()) {
-            provided_fields.extend(collect_target_fields_from_field_set(
+            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
+            // which can report it with a better error message.
+            if let Ok(fields) = collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 provides_directive.target_return_type.clone(),
                 provides_directive.arguments.fields,
                 false,
-            )?);
+            ) {
+                provided_fields.extend(fields);
+            }
         }
         Ok(provided_fields)
     }
@@ -171,12 +179,16 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
-            required_fields.extend(collect_target_fields_from_field_set(
+            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
+            // which can report it with a better error message.
+            if let Ok(fields) = collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 requires_directive.target.type_name.clone(),
                 requires_directive.arguments.fields,
                 false,
-            )?);
+            ) {
+                required_fields.extend(fields);
+            }
         }
         Ok(required_fields)
     }

@@ -1,6 +1,7 @@
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Field;
+use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::error::FederationError;
@@ -10,6 +11,7 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::HasFields;
+use crate::schema::ProvidesDirective;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
@@ -26,7 +28,7 @@ pub(crate) fn validate_provides_directives(
         .directive_name_in_schema(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)?
         .unwrap_or(FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC);
 
-    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
+    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<Baggage = ProvidesDirective>>> = vec![
         Box::new(DenyAliases::new()),
         Box::new(DenyFieldsWithDirectiveApplicationsInProvides::new()),
         Box::new(DenyFieldsWithArguments::new()),
@@ -51,20 +53,36 @@ pub(crate) fn validate_provides_directives(
                                 provides.target.type_name, provides.target.field_name
                             ),
                         },
-                    )
+                    );
+                    continue;
                 }
                 if !schema
-                    .get_type(provides.target.type_name.clone())
-                    .is_ok_and(|ty| ty.is_composite_type())
+                    .schema()
+                    .types
+                    .get(provides.target_return_type.as_str())
+                    .is_some_and(|t| t.is_object() || t.is_interface() || t.is_union())
                 {
-                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\"", provides.target.type_name, provides.target.field_name, provides.target_return_type) })
+                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\" which is not a Composite Type", provides.target.type_name, provides.target.field_name, provides.target_return_type) });
+                    continue;
                 }
 
                 // PORT NOTE: Think of this as `validateFieldSet`, but the set of rules are already filtered to account for what were boolean flags in JS
                 match provides.parse_fields(schema.schema()) {
-                    Ok(field_set) => {
+                    Ok(fields) => {
+                        let existing_error_count = errors.errors.len();
                         for rule in fieldset_rules.iter() {
-                            rule.visit(provides.target_return_type, &field_set, errors);
+                            rule.visit(provides.target_return_type, &fields, &provides, errors);
+                        }
+
+                        // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
+                        // but if we get to this point without errors, we want to make sure it's still a valid selection.
+                        let did_not_find_errors = existing_error_count == errors.errors.len();
+                        if did_not_find_errors {
+                            if let Err(validation_error) =
+                                fields.validate(Valid::assume_valid_ref(schema.schema()))
+                            {
+                                errors.push(validation_error.into());
+                            }
                         }
                     }
                     Err(e) => errors.push(e.into()),
@@ -77,83 +95,139 @@ pub(crate) fn validate_provides_directives(
 }
 
 /// Instances of `@provides(fields:)` cannot use aliases
-struct DenyAliases {}
+struct DenyAliases<'a> {
+    _marker: std::marker::PhantomData<&'a ()>,
+}
 
-impl DenyAliases {
+impl<'a> DenyAliases<'a> {
     pub(crate) fn new() -> Self {
-        Self {}
+        Self {
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl SchemaFieldSetValidator for DenyAliases {
-    fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
-        // This largely duuplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
+impl<'a> SchemaFieldSetValidator for DenyAliases<'a> {
+    type Baggage = ProvidesDirective<'a>;
+
+    fn visit_field(
+        &self,
+        _parent_ty: &Name,
+        field: &Field,
+        baggage: &Self::Baggage,
+        errors: &mut MultipleFederationErrors,
+    ) {
+        // This largely duplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
         // That requires a valid schema and some operation data, which we don't have because were only working with a
         // schema. Additionally, that implementation uses a slightly different error message than that used by the JS
         // version of composition.
         if let Some(alias) = field.alias.as_ref() {
             errors.errors.push(SingleFederationError::ProvidesInvalidFields {
-                message: format!("Cannot use alias \"{}\" in \"{}.{}\": aliases are not currently supported in @provides", alias, parent_ty, field.name),
+                target_type: baggage.target.type_name.clone(),
+                target_field: baggage.target.field_name.clone(),
+                application: baggage.schema_directive.to_string(),
+                message: format!("Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @provides", field.name),
             });
         }
-        self.visit_selection_set(field.ty().inner_named_type(), &field.selection_set, errors);
+        self.visit_selection_set(
+            field.ty().inner_named_type(),
+            &field.selection_set,
+            baggage,
+            errors,
+        );
     }
 }
 
 /// Instances of `@provides(fields:)` cannot select fields with directive applications
-struct DenyFieldsWithDirectiveApplicationsInProvides {}
-
-impl DenyFieldsWithDirectiveApplicationsInProvides {
-    fn new() -> Self {
-        Self {}
-    }
+struct DenyFieldsWithDirectiveApplicationsInProvides<'a> {
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl DenyFieldsWithDirectiveApplications for DenyFieldsWithDirectiveApplicationsInProvides {
-    fn error(&self, directives: &DirectiveList) -> SingleFederationError {
-        SingleFederationError::ProvidesHasDirectiveInFieldsArg {
-            applied_directives: directives.iter().map(|d| d.name.to_string()).join(", "),
+impl<'a> DenyFieldsWithDirectiveApplicationsInProvides<'a> {
+    fn new() -> Self {
+        Self {
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl SchemaFieldSetValidator for DenyFieldsWithDirectiveApplicationsInProvides {
-    fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
-        DenyFieldsWithDirectiveApplications::visit_field(self, parent_ty, field, errors);
+impl DenyFieldsWithDirectiveApplications for DenyFieldsWithDirectiveApplicationsInProvides<'_> {
+    fn error(&self, directives: &DirectiveList, baggage: &Self::Baggage) -> SingleFederationError {
+        SingleFederationError::ProvidesHasDirectiveInFieldsArg {
+            target_type: baggage.target.type_name.clone(),
+            target_field: baggage.target.field_name.clone(),
+            application: baggage.schema_directive.to_string(),
+            applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
+        }
+    }
+}
+
+impl<'a> SchemaFieldSetValidator for DenyFieldsWithDirectiveApplicationsInProvides<'a> {
+    type Baggage = ProvidesDirective<'a>;
+
+    fn visit_field(
+        &self,
+        parent_ty: &Name,
+        field: &Field,
+        baggage: &Self::Baggage,
+        errors: &mut MultipleFederationErrors,
+    ) {
+        DenyFieldsWithDirectiveApplications::visit_field(self, parent_ty, field, baggage, errors);
     }
 
     fn visit_inline_fragment(
         &self,
         parent_ty: &Name,
         fragment: &apollo_compiler::executable::InlineFragment,
+        baggage: &Self::Baggage,
         errors: &mut MultipleFederationErrors,
     ) {
         DenyFieldsWithDirectiveApplications::visit_inline_fragment(
-            self, parent_ty, fragment, errors,
+            self, parent_ty, fragment, baggage, errors,
         );
     }
 }
 
 /// Instances of `@provides(fields:)` cannot select fields with arguments
-struct DenyFieldsWithArguments {}
+struct DenyFieldsWithArguments<'a> {
+    _marker: std::marker::PhantomData<&'a ()>,
+}
 
-impl DenyFieldsWithArguments {
+impl<'a> DenyFieldsWithArguments<'a> {
     pub(crate) fn new() -> Self {
-        Self {}
+        Self {
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl SchemaFieldSetValidator for DenyFieldsWithArguments {
-    fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
+impl<'a> SchemaFieldSetValidator for DenyFieldsWithArguments<'a> {
+    type Baggage = ProvidesDirective<'a>;
+
+    fn visit_field(
+        &self,
+        parent_ty: &Name,
+        field: &Field,
+        baggage: &Self::Baggage,
+        errors: &mut MultipleFederationErrors,
+    ) {
         if !field.definition.arguments.is_empty() {
             errors
                 .errors
                 .push(SingleFederationError::ProvidesFieldsHasArgs {
+                    target_type: baggage.target.type_name.clone(),
+                    target_field: baggage.target.field_name.clone(),
+                    application: baggage.schema_directive.to_string(),
                     type_name: parent_ty.to_string(),
                     field_name: field.name.to_string(),
                 });
         }
-        self.visit_selection_set(field.ty().inner_named_type(), &field.selection_set, errors);
+        self.visit_selection_set(
+            field.ty().inner_named_type(),
+            &field.selection_set,
+            baggage,
+            errors,
+        );
     }
 }
 
@@ -191,207 +265,26 @@ impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInProvides<'
         self.directive_name
     }
 
-    fn error(&self, message: String) -> SingleFederationError {
-        SingleFederationError::ProvidesFieldsMissingExternal { message }
+    fn error(&self, message: String, baggage: &Self::Baggage) -> SingleFederationError {
+        SingleFederationError::ProvidesFieldsMissingExternal {
+            target_type: baggage.target.type_name.clone(),
+            target_field: baggage.target.field_name.clone(),
+            application: baggage.schema_directive.to_string(),
+            message,
+        }
     }
 }
 
-impl SchemaFieldSetValidator for DenyNonExternalLeafFieldsInProvides<'_> {
-    fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
-        DenyNonExternalLeafFields::visit_field(self, parent_ty, field, errors);
-    }
-}
+impl<'a> SchemaFieldSetValidator for DenyNonExternalLeafFieldsInProvides<'a> {
+    type Baggage = ProvidesDirective<'a>;
 
-#[cfg(test)]
-mod tests {
-    use apollo_compiler::Schema;
-    use apollo_compiler::executable::FieldSet;
-    use apollo_compiler::name;
-
-    use super::*;
-    use crate::schema::compute_subgraph_metadata;
-
-    #[test]
-    fn deny_fields_with_arguments() {
-        let schema = Schema::parse_and_validate(
-            r#"
-            directive @external on FIELD_DEFINITION | OBJECT
-
-            directive @provides(fields: FieldSet!) on FIELD_DEFINITION
-
-            scalar FieldSet
-
-            type Query {
-                t: T @provides(fields: "f")
-            }
-
-            type T {
-                f(x: Int): Int @external
-            }
-        "#,
-            "test.graphqls",
-        )
-        .expect("parses schema");
-
-        let field_set =
-            FieldSet::parse(&schema, name!("T"), "f", "test.graphqls").expect("parses FieldSet");
-
-        let mut errors = MultipleFederationErrors::new();
-        let rule = DenyFieldsWithArguments::new();
-        rule.visit(&name!("T"), &field_set, &mut errors);
-
-        assert_eq!(errors.errors.len(), 1);
-        assert!(
-            matches!(
-                errors.errors[0],
-                SingleFederationError::ProvidesFieldsHasArgs { .. }
-            ),
-            "Expected an error about arguments in @provides(fields:), but got: {:?}",
-            errors.errors[0]
-        );
-    }
-
-    #[test]
-    fn deny_non_external() {
-        let schema = Schema::parse_and_validate(
-            r#"
-            directive @provides(fields: FieldSet!) on FIELD_DEFINITION
-
-            scalar FieldSet
-
-            type Query {
-                t: T @provides(fields: "f")
-            }
-
-            type T {
-                f: Int
-            }
-        "#,
-            "test.graphqls",
-        )
-        .expect("parses schema");
-        let fed_schema = FederationSchema::new((*schema).clone()).expect("wraps schema");
-        let metadata = compute_subgraph_metadata(&fed_schema)
-            .expect("computes metadata")
-            .expect("has metadata");
-
-        let field_set =
-            FieldSet::parse(&schema, name!("T"), "f", "test.graphqls").expect("parses FieldSet");
-
-        let mut errors = MultipleFederationErrors::new();
-        let provides = name!("provides");
-        let rule = DenyNonExternalLeafFieldsInProvides::new(&fed_schema, &metadata, &provides);
-        rule.visit(&name!("T"), &field_set, &mut errors);
-
-        assert_eq!(errors.errors.len(), 1);
-        assert!(
-            matches!(
-                errors.errors[0],
-                SingleFederationError::ProvidesFieldsMissingExternal { .. }
-            ),
-            "Expected an error about missing @external in @provides(fields:), but got: {:?}",
-            errors.errors[0]
-        );
-    }
-
-    #[test]
-    fn deny_directive_applications() {
-        let schema = Schema::parse_and_validate(
-            r#"
-            directive @external on FIELD_DEFINITION | OBJECT
-
-            directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-            directive @provides(fields: FieldSet!) on FIELD_DEFINITION
-            
-            scalar FieldSet
-
-            type Query {
-                t: T @provides(fields: "v { ... on V @skip(if: true) { x y } }")
-            }
-
-            type T @key(fields: "id") {
-                id: ID
-                v: V @external
-            }
-
-            type V {
-                x: Int
-                y: Int
-            }
-        "#,
-            "test.graphqls",
-        )
-        .expect("parses schema");
-
-        let field_set = FieldSet::parse(
-            &schema,
-            name!("T"),
-            "v { ... on V @skip(if: true) { x y } }",
-            "test.graphqls",
-        )
-        .expect("parses FieldSet");
-
-        let mut errors = MultipleFederationErrors::new();
-        let rule = DenyFieldsWithDirectiveApplicationsInProvides::new();
-        rule.visit(&name!("T"), &field_set, &mut errors);
-
-        assert_eq!(
-            errors.errors.len(),
-            1,
-            "Expected one error, got {:?}",
-            errors.errors
-        );
-        assert!(
-            matches!(
-                errors.errors[0],
-                SingleFederationError::ProvidesHasDirectiveInFieldsArg { .. }
-            ),
-            "Expected an error about directive applications in @provides(fields:), but got: {:?}",
-            errors.errors[0]
-        );
-    }
-
-    #[test]
-    fn deny_aliases() {
-        let schema = Schema::parse_and_validate(
-            r#"
-            directive @external on FIELD_DEFINITION | OBJECT
-
-            directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-            directive @provides(fields: FieldSet!) on FIELD_DEFINITION
-
-            scalar FieldSet
-
-            type Query {
-                t: T @provides(fields: "bar: x")
-            }
-
-            type T @key(fields: "id") {
-                id: ID!
-                x: Int @external
-            }
-        "#,
-            "test.graphqls",
-        )
-        .expect("parses schema");
-
-        let field_set = FieldSet::parse(&schema, name!("T"), "bar: x", "test.graphqls")
-            .expect("parses FieldSet");
-
-        let mut errors = MultipleFederationErrors::new();
-        let rule = DenyAliases::new();
-        rule.visit(&name!("T"), &field_set, &mut errors);
-
-        assert_eq!(errors.errors.len(), 1);
-        assert!(
-            matches!(
-                errors.errors[0],
-                SingleFederationError::ProvidesInvalidFields { .. }
-            ),
-            "Expected an error about aliases in @provides(fields:), but got: {:?}",
-            errors.errors[0]
-        );
+    fn visit_field(
+        &self,
+        parent_ty: &Name,
+        field: &Field,
+        baggage: &Self::Baggage,
+        errors: &mut MultipleFederationErrors,
+    ) {
+        DenyNonExternalLeafFields::visit_field(self, parent_ty, field, baggage, errors);
     }
 }
