@@ -3,7 +3,7 @@ source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/carryover.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
   query: Query
 }
 
@@ -33,7 +33,7 @@ directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINIT
 
 directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
-directive @custom on OBJECT | FIELD_DEFINITION
+directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
 
 directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
@@ -102,6 +102,20 @@ type Z @join__type(graph: TWO, key: "id") @context(name: "two__ctx") {
   x: X @join__field(graph: TWO, type: "X")
 }
 
-scalar requiresScopes__Scope
+scalar context__ContextFieldValue
 
 scalar policy__Policy
+
+scalar custom__Scalar @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_R_0)
+
+enum custom__Enum @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_R_0) {
+  ONE @join__enumValue(graph: ONE_QUERY_TS_0) @join__enumValue(graph: ONE_QUERY_T_0) @join__enumValue(graph: ONE_T_R_0)
+  TWO @join__enumValue(graph: ONE_QUERY_TS_0) @join__enumValue(graph: ONE_QUERY_T_0) @join__enumValue(graph: ONE_T_R_0)
+}
+
+input custom__Input @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_R_0) {
+  one: String @join__field(graph: ONE_QUERY_TS_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_T_R_0)
+  two: String @join__field(graph: ONE_QUERY_TS_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_T_R_0)
+}
+
+scalar requiresScopes__Scope

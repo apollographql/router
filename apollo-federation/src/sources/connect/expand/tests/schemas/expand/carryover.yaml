@@ -15,7 +15,7 @@ subgraphs:
           @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
           @composeDirective(name: "@custom")
           @source(name: "json" http: { baseURL: "http://example/" })
-        directive @custom on OBJECT | FIELD_DEFINITION
+
         type Query {
           ts: [T] @connect(
             source: "json"
@@ -67,6 +67,21 @@ subgraphs:
         type R {
           id: ID!
         }
+
+        # bug fix: this won't compose until it's fixed and released in federation
+        directive @custom on OBJECT | FIELD_DEFINITION
+        # directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
+        # scalar custom__Scalar
+
+        # enum custom__Enum {
+        #   ONE
+        #   TWO
+        # }
+
+        # input custom__Input {
+        #   one: String
+        #   two: String
+        # }
   two:
     routing_url: none
     schema:

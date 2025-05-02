@@ -8,7 +8,7 @@ schema
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
   @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
-  @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
   @join__directive(graphs: [ONE], name: "source", args: {name: "json", http: {baseURL: "http://example/"}})
 {
@@ -21,7 +21,7 @@ directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
 directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
 
-directive @custom on OBJECT | FIELD_DEFINITION
+directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
@@ -82,6 +82,18 @@ enum link__Purpose {
 }
 
 scalar policy__Policy
+
+scalar custom__Scalar @join__type(graph: ONE)
+
+enum custom__Enum @join__type(graph: ONE) {
+  ONE @join__enumValue(graph: ONE)
+  TWO @join__enumValue(graph: ONE)
+}
+
+input custom__Input @join__type(graph: ONE) {
+  one: String @join__field(graph: ONE)
+  two: String @join__field(graph: ONE)
+}
 
 type Query
   @join__type(graph: ONE)
