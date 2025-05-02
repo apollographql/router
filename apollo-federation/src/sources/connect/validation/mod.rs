@@ -129,6 +129,8 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         });
     }
 
+    // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
+    // incorrect line/col info.
     if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
         if let Some(replace_range) = schema_info.connect_link.directive().location() {
             let mut new_link = schema_info.connect_link.clone();
