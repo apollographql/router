@@ -29,6 +29,7 @@ use crate::schema::field_set::parse_field_set;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::external::validate_external_directives;
 use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
@@ -147,6 +148,7 @@ impl FederationBlueprint {
         validate_key_directives(&schema, &mut error_collector)?;
         validate_provides_directives(&schema, meta, &mut error_collector)?;
         validate_requires_directives(&schema, meta, &mut error_collector)?;
+        validate_external_directives(&schema, meta, &mut error_collector)?;
 
         // TODO: Remaining validations
         Self::validate_keys_on_interfaces_are_also_on_all_implementations(
