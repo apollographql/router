@@ -44,7 +44,7 @@ impl SpanMode {
                         REQUEST_SPAN_NAME,
                         "http.method" = %request.method(),
                         "http.request.method" = %request.method(),
-                        "http.route" = %request.uri(),
+                        "http.route" = %request.uri().path(),
                         "http.flavor" = ?request.version(),
                         "http.status" = 500, // This prevents setting later
                         "otel.name" = ::tracing::field::Empty,
@@ -59,7 +59,7 @@ impl SpanMode {
                         REQUEST_SPAN_NAME,
                         "http.method" = %request.method(),
                         "http.request.method" = %request.method(),
-                        "http.route" = %request.uri(),
+                        "http.route" = %request.uri().path(),
                         "http.flavor" = ?request.version(),
                         "otel.name" = ::tracing::field::Empty,
                         "otel.kind" = "SERVER",
@@ -84,7 +84,7 @@ impl SpanMode {
                 let span = info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %request.method(),
                     "http.request.method" = %request.method(),
-                    "http.route" = %request.uri(),
+                    "http.route" = %request.uri().path(),
                     "http.flavor" = ?request.version(),
                     "trace_id" = %trace_id,
                     "client.name" = ::tracing::field::Empty,
@@ -100,7 +100,7 @@ impl SpanMode {
             SpanMode::SpecCompliant => {
                 info_span!(ROUTER_SPAN_NAME,
                     // Needed for apollo_telemetry and datadog span mapping
-                    "http.route" = %request.uri(),
+                    "http.route" = %request.uri().path(),
                     "http.request.method" = %request.method(),
                     "otel.name" = ::tracing::field::Empty,
                     "otel.kind" = "SERVER",
