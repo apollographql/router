@@ -230,3 +230,103 @@ impl SpanMode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tracing_mock::expect;
+    use tracing_mock::subscriber;
+
+    use crate::plugins::telemetry::SpanMode;
+    use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+    use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+    use crate::uplink::license_enforcement::LicenseState;
+
+    #[test]
+    fn test_specific_span() {
+        // NB: this test checks the behavior of tracing_mock for a specific span.
+        //  Most tests should probably follow the pattern of `test_http_route_on_array_of_router_spans`
+        //  where they check a behavior across a variety of parameters.
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("http://example.com/path/to/location?with=query&another=UN1QU3_query")
+            .header("apollographql-client-name", "client")
+            .body("useful info")
+            .unwrap();
+
+        let expected_fields = expect::field("http.route")
+            .with_value(&tracing::field::display("/path/to/location"))
+            .and(expect::field("http.request.method").with_value(&tracing::field::display("GET")))
+            .and(expect::field("otel.kind").with_value(&"SERVER"))
+            .and(expect::field("apollo_private.request").with_value(&true));
+
+        let expected_span = expect::span()
+            .named(ROUTER_SPAN_NAME)
+            .with_fields(expected_fields);
+
+        let (subscriber, handle) = subscriber::mock()
+            .new_span(expected_span)
+            .enter(ROUTER_SPAN_NAME)
+            .event(expect::event())
+            .exit(ROUTER_SPAN_NAME)
+            .run_with_handle();
+        tracing::subscriber::with_default(subscriber, || {
+            let span = SpanMode::SpecCompliant.create_router(&request);
+            let _guard = span.enter();
+            tracing::info!("an event happened!");
+        });
+        handle.assert_finished();
+    }
+
+    #[test]
+    fn test_http_route_on_array_of_router_spans() {
+        const EXPECTED_ROUTES: [(&str, &str); 4] = [
+            ("https://www.example.com/", "/"),
+            ("https://www.example.com/path", "/path"),
+            ("http://example.com/path/to/location", "/path/to/location"),
+            ("http://www.example.com/path?with=query", "/path"),
+        ];
+
+        let span_modes = [SpanMode::SpecCompliant, SpanMode::Deprecated];
+        let license_states = [
+            LicenseState::LicensedHalt { limits: None },
+            LicenseState::Unlicensed,
+        ];
+
+        for (uri, expected_route) in EXPECTED_ROUTES {
+            let request = http::Request::builder().uri(uri).body("").unwrap();
+
+            // test `request` spans
+            for license_state in license_states {
+                let expected_span = expect::span().named(REQUEST_SPAN_NAME).with_fields(
+                    expect::field("http.route")
+                        .with_value(&tracing::field::display(expected_route)),
+                );
+
+                let span_mode = SpanMode::Deprecated;
+                let (subscriber, handle) =
+                    subscriber::mock().new_span(expected_span).run_with_handle();
+                tracing::subscriber::with_default(subscriber, || {
+                    let span = span_mode.create_request(&request, license_state);
+                    let _guard = span.enter();
+                });
+                handle.assert_finished();
+            }
+
+            // test `router` spans
+            for span_mode in span_modes {
+                let expected_span = expect::span().named(ROUTER_SPAN_NAME).with_fields(
+                    expect::field("http.route")
+                        .with_value(&tracing::field::display(expected_route)),
+                );
+
+                let (subscriber, handle) =
+                    subscriber::mock().new_span(expected_span).run_with_handle();
+                tracing::subscriber::with_default(subscriber, || {
+                    let span = span_mode.create_router(&request);
+                    let _guard = span.enter();
+                });
+                handle.assert_finished();
+            }
+        }
+    }
+}

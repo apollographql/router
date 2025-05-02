@@ -325,6 +325,7 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
 ] }
 tracing-opentelemetry = "0.25.0"
 tracing-test = "0.2.5"
+tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
 libtest-mimic = "0.8.0"
