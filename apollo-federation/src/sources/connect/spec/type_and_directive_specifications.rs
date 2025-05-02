@@ -470,7 +470,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
@@ -550,7 +550,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
