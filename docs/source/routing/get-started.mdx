@@ -10,8 +10,8 @@ Hello! Let's run Apollo Router for the very first time. You will:
 
 - Download and install a router binary.
 - Download a supergraph schema.
-- Create and edit a YAML configuration file.
-- Run the router in development mode, with your configuration and for your supergraph.
+- Create a router YAML configuration file.
+- Run the router in development mode.
 - Make a query to the running router.
 
 ## 1. Install router binary
@@ -206,9 +206,9 @@ Let's customize a common setting: the router's _supergraph listen address_. It's
 
 ## 4. Run the router
 
-When you're developing with the router locally and in non-production environments, it's useful to run the router in _development mode_, or dev mode. Dev mode is a collection of router configuration settings that make development easier.
+When you're developing with the router locally, it's useful to run the router in _development mode_, or dev mode. Dev mode is a collection of router configuration settings that enable development and debugging features.
 
-Let's run the router in dev mode. We'll use both the supergraph schema and YAML configuration files you saved: 
+Let's run the router in dev mode. We'll also run the router using both the supergraph schema and YAML configuration files you saved: 
 
 1. Run the router with command-line options:
     - `--dev` enables dev mode
@@ -246,7 +246,7 @@ Let's run the router in dev mode. We'll use both the supergraph schema and YAML 
 
     </ExpansionPanel>
 
-## 4. Make a query
+## 5. Make a query
 
 A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server running a development instance of your graph. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your development graph. 
 
@@ -256,29 +256,29 @@ Let's use Sandbox and its Explorer IDE to write a query and send it to your grap
 
 1. Copy and paste the example query into the **Operation** pane of Explorer:
 
-  ```graphql
-  query Query {
-    recommendedProducts {
-      inStock
-      name
-      price
-      reviews {
-        author {
-          name
+    ```graphql
+    query Query {
+      recommendedProducts {
+        inStock
+        name
+        price
+        reviews {
+          author {
+            name
+          }
         }
       }
     }
-  }
-```
+    ```
 
 1. Click **Query** to run the query, then check for its response in the **Response** pane.
 
-  <img
-    className="screenshot"
-    alt="Apollo Sandbox IDE showing successful query and response at the end of the router quickstart"
-    src="../images/router-quickstart-sandbox.jpg"
-    width="700"
-  />
+    <img
+      className="screenshot"
+      alt="Apollo Sandbox IDE showing successful query and response at the end of the router quickstart"
+      src="../images/router-quickstart-sandbox.jpg"
+      width="700"
+    />
 
 That's it! You've successfully sent a query to a router running a development graph and received a response.
 
