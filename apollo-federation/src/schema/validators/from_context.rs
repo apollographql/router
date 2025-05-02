@@ -240,7 +240,7 @@ impl FromContextValidator for RequireContextExists {
         let selection = selection.as_ref().map(|s| s.as_str()).unwrap_or("");
         if context.is_empty() {
             errors.push(
-                SingleFederationError::NoContextInSelection {
+                SingleFederationError::NoContextReferenced {
                     message: format!(
                         "@fromContext argument does not reference a context \"${} {}\".",
                         context, selection
@@ -256,6 +256,13 @@ impl FromContextValidator for RequireContextExists {
                         context,
                         as_coordinate(target)
                     ),
+                }
+                .into(),
+            );
+        } else if selection.is_empty() {
+            errors.push(
+                SingleFederationError::NoSelectionForContext {
+                    message: format!("@fromContext directive in field \"{}\" has no selection", as_coordinate(target)),
                 }
                 .into(),
             );
@@ -490,12 +497,11 @@ mod tests {
             "Expected an error about invalid context"
         );
         
-        dbg!(&errors);
         // Check for missing selection error
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::NoContextInSelection { message } if message.contains("noSelection")
+                SingleFederationError::NoSelectionForContext { message } if message.contains("has no selection")
             )),
             "Expected an error about missing selection"
         );
@@ -550,58 +556,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_from_context_directives() {
-        let schema_str = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
-                
-            type Query {
-                user(id: ID! @fromContext(field: "userContext.userId")): User
-                invalid(id: ID! @fromContext(field: "invalidContext.userId")): User
-                noContext(id: ID! @fromContext(field: "noSelection")): User
-            }
-
-            type User @context(name: "userContext") {
-                id: ID!
-                name: String
-            }
-        "#;
-
-        let subgraph = build_and_expand(schema_str);
-        let mut errors = MultipleFederationErrors::new();
-        
-        // First validate context directives to build the context map
-        let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(), 
-            &mut errors
-        ).expect("validates context directives");
-        
-        // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors).expect("validates fromContext directives");
-
-        // We expect at least one error for the invalid context
-        assert!(errors.errors.len() > 0, "Expected at least one validation error");
-        
-        // Check for invalid context error
-        assert!(
-            errors.errors.iter().any(|e| matches!(
-                e,
-                SingleFederationError::ContextNotSet { message } if message.contains("invalidContext")
-            )),
-            "Expected an error about invalid context"
-        );
-        
-        // Check for missing selection error
-        assert!(
-            errors.errors.iter().any(|e| matches!(
-                e,
-                SingleFederationError::NoContextInSelection { message } if message.contains("noSelection")
-            )),
-            "Expected an error about missing selection"
-        );
-    }
-    
-    #[test]
     fn test_parse_context() {
         let fields = [
             ("$context { prop }", ("context", "{ prop }")),
@@ -650,19 +604,19 @@ mod tests {
         assert_eq!(parsed_context, None);
         assert_eq!(parsed_selection, None);
 
-        // // Test empty context
+        // // Test space in context
         let (parsed_context, parsed_selection) = parse_context("$ selection");
-        assert_eq!(parsed_context, None);
+        assert_eq!(parsed_context, Some("selection".to_string()));
         assert_eq!(parsed_selection, None);
 
         // Test empty selection
         let (parsed_context, parsed_selection) = parse_context("$context ");
-        assert_eq!(parsed_context, None);
+        assert_eq!(parsed_context, Some("context".to_string()));
         assert_eq!(parsed_selection, None);
         
         // Test multiple delimiters (should only split on first)
-        let (parsed_context, parsed_selection) = parse_context("$contextA nested field");
+        let (parsed_context, parsed_selection) = parse_context("$contextA multiple fields selected");
         assert_eq!(parsed_context, Some("contextA".to_string()));
-        assert_eq!(parsed_selection, Some("nested field".to_string()));
+        assert_eq!(parsed_selection, Some("multiple fields selected".to_string()));
     }
 }

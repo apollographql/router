@@ -345,7 +345,9 @@ pub enum SingleFederationError {
     #[error("{message}")]
     ContextNotSet { message: String },
     #[error("{message}")]
-    NoContextInSelection { message: String },
+    NoContextReferenced { message: String },
+    #[error("{message}")]
+    NoSelectionForContext { message: String },
     #[error("{message}")]
     ContextNoResolvableKey { message: String },
 }
@@ -549,7 +551,8 @@ impl SingleFederationError {
             SingleFederationError::ContextNameContainsUnderscore { .. } => ErrorCode::Internal,
             SingleFederationError::ContextNameInvalid { .. } => ErrorCode::Internal,
             SingleFederationError::ContextNotSet { .. } => ErrorCode::Internal,
-            SingleFederationError::NoContextInSelection { .. } => ErrorCode::Internal,
+            SingleFederationError::NoContextReferenced { .. } => ErrorCode::Internal,
+            SingleFederationError::NoSelectionForContext { .. } => ErrorCode::Internal,
             SingleFederationError::ContextNoResolvableKey { .. } => ErrorCode::Internal,
         }
     }
