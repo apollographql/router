@@ -142,7 +142,7 @@ fn join_not_null_method_shape(
         if !mismatches.is_empty() {
             return Shape::error(
                 format!(
-                    "Method ->{} requires an array of scalars values as input",
+                    "Method ->{} requires an array of scalar values as input",
                     method_name.as_ref()
                 ),
                 [],
@@ -219,9 +219,9 @@ mod tests {
     }
 
     #[rstest::rstest]
-    #[case(json!({"a": 1}), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
-    #[case(json!([{"a": 1}, {"a": 2}]), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
-    #[case(json!([[1, 2]]), vec!["Method ->joinNotNull requires an array of scalars values as input"])]
+    #[case(json!({"a": 1}), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
+    #[case(json!([{"a": 1}, {"a": 2}]), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
+    #[case(json!([[1, 2]]), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
     fn join_not_null_warnings(#[case] input: JSON, #[case] expected_warnings: Vec<&str>) {
         use itertools::Itertools;
 
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(
             output_shape,
             Shape::error(
-                "Method ->joinNotNull requires an array of scalars values as input".to_string(),
+                "Method ->joinNotNull requires an array of scalar values as input".to_string(),
                 vec![]
             )
         );
