@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use aws_config::imds;
 use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::ProvideCredentials;
@@ -13,6 +12,10 @@ use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_sigv4::http_request::sign;
+use aws_smithy_async::rt::sleep::SharedAsyncSleep;
+use aws_smithy_async::rt::sleep::TokioSleep;
+use aws_smithy_async::rt::sleep::default_async_sleep;
+use aws_smithy_async::time::SystemTimeSource;
 use aws_smithy_http_client::tls::Provider;
 use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
 use aws_smithy_runtime_api::client::identity::Identity;
@@ -171,16 +174,15 @@ impl AWSSigV4Config {
 }
 
 fn credentials_chain_builder() -> aws_config::default_provider::credentials::Builder {
-    aws_config::default_provider::credentials::DefaultCredentialsChain::builder().imds_client(
-        imds::Client::builder()
-            .configure(
-                &ProviderConfig::default().with_http_client(
-                    aws_smithy_http_client::Builder::new()
-                        .tls_provider(Provider::Rustls(CryptoMode::Ring))
-                        .build_https(),
-                ),
+    aws_config::default_provider::credentials::DefaultCredentialsChain::builder().configure(
+        ProviderConfig::default()
+            .with_http_client(
+                aws_smithy_http_client::Builder::new()
+                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .build_https(),
             )
-            .build(),
+            .with_sleep_impl(TokioSleep::new())
+            .with_time_source(SystemTimeSource::new()),
     )
 }
 

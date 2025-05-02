@@ -267,6 +267,7 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sigv4",
+ "aws-smithy-async",
  "aws-smithy-http-client",
  "aws-smithy-runtime-api",
  "aws-types",
