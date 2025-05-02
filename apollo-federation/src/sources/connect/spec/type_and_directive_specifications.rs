@@ -44,7 +44,6 @@ use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
     link: &Link,
-    spec: &ConnectSpec,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     // the `get_type` closure expects a SingleFederationError, so we can't
@@ -316,7 +315,10 @@ pub(super) fn check_or_add(
             },
         ],
         true,
-        spec.connect_directive_locations(),
+        &[
+            DirectiveLocation::FieldDefinition,
+            DirectiveLocation::Object,
+        ],
         false,
         None,
         None,

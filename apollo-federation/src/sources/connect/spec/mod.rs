@@ -24,7 +24,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 pub(crate) use directives::extract_connect_directive_arguments;
@@ -117,9 +116,7 @@ impl ConnectSpec {
             return Ok(());
         };
 
-        let spec = Self::try_from(&link.url.version)?;
-
-        type_and_directive_specifications::check_or_add(&link, &spec, schema)
+        type_and_directive_specifications::check_or_add(&link, schema)
     }
 
     pub(crate) fn source_directive_name(link: &Link) -> Name {
@@ -156,21 +153,6 @@ impl ConnectSpec {
             ],
         }
     }
-
-    pub(crate) const fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
-        match self {
-            ConnectSpec::V0_1 => CONNECT_V0_1_LOCATIONS,
-            ConnectSpec::V0_2 => CONNECT_V0_2_LOCATIONS,
-        }
-    }
-
-    pub(crate) const fn available() -> &'static [ConnectSpec] {
-        if cfg!(any(feature = "connect_v0.2", test)) {
-            &[ConnectSpec::V0_1, ConnectSpec::V0_2]
-        } else {
-            &[ConnectSpec::V0_1]
-        }
-    }
 }
 
 impl TryFrom<&Version> for ConnectSpec {
@@ -178,7 +160,6 @@ impl TryFrom<&Version> for ConnectSpec {
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
-            #[cfg(any(feature = "connect_v0.2", test))]
             (0, 2) => Ok(Self::V0_2),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),
@@ -201,9 +182,3 @@ impl From<ConnectSpec> for Version {
         }
     }
 }
-
-const CONNECT_V0_1_LOCATIONS: &[DirectiveLocation] = &[DirectiveLocation::FieldDefinition];
-const CONNECT_V0_2_LOCATIONS: &[DirectiveLocation] = &[
-    DirectiveLocation::FieldDefinition,
-    DirectiveLocation::Object,
-];
