@@ -4,6 +4,8 @@ use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
+use encoding_rs::Encoding;
+use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use itertools::Itertools;
@@ -628,17 +630,27 @@ async fn deserialize_response<T: HttpBody>(
         .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
     {
         // Plain text we can't parse as JSON so we'll instead return it as a JSON string
-        match std::str::from_utf8(body).map(|text| Value::String(text.into())) {
-            Ok(json_data) => Ok(json_data),
-            Err(_) => {
-                if let Some(debug_context) = debug_context {
-                    debug_context
-                        .lock()
-                        .push_invalid_response(debug_request.clone(), parts, body);
-                }
-                Err(make_err(path))
+        // Before we can do that, we need to figure out the charset and attempt to decode the string
+        let charset = content_type
+            .as_ref()
+            .and_then(|ct| {
+                ct.get_param("charset")
+                    .map(|c| c.as_str().to_ascii_lowercase())
+            })
+            .unwrap_or("utf-8".to_string());
+        let encoding = Encoding::for_label(charset.as_bytes()).unwrap_or(UTF_8);
+        let (decoded_body, _, had_errors) = encoding.decode(body);
+
+        if had_errors {
+            if let Some(debug_context) = debug_context {
+                debug_context
+                    .lock()
+                    .push_invalid_response(debug_request.clone(), parts, body);
             }
+            return Err(make_err(path));
         }
+
+        Ok(Value::String(decoded_body.into_owned().into()))
     } else {
         // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
         Ok(Value::Null)
