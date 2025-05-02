@@ -256,8 +256,9 @@ mod fieldset_based_directives {
         }
     }
 
+    // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -283,8 +284,9 @@ mod fieldset_based_directives {
         );
     }
 
+    // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -307,14 +309,13 @@ mod fieldset_based_directives {
                 ),
                 (
                     "EXTERNAL_ON_INTERFACE",
-                    r#"[S] Interface type field "T.f" is marked @external but @external is not allowed on interface fields (it is nonsensical)."#,
+                    r#"[S] Interface type field "T.f" is marked @external but @external is not allowed on interface fields."#,
                 ),
             ]
         );
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_unused_external() {
         let schema_str = r#"
             type Query {
