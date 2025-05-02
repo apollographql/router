@@ -9,7 +9,6 @@ use apollo_compiler::executable::SelectionSet;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::schema::FederationSchema;
-use crate::schema::HasFields;
 use crate::schema::KeyDirective;
 use crate::schema::ProvidesDirective;
 use crate::schema::RequiresDirective;
@@ -143,10 +142,15 @@ trait DenyNonExternalLeafFields<'a>: SchemaFieldSetValidator {
 }
 
 pub(crate) trait AppliesOnType {
+    fn applied_type(&self) -> &Name;
     fn unsupported_on_interface_error(message: String) -> SingleFederationError;
 }
 
 impl AppliesOnType for KeyDirective<'_> {
+    fn applied_type(&self) -> &Name {
+        self.target.type_name()
+    }
+
     fn unsupported_on_interface_error(message: String) -> SingleFederationError {
         SingleFederationError::KeyUnsupportedOnInterface { message }
     }
@@ -177,19 +181,19 @@ impl AppliesOnField for ProvidesDirective<'_> {
     }
 }
 
-pub(crate) fn deny_unsupported_directive_on_interface_type<D: HasFields + AppliesOnType>(
+pub(crate) fn deny_unsupported_directive_on_interface_type<D: AppliesOnType>(
     directive_name: &Name,
     directive_application: &D,
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) {
-    let directive_display = format!("@{directive_name}");
-    let target_type = directive_application.target_type();
-    if schema.is_interface(target_type) {
+    let applied_type = directive_application.applied_type();
+    if schema.is_interface(applied_type) {
+        let directive_display = format!("@{directive_name}");
         errors.push(
             D::unsupported_on_interface_error(
                 format!(
-                    r#"Cannot use {directive_display} on interface "{target_type}": {directive_display} is not yet supported on interfaces"#,
+                    r#"Cannot use {directive_display} on interface "{applied_type}": {directive_display} is not yet supported on interfaces"#,
                 ),
             )
             .into(),
@@ -197,16 +201,16 @@ pub(crate) fn deny_unsupported_directive_on_interface_type<D: HasFields + Applie
     }
 }
 
-pub(crate) fn deny_unsupported_directive_on_interface_field<D: HasFields + AppliesOnField>(
+pub(crate) fn deny_unsupported_directive_on_interface_field<D: AppliesOnField>(
     directive_name: &Name,
     directive_application: &D,
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) {
-    let directive_display = format!("@{directive_name}");
     let applied_field = directive_application.applied_field();
     let parent_type = applied_field.parent();
     if schema.is_interface(parent_type.type_name()) {
+        let directive_display = format!("@{directive_name}");
         errors.push(
             D::unsupported_on_interface_error(
                 format!(
