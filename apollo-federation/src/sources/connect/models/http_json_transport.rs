@@ -400,7 +400,7 @@ impl<'a> Header<'a> {
                 node: name_node,
             })?;
 
-        if header_name_is_reserved(&name) {
+        if RESERVED_HEADERS.contains(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
                 node: name_node,
@@ -415,7 +415,7 @@ impl<'a> Header<'a> {
             .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
-            (Some(_), None) if header_name_allowed_static(&name) => {
+            (Some(_), None) if STATIC_HEADERS.contains(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
                     "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})
@@ -500,26 +500,21 @@ impl Display for HeaderParseError<'_> {
 
 impl Error for HeaderParseError<'_> {}
 
-pub(crate) fn header_name_is_reserved(header_name: &HeaderName) -> bool {
-    [
-        header::CONNECTION,
-        header::PROXY_AUTHENTICATE,
-        header::PROXY_AUTHORIZATION,
-        header::TE,
-        header::TRAILER,
-        header::TRANSFER_ENCODING,
-        header::UPGRADE,
-        header::CONTENT_LENGTH,
-        header::CONTENT_ENCODING,
-        header::ACCEPT_ENCODING,
-        HeaderName::from_static("keep-alive"),
-    ]
-    .contains(header_name)
-}
+const RESERVED_HEADERS: [HeaderName; 11] = [
+    header::CONNECTION,
+    header::PROXY_AUTHENTICATE,
+    header::PROXY_AUTHORIZATION,
+    header::TE,
+    header::TRAILER,
+    header::TRANSFER_ENCODING,
+    header::UPGRADE,
+    header::CONTENT_LENGTH,
+    header::CONTENT_ENCODING,
+    header::ACCEPT_ENCODING,
+    HeaderName::from_static("keep-alive"),
+];
 
-pub(crate) fn header_name_allowed_static(header_name: &HeaderName) -> bool {
-    [header::CONTENT_TYPE, header::ACCEPT, header::HOST].contains(header_name)
-}
+const STATIC_HEADERS: [HeaderName; 3] = [header::CONTENT_TYPE, header::ACCEPT, header::HOST];
 
 #[cfg(test)]
 mod test_make_uri {
