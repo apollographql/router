@@ -226,7 +226,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interfaces_in_all_specs() {
         for version in ["2.0", "2.1", "2.2"] {
             let schema_str = format!(
@@ -256,9 +255,7 @@ mod fieldset_based_directives {
         }
     }
 
-    // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -284,9 +281,7 @@ mod fieldset_based_directives {
         );
     }
 
-    // TODO: UNSUPPORTED_ON_INTERFACE
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_interfaces() {
         let schema_str = r#"
             type Query {

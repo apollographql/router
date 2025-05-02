@@ -145,7 +145,7 @@ impl FederationBlueprint {
             return error_collector.into_result().map(|_| schema);
         }
 
-        validate_key_directives(&schema, &mut error_collector)?;
+        validate_key_directives(&schema, meta, &mut error_collector)?;
         validate_provides_directives(&schema, meta, &mut error_collector)?;
         validate_requires_directives(&schema, meta, &mut error_collector)?;
         validate_external_directives(&schema, meta, &mut error_collector)?;
