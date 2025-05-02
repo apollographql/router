@@ -17,10 +17,10 @@ use crate::sources::connect::validation::Message;
 /// The `@link` in a subgraph which enables connectors
 #[derive(Clone, Debug)]
 pub(super) struct ConnectLink<'schema> {
-    pub(crate) spec: ConnectSpec,
-    pub(crate) source_directive_name: Name,
-    pub(crate) connect_directive_name: Name,
-    pub(crate) directive: &'schema Component<Directive>,
+    spec: ConnectSpec,
+    source_directive_name: Name,
+    connect_directive_name: Name,
+    directive: &'schema Component<Directive>,
     link: Link,
 }
 
@@ -61,10 +61,30 @@ impl<'schema> ConnectLink<'schema> {
             link,
         }))
     }
+
+    pub(super) fn spec(&self) -> ConnectSpec {
+        self.spec
+    }
+    pub(super) fn set_spec(&mut self, spec: ConnectSpec) {
+        self.spec = spec;
+        self.link.url.version = spec.into();
+    }
+
+    pub(super) fn source_directive_name(&self) -> &Name {
+        &self.source_directive_name
+    }
+
+    pub(super) fn connect_directive_name(&self) -> &Name {
+        &self.connect_directive_name
+    }
+
+    pub(super) fn directive(&self) -> &Component<Directive> {
+        self.directive
+    }
 }
 
 impl Display for ConnectLink<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "@link(url: \"{}\")", self.link.url)
+        write!(f, "{}", self.link)
     }
 }

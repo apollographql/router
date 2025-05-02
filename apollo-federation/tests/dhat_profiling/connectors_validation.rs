@@ -16,7 +16,7 @@ fn valid_large_body() {
 
     let _profiler = dhat::Profiler::builder().testing().build();
 
-    apollo_federation::sources::connect::validation::validate(&schema, SCHEMA);
+    apollo_federation::sources::connect::validation::validate(schema, SCHEMA);
 
     let stats = dhat::HeapStats::get();
     dhat::assert!(stats.max_bytes < MAX_BYTES);
