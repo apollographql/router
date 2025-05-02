@@ -25,7 +25,6 @@ use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
-use super::spec::versions::VersionInfo;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
@@ -113,14 +112,11 @@ impl Connector {
             return Ok(Default::default());
         };
 
-        let version: VersionInfo = spec.into();
-
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name, &version)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments =
-            extract_connect_directive_arguments(schema, &connect_name, &version)?;
+        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
 
         connect_arguments
             .into_iter()
