@@ -1,4 +1,5 @@
 use apollo_federation::subgraph::SubgraphError;
+use apollo_federation::subgraph::typestate::Expanded;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::subgraph::typestate::Validated;
 
@@ -27,8 +28,31 @@ pub(crate) fn build_inner(
         .validate(true)
 }
 
+pub(crate) fn build_inner_expanded(
+    schema_str: &str,
+    build_option: BuildOption,
+) -> Result<Subgraph<Expanded>, SubgraphError> {
+    let name = "S";
+    let subgraph =
+        Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
+    let subgraph = if matches!(build_option, BuildOption::AsFed2) {
+        subgraph
+            .into_fed2_subgraph()
+            .map_err(|e| SubgraphError::new(name, e))?
+    } else {
+        subgraph
+    };
+    Ok(subgraph
+        .expand_links()
+        .map_err(|e| SubgraphError::new(name, e))?)
+}
+
 pub(crate) fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
     build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
+}
+
+pub(crate) fn build_and_expand(schema_str: &str) -> Subgraph<Expanded> {
+    build_inner_expanded(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
 }
 
 pub(crate) fn build_for_errors_with_option(
