@@ -1,12 +1,12 @@
 use std::sync::LazyLock;
 
-use apollo_compiler::ast::DirectiveLocation;
-use apollo_compiler::ty;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::name;
+use apollo_compiler::ty;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -20,10 +20,10 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
-use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");

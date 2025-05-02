@@ -67,15 +67,19 @@ pub(crate) fn parse_context(field: &str) -> (Option<String>, Option<String>) {
             .map_or(None, |m| Some(m.as_str()))
     }
 
-    let Some(dollar_start) = strip_leading_ignored_tokens(field) else { return (None, None) };
-    
+    let Some(dollar_start) = strip_leading_ignored_tokens(field) else {
+        return (None, None);
+    };
+
     let mut dollar_iter = dollar_start.chars();
     if dollar_iter.next() != Some('$') {
         return (None, None);
     }
     let after_dollar = dollar_iter.as_str();
 
-    let Some(context_start) = strip_leading_ignored_tokens(after_dollar) else { return (None, None) };
+    let Some(context_start) = strip_leading_ignored_tokens(after_dollar) else {
+        return (None, None);
+    };
     let Some(context_captures) =
         iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
     else {
@@ -90,7 +94,9 @@ pub(crate) fn parse_context(field: &str) -> (Option<String>, Option<String>) {
     };
     let selection = match context_captures.get(2).map(|m| m.as_str()) {
         Some(selection) => {
-            let Some(selection) = strip_leading_ignored_tokens(selection) else { return (Some(context.to_owned()), None) };
+            let Some(selection) = strip_leading_ignored_tokens(selection) else {
+                return (Some(context.to_owned()), None);
+            };
             if !selection.is_empty() {
                 selection
             } else {
@@ -103,7 +109,9 @@ pub(crate) fn parse_context(field: &str) -> (Option<String>, Option<String>) {
     };
     // PORT_NOTE: apollo_compiler's parsing code for field sets requires ignored tokens to be
     // pre-stripped if curly braces are missing, so we additionally do that here.
-    let Some(selection) = strip_leading_ignored_tokens(selection) else { return (Some(context.to_owned()), None) };
+    let Some(selection) = strip_leading_ignored_tokens(selection) else {
+        return (Some(context.to_owned()), None);
+    };
     (Some(context.to_owned()), Some(selection.to_owned()))
 }
 
@@ -266,7 +274,10 @@ impl FromContextValidator for RequireContextExists {
         } else if selection.is_empty() {
             errors.push(
                 SingleFederationError::NoSelectionForContext {
-                    message: format!("@fromContext directive in field \"{}\" has no selection", as_coordinate(target)),
+                    message: format!(
+                        "@fromContext directive in field \"{}\" has no selection",
+                        as_coordinate(target)
+                    ),
                 }
                 .into(),
             );
@@ -346,9 +357,9 @@ mod tests {
     use super::*;
     use crate::error::MultipleFederationErrors;
     use crate::error::SingleFederationError;
+    use crate::subgraph::SubgraphError;
     use crate::subgraph::typestate::Expanded;
     use crate::subgraph::typestate::Subgraph;
-    use crate::subgraph::SubgraphError;
     use std::collections::HashMap;
 
     enum BuildOption {
@@ -397,12 +408,13 @@ mod tests {
 
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
-        
+
         // First validate context directives to build the context map
         let context_map = HashMap::new();
-        
+
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors).expect("validates fromContext directives");
+        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+            .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type
         assert!(
@@ -441,15 +453,17 @@ mod tests {
 
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
-        
+
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(), 
-            &mut errors
-        ).expect("validates context directives");
-        
+            &subgraph.schema(),
+            &mut errors,
+        )
+        .expect("validates context directives");
+
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors).expect("validates fromContext directives");
+        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+            .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on a field implementing an interface
         assert!(
@@ -482,15 +496,17 @@ mod tests {
 
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
-        
+
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(), 
-            &mut errors
-        ).expect("validates context directives");
-        
+            &subgraph.schema(),
+            &mut errors,
+        )
+        .expect("validates context directives");
+
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors).expect("validates fromContext directives");
+        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+            .expect("validates fromContext directives");
 
         // Check for invalid context error
         assert!(
@@ -500,7 +516,7 @@ mod tests {
             )),
             "Expected an error about invalid context"
         );
-        
+
         // Check for missing selection error
         assert!(
             errors.errors.iter().any(|e| matches!(
@@ -530,22 +546,24 @@ mod tests {
 
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
-        
+
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(), 
-            &mut errors
-        ).expect("validates context directives");
-        
+            &subgraph.schema(),
+            &mut errors,
+        )
+        .expect("validates context directives");
+
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors).expect("validates fromContext directives");
+        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+            .expect("validates fromContext directives");
 
         // We expect an error for the missing resolvable key
-        let resolvable_key_error = errors.errors.iter().find(|e| matches!(
-            e,
-            SingleFederationError::ContextNoResolvableKey { .. }
-        ));
-        
+        let resolvable_key_error = errors
+            .errors
+            .iter()
+            .find(|e| matches!(e, SingleFederationError::ContextNoResolvableKey { .. }));
+
         // Note: This might not be detected depending on the actual implementation
         // as there is a resolvable: false key
         if let Some(error) = resolvable_key_error {
@@ -595,14 +613,20 @@ mod tests {
             assert_eq!(selection, Some(known_selection.to_string()));
         }
         // Ensure we don't backtrack in the comment regex.
-        assert_eq!(parse_context("#comment $fakeContext fakeSelection"), (None, None));
-        assert_eq!(parse_context("$ #comment fakeContext fakeSelection"), (None, None));
-        
-            // Test valid context reference
+        assert_eq!(
+            parse_context("#comment $fakeContext fakeSelection"),
+            (None, None)
+        );
+        assert_eq!(
+            parse_context("$ #comment fakeContext fakeSelection"),
+            (None, None)
+        );
+
+        // Test valid context reference
         let (parsed_context, parsed_selection) = parse_context("$contextA userId");
         assert_eq!(parsed_context, Some("contextA".to_string()));
         assert_eq!(parsed_selection, Some("userId".to_string()));
-        
+
         // Test no delimiter
         let (parsed_context, parsed_selection) = parse_context("invalidFormat");
         assert_eq!(parsed_context, None);
@@ -617,10 +641,14 @@ mod tests {
         let (parsed_context, parsed_selection) = parse_context("$context ");
         assert_eq!(parsed_context, Some("context".to_string()));
         assert_eq!(parsed_selection, None);
-        
+
         // Test multiple delimiters (should only split on first)
-        let (parsed_context, parsed_selection) = parse_context("$contextA multiple fields selected");
+        let (parsed_context, parsed_selection) =
+            parse_context("$contextA multiple fields selected");
         assert_eq!(parsed_context, Some("contextA".to_string()));
-        assert_eq!(parsed_selection, Some("multiple fields selected".to_string()));
+        assert_eq!(
+            parsed_selection,
+            Some("multiple fields selected".to_string())
+        );
     }
 }

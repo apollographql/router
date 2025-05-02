@@ -31,7 +31,6 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
-use crate::schema::validators::from_context::parse_context;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -47,6 +46,7 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::validators::from_context::parse_context;
 use crate::supergraph::extract_subgraphs_from_supergraph;
 use crate::utils::FallibleIterator;
 
@@ -1585,7 +1585,7 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .from_context_directive_arguments(dir)?;
-                
+
                 // if parse_context returns None, assume that the @fromContext validator will return the actual error
                 // it isn't necessary to throw here, we can just ignore it
                 let (Some(context), Some(selection)) = parse_context(application.field) else {

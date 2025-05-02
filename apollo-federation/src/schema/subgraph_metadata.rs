@@ -250,7 +250,9 @@ impl SubgraphMetadata {
             .into_iter()
             .filter_map(|d| d.ok())
         {
-            let (Some(context), Some(selection)) = parse_context(from_context_directive.arguments.field) else {
+            let (Some(context), Some(selection)) =
+                parse_context(from_context_directive.arguments.field)
+            else {
                 continue;
             };
             if let Some(entry_point) = entry_points.get(context.as_str()) {
