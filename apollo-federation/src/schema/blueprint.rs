@@ -149,7 +149,7 @@ impl FederationBlueprint {
 
         let context_map = validate_context_directives(&schema, &mut error_collector)?;
         validate_from_context_directives(&schema, &context_map, &mut error_collector)?;
-        validate_key_directives(&schema, &mut error_collector)?;
+        validate_key_directives(&schema, meta, &mut error_collector)?;
         validate_provides_directives(&schema, meta, &mut error_collector)?;
         validate_requires_directives(&schema, meta, &mut error_collector)?;
         validate_external_directives(&schema, meta, &mut error_collector)?;
