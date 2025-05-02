@@ -613,7 +613,9 @@ impl FederationSchema {
         };
 
         let mut applications = Vec::new();
-        for field_definition_position in &list_size_directive_referencers.object_fields {
+        for field_definition_position in
+            list_size_directive_referencers.object_or_interface_fields()
+        {
             let field_definition = field_definition_position.get(self.schema())?;
             match CostSpecDefinition::list_size_directive_from_field_definition(
                 self,
@@ -622,28 +624,7 @@ impl FederationSchema {
                 Ok(Some(list_size_directive)) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
-                        parent_type: &field_definition_position.type_name,
-                        target: field_definition,
-                    }));
-                }
-                Ok(None) => {
-                    // No listSize directive found, continue
-                }
-                Err(error) => {
-                    applications.push(Err(error));
-                }
-            }
-        }
-        for field_definition_position in &list_size_directive_referencers.interface_fields {
-            let field_definition = field_definition_position.get(self.schema())?;
-            match CostSpecDefinition::list_size_directive_from_field_definition(
-                self,
-                field_definition,
-            ) {
-                Ok(Some(list_size_directive)) => {
-                    applications.push(Ok(ListSizeDirective {
-                        directive: list_size_directive,
-                        parent_type: &field_definition_position.type_name,
+                        parent_type: field_definition_position.type_name().clone(),
                         target: field_definition,
                     }));
                 }
@@ -708,7 +689,7 @@ pub(crate) struct ListSizeDirective<'schema> {
     /// The parsed directive
     directive: cost_spec_definition::ListSizeDirective,
     /// The parent type of `target`
-    parent_type: &'schema Name,
+    parent_type: Name,
     /// The schema position to which this directive is applied
     target: &'schema FieldDefinition,
 }
