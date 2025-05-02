@@ -35,6 +35,7 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::ContextSpecDefinition;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
@@ -836,53 +837,6 @@ impl FederationSpecDefinition {
             None,
         )
     }
-
-    fn context_directive_specification() -> DirectiveSpecification {
-        DirectiveSpecification::new(
-            FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-            &[DirectiveArgumentSpecification {
-                base_spec: ArgumentSpecification {
-                    name: FEDERATION_NAME_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(String!)),
-                    default_value: None,
-                },
-                composition_strategy: None,
-            }],
-            false,
-            &[
-                DirectiveLocation::Object,
-                DirectiveLocation::Interface,
-                DirectiveLocation::Union,
-            ],
-            false,
-            None,
-            None,
-        )
-    }
-
-    // The directive is named `@fromContext`. This is confusing for clippy, as
-    // `from` is a conventional prefix used in conversion methods, which do not
-    // take `self` as an argument. This function does **not** perform
-    // conversion, but creates a `@fromContext` directive specification.
-    #[allow(clippy::wrong_self_convention)]
-    fn from_context_directive_specification() -> DirectiveSpecification {
-        DirectiveSpecification::new(
-            FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-            &[DirectiveArgumentSpecification {
-                base_spec: ArgumentSpecification {
-                    name: FEDERATION_FIELD_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(String!)),
-                    default_value: None,
-                },
-                composition_strategy: None,
-            }],
-            false,
-            &[DirectiveLocation::ArgumentDefinition],
-            false,
-            None,
-            None,
-        )
-    }
 }
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
@@ -926,8 +880,8 @@ impl SpecDefinition for FederationSpecDefinition {
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
-            specs.push(Box::new(Self::context_directive_specification()));
-            specs.push(Box::new(Self::from_context_directive_specification()));
+            let context_spec_definitions = ContextSpecDefinition::new(self.version().clone()).directive_specs();
+            specs.extend(context_spec_definitions);
         }
 
         // TODO: The remaining directives added in later versions are implemented in separate specs,
