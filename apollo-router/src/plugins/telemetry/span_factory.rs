@@ -279,11 +279,12 @@ mod tests {
 
     #[test]
     fn test_http_route_on_array_of_router_spans() {
-        const EXPECTED_ROUTES: [(&str, &str); 4] = [
+        let expected_routes = [
             ("https://www.example.com/", "/"),
             ("https://www.example.com/path", "/path"),
             ("http://example.com/path/to/location", "/path/to/location"),
             ("http://www.example.com/path?with=query", "/path"),
+            ("/foo/bar?baz", "/foo/bar"),
         ];
 
         let span_modes = [SpanMode::SpecCompliant, SpanMode::Deprecated];
@@ -292,7 +293,7 @@ mod tests {
             LicenseState::Unlicensed,
         ];
 
-        for (uri, expected_route) in EXPECTED_ROUTES {
+        for (uri, expected_route) in expected_routes {
             let request = http::Request::builder().uri(uri).body("").unwrap();
 
             // test `request` spans
