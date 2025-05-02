@@ -34,51 +34,50 @@ fn map_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(args) = method_args {
-        if let Some(first_arg) = args.args.first() {
-            if let JSON::Array(array) = data {
-                let mut output = Vec::with_capacity(array.len());
-                let mut errors = Vec::new();
-
-                for (i, element) in array.iter().enumerate() {
-                    let input_path = input_path.append(JSON::Number(i.into()));
-                    let (applied_opt, arg_errors) =
-                        first_arg.apply_to_path(element, vars, &input_path);
-                    errors.extend(arg_errors);
-                    output.insert(i, applied_opt.unwrap_or(JSON::Null));
-                }
-
-                (Some(JSON::Array(output)), errors)
-            } else {
-                // Return a singleton array wrapping the value of applying the
-                // ->map method the non-array input data.
-                first_arg
-                    .apply_to_path(data, vars, input_path)
-                    .and_then_collecting_errors(|value| {
-                        (Some(JSON::Array(vec![value.clone()])), vec![])
-                    })
-            }
-        } else {
-            (
-                None,
-                vec![ApplyToError::new(
-                    format!("Method ->{} requires one argument", method_name.as_ref()),
-                    input_path.to_vec(),
-                    method_name.range(),
-                )],
-            )
-        }
-    } else {
-        (
+    let Some(args) = method_args else {
+        return (
             None,
             vec![ApplyToError::new(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
             )],
-        )
+        );
+    };
+    let Some(first_arg) = args.args.first() else {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires one argument", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    };
+
+    if let JSON::Array(array) = data {
+        let mut output = Vec::with_capacity(array.len());
+        let mut errors = Vec::new();
+
+        for (i, element) in array.iter().enumerate() {
+            let input_path = input_path.append(JSON::Number(i.into()));
+            let (applied_opt, arg_errors) = first_arg.apply_to_path(element, vars, &input_path);
+            errors.extend(arg_errors);
+            output.insert(i, applied_opt.unwrap_or(JSON::Null));
+        }
+
+        (Some(JSON::Array(output)), errors)
+    } else {
+        // Return a singleton array wrapping the value of applying the
+        // ->map method the non-array input data.
+        first_arg
+            .apply_to_path(data, vars, input_path)
+            .and_then_collecting_errors(|value| {
+                (Some(JSON::Array(vec![value.clone()])), Vec::new())
+            })
     }
 }
+
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn map_shape(
     method_name: &WithRange<String>,
@@ -109,7 +108,7 @@ fn map_shape(
                 .collect::<Vec<_>>();
             let new_tail = first_arg.compute_output_shape(
                 tail.clone(),
-                dollar_shape.clone(),
+                dollar_shape,
                 named_var_shapes,
                 source_id,
             );
@@ -118,7 +117,7 @@ fn map_shape(
         _ => Shape::list(
             first_arg.compute_output_shape(
                 input_shape.any_item([]),
-                dollar_shape.clone(),
+                dollar_shape,
                 named_var_shapes,
                 source_id,
             ),
