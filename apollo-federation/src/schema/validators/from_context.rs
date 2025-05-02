@@ -24,7 +24,11 @@ pub(crate) fn validate_from_context_directives(
         Box::new(RequireResolvableKey::new()),
     ];
 
-    for from_context_directive in schema.from_context_directive_applications()? {
+    let Ok(from_context_directives) = schema.from_context_directive_applications() else {
+        // if we get an error, we probably are pre fed 2.8
+        return Ok(());
+    };
+    for from_context_directive in from_context_directives {
         match from_context_directive {
             Ok(from_context) => {
                 // Parse context and selection from the field value

@@ -17,7 +17,11 @@ pub(crate) fn validate_context_directives(
 
     let mut context_to_type_map: HashMap<String, Vec<Name>> = HashMap::new();
 
-    for context_directive in schema.context_directive_applications()? {
+    let Ok(context_directives) = schema.context_directive_applications() else {
+        // if we get an error, we probably are pre fed 2.8
+        return Ok(context_to_type_map);
+    };
+    for context_directive in context_directives {
         match context_directive {
             Ok(context) => {
                 let name = context.arguments.name.to_string();
