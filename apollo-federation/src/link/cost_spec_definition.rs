@@ -24,6 +24,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
@@ -253,7 +254,7 @@ impl CostSpecDefinition {
                     get_type: |_, _| Ok(ty!(Int!)),
                     default_value: None,
                 },
-                composition_strategy: None,
+                composition_strategy: Some(ArgumentCompositionStrategy::Max),
             }],
             false,
             &[
@@ -281,7 +282,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Int)),
                         default_value: None,
                     },
-                    composition_strategy: None,
+                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -289,7 +290,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: None,
+                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -297,7 +298,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: None,
+                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -305,7 +306,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Boolean)),
                         default_value: Some(Value::Boolean(true)),
                     },
-                    composition_strategy: None,
+                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
                 },
             ],
             false,

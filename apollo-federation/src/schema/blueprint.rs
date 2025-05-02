@@ -161,7 +161,6 @@ impl FederationBlueprint {
         )?;
         Self::validate_interface_objects_are_on_entities(&schema, meta, &mut error_collector)?;
 
-        println!("Validating cost directives");
         validate_cost_directives(&schema, &mut error_collector)?;
         validate_list_size_directives(&schema, &mut error_collector)?;
 

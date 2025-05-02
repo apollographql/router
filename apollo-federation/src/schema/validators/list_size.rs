@@ -14,10 +14,6 @@ pub(crate) fn validate_list_size_directives(
     for list_size_directive in schema.list_size_directive_applications()? {
         match list_size_directive {
             Ok(list_size) => {
-                println!(
-                    "Validating @listSize on {}.{}",
-                    list_size.parent_type, list_size.target.name
-                );
                 validate_applied_to_list(&list_size, errors);
                 validate_assumed_size_not_negative(&list_size, errors);
                 validate_slicing_arguments_are_valid_integers(&list_size, errors);
