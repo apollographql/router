@@ -4,7 +4,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ty;
 use itertools::Itertools;
@@ -39,6 +38,8 @@ use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
+use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
+use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
 use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
 use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
@@ -86,16 +87,36 @@ impl FederationBlueprint {
     pub(crate) fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
+        // PORT_NOTE: JS version calls `completeSubgraphSchema`. But, in Rust, it's implemented
+        //            directly in this method and `Subgraph::expand_links`.
         let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
         if federation_spec.is_fed1() {
             Self::remove_federation_definitions_broken_in_known_ways(schema)?;
         }
         federation_spec.add_elements_to_schema(schema)?;
         Self::expand_known_features(schema)
+
+        // TODO (FED-428): Port `processUnappliedDirectives`.
     }
 
-    pub(crate) fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
-        todo!()
+    pub(crate) fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
+        // Historically, federation 1 has accepted invalid schema, including some where the Query
+        // type included the definition of `_entities` (so `_entities(representations: [_Any!]!):
+        // [_Entity]!`) but _without_ defining the `_Any` or `_Entity` type. So while we want to be
+        // stricter for fed2 (so this kind of really weird case can be fixed), we want fed2 to
+        // accept as much fed1 schema as possible.
+        //
+        // So, to avoid this problem, we ignore the _entities and _service fields if we parse them
+        // from a fed1 input schema. Those will be added back anyway (along with the proper types)
+        // post-parsing.
+        if !(FEDERATION_OPERATION_FIELDS.iter().any(|f| *f == field_name)) {
+            return false;
+        }
+        if let Some(metadata) = &schema.subgraph_metadata {
+            !metadata.is_fed_2_schema()
+        } else {
+            false
+        }
     }
 
     pub(crate) fn on_constructed(schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -429,3 +450,8 @@ fn default_operation_name(op_type: &OperationType) -> Name {
         OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
     }
 }
+
+pub(crate) const FEDERATION_OPERATION_FIELDS: [Name; 2] = [
+    FEDERATION_SERVICE_FIELD_NAME,
+    FEDERATION_ENTITIES_FIELD_NAME,
+];

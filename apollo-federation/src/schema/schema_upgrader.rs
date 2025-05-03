@@ -175,6 +175,7 @@ impl<'a> SchemaUpgrader<'a> {
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         let schema = original_subgraph.schema().clone();
+        // TODO (FED-428): JS version calls `setSchemaAsFed2Subgraph`.
         Ok(SchemaUpgrader {
             schema,
             expanded_info: ExpandedSubgraphInfo {
