@@ -15,6 +15,7 @@ use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
@@ -150,4 +151,19 @@ pub(crate) struct DirectiveReferencers {
     pub(crate) input_object_types: IndexSet<InputObjectTypeDefinitionPosition>,
     pub(crate) input_object_fields: IndexSet<InputObjectFieldDefinitionPosition>,
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
+}
+
+impl DirectiveReferencers {
+    pub(crate) fn object_or_interface_fields(
+        &self,
+    ) -> impl Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> {
+        self.object_fields
+            .iter()
+            .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()))
+            .chain(
+                self.interface_fields
+                    .iter()
+                    .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
+            )
+    }
 }

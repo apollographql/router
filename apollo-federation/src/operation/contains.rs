@@ -225,7 +225,7 @@ mod tests {
         let schema = ValidFederationSchema::new(schema).unwrap();
         let left = Operation::parse(schema.clone(), left, "left.graphql")
             .expect("operation is valid and can be parsed");
-        let right = Operation::parse(schema.clone(), right, "right.graphql")
+        let right = Operation::parse(schema, right, "right.graphql")
             .expect("operation is valid and can be parsed");
 
         left.selection_set.containment(

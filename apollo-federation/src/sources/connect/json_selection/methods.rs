@@ -35,6 +35,7 @@ pub(super) enum ArrowMethod {
     Size,
     Entries,
     JsonStringify,
+    JoinNotNull,
 
     // Future methods:
     TypeOf,
@@ -147,6 +148,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Size => &public::SizeMethod,
             Self::Entries => &public::EntriesMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
+            Self::JoinNotNull => &public::JoinNotNullMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -201,6 +203,7 @@ impl ArrowMethod {
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
+            "joinNotNull" => Some(Self::JoinNotNull),
             _ => None,
         };
 
@@ -210,7 +213,7 @@ impl ArrowMethod {
         }
     }
 
-    pub(super) fn is_public(&self) -> bool {
+    pub(super) const fn is_public(&self) -> bool {
         // This set controls which ->methods are exposed for use in connector
         // schemas. Non-public methods are still implemented and tested, but
         // will not be returned from lookup_arrow_method outside of tests.
@@ -225,6 +228,7 @@ impl ArrowMethod {
                 | Self::Size
                 | Self::Entries
                 | Self::JsonStringify
+                | Self::JoinNotNull
         )
     }
 }

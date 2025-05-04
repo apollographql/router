@@ -14,6 +14,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -913,7 +914,7 @@ fn extract_interface_type_content(
                     ),
                 }
             })?;
-            Ok(match subgraph.schema.get_type(type_name.clone())? {
+            Ok(match subgraph.schema.get_type(type_name)? {
                 TypeDefinitionPosition::Object(pos) => {
                     if !is_interface_object {
                         return Err(
@@ -1772,7 +1773,7 @@ fn add_federation_operations(
 
     // `Query._service`
     ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
+        type_name: query_root_type_name,
         field_name: FEDERATION_SERVICE_FIELD_NAME,
     }
     .insert(
@@ -1928,12 +1929,20 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
         )?;
+
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
             } else {
-                let fields = fields.serialize().no_indent().to_string();
+                let fields = FieldSet {
+                    sources: Default::default(),
+                    selection_set: fields,
+                }
+                .serialize()
+                .no_indent()
+                .to_string();
+
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {
                         federation_spec_definition.provides_directive(schema, fields)?

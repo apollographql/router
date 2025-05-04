@@ -146,9 +146,9 @@ fn check_seen_fields(
     fields_seen_by_connectors: Vec<(Name, Name)>,
 ) -> impl Iterator<Item = Message> {
     let federation = Link::for_identity(schema, &Identity::federation_identity());
-    let external_directive_name = federation
-        .map(|(link, _)| link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME))
-        .unwrap_or(EXTERNAL_DIRECTIVE_NAME.clone());
+    let external_directive_name = federation.map_or(EXTERNAL_DIRECTIVE_NAME, |(link, _)| {
+        link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME)
+    });
 
     let all_fields: IndexSet<_> = schema
         .types
@@ -269,32 +269,30 @@ fn resolvable_key_fields<'a>(
                 .unwrap_or(true)
         })
         .filter_map(|directive| {
-            if let Some(fields_str) = directive
+            directive
                 .arguments
                 .iter()
                 .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
                 .map(|arg| &arg.value)
                 .and_then(|value| value.as_str())
-            {
-                Parser::new()
-                    .parse_field_set(
-                        Valid::assume_valid_ref(schema),
-                        object.name.clone(),
-                        fields_str.to_string(),
-                        "",
-                    )
-                    .ok()
-                    .map(|field_set| (field_set, directive))
-            } else {
-                None
-            }
+                .and_then(|fields_str| {
+                    Parser::new()
+                        .parse_field_set(
+                            Valid::assume_valid_ref(schema),
+                            object.name.clone(),
+                            fields_str.to_string(),
+                            "",
+                        )
+                        .ok()
+                        .map(|field_set| (field_set, directive))
+                })
         })
 }
 
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec)
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec())
     else {
         return messages;
     };
