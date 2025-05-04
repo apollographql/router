@@ -1524,6 +1524,8 @@ pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Out
 
 #[cfg(test)]
 pub(crate) trait FutureMetricsExt<T> {
+    /// See [dev-docs/metrics.md](https://github.com/apollographql/router/blob/dev/dev-docs/metrics.md#testing-async)
+    /// for details on this function.
     fn with_metrics(
         self,
     ) -> tokio::task::futures::TaskLocalFuture<

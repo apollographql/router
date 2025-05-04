@@ -457,7 +457,7 @@ fn flat_wrap_nodes(
     let mut iter = nodes.into_iter().flatten();
     let first = iter.next()?;
     let Some(second) = iter.next() else {
-        return Some(first.clone());
+        return Some(first);
     };
     let mut nodes = Vec::new();
     for node in [first, second].into_iter().chain(iter) {

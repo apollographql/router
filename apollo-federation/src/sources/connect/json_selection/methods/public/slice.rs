@@ -86,7 +86,7 @@ fn slice_method(
                             .collect(),
                     )
                 } else {
-                    JSON::Array(vec![])
+                    JSON::Array(Vec::new())
                 }
             }
 
@@ -106,7 +106,7 @@ fn slice_method(
         // TODO Should calling ->slice or ->slice() without arguments be an
         // error? In JavaScript, array->slice() copies the array, but that's not
         // so useful in an immutable value-typed language like JSONSelection.
-        (Some(data.clone()), vec![])
+        (Some(data.clone()), Vec::new())
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution

@@ -25,7 +25,6 @@ use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
-use super::spec::versions::VersionInfo;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
@@ -81,7 +80,7 @@ pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 /// A connector can be used as a potential entity resolver for a type, with
 /// extra validation rules based on the transport args and field position within
 /// a schema.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityResolver {
     /// The user defined a connector on a field that acts as an entity resolver
     Explicit,
@@ -113,14 +112,11 @@ impl Connector {
             return Ok(Default::default());
         };
 
-        let version: VersionInfo = spec.into();
-
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name, &version)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments =
-            extract_connect_directive_arguments(schema, &connect_name, &version)?;
+        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
 
         connect_arguments
             .into_iter()
@@ -258,7 +254,7 @@ impl Connector {
             .id
             .source_name
             .clone()
-            .unwrap_or(self.id.synthetic_name());
+            .unwrap_or_else(|| self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
     }
 }

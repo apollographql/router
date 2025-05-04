@@ -14,6 +14,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_field;
 
 pub(crate) fn validate_requires_directives(
     schema: &FederationSchema,
@@ -37,14 +38,22 @@ pub(crate) fn validate_requires_directives(
 
     for requires_directive in schema.requires_directive_applications()? {
         match requires_directive {
-            Ok(requires) => match requires.parse_fields(schema.schema()) {
-                Ok(fields) => {
-                    for rule in fieldset_rules.iter() {
-                        rule.visit(&requires.target.type_name, &fields, errors);
+            Ok(requires) => {
+                deny_unsupported_directive_on_interface_field(
+                    &requires_directive_name,
+                    &requires,
+                    schema,
+                    errors,
+                );
+                match requires.parse_fields(schema.schema()) {
+                    Ok(fields) => {
+                        for rule in fieldset_rules.iter() {
+                            rule.visit(requires.target.type_name(), &fields, errors);
+                        }
                     }
+                    Err(e) => errors.push(e.into()),
                 }
-                Err(e) => errors.push(e.into()),
-            },
+            }
             Err(e) => errors.push(e),
         }
     }
