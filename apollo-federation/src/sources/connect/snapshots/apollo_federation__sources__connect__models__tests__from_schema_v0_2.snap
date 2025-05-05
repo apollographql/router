@@ -129,6 +129,11 @@ expression: "&connectors"
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
     ConnectId {
         label: "connectors.json http: POST /posts",
@@ -324,5 +329,10 @@ expression: "&connectors"
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

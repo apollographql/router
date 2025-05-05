@@ -7,6 +7,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
@@ -23,6 +24,8 @@ use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::cost_spec_definition;
+use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
@@ -600,6 +603,47 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    pub(crate) fn list_size_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ListSizeDirective> {
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        else {
+            return Ok(Vec::new());
+        };
+        let Ok(list_size_directive_referencers) = self
+            .referencers()
+            .get_directive(list_size_directive_name.as_str())
+        else {
+            return Ok(Vec::new());
+        };
+
+        let mut applications = Vec::new();
+        for field_definition_position in
+            list_size_directive_referencers.object_or_interface_fields()
+        {
+            let field_definition = field_definition_position.get(self.schema())?;
+            match CostSpecDefinition::list_size_directive_from_field_definition(
+                self,
+                field_definition,
+            ) {
+                Ok(Some(list_size_directive)) => {
+                    applications.push(Ok(ListSizeDirective {
+                        directive: list_size_directive,
+                        parent_type: field_definition_position.type_name().clone(),
+                        target: field_definition,
+                    }));
+                }
+                Ok(None) => {
+                    // No listSize directive found, continue
+                }
+                Err(error) => {
+                    applications.push(Err(error));
+                }
+            }
+        }
+        Ok(applications)
+    }
+
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
         self.referencers().interface_types.contains_key(type_name)
     }
@@ -646,6 +690,15 @@ impl KeyDirective<'_> {
     pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
         &self.target
     }
+}
+
+pub(crate) struct ListSizeDirective<'schema> {
+    /// The parsed directive
+    directive: cost_spec_definition::ListSizeDirective,
+    /// The parent type of `target`
+    parent_type: Name,
+    /// The schema position to which this directive is applied
+    target: &'schema FieldDefinition,
 }
 
 pub(crate) struct ProvidesDirective<'schema> {
