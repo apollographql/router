@@ -4,6 +4,7 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
+use opentelemetry_prometheus::ResourceSelector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::View;
@@ -127,6 +128,7 @@ impl MetricsConfigurator for Config {
                     .record_min_max(true)
                     .build(),
             )
+            .with_resource_selector(ResourceSelector::All)
             .with_registry(registry.clone())
             .build()?;
 

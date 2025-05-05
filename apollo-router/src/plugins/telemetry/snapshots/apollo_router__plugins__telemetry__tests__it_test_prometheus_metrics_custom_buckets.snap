@@ -2,7 +2,7 @@
 source: apollo-router/src/plugins/telemetry/mod.rs
 expression: prometheus_metrics
 ---
-apollo_test_histo_bucket{otel_scope_name="apollo/router",le="+Inf"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",le="10"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",le="20"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",le="5"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="2.2.0",le="+Inf"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="2.2.0",le="10"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="2.2.0",le="20"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="2.2.0",le="5"} 1

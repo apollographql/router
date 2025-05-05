@@ -2860,6 +2860,8 @@ mod tests {
 
             make_supergraph_request(plugin.as_ref()).await;
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+            // To test global resources
+            assert!(prometheus_metrics.contains("test_resource"));
             assert_snapshot!(prometheus_metrics);
         }
         .with_metrics()
