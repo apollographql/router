@@ -558,12 +558,16 @@ impl SingleFederationError {
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
             }
-            SingleFederationError::ContextNameContainsUnderscore { .. } => ErrorCode::ContextNameContainsUnderscore,
+            SingleFederationError::ContextNameContainsUnderscore { .. } => {
+                ErrorCode::ContextNameContainsUnderscore
+            }
             SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
             SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
             SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
-            SingleFederationError::ContextNoResolvableKey { .. } => ErrorCode::ContextNoResolvableKey,
+            SingleFederationError::ContextNoResolvableKey { .. } => {
+                ErrorCode::ContextNoResolvableKey
+            }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
             }
