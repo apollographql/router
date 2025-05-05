@@ -69,7 +69,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/d
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)` header 'host' is reserved and cannot be set by a connector",
+        message: "In `@source(http.headers:)` header 'host' can't be set with `from`, only with `value`",
         locations: [
             20:17..20:23,
         ],
@@ -163,13 +163,6 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/d
         message: "In `@source(http.headers:)` header 'content-encoding' is reserved and cannot be set by a connector",
         locations: [
             41:17..41:35,
-        ],
-    },
-    Message {
-        code: InvalidHeader,
-        message: "In `@source(http.headers:)` header 'host' is reserved and cannot be set by a connector",
-        locations: [
-            42:17..42:23,
         ],
     },
     Message {

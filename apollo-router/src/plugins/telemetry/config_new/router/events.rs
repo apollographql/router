@@ -22,7 +22,7 @@ use crate::services::router;
 #[derive(Clone)]
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
 #[derive(Default, Clone)]
-pub(crate) struct DisplayRouterResponse(pub(crate) bool);
+pub(crate) struct DisplayRouterResponse;
 #[derive(Default, Clone, Debug)]
 pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
 
@@ -44,7 +44,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                 request
                     .context
                     .extensions()
-                    .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
+                    .with_lock(|ext| ext.insert(DisplayRouterResponse));
             }
         }
         for custom_event in &mut self.custom {

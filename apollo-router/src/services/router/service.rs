@@ -339,10 +339,9 @@ impl RouterService {
                         });
                     let body = body?;
                     // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-                    let display_router_response: DisplayRouterResponse = context
+                    let display_router_response = context
                         .extensions()
-                        .with_lock(|lock| lock.get().cloned())
-                        .unwrap_or_default();
+                        .with_lock(|lock| lock.get::<DisplayRouterResponse>().is_some());
 
                     let mut res = router::Response {
                         response: Response::from_parts(

@@ -5454,8 +5454,7 @@ expression: "&schema"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_RouterSelector",
-          "description": "#/definitions/Condition_for_RouterSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_RouterSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -6633,8 +6632,7 @@ expression: "&schema"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
-          "description": "#/definitions/Condition_for_SubgraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -6679,8 +6677,7 @@ expression: "&schema"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
-          "description": "#/definitions/Condition_for_SubgraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -7394,8 +7391,7 @@ expression: "&schema"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
-          "description": "#/definitions/Condition_for_SupergraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -7430,8 +7426,7 @@ expression: "&schema"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
-          "description": "#/definitions/Condition_for_SupergraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
