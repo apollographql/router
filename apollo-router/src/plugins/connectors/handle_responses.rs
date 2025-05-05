@@ -604,8 +604,7 @@ async fn deserialize_response<T: HttpBody>(
     let content_type = parts
         .headers
         .get(CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.parse::<Mime>().ok());
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
 
     if content_type.is_none()
         || content_type
@@ -631,14 +630,10 @@ async fn deserialize_response<T: HttpBody>(
     {
         // Plain text we can't parse as JSON so we'll instead return it as a JSON string
         // Before we can do that, we need to figure out the charset and attempt to decode the string
-        let charset = content_type
+        let encoding = content_type
             .as_ref()
-            .and_then(|ct| {
-                ct.get_param("charset")
-                    .map(|c| c.as_str().to_ascii_lowercase())
-            })
-            .unwrap_or("utf-8".to_string());
-        let encoding = Encoding::for_label(charset.as_bytes()).unwrap_or(UTF_8);
+            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
+            .unwrap_or(UTF_8);
         let (decoded_body, _, had_errors) = encoding.decode(body);
 
         if had_errors {
