@@ -139,32 +139,24 @@ impl<'schema> ErrorsMessage<'schema> {
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
         // Ensure that the selection is a valid JSONSelection string
-        let string = match GraphQLString::new(value, &schema.sources) {
-            Ok(selection_str) => selection_str,
-            Err(_) => {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!("{coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
+        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
+            return Err(Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must be a string."),
+                locations: value
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
         };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidErrorsMessage,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
+        let selection = JSONSelection::parse(string.as_str()).map_err(|err| Message {
+            code: Code::InvalidErrorsMessage,
+            message: format!("{coordinate} is not valid: {err}"),
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })?;
 
         Ok(Some(Self {
             selection,
@@ -277,18 +269,15 @@ impl<'schema> ErrorsExtensions<'schema> {
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
         // Ensure that the selection is a valid JSONSelection string
-        let string = match GraphQLString::new(value, &schema.sources) {
-            Ok(selection_str) => selection_str,
-            Err(_) => {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!("{coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
+        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
+            return Err(Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must be a string."),
+                locations: value
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
         };
         let selection = match JSONSelection::parse(string.as_str()) {
             Ok(selection) => selection,
