@@ -4,8 +4,12 @@ use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
+use encoding_rs::Encoding;
+use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use itertools::Itertools;
+use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -477,8 +481,8 @@ async fn deserialize_response<T: HttpBody>(
 
     let make_err = |path: Path| {
         graphql::Error::builder()
-            .message("Request failed".to_string())
-            .extension_code("CONNECTOR_FETCH")
+            .message("The server returned data in an unexpected format.".to_string())
+            .extension_code("CONNECTOR_RESPONSE_INVALID")
             .extension("service", connector.id.subgraph_name.clone())
             .extension(
                 "http",
@@ -597,17 +601,54 @@ async fn deserialize_response<T: HttpBody>(
         }
     }
 
-    match serde_json::from_slice::<Value>(body) {
-        Ok(json_data) => Ok(json_data),
-        Err(_) => {
+    let content_type = parts
+        .headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
+
+    if content_type.is_none()
+        || content_type
+            .as_ref()
+            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
+    {
+        // Treat any JSON-y like content types as JSON
+        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
+        match serde_json::from_slice::<Value>(body) {
+            Ok(json_data) => Ok(json_data),
+            Err(_) => {
+                if let Some(debug_context) = debug_context {
+                    debug_context
+                        .lock()
+                        .push_invalid_response(debug_request.clone(), parts, body);
+                }
+                Err(make_err(path))
+            }
+        }
+    } else if content_type
+        .as_ref()
+        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
+    {
+        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
+        // Before we can do that, we need to figure out the charset and attempt to decode the string
+        let encoding = content_type
+            .as_ref()
+            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
+            .unwrap_or(UTF_8);
+        let (decoded_body, _, had_errors) = encoding.decode(body);
+
+        if had_errors {
             if let Some(debug_context) = debug_context {
                 debug_context
                     .lock()
                     .push_invalid_response(debug_request.clone(), parts, body);
             }
-
-            Err(make_err(path))
+            return Err(make_err(path));
         }
+
+        Ok(Value::String(decoded_body.into_owned().into()))
+    } else {
+        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
+        Ok(Value::Null)
     }
 }
 
@@ -1230,7 +1271,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1255,7 +1296,7 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "Request failed",
+                            message: "The server returned data in an unexpected format.",
                             locations: [],
                             path: Some(
                                 Path(
@@ -1283,7 +1324,7 @@ mod tests {
                                     ),
                                 }),
                                 "code": String(
-                                    "CONNECTOR_FETCH",
+                                    "CONNECTOR_RESPONSE_INVALID",
                                 ),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
@@ -1371,7 +1412,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]

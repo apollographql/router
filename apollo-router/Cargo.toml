@@ -262,6 +262,7 @@ ryu = "1.0.15"
 form_urlencoded = "1.2.1"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
+encoding_rs = "0.8.35"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
