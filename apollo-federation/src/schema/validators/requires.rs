@@ -13,6 +13,10 @@ use crate::schema::FederationSchema;
 use crate::schema::HasFields;
 use crate::schema::RequiresDirective;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::DeniesAliases;
+use crate::schema::validators::DeniesDirectiveApplications;
+use crate::schema::validators::DeniesNonExternalLeafFields;
+use crate::schema::validators::DenyAliases;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
@@ -28,14 +32,10 @@ pub(crate) fn validate_requires_directives(
         .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
         .unwrap_or(FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC);
 
-    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<Baggage = RequiresDirective>>> = vec![
+    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<RequiresDirective>>> = vec![
         Box::new(DenyAliases::new()),
-        Box::new(DenyFieldsWithDirectiveApplicationsInRequires::new()),
-        Box::new(DenyNonExternalLeafFieldsInRequires::new(
-            schema,
-            meta,
-            &requires_directive_name,
-        )),
+        Box::new(DenyFieldsWithDirectiveApplications::new()),
+        Box::new(DenyNonExternalLeafFields::new(schema, meta)),
     ];
 
     for requires_directive in schema.requires_directive_applications()? {
@@ -74,154 +74,57 @@ pub(crate) fn validate_requires_directives(
     Ok(())
 }
 
-/// Instances of `@requires(fields:)` cannot use aliases
-struct DenyAliases<'a> {
-    _marker: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> DenyAliases<'a> {
-    pub(crate) fn new() -> Self {
-        Self {
-            _marker: std::marker::PhantomData,
+impl DeniesAliases for RequiresDirective<'_> {
+    fn error(&self, alias: &Name, field: &Field) -> SingleFederationError {
+        SingleFederationError::RequiresInvalidFields {
+            target_type: self.target.type_name().clone(),
+            target_field: self.target.field_name().clone(),
+            application: self.schema_directive.to_string(),
+            message: format!(
+                "Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @requires",
+                field.name
+            ),
         }
     }
 }
 
-impl<'a> SchemaFieldSetValidator for DenyAliases<'a> {
-    type Baggage = RequiresDirective<'a>;
-
-    fn visit_field(
-        &self,
-        _parent_ty: &Name,
-        field: &Field,
-        baggage: &Self::Baggage,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        // This largely duplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
-        // That requires a valid schema and some operation data, which we don't have because were only working with a
-        // schema. Additionally, that implementation uses a slightly different error message than that used by the JS
-        // version of composition.
-        if let Some(alias) = field.alias.as_ref() {
-            errors.errors.push(SingleFederationError::RequiresInvalidFields {
-                target_type: baggage.target.type_name().clone(),
-                target_field: baggage.target.field_name().clone(),
-                application: baggage.schema_directive.to_string(),
-                message: format!("Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @requires", field.name),
-            });
-        }
-        self.visit_selection_set(
-            field.ty().inner_named_type(),
-            &field.selection_set,
-            baggage,
-            errors,
-        );
-    }
-}
-
-/// Instances of `@requires(fields:)` cannot select fields with directive applications
-struct DenyFieldsWithDirectiveApplicationsInRequires<'a> {
-    _marker: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> DenyFieldsWithDirectiveApplicationsInRequires<'a> {
-    fn new() -> Self {
-        Self {
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl DenyFieldsWithDirectiveApplications for DenyFieldsWithDirectiveApplicationsInRequires<'_> {
-    fn error(&self, directives: &DirectiveList, baggage: &Self::Baggage) -> SingleFederationError {
+impl DeniesDirectiveApplications for RequiresDirective<'_> {
+    fn error(&self, directives: &DirectiveList) -> SingleFederationError {
         SingleFederationError::RequiresHasDirectiveInFieldsArg {
-            target_type: baggage.target.type_name().clone(),
-            target_field: baggage.target.field_name().clone(),
-            application: baggage.schema_directive.to_string(),
+            target_type: self.target.type_name().clone(),
+            target_field: self.target.field_name().clone(),
+            application: self.schema_directive.to_string(),
             applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
         }
     }
 }
 
-impl<'a> SchemaFieldSetValidator for DenyFieldsWithDirectiveApplicationsInRequires<'a> {
-    type Baggage = RequiresDirective<'a>;
-
-    fn visit_field(
-        &self,
-        parent_ty: &Name,
-        field: &Field,
-        baggage: &Self::Baggage,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        DenyFieldsWithDirectiveApplications::visit_field(self, parent_ty, field, baggage, errors);
-    }
-
-    fn visit_inline_fragment(
-        &self,
-        parent_ty: &Name,
-        fragment: &apollo_compiler::executable::InlineFragment,
-        baggage: &Self::Baggage,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        DenyFieldsWithDirectiveApplications::visit_inline_fragment(
-            self, parent_ty, fragment, baggage, errors,
-        );
-    }
-}
-
-/// Instances of `@requires(fields:)` must only select external leaf fields
-struct DenyNonExternalLeafFieldsInRequires<'a> {
-    schema: &'a FederationSchema,
-    metadata: &'a SubgraphMetadata,
-    directive_name: &'a Name,
-}
-
-impl<'a> DenyNonExternalLeafFieldsInRequires<'a> {
-    fn new(
-        schema: &'a FederationSchema,
-        metadata: &'a SubgraphMetadata,
-        directive_name: &'a Name,
-    ) -> Self {
-        Self {
-            schema,
-            metadata,
-            directive_name,
-        }
-    }
-}
-
-impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInRequires<'a> {
-    fn schema(&self) -> &'a FederationSchema {
-        self.schema
-    }
-
-    fn meta(&self) -> &'a SubgraphMetadata {
-        self.metadata
-    }
-
-    fn directive_name(&self) -> &'a Name {
-        self.directive_name
-    }
-
-    fn error(&self, message: String, baggage: &Self::Baggage) -> SingleFederationError {
+impl DeniesNonExternalLeafFields for RequiresDirective<'_> {
+    fn error(&self, parent_ty: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::RequiresFieldsMissingExternal {
-            target_type: baggage.target_type().clone(),
-            target_field: baggage.target.field_name().clone(),
-            application: baggage.schema_directive.to_string(),
-            message,
+            target_type: self.target.type_name().clone(),
+            target_field: self.target.field_name().clone(),
+            application: self.schema_directive.to_string(),
+            message: format!(
+                "field \"{}.{}\" should not be part of a @requires since it is already provided by this subgraph (it is not marked @external)",
+                parent_ty, field.name
+            ),
         }
     }
-}
 
-impl<'a> SchemaFieldSetValidator for DenyNonExternalLeafFieldsInRequires<'a> {
-    type Baggage = RequiresDirective<'a>;
-
-    fn visit_field(
+    fn error_for_fake_external_field(
         &self,
         parent_ty: &Name,
         field: &Field,
-        baggage: &Self::Baggage,
-        errors: &mut MultipleFederationErrors,
-    ) {
-        DenyNonExternalLeafFields::visit_field(self, parent_ty, field, baggage, errors);
+    ) -> SingleFederationError {
+        SingleFederationError::RequiresFieldsMissingExternal {
+            target_type: self.target.type_name().clone(),
+            target_field: self.target.field_name().clone(),
+            application: self.schema_directive.to_string(),
+            message: format!(
+                "field \"{}.{}\" should not be part of a @requires since it is already \"effectively\" provided by this subgraph (while it is marked @external, it is a @key field of an extension type, which are not internally considered external for historical/backward compatibility reasons)",
+                parent_ty, field.name
+            ),
+        }
     }
 }
