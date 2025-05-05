@@ -391,7 +391,7 @@ mod tests {
         let context_map = HashMap::new();
 
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type
@@ -434,13 +434,13 @@ mod tests {
 
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(),
+            subgraph.schema(),
             &mut errors,
         )
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on a field implementing an interface
@@ -477,13 +477,13 @@ mod tests {
 
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(),
+            subgraph.schema(),
             &mut errors,
         )
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Check for invalid context error
@@ -527,13 +527,13 @@ mod tests {
 
         // First validate context directives to build the context map
         let context_map = crate::schema::validators::context::validate_context_directives(
-            &subgraph.schema(),
+            subgraph.schema(),
             &mut errors,
         )
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(&subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the missing resolvable key

@@ -189,7 +189,7 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
         let context_map =
-            validate_context_directives(&subgraph.schema(), &mut errors).expect("validates");
+            validate_context_directives(subgraph.schema(), &mut errors).expect("validates");
 
         // Check that there are no validation errors
         assert_eq!(errors.errors.len(), 0, "Expected no validation errors");
