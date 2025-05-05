@@ -94,7 +94,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
     },
     "connectors_T_b_0": Connector {
         id: ConnectId {
-            label: "connectors. http: GET https://my.api/t/{$this.k.id}",
+            label: "[N+1] connectors. http: GET https://my.api/t/{$this.k.id}",
             subgraph_name: "connectors",
             source_name: None,
             directive: Field(

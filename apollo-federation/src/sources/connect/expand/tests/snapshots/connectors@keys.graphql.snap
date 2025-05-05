@@ -472,7 +472,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r1_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}",
+            label: "[N+1] one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             directive: Field(
@@ -599,7 +599,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r2_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
+            label: "[N+1] one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
             subgraph_name: "one",
             source_name: None,
             directive: Field(
@@ -775,7 +775,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r3_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}",
+            label: "[N+1] one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             directive: Field(
@@ -946,7 +946,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r4_0": Connector {
         id: ConnectId {
-            label: "one. http: POST http://localhost/rs",
+            label: "[N+1] one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
             directive: Field(
@@ -1094,7 +1094,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r5_0": Connector {
         id: ConnectId {
-            label: "one. http: POST http://localhost/rs",
+            label: "[N+1] one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
             directive: Field(

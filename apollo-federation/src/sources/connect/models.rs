@@ -160,7 +160,7 @@ impl Connector {
         let batch_settings = ConnectorBatchSettings::from_directive(&connect);
 
         let id = ConnectId {
-            label: make_label(subgraph_name, &source_name, &transport),
+            label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
             directive: connect.position,
@@ -263,9 +263,17 @@ fn make_label(
     subgraph_name: &str,
     source: &Option<String>,
     transport: &HttpJsonTransport,
+    entity_resolver: &Option<EntityResolver>,
 ) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
-    format!("{}{} {}", subgraph_name, source, transport.label())
+    let batch = match entity_resolver {
+        Some(EntityResolver::TypeBatch) => "[BATCH] ",
+        Some(EntityResolver::TypeSingle) => "[N+1] ",
+        Some(EntityResolver::Explicit) => "", // this could be used as a root field, so we don't know if it's batch or not
+        Some(EntityResolver::Implicit) => "[N+1] ",
+        _ => "",
+    };
+    format!("{}{}{} {}", batch, subgraph_name, source, transport.label())
 }
 
 fn determine_entity_resolver(

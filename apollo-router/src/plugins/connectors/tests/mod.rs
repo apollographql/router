@@ -45,6 +45,7 @@ mod progressive_override;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
+mod query_plan;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");

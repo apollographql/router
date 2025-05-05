@@ -131,7 +131,7 @@ expression: "&connectors"
         ),
     },
     ConnectId {
-        label: "connectors.json http: POST /posts",
+        label: "[BATCH] connectors.json http: POST /posts",
         subgraph_name: "connectors",
         source_name: Some(
             "json",
@@ -145,7 +145,7 @@ expression: "&connectors"
         ),
     }: Connector {
         id: ConnectId {
-            label: "connectors.json http: POST /posts",
+            label: "[BATCH] connectors.json http: POST /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
