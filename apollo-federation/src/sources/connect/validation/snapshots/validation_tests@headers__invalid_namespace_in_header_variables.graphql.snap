@@ -13,9 +13,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context, $request",
+        message: "In `@source(http.headers:)`: `$this` is not valid here, must be one of $config, $context, $request",
         locations: [
-            12:62..12:67,
+            12:62..12:71,
         ],
     },
     Message {
@@ -34,14 +34,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $status is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: `$status` is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             25:62..25:69,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $this is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: `$this` is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             26:47..26:52,
         ],

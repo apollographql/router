@@ -27,23 +27,23 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http: {body:})` on `Query.ts`: `$batch` is not valid here, must be one of $args, $config, $context, $request",
         locations: [
-            14:40..14:46,
+            14:40..14:49,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `POST` in `@connect(http:)` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `POST` in `@connect(http:)` on `Query.ts`: `$batch` is not valid here, must be one of $args, $config, $context, $request",
         locations: [
-            19:31..19:37,
+            19:31..19:40,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context, $request",
+        message: "In `GET` in `@connect(http:)` on `T`: `$args` is not valid here, must be one of $this, $batch, $config, $context, $request",
         locations: [
-            37:29..37:34,
+            37:29..37:37,
         ],
     },
     Message {
@@ -87,6 +87,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
         message: "Direct circular reference detected in `T.friends: [T]`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
         locations: [
             74:3..79:6,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `T.listRelationship`: `$batch` is not valid here, must be one of $args, $config, $context, $request, $this",
+        locations: [
+            83:28..83:37,
         ],
     },
 ]
