@@ -205,7 +205,7 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
       "data": null,
       "errors": [
         {
-          "message": "Response deserialization failed",
+          "message": "The server returned data in an unexpected format.",
           "path": [
             "raw"
           ],
@@ -217,7 +217,7 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
             "connector": {
               "coordinate": "connectors:Query.raw@connect[0]"
             },
-            "code": "CONNECTOR_DESERIALIZE"
+            "code": "CONNECTOR_RESPONSE_INVALID"
           }
         }
       ]
@@ -364,7 +364,7 @@ async fn should_error_on_invalid_with_json_content_type() {
       "data": null,
       "errors": [
         {
-          "message": "Response deserialization failed",
+          "message": "The server returned data in an unexpected format.",
           "path": [
             "users"
           ],
@@ -376,7 +376,7 @@ async fn should_error_on_invalid_with_json_content_type() {
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_DESERIALIZE"
+            "code": "CONNECTOR_RESPONSE_INVALID"
           }
         }
       ]
@@ -473,7 +473,7 @@ async fn should_error_on_invalid_with_json_like_content_type() {
       "data": null,
       "errors": [
         {
-          "message": "Response deserialization failed",
+          "message": "The server returned data in an unexpected format.",
           "path": [
             "users"
           ],
@@ -485,7 +485,7 @@ async fn should_error_on_invalid_with_json_like_content_type() {
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_DESERIALIZE"
+            "code": "CONNECTOR_RESPONSE_INVALID"
           }
         }
       ]

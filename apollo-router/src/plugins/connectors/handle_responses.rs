@@ -481,8 +481,8 @@ async fn deserialize_response<T: HttpBody>(
 
     let make_err = |path: Path| {
         graphql::Error::builder()
-            .message("Response deserialization failed".to_string())
-            .extension_code("CONNECTOR_DESERIALIZE")
+            .message("The server returned data in an unexpected format.".to_string())
+            .extension_code("CONNECTOR_RESPONSE_INVALID")
             .extension("service", connector.id.subgraph_name.clone())
             .extension(
                 "http",
@@ -1301,7 +1301,7 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "Response deserialization failed",
+                            message: "The server returned data in an unexpected format.",
                             locations: [],
                             path: Some(
                                 Path(
@@ -1329,7 +1329,7 @@ mod tests {
                                     ),
                                 }),
                                 "code": String(
-                                    "CONNECTOR_DESERIALIZE",
+                                    "CONNECTOR_RESPONSE_INVALID",
                                 ),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
