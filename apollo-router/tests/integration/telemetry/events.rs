@@ -276,7 +276,6 @@ async fn test_events_with_request_header_condition() -> Result<(), BoxError> {
     Ok(())
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_body_selector() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -294,7 +293,7 @@ async fn test_response_body_selector() -> Result<(), BoxError> {
         },
       }
     }))
-        .await;
+    .await;
 
     assert_yaml_snapshot!(router.execute_default_query().await?, @r"
     - kind: custom.router.response
