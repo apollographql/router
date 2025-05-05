@@ -1,5 +1,7 @@
 //! Parsing and validation for `@connect(http:)`
 
+pub(crate) mod url_properties;
+
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -9,6 +11,7 @@ use apollo_compiler::ast::Value;
 use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
+use url_properties::UrlProperties;
 
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
@@ -261,6 +264,8 @@ struct Transport<'schema> {
     url: StringTemplate,
     url_string: GraphQLString<'schema>,
     coordinate: HttpMethodCoordinate<'schema>,
+
+    url_properties: UrlProperties<'schema>,
 }
 
 impl<'schema> Transport<'schema> {
@@ -304,6 +309,8 @@ impl<'schema> Transport<'schema> {
                 locations,
             });
         }
+
+        let url_properties = UrlProperties::parse_for_connector(coordinate.clone(), schema, http_arg)?;
 
         let coordinate = HttpMethodCoordinate {
             connect: coordinate.connect_directive_coordinate,
@@ -354,6 +361,7 @@ impl<'schema> Transport<'schema> {
                     url,
                     url_string,
                     coordinate,
+                    url_properties
                 })
             };
         } else {
@@ -364,6 +372,7 @@ impl<'schema> Transport<'schema> {
             url,
             url_string,
             coordinate,
+            url_properties
         })
     }
 
@@ -394,6 +403,9 @@ impl<'schema> Transport<'schema> {
                     }),
             );
         }
+
+        messages.extend(self.url_properties.type_check(schema));
+
         messages
     }
 }

@@ -1,0 +1,23 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/url_properties/invalid_mappings.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "`@source(http:)` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            6:37..6:40,
+            6:55..6:58,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "`@connect(http:)` on `Query.resources` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            12:31..12:34,
+            12:49..12:52,
+        ],
+    },
+]

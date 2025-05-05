@@ -9,6 +9,7 @@ use hashbrown::HashMap;
 
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
+use super::connect::UrlProperties;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
@@ -88,6 +89,14 @@ impl<'schema> SourceDirective<'schema> {
                     errors.push(url_error);
                 }
             }
+
+            let _ = UrlProperties::parse_for_source(
+                source_http_argument_coordinate(&directive.name),
+                schema,
+                http_arg,
+            )
+            .map_err(|e| errors.push(e))
+            .map(|url_properties| errors.extend(url_properties.type_check(schema)));
 
             errors.extend(
                 Headers::parse(
