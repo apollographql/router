@@ -154,8 +154,7 @@ impl DeniesArguments for KeyDirective<'_> {
         SingleFederationError::KeyFieldsHasArgs {
             target_type: self.target.type_name().clone(),
             application: self.schema_directive.to_string(),
-            type_name: type_name.to_string(),
-            field_name: field.name.to_string(),
+            inner_coordinate: format!("{}.{}", type_name, field.name),
         }
     }
 }

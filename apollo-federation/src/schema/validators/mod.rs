@@ -120,7 +120,7 @@ impl<D: DeniesAliases> SchemaFieldSetValidator<D> for DenyAliases {
 }
 
 trait DeniesArguments {
-    fn error(&self, type_name: &Name, field: &Field) -> SingleFederationError;
+    fn error(&self, parent_ty: &Name, field: &Field) -> SingleFederationError;
 }
 
 pub(crate) struct DenyFieldsWithArguments {}

@@ -105,8 +105,7 @@ pub(crate) fn validate_provides_directives(
 impl DeniesAliases for ProvidesDirective<'_> {
     fn error(&self, alias: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::ProvidesInvalidFields {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @provides",
@@ -119,11 +118,9 @@ impl DeniesAliases for ProvidesDirective<'_> {
 impl DeniesArguments for ProvidesDirective<'_> {
     fn error(&self, parent_ty: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::ProvidesFieldsHasArgs {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
-            type_name: parent_ty.to_string(),
-            field_name: field.name.to_string(),
+            inner_coordinate: format!("{}.{}", parent_ty, field.name),
         }
     }
 }
@@ -131,8 +128,7 @@ impl DeniesArguments for ProvidesDirective<'_> {
 impl DeniesDirectiveApplications for ProvidesDirective<'_> {
     fn error(&self, directives: &DirectiveList) -> SingleFederationError {
         SingleFederationError::ProvidesHasDirectiveInFieldsArg {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
         }
@@ -142,8 +138,7 @@ impl DeniesDirectiveApplications for ProvidesDirective<'_> {
 impl DeniesNonExternalLeafFields for ProvidesDirective<'_> {
     fn error(&self, parent_ty: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::ProvidesFieldsMissingExternal {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "field \"{}.{}\" should not be part of a @provides since it is already provided by this subgraph (it is not marked @external)",
@@ -158,8 +153,7 @@ impl DeniesNonExternalLeafFields for ProvidesDirective<'_> {
         field: &Field,
     ) -> SingleFederationError {
         SingleFederationError::ProvidesFieldsMissingExternal {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "field \"{}.{}\" should not be part of a @provides since it is already \"effectively\" provided by this subgraph (while it is marked @external, it is a @key field of an extension type, which are not internally considered external for historical/backward compatibility reasons)",

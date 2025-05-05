@@ -893,6 +893,10 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             }
         }
     }
+
+    pub(crate) fn coordinate(&self) -> String {
+        format!("{}.{}", self.type_name(), self.field_name())
+    }
 }
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);

@@ -155,35 +155,30 @@ pub enum SingleFederationError {
     #[error("{message}")]
     UnknownLinkVersion { message: String },
     #[error(
-        "On type \"{target_type}\", for {application}: field {type_name}.{field_name} cannot be included because it has arguments (fields with argument are not allowed in @key)"
+        "On type \"{target_type}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @key)"
     )]
     KeyFieldsHasArgs {
         target_type: Name,
         application: String,
-        type_name: String,
-        field_name: String,
+        inner_coordinate: String,
     },
     #[error(
-        "On field \"{target_type}.{target_field}\", for {application}: field {type_name}.{field_name} cannot be included because it has arguments (fields with argument are not allowed in @provides)"
+        "On field \"{coordinate}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @provides)"
     )]
     ProvidesFieldsHasArgs {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
-        type_name: String,
-        field_name: String,
+        inner_coordinate: String,
     },
-    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
     ProvidesFieldsMissingExternal {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         message: String,
     },
-    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
     RequiresFieldsMissingExternal {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         message: String,
     },
@@ -202,20 +197,18 @@ pub enum SingleFederationError {
         applied_directives: String,
     },
     #[error(
-        "On field \"{target_type}.{target_field}\", for {application}: cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
     )]
     ProvidesHasDirectiveInFieldsArg {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         applied_directives: String,
     },
     #[error(
-        "On field \"{target_type}.{target_field}\", for {application}: cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
     )]
     RequiresHasDirectiveInFieldsArg {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         applied_directives: String,
     },
@@ -235,19 +228,17 @@ pub enum SingleFederationError {
         application: String,
     },
     #[error(
-        "On field \"{target_type}.{target_field}\", for {application}: Invalid value for argument \"fields\": must be a string."
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
     )]
     ProvidesInvalidFieldsType {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
     },
     #[error(
-        "On field \"{target_type}.{target_field}\", for {application}: Invalid value for argument \"fields\": must be a string."
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
     )]
     RequiresInvalidFieldsType {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
     },
     #[error("On type \"{target_type}\", for {application}: {message}")]
@@ -256,17 +247,15 @@ pub enum SingleFederationError {
         application: String,
         message: String,
     },
-    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
     ProvidesInvalidFields {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         message: String,
     },
-    #[error("On field \"{target_type}.{target_field}\", for {application}: {message}")]
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
     RequiresInvalidFields {
-        target_type: Name,
-        target_field: Name,
+        coordinate: String,
         application: String,
         message: String,
     },

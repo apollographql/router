@@ -77,8 +77,7 @@ pub(crate) fn validate_requires_directives(
 impl DeniesAliases for RequiresDirective<'_> {
     fn error(&self, alias: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::RequiresInvalidFields {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "Cannot use alias \"{alias}\" in \"{alias}: {}\": aliases are not currently supported in @requires",
@@ -91,8 +90,7 @@ impl DeniesAliases for RequiresDirective<'_> {
 impl DeniesDirectiveApplications for RequiresDirective<'_> {
     fn error(&self, directives: &DirectiveList) -> SingleFederationError {
         SingleFederationError::RequiresHasDirectiveInFieldsArg {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             applied_directives: directives.iter().map(|d| d.to_string()).join(", "),
         }
@@ -102,8 +100,7 @@ impl DeniesDirectiveApplications for RequiresDirective<'_> {
 impl DeniesNonExternalLeafFields for RequiresDirective<'_> {
     fn error(&self, parent_ty: &Name, field: &Field) -> SingleFederationError {
         SingleFederationError::RequiresFieldsMissingExternal {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "field \"{}.{}\" should not be part of a @requires since it is already provided by this subgraph (it is not marked @external)",
@@ -118,8 +115,7 @@ impl DeniesNonExternalLeafFields for RequiresDirective<'_> {
         field: &Field,
     ) -> SingleFederationError {
         SingleFederationError::RequiresFieldsMissingExternal {
-            target_type: self.target.type_name().clone(),
-            target_field: self.target.field_name().clone(),
+            coordinate: self.target.coordinate(),
             application: self.schema_directive.to_string(),
             message: format!(
                 "field \"{}.{}\" should not be part of a @requires since it is already \"effectively\" provided by this subgraph (while it is marked @external, it is a @key field of an extension type, which are not internally considered external for historical/backward compatibility reasons)",
