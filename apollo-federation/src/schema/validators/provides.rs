@@ -10,11 +10,11 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::HasFields;
-use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
+use crate::schema::validators::deny_unsupported_directive_on_interface_field;
 
 pub(crate) fn validate_provides_directives(
     schema: &FederationSchema,
@@ -40,24 +40,30 @@ pub(crate) fn validate_provides_directives(
     for provides_directive in schema.provides_directive_applications()? {
         match provides_directive {
             Ok(provides) => {
+                deny_unsupported_directive_on_interface_field(
+                    &provides_directive_name,
+                    &provides,
+                    schema,
+                    errors,
+                );
+
                 // PORT NOTE: In JS, these two checks are done inside the `targetTypeExtractor`.
-                if metadata
-                    .is_field_external(&FieldDefinitionPosition::Object(provides.target.clone()))
-                {
+                if metadata.is_field_external(&provides.target.clone().into()) {
                     errors.errors.push(
                         SingleFederationError::ExternalCollisionWithAnotherDirective {
                             message: format!(
                                 "Cannot have both @provides and @external on field \"{}.{}\"",
-                                provides.target.type_name, provides.target.field_name
+                                provides.target.type_name(),
+                                provides.target.field_name()
                             ),
                         },
                     )
                 }
                 if !schema
-                    .get_type(provides.target.type_name.clone())
+                    .get_type(provides.target.type_name().clone())
                     .is_ok_and(|ty| ty.is_composite_type())
                 {
-                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\"", provides.target.type_name, provides.target.field_name, provides.target_return_type) })
+                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\"", provides.target.type_name(), provides.target.field_name(), provides.target_return_type) })
                 }
 
                 // PORT NOTE: Think of this as `validateFieldSet`, but the set of rules are already filtered to account for what were boolean flags in JS

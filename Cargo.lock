@@ -197,6 +197,7 @@ dependencies = [
  "apollo-federation",
  "derive_more",
  "dhat",
+ "diff",
  "either",
  "hashbrown 0.15.2",
  "hex",
