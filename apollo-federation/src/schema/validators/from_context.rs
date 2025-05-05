@@ -51,16 +51,16 @@ pub(crate) fn validate_from_context_directives(
 }
 
 /// Parses a field string that contains a context reference and optional selection.
-/// 
+///
 /// The function expects a string in the format "$contextName selection" where:
 /// - The string must start with a '$' followed by a context name
 /// - The context name must be a valid identifier (starting with letter/underscore, followed by alphanumeric/underscore)
 /// - An optional selection can follow the context name
-/// 
+///
 /// Returns a tuple of (Option<String>, Option<String>) where:
 /// - First element is Some(context_name) if a valid context was found, None otherwise
 /// - Second element is Some(selection) if a valid selection was found after the context, None otherwise
-/// 
+///
 /// Examples:
 /// - "$userContext userId" -> (Some("userContext"), Some("userId"))
 /// - "$context { prop }" -> (Some("context"), Some("{ prop }"))
