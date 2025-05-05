@@ -223,9 +223,7 @@ impl<'schema> DenyNonExternalLeafFields<'schema> {
     }
 }
 
-impl<'schema, D: DeniesNonExternalLeafFields> SchemaFieldSetValidator<D>
-    for DenyNonExternalLeafFields<'schema>
-{
+impl<D: DeniesNonExternalLeafFields> SchemaFieldSetValidator<D> for DenyNonExternalLeafFields<'_> {
     fn visit_field(
         &self,
         parent_ty: &Name,

@@ -93,7 +93,7 @@ impl<'schema> DenyUnionAndInterfaceFields<'schema> {
     }
 }
 
-impl<'schema> SchemaFieldSetValidator<KeyDirective<'_>> for DenyUnionAndInterfaceFields<'schema> {
+impl SchemaFieldSetValidator<KeyDirective<'_>> for DenyUnionAndInterfaceFields<'_> {
     fn visit_field(
         &self,
         parent_ty: &Name,

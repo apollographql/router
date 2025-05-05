@@ -51,7 +51,7 @@ pub(crate) fn validate_requires_directives(
                     Ok(fields) => {
                         let existing_error_count = errors.errors.len();
                         for rule in fieldset_rules.iter() {
-                            rule.visit(&requires.target.type_name(), &fields, &requires, errors);
+                            rule.visit(requires.target.type_name(), &fields, &requires, errors);
                         }
 
                         // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
