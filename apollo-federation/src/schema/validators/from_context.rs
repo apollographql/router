@@ -1,6 +1,8 @@
-use apollo_compiler::Name;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+use apollo_compiler::Name;
+use regex::Regex;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -10,7 +12,6 @@ use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 use crate::utils::iter_into_single_item;
-use regex::Regex;
 
 pub(crate) fn validate_from_context_directives(
     schema: &FederationSchema,
@@ -354,11 +355,12 @@ fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::error::MultipleFederationErrors;
     use crate::error::SingleFederationError;
     use crate::subgraph::test_utils::build_and_expand;
-    use std::collections::HashMap;
 
     #[test]
     fn test_deny_on_abstract_type() {

@@ -1,7 +1,8 @@
-use apollo_federation::subgraph::test_utils::{
-    BuildOption, build_and_validate, build_for_errors, build_for_errors_with_option
-};
 use apollo_federation::assert_errors;
+use apollo_federation::subgraph::test_utils::BuildOption;
+use apollo_federation::subgraph::test_utils::build_and_validate;
+use apollo_federation::subgraph::test_utils::build_for_errors;
+use apollo_federation::subgraph::test_utils::build_for_errors_with_option;
 
 mod fieldset_based_directives {
     use super::*;

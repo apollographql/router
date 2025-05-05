@@ -1,5 +1,6 @@
-use apollo_compiler::Name;
 use std::collections::HashMap;
+
+use apollo_compiler::Name;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
