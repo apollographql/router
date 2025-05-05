@@ -92,7 +92,7 @@ dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
 flate2 = "1.0.30"
-fred = { version = "9.4.0", features = ["enable-rustls", "i-cluster"] }
+fred = { version = "9.4.0", features = ["enable-rustls-ring", "i-cluster"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
@@ -105,7 +105,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "1.5.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
-hyper-rustls = { version = "0.27.3", features = ["http1", "http2", "rustls-native-certs"] }
+hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "rustls-native-certs"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
@@ -187,7 +187,7 @@ reqwest = { workspace = true, default-features = false, features = [
 ] }
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
-rustls = "0.23.19"
+rustls = { version = "0.23.19", default-features = false }
 rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.2.0"
 schemars.workspace = true
@@ -232,7 +232,7 @@ wsl = "0.1.0"
 tokio-tungstenite = { version = "0.26.1", features = [
     "rustls-tls-native-roots",
 ] }
-tokio-rustls = "0.26.0"
+tokio-rustls = { version = "0.26.0", default-features = false }
 hickory-resolver = "0.24.1"
 http-serde = "2.1.1"
 hmac = "0.12.1"
@@ -245,8 +245,10 @@ zstd-safe = "7.1.0"
 # note: hyper 1.0 update seems to mean this isn't true...
 aws-sigv4 = "1.2.6"
 aws-credential-types = "1.2.1" # XXX: This is the latest version
-aws-config = "1.5.5"
+aws-config = { version = "1.5.5", default-features = false }
 aws-types = "1.3.3"
+aws-smithy-async = { version = "1.2.5", features = ["rt-tokio"] }
+aws-smithy-http-client = { version = "1.0.1", default-features = false, features = ["default-client", "rustls-ring"] }
 aws-smithy-runtime-api = { version = "1.7.3", features = ["client"] }
 sha1.workspace = true
 tracing-serde = "0.1.3"
@@ -278,7 +280,7 @@ tikv-jemallocator = "0.6.0"
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }
+fred = { version = "9.4.0", features = ["enable-rustls-ring", "mocks", "i-cluster"] }
 futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"
