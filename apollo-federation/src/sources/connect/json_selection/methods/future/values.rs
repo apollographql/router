@@ -44,7 +44,7 @@ fn values_method(
     match data {
         JSON::Object(map) => {
             let values = map.values().cloned().collect();
-            (Some(JSON::Array(values)), vec![])
+            (Some(JSON::Array(values)), Vec::new())
         }
         _ => (
             None,

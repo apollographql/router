@@ -5,7 +5,6 @@ use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -21,12 +20,11 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SupergraphSelector>>,
+    pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -40,12 +38,11 @@ pub(super) struct SupergraphRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SupergraphSelector>>,
+    pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -58,7 +55,7 @@ pub(super) struct SupergraphResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct SupergraphStage {
     /// The request configuration
@@ -198,12 +195,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = request_config
-        .condition
-        .as_mut()
-        .map(|c| c.evaluate_request(&request) == Some(true))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
     }
     // Call into our out of process processor with a body of our body
@@ -349,12 +341,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // split the response into parts + body
@@ -447,9 +434,7 @@ where
             let generator_id = map_context.id.clone();
             let should_be_executed = response_config
                 .condition
-                .as_ref()
-                .map(|c| c.evaluate_event_response(&deferred_response, &map_context))
-                .unwrap_or(true);
+                .evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
             async move {
                 if !should_be_executed {
@@ -743,8 +728,7 @@ mod tests {
                         default: None,
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
-                ])
-                .into(),
+                ]),
                 headers: false,
                 context: ContextConf::Deprecated(false),
                 body: true,
@@ -1130,8 +1114,7 @@ mod tests {
                         is_primary_response: true,
                     }),
                     SelectorOrValue::Value(true.into()),
-                ])
-                .into(),
+                ]),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,

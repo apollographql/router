@@ -6,12 +6,17 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
+use super::schema::BATCH_ARGUMENT_NAME;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::ConnectBatchArguments;
 use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
+use super::schema::ERRORS_ARGUMENT_NAME;
+use super::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
+use super::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
+use super::schema::ErrorsArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::PATH_ARGUMENT_NAME;
@@ -20,7 +25,6 @@ use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
-use super::versions::VersionInfo;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -41,21 +45,19 @@ macro_rules! internal {
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
-    version_info: &VersionInfo,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
     schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(|d| SourceDirectiveArguments::from_directive(d, version_info))
+        .map(SourceDirectiveArguments::from_directive)
         .collect()
 }
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
-    version_info: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     // connect on fields
     schema
@@ -100,11 +102,7 @@ pub(crate) fn extract_connect_directive_arguments(
                                 directive_name: directive.name.clone(),
                                 directive_index: i,
                             });
-                        ConnectDirectiveArguments::from_position_and_directive(
-                            position,
-                            directive,
-                            version_info,
-                        )
+                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
                     })
             })
         })
@@ -127,9 +125,7 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_index: i,
                                 });
                             ConnectDirectiveArguments::from_position_and_directive(
-                                position,
-                                directive,
-                                version_info,
+                                position, directive,
                             )
                         })
                 }),
@@ -141,29 +137,35 @@ pub(crate) fn extract_connect_directive_arguments(
 type ObjectNode = [(Name, Node<Value>)];
 
 impl SourceDirectiveArguments {
-    fn from_directive(
-        value: &Component<Directive>,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_directive(value: &Component<Directive>) -> Result<Self, FederationError> {
         let args = &value.arguments;
+        let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut name = None;
         let mut http = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
             if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
-                name = Some(arg.value.as_str().ok_or(internal!(
-                    "`name` field in `@source` directive is not a string"
-                ))?);
+                name = Some(arg.value.as_str().ok_or_else(|| {
+                    internal!("`name` field in `@source` directive is not a string")
+                })?);
             } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@source` directive is not an object"
-                ))?;
-                let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@source` directive is not an object")
+                })?;
+                let http_value = SourceHTTPArguments::from_values(http_value)?;
 
                 http = Some(http_value);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@source` directive is not an object")
+                })?;
+                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+
+                errors = Some(errors_value);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive: {arg_name}"
@@ -173,18 +175,16 @@ impl SourceDirectiveArguments {
 
         Ok(Self {
             name: name
-                .ok_or(internal!("missing `name` field in `@source` directive"))?
+                .ok_or_else(|| internal!("missing `name` field in `@source` directive"))?
                 .to_string(),
-            http: http.ok_or(internal!("missing `http` field in `@source` directive"))?,
+            http: http.ok_or_else(|| internal!("missing `http` field in `@source` directive"))?,
+            errors,
         })
     }
 }
 
 impl SourceHTTPArguments {
-    fn from_values(
-        values: &ObjectNode,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         let mut path = None;
@@ -193,7 +193,7 @@ impl SourceHTTPArguments {
             let name = name.as_str();
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_str().ok_or(internal!(
+                let base_url_value = value.as_str().ok_or_else(|| internal!(
                     "`baseURL` field in `@source` directive's `http.baseURL` field is not a string"
                 ))?;
 
@@ -204,20 +204,22 @@ impl SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &version_info.allowed_headers)
+                    Header::from_headers_arg(value)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
                         .map_err(|err| internal!(err.to_string()))?,
                 );
             } else if name == PATH_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@source` directive's `http.path` field is not a string",
-                    PATH_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@source` directive's `http.path` field is not a string",
+                        PATH_ARGUMENT_NAME
+                    ))
+                })?;
                 path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
+                let value = value.as_str().ok_or_else(|| internal!(format!(
                     "`{}` field in `@source` directive's `http.queryParams` field is not a string",
                     QUERY_PARAMS_ARGUMENT_NAME
                 )))?;
@@ -230,12 +232,45 @@ impl SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url.ok_or(internal!(
-                "missing `base_url` field in `@source` directive's `http` argument"
-            ))?,
+            base_url: base_url.ok_or_else(|| {
+                internal!("missing `base_url` field in `@source` directive's `http` argument")
+            })?,
             headers: headers.unwrap_or_default(),
             path,
             query_params: query,
+        })
+    }
+}
+
+impl ErrorsArguments {
+    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+        let mut message = None;
+        let mut extensions = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
+                let message_value = value.as_str().ok_or_else(|| internal!(format!(
+                    "`message` field in `@{directive_name}` directive's `errors` field is not a string")
+                ))?;
+                message =
+                    Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
+            } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
+                let extensions_value = value.as_str().ok_or_else(|| internal!(format!(
+                    "`extensions` field in `@{directive_name}` directive's `errors` field is not a string")
+                ))?;
+                extensions =
+                    Some(JSONSelection::parse(extensions_value).map_err(|e| internal!(e.message))?);
+            } else {
+                return Err(internal!(format!(
+                    "unknown argument in `@{directive_name}` directive's `errors` field: {name}"
+                )));
+            }
+        }
+
+        Ok(Self {
+            message,
+            extensions,
         })
     }
 }
@@ -244,9 +279,9 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
         value: &Node<Directive>,
-        version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
+        let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut source = None;
@@ -254,37 +289,46 @@ impl ConnectDirectiveArguments {
         let mut selection = None;
         let mut entity = None;
         let mut batch = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
             if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
-                let source_value = arg.value.as_str().ok_or(internal!(
-                    "`source` field in `@source` directive is not a string"
-                ))?;
+                let source_value = arg.value.as_str().ok_or_else(|| {
+                    internal!("`source` field in `@source` directive is not a string")
+                })?;
 
                 source = Some(source_value);
             } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@connect` directive is not an object"
-                ))?;
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@connect` directive is not an object")
+                })?;
 
-                http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
-            } else if arg_name == "batch" {
-                let http_value = arg.value.as_object().ok_or(internal!(
-                    "`http` field in `@connect` directive is not an object"
-                ))?;
+                http = Some(ConnectHTTPArguments::from_values(http_value)?);
+            } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`http` field in `@connect` directive is not an object")
+                })?;
 
                 batch = Some(ConnectBatchArguments::from_values(http_value)?);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@connect` directive is not an object")
+                })?;
+
+                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+
+                errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
-                let selection_value = arg.value.as_str().ok_or(internal!(
-                    "`selection` field in `@connect` directive is not a string"
-                ))?;
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    internal!("`selection` field in `@connect` directive is not a string")
+                })?;
                 selection =
                     Some(JSONSelection::parse(selection_value).map_err(|e| internal!(e.message))?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
-                let entity_value = arg.value.to_bool().ok_or(internal!(
-                    "`entity` field in `@connect` directive is not a boolean"
-                ))?;
+                let entity_value = arg.value.to_bool().ok_or_else(|| {
+                    internal!("`entity` field in `@connect` directive is not a boolean")
+                })?;
 
                 entity = Some(entity_value);
             } else {
@@ -298,18 +342,17 @@ impl ConnectDirectiveArguments {
             position,
             source: source.map(|s| s.to_string()),
             http,
-            selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
+            selection: selection
+                .ok_or_else(|| internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
             batch,
+            errors,
         })
     }
 }
 
 impl ConnectHTTPArguments {
-    fn from_values(
-        values: &ObjectNode,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -323,49 +366,53 @@ impl ConnectHTTPArguments {
             let name = name.as_str();
 
             if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
-                let body_value = value.as_str().ok_or(internal!(
-                    "`body` field in `@connect` directive's `http` field is not a string"
-                ))?;
+                let body_value = value.as_str().ok_or_else(|| {
+                    internal!("`body` field in `@connect` directive's `http` field is not a string")
+                })?;
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &version_info.allowed_headers)
+                    Header::from_headers_arg(value)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
                         .map_err(|err| internal!(err.to_string()))?,
                 );
             } else if name == "GET" {
-                get = Some(value.as_str().ok_or(internal!(
+                get = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "POST" {
-                post = Some(value.as_str().ok_or(internal!(
+                post = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PATCH" {
-                patch = Some(value.as_str().ok_or(internal!(
+                patch = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PUT" {
-                put = Some(value.as_str().ok_or(internal!(
+                put = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "DELETE" {
-                delete = Some(value.as_str().ok_or(internal!(
+                delete = Some(value.as_str().ok_or_else(|| internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == PATH_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
-                    PATH_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@connect` directive's `http` field is not a string",
+                        PATH_ARGUMENT_NAME
+                    ))
+                })?;
                 path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
-                    QUERY_PARAMS_ARGUMENT_NAME
-                )))?;
+                let value = value.as_str().ok_or_else(|| {
+                    internal!(format!(
+                        "`{}` field in `@connect` directive's `http` field is not a string",
+                        QUERY_PARAMS_ARGUMENT_NAME
+                    ))
+                })?;
                 query_params = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             }
         }
@@ -391,7 +438,7 @@ impl ConnectBatchArguments {
             let name = name.as_str();
 
             if name == "maxSize" {
-                let max_size_int = Some(value.to_i32().ok_or(internal!(
+                let max_size_int = Some(value.to_i32().ok_or_else(|| internal!(
                     "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
                 ))?);
                 // Convert the int to a usize since it is used for chunking an array later.
@@ -413,7 +460,6 @@ mod tests {
 
     use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
-    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SourceDirectiveArguments;
@@ -439,7 +485,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
@@ -483,7 +529,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -525,12 +571,12 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.into()))
+            .map(SourceDirectiveArguments::from_directive)
             .collect();
 
         insta::assert_debug_snapshot!(
             sources.unwrap(),
-            @r###"
+            @r#"
         [
             SourceDirectiveArguments {
                 name: "json",
@@ -558,9 +604,10 @@ mod tests {
                     path: None,
                     query_params: None,
                 },
+                errors: None,
             },
         ]
-        "###
+        "#
         );
     }
 
@@ -571,11 +618,7 @@ mod tests {
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = super::extract_connect_directive_arguments(
-            schema.schema(),
-            &name!(connect),
-            &ConnectSpec::V0_1.into(),
-        );
+        let connects = super::extract_connect_directive_arguments(schema.schema(), &name!(connect));
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
@@ -642,6 +685,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -716,6 +760,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
         ]
         "###

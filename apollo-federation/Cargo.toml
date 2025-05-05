@@ -17,7 +17,6 @@ autotests = false                                      # Integration tests are m
 snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
-"connect_v0.2" = []
 
 [dependencies]
 apollo-compiler.workspace = true
@@ -50,6 +49,7 @@ ron = { version = "0.8.1", optional = true }
 shape = "0.5.1"
 
 [dev-dependencies]
+diff = "0.1.13"
 hex.workspace = true
 insta.workspace = true
 sha1.workspace = true

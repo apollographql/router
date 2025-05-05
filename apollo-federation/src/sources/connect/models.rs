@@ -24,8 +24,8 @@ use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
+use super::spec::schema::ErrorsArguments;
 use super::spec::schema::SourceDirectiveArguments;
-use super::spec::versions::VersionInfo;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
@@ -59,6 +59,8 @@ pub struct Connector {
     pub response_headers: HashSet<String>,
 
     pub batch_settings: Option<ConnectorBatchSettings>,
+
+    pub error_settings: ConnectorErrorsSettings,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +76,52 @@ impl ConnectorBatchSettings {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ConnectorErrorsSettings {
+    pub message: Option<JSONSelection>,
+    pub source_extensions: Option<JSONSelection>,
+    pub connect_extensions: Option<JSONSelection>,
+}
+
+impl ConnectorErrorsSettings {
+    fn from_directive(
+        connect_errors: Option<&ErrorsArguments>,
+        source_errors: Option<&ErrorsArguments>,
+    ) -> Self {
+        let message = connect_errors
+            .and_then(|e| e.message.as_ref())
+            .or_else(|| source_errors.and_then(|e| e.message.as_ref()))
+            .cloned();
+        let source_extensions = source_errors.and_then(|e| e.extensions.as_ref()).cloned();
+        let connect_extensions = connect_errors.and_then(|e| e.extensions.as_ref()).cloned();
+
+        Self {
+            message,
+            source_extensions,
+            connect_extensions,
+        }
+    }
+
+    pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+        self.message
+            .as_ref()
+            .into_iter()
+            .flat_map(|m| m.variable_references())
+            .chain(
+                self.source_extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+            .chain(
+                self.connect_extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+    }
+}
+
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 
 /// Entity resolver type
@@ -81,7 +129,7 @@ pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 /// A connector can be used as a potential entity resolver for a type, with
 /// extra validation rules based on the transport args and field position within
 /// a schema.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityResolver {
     /// The user defined a connector on a field that acts as an entity resolver
     Explicit,
@@ -113,14 +161,11 @@ impl Connector {
             return Ok(Default::default());
         };
 
-        let version: VersionInfo = spec.into();
-
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name, &version)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments =
-            extract_connect_directive_arguments(schema, &connect_name, &version)?;
+        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
 
         connect_arguments
             .into_iter()
@@ -139,30 +184,45 @@ impl Connector {
             .source
             .as_ref()
             .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
-
         let source_name = source.map(|s| s.name.clone());
+
+        // Create our transport
         let connect_http = connect
             .http
             .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
-        let request_variables: HashSet<Namespace> = transport
-            .variable_references()
+
+        // Get our batch and error settings
+        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        let connect_errors = connect.errors.as_ref();
+        let source_errors = source.and_then(|s| s.errors.as_ref());
+        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
+
+        // Calculate which variables and headers are in use in the request
+        let request_references: HashSet<VariableReference<Namespace>> =
+            transport.variable_references().collect();
+        let request_variables: HashSet<Namespace> = request_references
+            .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let request_headers = extract_header_references(transport.variable_references());
+        let request_headers = extract_header_references(request_references);
 
-        let response_variables: HashSet<Namespace> = connect
+        // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
+        let response_references: HashSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
+            .chain(error_settings.variable_references())
+            .collect();
+        let response_variables: HashSet<Namespace> = response_references
+            .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let response_headers = extract_header_references(connect.selection.variable_references());
-        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
-        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        let response_headers = extract_header_references(response_references);
 
+        // Last couple of items here!
+        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
             subgraph_name: subgraph_name.to_string(),
@@ -183,6 +243,7 @@ impl Connector {
             request_headers,
             response_headers,
             batch_settings,
+            error_settings,
         };
 
         Ok((id, connector))
@@ -258,7 +319,7 @@ impl Connector {
             .id
             .source_name
             .clone()
-            .unwrap_or(self.id.synthetic_name());
+            .unwrap_or_else(|| self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
     }
 }
@@ -296,10 +357,11 @@ fn determine_entity_resolver(
 }
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
-fn extract_header_references<'a>(
-    variable_references: impl Iterator<Item = VariableReference<'a, Namespace>> + 'a,
+fn extract_header_references(
+    variable_references: HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     let headers: HashSet<String> = variable_references
+        .iter()
         .filter_map(|var_ref| {
             if var_ref.namespace.namespace != Namespace::Request
                 && var_ref.namespace.namespace != Namespace::Response
@@ -349,7 +411,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -465,6 +527,11 @@ mod tests {
                         max_size: None,
                     },
                 ),
+                error_settings: ConnectorErrorsSettings {
+                    message: None,
+                    source_extensions: None,
+                    connect_extensions: None,
+                },
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -592,9 +659,14 @@ mod tests {
                         max_size: None,
                     },
                 ),
+                error_settings: ConnectorErrorsSettings {
+                    message: None,
+                    source_extensions: None,
+                    connect_extensions: None,
+                },
             },
         }
-        "###);
+        "#);
     }
 
     #[test]
