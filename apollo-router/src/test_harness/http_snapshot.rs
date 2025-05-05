@@ -499,8 +499,6 @@ impl SnapshotServer {
             }
         };
 
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
         let http_service = HttpClientService::new(
             "test",
             rustls::ClientConfig::builder()
