@@ -1781,7 +1781,8 @@ static NO_SELECTION_FOR_CONTEXT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|
 static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "CONTEXT_NO_RESOLVABLE_KEY".to_owned(),
-        "If an ObjectType uses a @fromContext, at least one of its keys must be resolvable".to_owned(),
+        "If an ObjectType uses a @fromContext, at least one of its keys must be resolvable"
+            .to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.8.0",
             replaces: &[],
