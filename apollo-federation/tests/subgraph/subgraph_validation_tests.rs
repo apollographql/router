@@ -1967,7 +1967,6 @@ mod cost_tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_cost_applications_on_interfaces() {
         let doc = r#"
             extend schema
@@ -1996,7 +1995,6 @@ mod list_size_tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_applications_on_non_lists_unless_it_uses_sized_fields() {
         let doc = r#"
             extend schema
@@ -2022,7 +2020,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_negative_assumed_size() {
         let doc = r#"
             extend schema
@@ -2044,7 +2041,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched error counts:"#)]
     fn rejects_slicing_arguments_not_in_field_arguments() {
         let doc = r#"
             extend schema
@@ -2078,7 +2074,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched error counts:"#)]
     fn rejects_slicing_arguments_not_int_or_int_non_null() {
         let doc = r#"
             extend schema
@@ -2118,7 +2113,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_when_output_type_is_not_object() {
         let doc = r#"
             extend schema
@@ -2149,7 +2143,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_not_in_output_type() {
         let doc = r#"
             extend schema
@@ -2174,7 +2167,6 @@ mod list_size_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_sized_fields_not_lists() {
         let doc = r#"
             extend schema
