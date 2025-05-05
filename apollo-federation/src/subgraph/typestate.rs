@@ -336,6 +336,9 @@ impl Subgraph<Expanded> {
 
 impl Subgraph<Validated> {
     pub fn invalidate(self) -> Subgraph<Expanded> {
+        // PORT_NOTE: In JS, the metadata gets invalidated by calling
+        // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
+        // doesn't seem necessary in Rust, since the metadata is computed eagerly.
         Subgraph {
             name: self.name,
             url: self.url,

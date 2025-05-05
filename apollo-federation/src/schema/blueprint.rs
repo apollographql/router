@@ -20,6 +20,7 @@ use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
@@ -126,12 +127,17 @@ impl FederationBlueprint {
         Ok(())
     }
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
-        todo!()
-    }
-
-    pub(crate) fn on_invalidation(_: &Schema) {
-        todo!()
+    fn on_added_core_feature(
+        schema: &mut FederationSchema,
+        feature: &CoreFeature,
+    ) -> Result<(), FederationError> {
+        if feature.url.identity == Identity::federation_identity() {
+            FEDERATION_VERSIONS
+                .find(&feature.url.version)
+                .iter()
+                .try_for_each(|spec| spec.add_elements_to_schema(schema))?;
+        }
+        Ok(())
     }
 
     pub(crate) fn on_validation(
