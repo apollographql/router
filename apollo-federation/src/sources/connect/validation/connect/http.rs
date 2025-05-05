@@ -310,7 +310,8 @@ impl<'schema> Transport<'schema> {
             });
         }
 
-        let url_properties = UrlProperties::parse_for_connector(coordinate.clone(), schema, http_arg)?;
+        let url_properties =
+            UrlProperties::parse_for_connector(coordinate.clone(), schema, http_arg)?;
 
         let coordinate = HttpMethodCoordinate {
             connect: coordinate.connect_directive_coordinate,
@@ -361,7 +362,7 @@ impl<'schema> Transport<'schema> {
                     url,
                     url_string,
                     coordinate,
-                    url_properties
+                    url_properties,
                 })
             };
         } else {
@@ -372,7 +373,7 @@ impl<'schema> Transport<'schema> {
             url,
             url_string,
             coordinate,
-            url_properties
+            url_properties,
         })
     }
 

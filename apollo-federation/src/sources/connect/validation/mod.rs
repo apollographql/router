@@ -270,7 +270,7 @@ pub enum Code {
     /// Using both `$batch` and `$this` is not allowed
     ConnectBatchAndThis,
     /// Invalid URL property
-    InvalidUrlProperty
+    InvalidUrlProperty,
 }
 
 impl Code {
