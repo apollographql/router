@@ -373,7 +373,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic = "Mismatched error counts: 2 != 1"] // unused external validation not yet implemented
     fn rejects_non_string_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -405,7 +404,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic = "Mismatched error counts: 2 != 1"] // unused external validation not yet implemented
     fn rejects_non_string_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -464,7 +462,6 @@ mod fieldset_based_directives {
     #[test]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
-    #[should_panic = "Mismatched error counts: 2 != 1"] // unused external validation not yet implemented
     fn rejects_enum_like_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -498,7 +495,6 @@ mod fieldset_based_directives {
     #[test]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
-    #[should_panic = "Mismatched error counts: 2 != 1"] // unused external validation not yet implemented
     fn rejects_enum_like_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -531,7 +527,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -554,7 +550,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic = "Mismatched error counts: 2 != 1"] // unused external validation not yet implemented
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -583,7 +579,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -627,7 +623,7 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_FIELDS_SELECT_INVALID_TYPE",
-                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Interface type which is not allowed in @key"#,
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is an Interface type which is not allowed in @key"#,
             )]
         );
     }

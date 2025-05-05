@@ -118,7 +118,7 @@ impl<'schema> SchemaFieldSetValidator for DenyUnionAndInterfaceFields<'schema> {
                         target_type: baggage.target.type_name().clone(),
                         application: baggage.schema_directive.to_string(),
                         message: format!(
-                            "field \"{}.{}\" is a Interface type which is not allowed in @key",
+                            "field \"{}.{}\" is an Interface type which is not allowed in @key",
                             parent_ty, field.name
                         ),
                     })

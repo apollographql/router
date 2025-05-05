@@ -521,8 +521,8 @@ impl FederationSchema {
                             // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
                             applications.push(Err(
                                 SingleFederationError::ProvidesInvalidFieldsType {
-                                    target_type: field_definition.ty.inner_named_type().clone(),
-                                    target_field: field_definition.name.clone(),
+                                    target_type: field_definition_position.type_name().clone(),
+                                    target_field: field_definition_position.field_name().clone(),
                                     application: provides_directive_application.to_string(),
                                 }
                                 .into(),
@@ -573,8 +573,8 @@ impl FederationSchema {
                             // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
                             applications.push(Err(
                                 SingleFederationError::RequiresInvalidFieldsType {
-                                    target_type: field_definition.ty.inner_named_type().clone(),
-                                    target_field: field_definition.name.clone(),
+                                    target_type: field_definition_position.type_name().clone(),
+                                    target_field: field_definition_position.field_name().clone(),
                                     application: requires_directive_application.to_string(),
                                 }
                                 .into(),
