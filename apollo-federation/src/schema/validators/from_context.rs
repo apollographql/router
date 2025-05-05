@@ -357,38 +357,8 @@ mod tests {
     use super::*;
     use crate::error::MultipleFederationErrors;
     use crate::error::SingleFederationError;
-    use crate::subgraph::SubgraphError;
-    use crate::subgraph::typestate::Expanded;
-    use crate::subgraph::typestate::Subgraph;
+    use crate::subgraph::test_utils::build_and_expand;
     use std::collections::HashMap;
-
-    enum BuildOption {
-        AsIs,
-        AsFed2,
-    }
-
-    fn build_inner(
-        schema_str: &str,
-        build_option: BuildOption,
-    ) -> Result<Subgraph<Expanded>, SubgraphError> {
-        let name = "S";
-        let subgraph =
-            Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
-        let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph
-                .into_fed2_subgraph()
-                .map_err(|e| SubgraphError::new(name, e))?
-        } else {
-            subgraph
-        };
-        Ok(subgraph
-            .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))?)
-    }
-
-    fn build_and_expand(schema_str: &str) -> Subgraph<Expanded> {
-        build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
-    }
 
     #[test]
     fn test_deny_on_abstract_type() {

@@ -1,7 +1,7 @@
-use crate::assert_errors;
-use crate::subgraph::subgraph_utils::{
-    BuildOption, build_and_validate, build_for_errors, build_for_errors_with_option,
+use apollo_federation::subgraph::test_utils::{
+    BuildOption, build_and_validate, build_for_errors, build_for_errors_with_option
 };
+use apollo_federation::assert_errors;
 
 mod fieldset_based_directives {
     use super::*;
