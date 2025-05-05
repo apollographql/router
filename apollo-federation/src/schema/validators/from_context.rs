@@ -80,7 +80,7 @@ pub(crate) fn parse_context(field: &str) -> (Option<String>, Option<String>) {
     fn strip_leading_ignored_tokens(input: &str) -> Option<&str> {
         iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
             .and_then(|c| c.get(1))
-            .map_or(None, |m| Some(m.as_str()))
+            .map(|m| m.as_str())
     }
 
     let Some(dollar_start) = strip_leading_ignored_tokens(field) else {
@@ -180,19 +180,16 @@ impl FromContextValidator for DenyOnAbstractType {
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
     ) -> Result<(), FederationError> {
-        match target {
-            FieldArgumentDefinitionPosition::Interface(_) => {
-                errors.push(
-                SingleFederationError::ContextNotSet {
-                    message: format!(
-                        "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
-                        as_coordinate(target)
-                    ),
-                    }
-                    .into(),
-                );
-            }
-            _ => {}
+        if let FieldArgumentDefinitionPosition::Interface(_) = target {
+            errors.push(
+            SingleFederationError::ContextNotSet {
+                message: format!(
+                    "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
+                    as_coordinate(target)
+                ),
+                }
+                .into(),
+            );
         }
         Ok(())
     }
@@ -216,29 +213,26 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
     ) -> Result<(), FederationError> {
-        match target {
-            FieldArgumentDefinitionPosition::Object(position) => {
-                let obj = position.parent().parent().get(schema.schema())?;
-                let field = position.parent().field_name;
-                for implemented in &obj.implements_interfaces {
-                    let itf = InterfaceTypeDefinitionPosition {
-                        type_name: implemented.name.clone(),
-                    };
-                    let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
-                    if field.is_some() {
-                        errors.push(
-                            SingleFederationError::ContextNotSet {
-                                message: format!(
-                                    "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
-                                    as_coordinate(target)
-                                ),
-                            }
-                            .into(),
-                        );
-                    }
+        if let FieldArgumentDefinitionPosition::Object(position) = target {
+            let obj = position.parent().parent().get(schema.schema())?;
+            let field = position.parent().field_name;
+            for implemented in &obj.implements_interfaces {
+                let itf = InterfaceTypeDefinitionPosition {
+                    type_name: implemented.name.clone(),
+                };
+                let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
+                if field.is_some() {
+                    errors.push(
+                        SingleFederationError::ContextNotSet {
+                            message: format!(
+                                "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
+                                as_coordinate(target)
+                            ),
+                        }
+                        .into(),
+                    );
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -320,38 +314,35 @@ impl FromContextValidator for RequireResolvableKey {
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
     ) -> Result<(), FederationError> {
-        match target {
-            FieldArgumentDefinitionPosition::Object(position) => {
-                let parent = position.parent().parent();
-                if let Some(metadata) = &schema.subgraph_metadata {
-                    let key_directive = metadata
-                        .federation_spec_definition()
-                        .key_directive_definition(schema)?;
-                    let keys_on_type = parent.get_applied_directives(schema, &key_directive.name);
-                    if !keys_on_type
-                        .iter()
-                        .fallible_filter(|application| -> Result<bool, FederationError> {
-                            let arguments = metadata
-                                .federation_spec_definition()
-                                .key_directive_arguments(application)?;
-                            Ok(arguments.resolvable)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                        .is_empty()
-                    {
-                        errors.push(
-                            SingleFederationError::ContextNoResolvableKey {
-                                message: format!(
-                                    "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                                    as_coordinate(target)
-                                ),
-                            }
-                            .into(),
-                        );
-                    }
+        if let FieldArgumentDefinitionPosition::Object(position) = target {
+            let parent = position.parent().parent();
+            if let Some(metadata) = &schema.subgraph_metadata {
+                let key_directive = metadata
+                    .federation_spec_definition()
+                    .key_directive_definition(schema)?;
+                let keys_on_type = parent.get_applied_directives(schema, &key_directive.name);
+                if !keys_on_type
+                    .iter()
+                    .fallible_filter(|application| -> Result<bool, FederationError> {
+                        let arguments = metadata
+                            .federation_spec_definition()
+                            .key_directive_arguments(application)?;
+                        Ok(arguments.resolvable)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .is_empty()
+                {
+                    errors.push(
+                        SingleFederationError::ContextNoResolvableKey {
+                            message: format!(
+                                "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
+                                as_coordinate(target)
+                            ),
+                        }
+                        .into(),
+                    );
                 }
             }
-            _ => {}
         }
         Ok(())
     }

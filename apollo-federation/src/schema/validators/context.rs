@@ -85,7 +85,7 @@ impl ContextValidator for DenyInvalidContextName {
             || !context_name
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_alphabetic())
+                .is_some_and(|c| c.is_alphabetic())
         {
             errors.push(
                 SingleFederationError::ContextNameInvalid {

@@ -471,9 +471,9 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        Ok(subgraph
+        subgraph
             .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))?)
+            .map_err(|e| SubgraphError::new(name, e))
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
