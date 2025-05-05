@@ -283,7 +283,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     assert!(response.contains("REQUEST_RATE_LIMITED"));
     assert_yaml_snapshot!(response);
 
-    router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;
+    router.assert_metrics_contains(&format!(r#"apollo_router_graphql_error_total{{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None).await;
 
     router.graceful_shutdown().await;
     Ok(())
