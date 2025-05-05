@@ -11,13 +11,13 @@ use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
 use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::json_selection::SelectionTrie;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::variable::Namespace;
 use crate::sources::connect::variable::VariableContext;
-use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
 
 pub(crate) struct VariableResolver<'a> {
@@ -69,12 +69,11 @@ impl<'a> VariableResolver<'a> {
                     namespace = reference.namespace.namespace.as_str(),
                     available = self.context.namespaces_joined(),
                 ),
-                locations: expression
-                    .line_col_for_subslice(
-                        reference.namespace.location.start..reference.namespace.location.end,
-                        self.schema,
-                    )
-                    .into_iter()
+                locations: reference
+                    .namespace
+                    .location
+                    .iter()
+                    .flat_map(|range| expression.line_col_for_subslice(range.clone(), self.schema))
                     .collect(),
             });
         }
@@ -117,17 +116,15 @@ pub(super) fn resolve_type<'schema>(
 /// path has already been resolved to the type, and validates any remainder.
 fn resolve_path(
     schema: &SchemaInfo,
-    reference: &VariableReference<Namespace>,
+    path_selection: &SelectionTrie,
     expression: GraphQLString,
     field_type: &Type,
     field: &Component<FieldDefinition>,
 ) -> Result<(), Message> {
-    let mut variable_type = field_type.clone();
-    for nested_field_name in reference.path.clone().iter().skip(1) {
-        let path_component_range = nested_field_name.location.clone();
-        let nested_field_name = nested_field_name.as_str();
-        let parent_is_nullable = !field_type.is_non_null();
-        variable_type = resolve_type(schema, &variable_type, field)
+    let parent_is_nullable = !field_type.is_non_null();
+
+    for (nested_field_name, sub_trie) in path_selection.iter() {
+        let nested_field_type = resolve_type(schema, field_type, field)
             .and_then(|extended_type| {
                 match extended_type {
                     ExtendedType::Enum(_) | ExtendedType::Scalar(_) => None,
@@ -151,24 +148,28 @@ fn resolve_path(
                     .ok_or_else(|| Message {
                         code: Code::UndefinedField,
                         message: format!(
-                            "`{variable_type}` does not have a field named `{nested_field_name}`."
+                            "`{field_type}` does not have a field named `{nested_field_name}`."
                         ),
-                        locations: expression.line_col_for_subslice(
-                            path_component_range,
-                            schema
-                        ).into_iter().collect(),
+                        locations: path_selection
+                            .key_ranges(nested_field_name)
+                            .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                            .collect(),
                     })
-            })?.clone();
-        if parent_is_nullable && variable_type.is_non_null() {
-            variable_type = variable_type.nullable();
-        }
-    }
-    Ok(())
-}
+            })
+            .map(|extended_type| {
+                if parent_is_nullable && extended_type.is_non_null() {
+                    // This .clone() might not be necessary if .nullable() did
+                    // not take ownership of extended_type.
+                    extended_type.clone().nullable()
+                } else {
+                    extended_type.clone()
+                }
+            })?;
 
-/// Require a variable reference to have a path
-fn get_root<'a>(reference: &'a VariableReference<'a, Namespace>) -> Option<VariablePathPart<'a>> {
-    reference.path.first().cloned()
+        resolve_path(schema, sub_trie, expression, &nested_field_type, field)?;
+    }
+
+    Ok(())
 }
 
 /// Resolves variables in the `$this` namespace
@@ -190,29 +191,29 @@ impl NamespaceResolver for ThisResolver<'_> {
         expression: GraphQLString,
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
-        let Some(root) = get_root(reference) else {
-            return Ok(()); // Not something we can type check this way
-        };
+        for (root, sub_trie) in reference.selection.iter() {
+            let fields = &self.object.fields;
 
-        let fields = &self.object.fields;
+            let field_type = fields
+                .get(root)
+                .ok_or_else(|| Message {
+                    code: Code::UndefinedField,
+                    message: format!(
+                        "`{object}` does not have a field named `{root}`",
+                        object = self.object.name,
+                    ),
+                    locations: reference
+                        .selection
+                        .key_ranges(root)
+                        .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                        .collect(),
+                })
+                .map(|field| field.ty.clone())?;
 
-        let field_type = fields
-            .get(root.as_str())
-            .ok_or_else(|| Message {
-                code: Code::UndefinedField,
-                message: format!(
-                    "`{object}` does not have a field named `{root}`",
-                    object = self.object.name,
-                    root = root.as_str(),
-                ),
-                locations: expression
-                    .line_col_for_subslice(root.location.start..root.location.end, schema)
-                    .into_iter()
-                    .collect(),
-            })
-            .map(|field| field.ty.clone())?;
+            resolve_path(schema, sub_trie, expression, &field_type, self.field)?;
+        }
 
-        resolve_path(schema, reference, expression, &field_type, self.field)
+        Ok(())
     }
 }
 
@@ -234,29 +235,29 @@ impl NamespaceResolver for ArgsResolver<'_> {
         expression: GraphQLString,
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
-        let Some(root) = get_root(reference) else {
-            return Ok(()); // Not something we can type check this way TODO: delete all of this when Shape is available
-        };
+        for (root, sub_trie) in reference.selection.iter() {
+            let field_type = self
+                .field
+                .arguments
+                .iter()
+                .find(|arg| arg.name == root)
+                .ok_or_else(|| Message {
+                    code: Code::UndefinedArgument,
+                    message: format!(
+                        "`{object}` does not have an argument named `{root}`",
+                        object = self.field.name,
+                    ),
+                    locations: reference
+                        .selection
+                        .key_ranges(root)
+                        .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                        .collect(),
+                })
+                .map(|field| field.ty.clone())?;
 
-        let field_type = self
-            .field
-            .arguments
-            .iter()
-            .find(|arg| arg.name == root.as_str())
-            .ok_or_else(|| Message {
-                code: Code::UndefinedArgument,
-                message: format!(
-                    "`{object}` does not have an argument named `{root}`",
-                    object = self.field.name,
-                    root = root.as_str(),
-                ),
-                locations: expression
-                    .line_col_for_subslice(root.location.start..root.location.end, schema)
-                    .into_iter()
-                    .collect(),
-            })
-            .map(|field| field.ty.clone())?;
+            resolve_path(schema, sub_trie, expression, &field_type, self.field)?;
+        }
 
-        resolve_path(schema, reference, expression, &field_type, self.field)
+        Ok(())
     }
 }

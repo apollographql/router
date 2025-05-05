@@ -365,29 +365,20 @@ fn determine_entity_resolver(
 fn extract_header_references(
     variable_references: HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
-    let headers: HashSet<String> = variable_references
+    variable_references
         .iter()
-        .filter_map(|var_ref| {
+        .flat_map(|var_ref| {
             if var_ref.namespace.namespace != Namespace::Request
                 && var_ref.namespace.namespace != Namespace::Response
             {
-                return None;
+                vec![]
+            } else if let Some(headers_subselection) = var_ref.selection.get("headers") {
+                headers_subselection.keys().cloned().collect()
+            } else {
+                vec![]
             }
-
-            // We only care if the path references starts with "headers"
-            if var_ref
-                .path
-                .first()
-                .is_none_or(|path| path.part != "headers")
-            {
-                return None;
-            }
-
-            // Grab the name of the header from the path
-            var_ref.path.get(1).map(|path| path.part.to_string())
         })
-        .collect();
-    headers
+        .collect()
 }
 
 #[cfg(test)]
