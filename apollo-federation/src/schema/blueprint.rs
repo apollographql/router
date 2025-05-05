@@ -6,6 +6,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -14,12 +15,14 @@ use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -29,7 +32,10 @@ use crate::schema::field_set::parse_field_set;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::cost::validate_cost_directives;
+use crate::schema::validators::external::validate_external_directives;
 use crate::schema::validators::key::validate_key_directives;
+use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
 use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
@@ -144,9 +150,10 @@ impl FederationBlueprint {
             return error_collector.into_result().map(|_| schema);
         }
 
-        validate_key_directives(&schema, &mut error_collector)?;
+        validate_key_directives(&schema, meta, &mut error_collector)?;
         validate_provides_directives(&schema, meta, &mut error_collector)?;
         validate_requires_directives(&schema, meta, &mut error_collector)?;
+        validate_external_directives(&schema, meta, &mut error_collector)?;
 
         // TODO: Remaining validations
         Self::validate_keys_on_interfaces_are_also_on_all_implementations(
@@ -155,6 +162,9 @@ impl FederationBlueprint {
             &mut error_collector,
         )?;
         Self::validate_interface_objects_are_on_entities(&schema, meta, &mut error_collector)?;
+
+        validate_cost_directives(&schema, &mut error_collector)?;
+        validate_list_size_directives(&schema, &mut error_collector)?;
 
         error_collector.into_result().map(|_| schema)
     }
@@ -243,9 +253,18 @@ impl FederationBlueprint {
             return Ok(());
         };
 
-        for _link in links_metadata.links.clone() {
+        for link in links_metadata.links.clone() {
             // TODO: Pick out known features by link identity and call `add_elements_to_schema`.
             // JS calls coreFeatureDefinitionIfKnown here, but we don't have a feature registry yet.
+
+            if link.url.identity == Identity::cost_identity() {
+                let spec = COST_VERSIONS
+                    .find(&link.url.version)
+                    .ok_or_else(|| SingleFederationError::UnknownLinkVersion {
+                        message: format!("Detected unsupported cost specification version {}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.", link.url.version, COST_VERSIONS.versions().join(", "))
+                    })?;
+                spec.add_elements_to_schema(schema)?;
+            }
         }
         Ok(())
     }

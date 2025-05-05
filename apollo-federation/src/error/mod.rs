@@ -338,6 +338,16 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
+    CostAppliedToInterfaceField { interface: Name, field: Name },
+    #[error("{message}")]
+    ListSizeAppliedToNonList { message: String },
+    #[error("{message}")]
+    ListSizeInvalidAssumedSize { message: String },
+    #[error("{message}")]
+    ListSizeInvalidSlicingArgument { message: String },
+    #[error("{message}")]
+    ListSizeInvalidSizedField { message: String },
 }
 
 impl SingleFederationError {
@@ -535,6 +545,21 @@ impl SingleFederationError {
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
+            }
+            SingleFederationError::CostAppliedToInterfaceField { .. } => {
+                ErrorCode::CostAppliedToInterfaceField
+            }
+            SingleFederationError::ListSizeAppliedToNonList { .. } => {
+                ErrorCode::ListSizeAppliedToNonList
+            }
+            SingleFederationError::ListSizeInvalidAssumedSize { .. } => {
+                ErrorCode::ListSizeInvalidAssumedSize
+            }
+            SingleFederationError::ListSizeInvalidSlicingArgument { .. } => {
+                ErrorCode::ListSizeInvalidSlicingArgument
+            }
+            SingleFederationError::ListSizeInvalidSizedField { .. } => {
+                ErrorCode::ListSizeInvalidSizedField
             }
         }
     }
@@ -1621,6 +1646,61 @@ static NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS: LazyLock<ErrorCodeDefinition> = La
     )
 });
 
+static COST_APPLIED_TO_INTERFACE_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "COST_APPLIED_TO_INTERFACE_FIELD".to_owned(),
+        "The `@cost` directive must be applied to concrete types".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_APPLIED_TO_NON_LIST: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_APPLIED_TO_NON_LIST".to_owned(),
+        "The `@listSize` directive must be applied to list types".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_ASSUMED_SIZE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_ASSUMED_SIZE".to_owned(),
+        "The `@listSize` directive assumed size cannot be negative".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_SLICING_ARGUMENT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_SLICING_ARGUMENT".to_owned(),
+        "The `@listSize` directive must have existing integer slicing arguments".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_SIZED_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_SIZED_FIELD".to_owned(),
+        "The `@listSize` directive must reference existing list fields as sized fields".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1704,6 +1784,11 @@ pub enum ErrorCode {
     UnsupportedFederationDirective,
     QueryPlanComplexityExceededError,
     NoPlanFoundWithDisabledSubgraphs,
+    CostAppliedToInterfaceField,
+    ListSizeAppliedToNonList,
+    ListSizeInvalidAssumedSize,
+    ListSizeInvalidSlicingArgument,
+    ListSizeInvalidSizedField,
 }
 
 impl ErrorCode {
@@ -1805,6 +1890,11 @@ impl ErrorCode {
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
             ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
             ErrorCode::NoPlanFoundWithDisabledSubgraphs => &NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS,
+            ErrorCode::CostAppliedToInterfaceField => &COST_APPLIED_TO_INTERFACE_FIELD,
+            ErrorCode::ListSizeAppliedToNonList => &LIST_SIZE_APPLIED_TO_NON_LIST,
+            ErrorCode::ListSizeInvalidAssumedSize => &LIST_SIZE_INVALID_ASSUMED_SIZE,
+            ErrorCode::ListSizeInvalidSlicingArgument => &LIST_SIZE_INVALID_SLICING_ARGUMENT,
+            ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
         }
     }
 }
