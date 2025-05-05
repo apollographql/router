@@ -1,5 +1,5 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"])
   @source(
     name: "valid_source"
     http: {

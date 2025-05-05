@@ -46,7 +46,6 @@ use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
     link: &Link,
-    spec: &ConnectSpec,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     // the `get_type` closure expects a SingleFederationError, so we can't
@@ -370,7 +369,10 @@ pub(super) fn check_or_add(
             },
         ],
         true,
-        spec.connect_directive_locations(),
+        &[
+            DirectiveLocation::FieldDefinition,
+            DirectiveLocation::Object,
+        ],
         false,
         None,
         None,
@@ -540,7 +542,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
@@ -551,7 +553,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
 
@@ -625,7 +627,7 @@ mod tests {
             .for_identity(&ConnectSpec::identity())
             .unwrap();
 
-        check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
+        check_or_add(&link, &mut federation_schema).unwrap();
 
         assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {

@@ -25,7 +25,6 @@ use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
-use super::versions::VersionInfo;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -46,21 +45,19 @@ macro_rules! internal {
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
-    version_info: &VersionInfo,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
     schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(|d| SourceDirectiveArguments::from_directive(d, version_info))
+        .map(SourceDirectiveArguments::from_directive)
         .collect()
 }
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
-    version_info: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     // connect on fields
     schema
@@ -105,11 +102,7 @@ pub(crate) fn extract_connect_directive_arguments(
                                 directive_name: directive.name.clone(),
                                 directive_index: i,
                             });
-                        ConnectDirectiveArguments::from_position_and_directive(
-                            position,
-                            directive,
-                            version_info,
-                        )
+                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
                     })
             })
         })
@@ -132,9 +125,7 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_index: i,
                                 });
                             ConnectDirectiveArguments::from_position_and_directive(
-                                position,
-                                directive,
-                                version_info,
+                                position, directive,
                             )
                         })
                 }),
@@ -146,10 +137,7 @@ pub(crate) fn extract_connect_directive_arguments(
 type ObjectNode = [(Name, Node<Value>)];
 
 impl SourceDirectiveArguments {
-    fn from_directive(
-        value: &Component<Directive>,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_directive(value: &Component<Directive>) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
 
@@ -168,7 +156,7 @@ impl SourceDirectiveArguments {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!("`http` field in `@source` directive is not an object")
                 })?;
-                let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
+                let http_value = SourceHTTPArguments::from_values(http_value)?;
 
                 http = Some(http_value);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
@@ -196,10 +184,7 @@ impl SourceDirectiveArguments {
 }
 
 impl SourceHTTPArguments {
-    fn from_values(
-        values: &ObjectNode,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         let mut path = None;
@@ -219,7 +204,7 @@ impl SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &version_info.allowed_headers)
+                    Header::from_headers_arg(value)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -294,7 +279,6 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
         value: &Node<Directive>,
-        version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
@@ -320,7 +304,7 @@ impl ConnectDirectiveArguments {
                     internal!("`http` field in `@connect` directive is not an object")
                 })?;
 
-                http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
+                http = Some(ConnectHTTPArguments::from_values(http_value)?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!("`http` field in `@connect` directive is not an object")
@@ -368,10 +352,7 @@ impl ConnectDirectiveArguments {
 }
 
 impl ConnectHTTPArguments {
-    fn from_values(
-        values: &ObjectNode,
-        version_info: &VersionInfo,
-    ) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -391,7 +372,7 @@ impl ConnectHTTPArguments {
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &version_info.allowed_headers)
+                    Header::from_headers_arg(value)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -479,7 +460,6 @@ mod tests {
 
     use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
-    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SourceDirectiveArguments;
@@ -549,7 +529,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -591,7 +571,7 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.into()))
+            .map(SourceDirectiveArguments::from_directive)
             .collect();
 
         insta::assert_debug_snapshot!(
@@ -638,11 +618,7 @@ mod tests {
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = super::extract_connect_directive_arguments(
-            schema.schema(),
-            &name!(connect),
-            &ConnectSpec::V0_1.into(),
-        );
+        let connects = super::extract_connect_directive_arguments(schema.schema(), &name!(connect));
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
