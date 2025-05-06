@@ -69,6 +69,7 @@ async fn test_few() {
     assert_eq!(get("docA").await.as_deref(), None);
     assert_eq!(get("docB").await.as_deref(), None);
     assert_eq!(get("docC").await.as_deref(), Some("C"));
+    cache.drop_index(true).await.unwrap();
 }
 
 async fn test_many() {
@@ -99,4 +100,5 @@ async fn test_many() {
         println!();
         assert_eq!(deleted, count)
     }
+    cache.drop_index(true).await.unwrap();
 }
