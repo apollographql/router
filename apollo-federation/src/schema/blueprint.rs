@@ -215,7 +215,7 @@ impl FederationBlueprint {
     }
 
     fn apply_directives_after_parsing() -> bool {
-        todo!()
+        true
     }
 
     fn remove_federation_definitions_broken_in_known_ways(
