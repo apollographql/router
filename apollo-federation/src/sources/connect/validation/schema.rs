@@ -292,7 +292,7 @@ fn resolvable_key_fields<'a>(
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec)
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec())
     else {
         return messages;
     };

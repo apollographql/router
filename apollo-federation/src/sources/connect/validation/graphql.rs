@@ -51,12 +51,12 @@ impl<'schema> SchemaInfo<'schema> {
 
     #[inline]
     pub(crate) fn source_directive_name(&self) -> &Name {
-        &self.connect_link.source_directive_name
+        self.connect_link.source_directive_name()
     }
 
     #[inline]
     pub(crate) fn connect_directive_name(&self) -> &Name {
-        &self.connect_link.connect_directive_name
+        self.connect_link.connect_directive_name()
     }
 }
 

@@ -24,7 +24,6 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -95,9 +94,6 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
-
-        // Enable crypto
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let tls_config = rustls::ClientConfig::builder()
             .with_native_roots()?
@@ -312,11 +308,10 @@ where
     }
 }
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
     pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
@@ -333,12 +328,11 @@ pub(super) struct RouterRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<RouterSelector>>,
+    pub(super) condition: Condition<RouterSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -351,12 +345,11 @@ pub(super) struct RouterResponseConf {
     pub(super) status_code: bool,
 }
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -374,12 +367,11 @@ pub(super) struct SubgraphRequestConf {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -421,7 +413,7 @@ struct Conf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(super) enum ContextConf {
     /// Deprecated configuration using a boolean
@@ -436,7 +428,7 @@ impl Default for ContextConf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(super) enum NewContextConf {
     /// Send all context keys to coprocessor
@@ -492,7 +484,7 @@ fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     );
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct RouterStage {
     /// The request configuration
@@ -619,7 +611,7 @@ impl RouterStage {
 // -----------------------------------------------------------------------------------------
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStages {
     #[serde(default)]
@@ -627,7 +619,7 @@ pub(super) struct SubgraphStages {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
@@ -936,12 +928,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // split the response into parts + body
@@ -1140,12 +1127,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = request_config
-        .condition
-        .as_mut()
-        .map(|c| c.evaluate_request(&request) == Some(true))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
     }
     // Call into our out of process processor with a body of our body
@@ -1306,12 +1288,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // Call into our out of process processor with a body of our body

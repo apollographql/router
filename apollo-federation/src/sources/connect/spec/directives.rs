@@ -6,12 +6,17 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
+use super::schema::BATCH_ARGUMENT_NAME;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::ConnectBatchArguments;
 use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
+use super::schema::ERRORS_ARGUMENT_NAME;
+use super::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
+use super::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
+use super::schema::ErrorsArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::PATH_ARGUMENT_NAME;
@@ -134,10 +139,12 @@ type ObjectNode = [(Name, Node<Value>)];
 impl SourceDirectiveArguments {
     fn from_directive(value: &Component<Directive>) -> Result<Self, FederationError> {
         let args = &value.arguments;
+        let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut name = None;
         let mut http = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -152,6 +159,13 @@ impl SourceDirectiveArguments {
                 let http_value = SourceHTTPArguments::from_values(http_value)?;
 
                 http = Some(http_value);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@source` directive is not an object")
+                })?;
+                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+
+                errors = Some(errors_value);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive: {arg_name}"
@@ -164,6 +178,7 @@ impl SourceDirectiveArguments {
                 .ok_or_else(|| internal!("missing `name` field in `@source` directive"))?
                 .to_string(),
             http: http.ok_or_else(|| internal!("missing `http` field in `@source` directive"))?,
+            errors,
         })
     }
 }
@@ -227,12 +242,46 @@ impl SourceHTTPArguments {
     }
 }
 
+impl ErrorsArguments {
+    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+        let mut message = None;
+        let mut extensions = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
+                let message_value = value.as_str().ok_or_else(|| internal!(format!(
+                    "`message` field in `@{directive_name}` directive's `errors` field is not a string")
+                ))?;
+                message =
+                    Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
+            } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
+                let extensions_value = value.as_str().ok_or_else(|| internal!(format!(
+                    "`extensions` field in `@{directive_name}` directive's `errors` field is not a string")
+                ))?;
+                extensions =
+                    Some(JSONSelection::parse(extensions_value).map_err(|e| internal!(e.message))?);
+            } else {
+                return Err(internal!(format!(
+                    "unknown argument in `@{directive_name}` directive's `errors` field: {name}"
+                )));
+            }
+        }
+
+        Ok(Self {
+            message,
+            extensions,
+        })
+    }
+}
+
 impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
         value: &Node<Directive>,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
+        let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut source = None;
@@ -240,6 +289,7 @@ impl ConnectDirectiveArguments {
         let mut selection = None;
         let mut entity = None;
         let mut batch = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -255,12 +305,20 @@ impl ConnectDirectiveArguments {
                 })?;
 
                 http = Some(ConnectHTTPArguments::from_values(http_value)?);
-            } else if arg_name == "batch" {
+            } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!("`http` field in `@connect` directive is not an object")
                 })?;
 
                 batch = Some(ConnectBatchArguments::from_values(http_value)?);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or_else(|| {
+                    internal!("`errors` field in `@connect` directive is not an object")
+                })?;
+
+                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+
+                errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or_else(|| {
                     internal!("`selection` field in `@connect` directive is not a string")
@@ -288,6 +346,7 @@ impl ConnectDirectiveArguments {
                 .ok_or_else(|| internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
             batch,
+            errors,
         })
     }
 }
@@ -426,7 +485,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
@@ -470,7 +529,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -517,7 +576,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             sources.unwrap(),
-            @r###"
+            @r#"
         [
             SourceDirectiveArguments {
                 name: "json",
@@ -545,9 +604,10 @@ mod tests {
                     path: None,
                     query_params: None,
                 },
+                errors: None,
             },
         ]
-        "###
+        "#
         );
     }
 
@@ -625,6 +685,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -699,6 +760,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
         ]
         "###

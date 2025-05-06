@@ -36,6 +36,17 @@ static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     )
 });
 
+static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
+
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
 pub(super) struct Context<'schema> {
@@ -45,6 +56,8 @@ pub(super) struct Context<'schema> {
     /// The code that all resulting messages will use
     /// TODO: make code dynamic based on coordinate so new validations can be warnings
     code: Code,
+    /// Used to determine if `$root` is available (aka: we're mapping a response, not a request)
+    has_response_body: bool,
 }
 
 impl<'schema> Context<'schema> {
@@ -79,6 +92,7 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: false,
                 }
             }
             ConnectedElement::Type { type_def } => {
@@ -97,6 +111,68 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: false,
+                }
+            }
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@connect` directive
+    /// TODO: We might be able to re-use this for the "selection" field later down the road
+    pub(super) fn for_connect_response(
+        schema: &'schema SchemaInfo,
+        coordinate: ConnectDirectiveCoordinate,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: true,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: true,
                 }
             }
         }
@@ -120,6 +196,33 @@ impl<'schema> Context<'schema> {
             var_lookup,
             source,
             code,
+            has_response_body: false,
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@source` directive
+    /// Note that we can't use stuff like "this" here cause we have no idea what the "type" is when on a @source block
+    pub(super) fn for_source_response(
+        schema: &'schema SchemaInfo,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
+            (Namespace::Status, Shape::int([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
+            (Namespace::Response, RESPONSE_SHAPE.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
+            has_response_body: true,
         }
     }
 }
@@ -219,6 +322,12 @@ fn resolve_shape(
         }
         ShapeCase::Name(name, key) => {
             let mut resolved = if name.value == "$root" {
+                // For response mapping, $root (aka the response body) is allowed so we will exit out early here
+                // However, $root is not allowed for requests so we will error below
+                if context.has_response_body {
+                    return Ok(Shape::unknown([]));
+                }
+
                 let mut key_str = key.iter().map(|key| key.to_string()).join(".");
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");

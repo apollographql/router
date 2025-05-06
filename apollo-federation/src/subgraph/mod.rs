@@ -30,7 +30,6 @@ use crate::subgraph::spec::LinkSpecDefinitions;
 use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
 
-mod database;
 pub mod spec;
 pub mod typestate; // TODO: Move here to overwrite Subgraph after API is reasonable
 
@@ -377,51 +376,5 @@ impl SubgraphError {
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.subgraph, self.error)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::subgraph::database::keys;
-
-    #[test]
-    fn can_inspect_a_type_key() {
-        // TODO: no schema expansion currently, so need to having the `@link` to `link` and the
-        // @link directive definition for @link-bootstrapping to work. Also, we should
-        // theoretically have the @key directive definition added too (but validation is not
-        // wired up yet, so we get away without). Point being, this is just some toy code at
-        // the moment.
-
-        let schema = r#"
-          extend schema
-            @link(url: "https://specs.apollo.dev/link/v1.0", import: ["Import"])
-            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
-
-          type Query {
-            t: T
-          }
-
-          type T @key(fields: "id") {
-            id: ID!
-            x: Int
-          }
-
-          enum link__Purpose {
-            SECURITY
-            EXECUTION
-          }
-
-          scalar Import
-
-          directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-        "#;
-
-        let subgraph = Subgraph::new("S1", "http://s1", schema).unwrap();
-        let keys = keys(&subgraph.schema, &name!("T"));
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys.first().unwrap().type_name, name!("T"));
-
-        // TODO: no accessible selection yet.
     }
 }

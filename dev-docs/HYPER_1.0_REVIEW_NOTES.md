@@ -6,6 +6,7 @@ Read HYPER_1.0_UPDATE.md first. This provides a lot of generally
 useful information.
 
 ### Crate updates
+
 Many crates have been updated as part of the update. In some parts of
 codebase we had to continue using the older version of the crate so
 that opentelemetry (which has not been updated to by hyper 1.0
@@ -34,27 +35,6 @@ We removed this since it's not required in hyper 1.0
 
 Anywhere you see a XXX comment is an indication that this should be reviewed
 carefully.
-
-### default crypto
-
-At various places in the code base you'll see code like this:
-```
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-```
-
-This is because crypto initialisation is now done differently in rustls and
-two crypto stacks are supported: `aws` and `ring`.
-
-If only one stack is enabled, then there is no need to specify a default
-provider. Unfortunately, because some of our crates are quite old, both
-aws and ring are specified. In this case no default is favoured by rustls
-and the crate panics at runtime when crypto functionality is required.
-
-The way around this is to specify a default manually. This has to be done
-once for the main binary and at various places in tests.
-
-Hopefully this situation will improve in the future.
 
 ## Focussed Review
 
