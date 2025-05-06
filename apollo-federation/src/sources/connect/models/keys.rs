@@ -29,7 +29,7 @@ pub(crate) fn make_key_field_set_from_variables(
     // let mut merged = TrieNode::default();
     let mut merged = SelectionTrie::new();
     for param in params {
-        merged.add_selection_trie(&param.selection);
+        merged.extend(&param.selection);
     }
 
     FieldSet::parse_and_validate(

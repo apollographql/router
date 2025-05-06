@@ -22,10 +22,12 @@ impl PathList {
     }
 }
 
+type Ref<T> = std::sync::Arc<T>;
+
 #[derive(Debug, Eq, Clone)]
 pub(crate) struct SelectionTrie {
     /// The top-level sub-selections of this [`SelectionTrie`].
-    selections: IndexMap<String, SelectionTrie>,
+    selections: IndexMap<String, Ref<SelectionTrie>>,
 
     /// Whether the path terminating at this [`SelectionTrie`] node was
     /// explicitly added to the trie.
@@ -105,11 +107,13 @@ impl SelectionTrie {
     }
 
     pub(crate) fn get(&self, key: impl Into<String>) -> Option<&SelectionTrie> {
-        self.selections.get(&key.into())
+        self.selections.get(&key.into()).map(|sub| sub.as_ref())
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &SelectionTrie)> {
-        self.selections.iter().map(|(key, sub)| (key.as_str(), sub))
+        self.selections
+            .iter()
+            .map(|(key, sub)| (key.as_str(), sub.as_ref()))
     }
 
     pub(crate) fn key_ranges(&self, key: &str) -> impl Iterator<Item = Range<usize>> {
@@ -178,10 +182,22 @@ impl SelectionTrie {
         self
     }
 
-    pub(crate) fn add_selection_trie(&mut self, other: &SelectionTrie) -> &mut Self {
+    pub(crate) fn extend(&mut self, other: &SelectionTrie) -> &mut Self {
         for (key, sub) in other.selections.iter() {
-            self.add_str_with_ranges(key, other.key_ranges(key))
-                .add_selection_trie(sub);
+            if let Some(existing) = self.selections.get_mut(key) {
+                Ref::make_mut(existing).extend(sub);
+            } else {
+                // Because sub is an Arc, this clone should be much cheaper than
+                // inserting an empty trie and then recursively extending it
+                // while traversing sub.
+                self.selections.insert(key.clone(), sub.clone());
+            }
+            // Whether or not the key already existed, we update self.key_ranges
+            // the same way:
+            self.key_ranges
+                .entry(key.clone())
+                .or_default()
+                .extend(other.key_ranges(key));
         }
         if self.is_used() || other.is_used() {
             self.set_used()
@@ -201,9 +217,11 @@ impl SelectionTrie {
     }
 
     fn add_str(&mut self, key: &str) -> &mut Self {
-        self.selections
-            .entry(key.to_string())
-            .or_insert_with(SelectionTrie::new)
+        if !self.selections.contains_key(key) {
+            self.selections
+                .insert(key.to_string(), Ref::new(SelectionTrie::new()));
+        }
+        Ref::make_mut(self.selections.get_mut(key).expect("should exist"))
     }
 
     fn add_str_with_ranges(
