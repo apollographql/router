@@ -665,6 +665,83 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "foobar")
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foobar")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp_override_client_name.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // rhai script overrides client.name - no matter what client name we pass via headers, it should
+    // end up equalling the value set in the script (`foo`)
+    for header_value in [None, Some(""), Some("foo"), Some("bar")] {
+        let mut headers = HashMap::default();
+        if let Some(value) = header_value {
+            headers.insert("apollographql-client-name".to_string(), value.to_string());
+        }
+
+        let query = Query::builder().traced(true).headers(headers).build();
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .attribute("client.name", "foo")
+            .build()
+            .validate_otlp_trace(&mut router, &mock_server, query)
+            .await
+            .unwrap_or_else(|_| panic!("Failed with header value {header_value:?}"));
+    }
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct OtlpTraceSpec<'a> {
     trace_spec: TraceSpec,
     mock_server: &'a MockServer,
@@ -678,10 +755,6 @@ impl Deref for OtlpTraceSpec<'_> {
 }
 
 impl Verifier for OtlpTraceSpec<'_> {
-    fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
-        // TODO
-        Ok(())
-    }
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
     }
@@ -873,6 +946,78 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
+<<<<<<< HEAD
+=======
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.resources.is_empty() {
+            let resources = trace.select_path("$..resource.attributes")?;
+            // Find the attributes for the router service
+            let router_resources = resources
+                .iter()
+                .filter(|r| {
+                    !r.select_path("$..[?(@.stringValue == 'router')]")
+                        .unwrap()
+                        .is_empty()
+                })
+                .collect::<Vec<_>>();
+            // Let's map this to a map of key value pairs
+            let router_resources = router_resources
+                .iter()
+                .flat_map(|v| v.as_array().expect("array required"))
+                .map(|v| {
+                    let entry = v.as_object().expect("must be an object");
+                    (
+                        entry
+                            .get("key")
+                            .expect("must have key")
+                            .as_string()
+                            .expect("key must be a string"),
+                        entry
+                            .get("value")
+                            .expect("must have value")
+                            .as_object()
+                            .expect("value must be an object")
+                            .get("stringValue")
+                            .expect("value must be a string")
+                            .as_string()
+                            .expect("value must be a string"),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+
+            for (key, value) in &self.resources {
+                if let Some(actual_value) = router_resources.get(*key) {
+                    assert_eq!(actual_value, value);
+                } else {
+                    return Err(BoxError::from(format!("missing resource key: {}", *key)));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!(
+                "$..spans..attributes..[?(@.key == '{key}')].value.*"
+            ))?;
+            let matches_value = binding.iter().any(|v| match v {
+                Value::Bool(v) => (*v).to_string() == *value,
+                Value::Number(n) => (*n).to_string() == *value,
+                Value::String(s) => s == value,
+                _ => false,
+            });
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+>>>>>>> 47925d01 (fix: propagate client name and version modifications through telemetry (#7369))
 }
 
 async fn mock_otlp_server_delayed() -> MockServer {
