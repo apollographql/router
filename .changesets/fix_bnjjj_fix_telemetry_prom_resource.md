@@ -1,12 +1,9 @@
 ### Telemetry: export properly resources on metrics configured on prometheus ([PR #7394](https://github.com/apollographql/router/pull/7394))
 
-When configuring `resource` to globally add labels on metrics like this:
+When configuring `telemetry.exporters.metrics.common.resource` to globally add labels on metrics, these labels were not exported to prometheus. This is now fixed.
 
 ```yaml
 telemetry:
-  apollo:
-    client_name_header: name_header
-    client_version_header: version_header
   exporters:
     metrics:
       common:
@@ -16,7 +13,6 @@ telemetry:
         enabled: true
 ```
 
-`test-resource` label was never exported to prometheus, this bug only occurs with prometheus and not otlp. 
-This PR fixes this behavior and will no longer filter `resource`s.
+This bug only occurred with Prometheus and not OTLP.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7394
