@@ -964,7 +964,7 @@ async fn test_span_metrics() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_attributes() -> Result<(), BoxError> {
+async fn test_span_attributes() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }

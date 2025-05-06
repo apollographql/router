@@ -667,7 +667,7 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_attributes() -> Result<(), BoxError> {
+async fn test_span_attributes() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
