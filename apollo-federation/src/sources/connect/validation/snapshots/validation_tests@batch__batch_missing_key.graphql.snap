@@ -1,0 +1,12 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/batch/batch_missing_key.graphql
+---
+[
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "The `@connect` directive on `User_0` specifies a batch entity resolver, but the key `id` is not a subset of the output shape `{ name: $root.results.*.name, profilePic: $root.results.*.profile_pic }`.",
+        locations: [],
+    },
+]

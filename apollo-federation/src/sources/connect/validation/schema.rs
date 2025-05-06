@@ -31,7 +31,8 @@ use apollo_compiler::{Name, Node};
 use hashbrown::HashSet;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use shape::{Shape, ShapeVisitor};
+use shape::{Shape, ShapeCase, ShapeVisitor};
+
 mod keys;
 
 pub(super) fn validate(
@@ -312,7 +313,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                     .expect("batch always has a key")
                     .expect("expected to find a key");
                 let mut walker = SelectionSetWalker::new(&input_key.selection_set);
-                let result = walker.walk(&connector.selection.shape(), connector, schema);
+                let result = walker.walk(&connector.selection.shape(), connector);
                 match result {
                     Ok(res) => messages.extend(res),
                     Err(err) => messages.push(err)
@@ -370,7 +371,6 @@ impl SelectionSetWalker<'_> {
         &mut self,
         output_shape: &Shape,
         connector: &Connector,
-        schema: &Schema,
     ) -> Result<Vec<Message>, Message> {
         output_shape.visit_shape(self)?;
 
@@ -380,13 +380,12 @@ impl SelectionSetWalker<'_> {
             vec.push(Message {
                 code: Code::ConnectorsUnresolvedField,
                 message: format!(
-                    "The `@connect` directive on `{connector}` specifies a batch entity resolver, but the key `{key}` is not a subset of the output shape `{output_shape}`.",
-                    connector = connector.id,
-                    key = unset,
-                    output_shape = output_shape
+                    "The `@connect` directive on `{connector}` specifies a batch entity resolver, but the key `{unset}` is not a subset of the output shape `{output_shape}`.",
+                    connector = connector.id.directive.synthetic_name()
                 ),
                 // TODO: Get correct location?
-                locations: unset.line_column_range(&schema.sources).into_iter().collect(),
+                locations: Vec::new(),
+                
             });
         }
         Ok(vec)
@@ -420,35 +419,41 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
                 continue;
             };
 
-            // Object should contain all fields in the selection set. If not, then the field is unmapped.
+            // Object should contain all fields in the selection set. If not, then the field 
+            // and all nested field sets are unmapped.
             // TODO: Should this also check alias?
-            if !fields.contains_key(&*field.name) {
+            let field_name = field.alias.as_ref().unwrap_or(&field.name).as_str();
+            if !fields.contains_key(field_name) {
                 self.unmapped_fields.insert(&field);
+                self.unmapped_fields.extend(&mut field.selection_set.selections.iter()
+                    .flat_map(|s| s.as_field())
+                );
                 continue;
             }
-
+            
+            let next_shape= fields.get(field_name).expect("nested shape expected");
+            
+            // Check that next shape doesn't come from a non-`$root` field.
+            if let ShapeCase::Name(root, _) = next_shape.case() {
+                if root.value != "$root" {
+                    return Err(Message {
+                        code: Code::ConnectBatchAndThis,
+                        message: "Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`).".to_string(),
+                        // TODO: Determine correct location
+                        locations: vec![],
+                    })
+                }
+            }
+            
             // If field has no nested selections, then we can stop walking down this branch.
             if field.selection_set.is_empty() {
                 continue;
             }
 
             // Continue walking with nested selection sets
-            if let Some(next_shape) = fields.get(&*field.name) {
-                // If the field has a nested selection set, continue walking
-                let mut nested = SelectionSetWalker::new(&field.selection_set);
-                next_shape.visit_shape(&mut nested)?;
-                self.unmapped_fields
-                    .extend(nested.unmapped_fields.into_iter());
-            } else {
-                // If no shape is found, then all nested field sets are unmapped.
-                self.unmapped_fields.extend(
-                    field
-                        .selection_set
-                        .selections
-                        .iter()
-                        .flat_map(|s| s.as_field()),
-                );
-            }
+            let mut nested = SelectionSetWalker::new(&field.selection_set);
+            next_shape.visit_shape(&mut nested)?;
+            self.unmapped_fields.extend(nested.unmapped_fields.into_iter());
         }
         Ok(())
     }
@@ -464,78 +469,4 @@ fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Direct
         })
         .flatten()
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sources::connect::validation::link::ConnectLink;
-    use apollo_compiler::schema::SchemaBuilder;
-
-    const SCHEMA: &str = r#"
-    extend schema
-      @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
-      @link(
-        url: "https://specs.apollo.dev/connect/v0.1"
-        import: ["@source", "@connect"]
-      )
-      @source(
-        name: "outerspace"
-        http: {
-          baseURL: "http://outerspace-api.example/"
-          headers: [{ name: "x-caller", value: "space-schema" }]
-        }
-      )
-
-    type Query {
-      "Returns the planets in a particular galaxy at a certain population level"
-      planets(maxPopulation: Int): [Planet]
-        @connect(
-          source: "outerspace"
-          http: { GET: "/planets/{maxPopulation}" }
-          selection: """
-          id: planetId name mass
-          """
-        )
-    }
-
-    "Astronomical information for a single planet."
-    type Planet {
-      "The ID for the planet"
-      id: ID!
-      "The planet's name"
-      name: String!
-      "The total estimated mass of the planet (in kg)"
-      mass: Int
-    }
-
-    "Astronomical information for a single galaxy"
-    type Galaxy {
-      "The ID for the galaxy"
-      id: ID!
-      "The galaxy's name"
-      name: String!
-      "The total number of known planets in the galaxy"
-      numOfPlanets: Int
-      "The date the galaxy was discovered"
-      dateDiscovered: String
-    }
-    "#;
-    const FAKE_FILE: &str = "stuff.graphql";
-
-    #[test]
-    fn test_advanced_validations() {
-        let schema = SchemaBuilder::new()
-            .adopt_orphan_extensions()
-            .parse(SCHEMA, FAKE_FILE)
-            .build()
-            .inspect_err(|err| eprintln!("{:?}", err))
-            .unwrap();
-        let schema_info = SchemaInfo::new(
-            &schema,
-            FAKE_FILE,
-            ConnectLink::new(&schema).unwrap().expect("STUFF"),
-        );
-        advanced_validations(&schema_info, "stuff");
-    }
 }

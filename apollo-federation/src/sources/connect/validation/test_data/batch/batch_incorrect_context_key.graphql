@@ -16,6 +16,7 @@ type User
     }
     selection: """
     $.results {
+      id: $context.id_stuff
       name
       profilePic: profile_pic
     }
