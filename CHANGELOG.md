@@ -4,6 +4,90 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.6] - 2025-05-06
+
+## 🐛 Fixes
+
+### Fix JWT metrics discrepancy ([PR #7258](https://github.com/apollographql/router/pull/7258))
+
+This fixes the `apollo.router.operations.authentication.jwt` counter metric to behave [as documented](https://www.apollographql.com/docs/graphos/routing/security/jwt#observability): emitted for every request that uses JWT, with the `authentication.jwt.failed` attribute set to true or false for failed or successful authentication.
+
+Previously, it was only used for failed authentication.
+
+The attribute-less and accidentally-differently-named `apollo.router.operations.jwt` counter was and is only emitted for successful authentication, but is deprecated now.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7258
+
+### Fix Redis connection leak ([PR #7319](https://github.com/apollographql/router/pull/7319))
+
+The router performs a 'hot reload' whenever it detects a schema update. During this reload, it effectively instantiates a new internal router, warms it up (optional), redirects all traffic to this new router, and drops the old internal router.
+
+This change fixes a bug in that drop process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections, which eats up memory.
+
+It also adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`). 
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7319
+
+### Fix Parsing of Coprocessor GraphQL Responses ([PR #7141](https://github.com/apollographql/router/pull/7141))
+
+Previously Router ignored `data: null` property inside GraphQL response returned by coprocessor.
+According to [GraphQL Spectification](https://spec.graphql.org/draft/#sel-FAPHLJCAACEBxlY):
+
+> If an error was raised during the execution that prevented a valid response, the "data" entry in the response should be null.
+
+That means if coprocessor returned valid execution error, for example:
+
+```json
+{
+  "data": null,
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+Router violated above restriction from GraphQL Specification by returning following response to client:
+
+```json
+{
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+This fix ensures full compliance with the GraphQL specification by preserving the complete structure of error responses from coprocessors.
+
+Contributed by [@IvanGoncharov](https://github.com/IvanGoncharov) in [#7141](https://github.com/apollographql/router/pull/7141)
+
+### Avoid fractional decimals when generating `apollo.router.operations.batching.size` metrics for GraphQL request batch sizes ([PR #7306](https://github.com/apollographql/router/pull/7306))
+
+Correct the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7306
+
+## 📃 Configuration
+
+### Add configurable server header read timeout ([PR #7262](https://github.com/apollographql/router/pull/7262))
+
+This change exposes the server's header read timeout as the `server.http.header_read_timeout` configuration option.
+
+By default, the `server.http.header_read_timeout` is set to previously hard-coded 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` option.
+
+```yaml title="router.yaml"
+server:
+  http:
+    header_read_timeout: 30s
+```
+
+By [@gwardwell ](https://github.com/gwardwell) in https://github.com/apollographql/router/pull/7262
+
+## 🛠 Maintenance
+
+### Reject `@skip`/`@include` on subscription root fields in validation ([PR #7338](https://github.com/apollographql/router/pull/7338))
+
+This implements a [GraphQL spec RFC](https://github.com/graphql/graphql-spec/pull/860), rejecting subscriptions in validation that can be invalid during execution.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7338
+
+
+
 # [1.61.5] - 2025-04-28
 
 ## 🔍 Debuggability
