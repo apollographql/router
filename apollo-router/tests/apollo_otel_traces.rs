@@ -359,7 +359,6 @@ async fn get_traces<
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
