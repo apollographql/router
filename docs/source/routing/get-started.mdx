@@ -6,7 +6,9 @@ description: This quickstart tutorial walks you through installing an Apollo Rou
 
 import ElasticNotice from "../../shared/elastic-notice.mdx";
 
-Hello! Let's run Apollo Router for the very first time. You will:
+Hello! Let's run Apollo Router for the first time, using the simple scenario of developing and deploying locally.
+
+In this guide, you will:
 
 - Download and install a router binary.
 - Download a supergraph schema.
@@ -16,7 +18,7 @@ Hello! Let's run Apollo Router for the very first time. You will:
 
 ## 1. Install router binary
 
-Let's start by downloading and installing a router binary.
+Let's start by downloading and installing a router binary locally.
 
 1. Download and install the latest version of the router binary with a single command line:
 
@@ -194,10 +196,10 @@ type User
 
 The router's many features are configurable via a YAML configuration file. You set your options declaratively in YAML, then point your router to it at startup.
 
-Let's customize a common setting: the router's _supergraph listen address_. It's the network address and port on which the router receives client requests. By default the address is `127.0.0.1:4000`. For this guide, let's change the port to `5555`.
+Let's customize a common setting: the router's _supergraph listen address_. It's the network address and port on which the router receives client requests. By default the address is `127.0.0.1:4000`. As an exercise, let's change the port to `5555`.
 
 1. Create a file named `router.yaml`. Open it for editing.
-1. Add the following configuration for `supergraph.listen` that sets it to `127.0.0.1:5555`:
+1. Add the following configuration that sets `supergraph.listen` to `127.0.0.1:5555`:
 
   ```yaml title="router.yaml"
   supergraph:
@@ -206,16 +208,16 @@ Let's customize a common setting: the router's _supergraph listen address_. It's
 
 ## 4. Run the router
 
-When you're developing with the router locally, it's useful to run the router in _development mode_, or dev mode. Dev mode is a collection of router configuration settings that enable development and debugging features.
+When you're developing with the router locally, it's useful to run the router in _dev mode_. Dev mode is a collection of settings that make router development and debugging easier.
 
-Let's run the router in dev mode. We'll also run the router using both the supergraph schema and YAML configuration files you saved: 
+Let's run the router in dev mode. We'll also use both the supergraph schema and YAML configuration files you saved: 
 
-1. Run the router with command-line options:
+1. Run the router with these command-line options:
     - `--dev` enables dev mode
     - `--config` provides the path to your YAML configuration file
     - `--supergraph` provides the path to your supergraph schema
 
-    ```sh
+    ```sh showLineNumbers=false
     ./router --dev --supergraph supergraph-schema.graphql --config router.yaml
     ```
 
@@ -223,7 +225,7 @@ Let's run the router in dev mode. We'll also run the router using both the super
 
     <ExpansionPanel title="Example router output">
 
-    ```sh
+    ```sh showLineNumbers=false disableCopy=true
     2025-04-25T21:54:05.910202Z INFO  Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)
     2025-04-25T21:54:05.981114Z INFO  Apollo Router v2.1.3 // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
     2025-04-25T21:54:05.981141Z INFO  Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for details.
@@ -285,8 +287,7 @@ That's it! You've successfully sent a query to a router running a development gr
 
 ## Next steps
 
-Now that you know how to run the router locally in dev mode with a supergraph schema, you can:
+Now that you've run the router locally, explore more about deployment and configuration:
 
-- Understand concepts [about the router](/graphos/routing/about-router).
-- Learn how to [configure the router](/router/configuration/overview).
-- Deploy the router [in your own infrastructure](/graphos/routing/self-hosted/containerization/overview).
+- Deploy the router [in your own infrastructure](/graphos/routing/self-hosted) with containers and/or Helm.
+- [Configure runtime features](/router/configuration/overview) of the router.
