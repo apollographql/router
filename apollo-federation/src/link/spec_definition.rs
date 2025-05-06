@@ -26,6 +26,8 @@ pub(crate) trait SpecDefinition {
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
 
+    fn minimum_federation_version(&self) -> &Version;
+
     fn identity(&self) -> &Identity {
         &self.url().identity
     }
@@ -200,5 +202,17 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
 
     pub(crate) fn versions(&self) -> Keys<Version, T> {
         self.definitions.keys()
+    }
+}
+
+impl<T: SpecDefinition + 'static> SpecDefinitions<T> {
+    pub(crate) fn get_minimum_required_version(
+        &'static self,
+        federation_version: &Version,
+    ) -> Option<&'static dyn SpecDefinition> {
+        self.definitions
+            .values()
+            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+            .map(|spec| spec as &dyn SpecDefinition)
     }
 }
