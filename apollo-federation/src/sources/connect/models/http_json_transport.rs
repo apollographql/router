@@ -253,14 +253,17 @@ fn extend_query_from_expression(
         ));
     };
 
-    let all_params = map.iter().flat_map(|(key, value)| {
-        if let Value::Array(values) = value {
-            // If the top-level value is an array, we're going to turn that into repeated params
-            Either::Left(values.iter().map(|value| (key.as_str(), value)))
-        } else {
-            Either::Right(once((key.as_str(), value)))
-        }
-    });
+    let all_params = map
+        .iter()
+        .filter(|(_, value)| !value.is_null())
+        .flat_map(|(key, value)| {
+            if let Value::Array(values) = value {
+                // If the top-level value is an array, we're going to turn that into repeated params
+                Either::Left(values.iter().map(|value| (key.as_str(), value)))
+            } else {
+                Either::Right(once((key.as_str(), value)))
+            }
+        });
 
     for (key, value) in all_params {
         if !query.is_empty() && !query.ends_with('&') {
@@ -808,6 +811,36 @@ mod test_make_uri {
         assert_eq!(
             transport.make_uri(&Default::default()).unwrap(),
             "http://localhost/"
+        )
+    }
+
+    #[test]
+    fn skip_null_query_params() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            connect_query_params: JSONSelection::parse("something: $(null)").ok(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/"
+        )
+    }
+
+    #[test]
+    fn skip_null_path_params() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            connect_path: JSONSelection::parse("$([1, null, 2])").ok(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/1/2"
         )
     }
 }
