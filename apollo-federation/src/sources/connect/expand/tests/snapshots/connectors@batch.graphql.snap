@@ -75,6 +75,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
     "one_User_0": Connector {
         id: ConnectId {
@@ -239,5 +244,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

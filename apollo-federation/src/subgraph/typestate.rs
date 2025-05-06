@@ -57,7 +57,6 @@ pub struct Raw {
 pub struct Expanded {
     schema: FederationSchema,
     metadata: SubgraphMetadata,
-    is_fed_1: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +68,6 @@ pub struct Validated {
 trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
-    fn is_fed_1(&self) -> bool;
 }
 
 impl HasMetadata for Expanded {
@@ -80,10 +78,6 @@ impl HasMetadata for Expanded {
     fn schema(&self) -> &FederationSchema {
         &self.schema
     }
-
-    fn is_fed_1(&self) -> bool {
-        self.is_fed_1
-    }
 }
 
 impl HasMetadata for Validated {
@@ -93,10 +87,6 @@ impl HasMetadata for Validated {
 
     fn schema(&self) -> &FederationSchema {
         &self.schema
-    }
-
-    fn is_fed_1(&self) -> bool {
-        true
     }
 }
 
@@ -172,11 +162,7 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded {
-                schema,
-                metadata,
-                is_fed_1: false,
-            },
+            state: Expanded { schema, metadata },
         })
     }
 
@@ -193,9 +179,8 @@ impl Subgraph<Raw> {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        let is_fed_1 = if schema.get_directive_definition(&name!("link")).is_some() {
+        if schema.get_directive_definition(&name!("link")).is_some() {
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
-            false
         } else {
             // This must be a Fed 1 schema.
             LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
@@ -203,10 +188,6 @@ impl Subgraph<Raw> {
             // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
             //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
             add_fed1_link_to_schema(&mut schema)?;
-            // LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
-
-            // add_fed2_link_to_schema(&mut schema)?;
-            true
         };
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
@@ -236,11 +217,7 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded {
-                schema,
-                metadata,
-                is_fed_1,
-            },
+            state: Expanded { schema, metadata },
         })
     }
 }
@@ -366,7 +343,6 @@ impl Subgraph<Validated> {
                 // Other holders may still need the data in the `Arc`, so we clone the contents to allow mutation later
                 schema: (*self.state.schema).clone(),
                 metadata: self.state.metadata,
-                is_fed_1: false,
             },
         }
     }
@@ -380,10 +356,6 @@ impl<S: HasMetadata> Subgraph<S> {
 
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
-    }
-
-    pub(crate) fn is_fed_1(&self) -> bool {
-        self.state.is_fed_1()
     }
 
     /// Returns the schema as a string. Mainly for testing purposes.
@@ -546,6 +518,7 @@ mod tests {
                 name!("requires"),
                 name!("skip"),
                 name!("specifiedBy"),
+                name!("tag"),
             ]
         );
     }
@@ -919,158 +892,5 @@ mod tests {
                 .root_operation(OperationType::Subscription),
             Some(name!("MySubscription")).as_ref()
         );
-    }
-}
-
-// PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
-#[cfg(test)]
-mod link_handling_tests {
-    use super::*;
-
-    // TODO(FED-543): Remaining directive definitions should be added to the schema
-    #[allow(dead_code)]
-    const EXPECTED_FULL_SCHEMA: &str = r#"
-    schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-    {
-      query: Query
-    }
-
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-    directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-    directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-    directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-    directive @federation__extends on OBJECT | INTERFACE
-
-    directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-    directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-    directive @federation__override(from: String!) on FIELD_DEFINITION
-
-    type T
-      @key(fields: "k")
-    {
-      k: ID!
-    }
-
-    enum link__Purpose {
-      """
-      \`SECURITY\` features provide metadata necessary to securely resolve fields.
-      """
-      SECURITY
-
-      """
-      \`EXECUTION\` features provide metadata necessary for operation execution.
-      """
-      EXECUTION
-    }
-
-    scalar link__Import
-
-    scalar federation__FieldSet
-
-    scalar _Any
-
-    type _Service {
-      sdl: String
-    }
-
-    union _Entity = T
-
-    type Query {
-      _entities(representations: [_Any!]!): [_Entity]!
-      _service: _Service!
-    }
-    "#;
-
-    #[test]
-    fn expands_everything_if_only_the_federation_spec_is_linked() {
-        let subgraph = Subgraph::parse(
-            "S",
-            "",
-            r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-
-            type T @key(fields: "k") {
-                k: ID!
-            }
-            "#,
-        )
-        .expect("valid schema")
-        .expand_links()
-        .expect("expands subgraph")
-        .validate(true)
-        .expect("expanded subgraph to be valid");
-
-        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
-        //                it's failing due to missing directive definitions. So, we use
-        //                `insta::assert_snapshot` for now.
-        // assert_eq!(subgraph.schema().schema().to_string(), EXPECTED_FULL_SCHEMA);
-        insta::assert_snapshot!(subgraph.schema().schema().to_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
-          query: Query
-        }
-
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-        directive @federation__override(from: String!) on FIELD_DEFINITION
-
-        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        type T @key(fields: "k") {
-          k: ID!
-        }
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service {
-          sdl: String
-        }
-
-        union _Entity = T
-
-        type Query {
-          _entities(representations: [_Any!]!): [_Entity]!
-          _service: _Service!
-        }
-        "###);
     }
 }
