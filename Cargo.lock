@@ -297,7 +297,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "form_urlencoded",
- "fred",
+ "fred 9.4.0",
  "futures",
  "futures-test",
  "graphql_client",
@@ -2442,6 +2442,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-cmp"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b09cf3155332e944990140d967ff5eceb70df778b34f77d8075db46e4704e6d8"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2542,19 +2551,44 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "crossbeam-queue",
- "float-cmp",
+ "float-cmp 0.9.0",
  "fred-macros",
  "futures",
  "log",
  "parking_lot",
  "rand 0.8.5",
- "redis-protocol",
+ "redis-protocol 5.0.1",
  "rustls",
  "rustls-native-certs 0.7.3",
  "semver",
  "socket2",
  "tokio",
  "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "url",
+ "urlencoding",
+]
+
+[[package]]
+name = "fred"
+version = "10.1.0"
+source = "git+https://github.com/SimonSapin/fred.rs?rev=32391ec56ac18ee83d02e9f112910b0382bc082c#32391ec56ac18ee83d02e9f112910b0382bc082c"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "bytes",
+ "bytes-utils",
+ "float-cmp 0.10.0",
+ "fred-macros",
+ "futures",
+ "log",
+ "parking_lot",
+ "rand 0.8.5",
+ "redis-protocol 6.0.0",
+ "semver",
+ "socket2",
+ "tokio",
  "tokio-stream",
  "tokio-util",
  "url",
@@ -5276,10 +5310,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis-experiments"
+version = "0.1.0"
+dependencies = [
+ "fred 10.1.0",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "redis-protocol"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65deb7c9501fbb2b6f812a30d59c0253779480853545153a51d8e9e444ddc99f"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "cookie-factory",
+ "crc16",
+ "log",
+ "nom",
+]
+
+[[package]]
+name = "redis-protocol"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cdba59219406899220fc4cdfd17a95191ba9c9afb719b5fa5a083d63109a9f1"
 dependencies = [
  "bytes",
  "bytes-utils",
