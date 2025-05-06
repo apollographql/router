@@ -325,10 +325,10 @@ fn get_shape(
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
     use serde_json_bytes::json;
 
     use super::*;
+    use crate::assert_debug_snapshot;
     use crate::selection;
 
     #[test]
