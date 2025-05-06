@@ -107,14 +107,14 @@ pub(super) fn copy_input_types(
 /// ```
 ///
 /// and a map of original subgraph names to new subgraph names:
-/// ```
+/// ```ignore
 /// {
 ///   "connectors-subgraph" => vec!["connectors-subgraph_Query_user_0", "connectors-subgraph_Query_users_0"]
 /// }
 /// ```
 ///
 /// Return a map of enum value replacements:
-/// ```
+/// ```ignore
 /// {
 ///   "CONNECTORS_SUBGRAPH" => vec!["CONNECTORS_SUBGRAPH_QUERY_USER_0", "CONNECTORS_SUBGRAPH_QUERY_USERS_0"],
 /// }
