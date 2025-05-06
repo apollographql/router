@@ -309,8 +309,9 @@ mod tests {
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
-    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
+
+    use crate::assert_snapshot;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {
         let document = ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();
