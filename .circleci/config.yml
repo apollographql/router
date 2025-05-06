@@ -56,7 +56,7 @@ executors:
       xcode: "15.4.0"
     resource_class: macos.m1.large.gen1
     environment:
-      MISE_ENV: ci
+      MISE_ENV: ci,ci-mac
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -65,7 +65,7 @@ executors:
       xcode: "15.4.0"
     resource_class: macos.m1.large.gen1
     environment:
-      MISE_ENV: ci
+      MISE_ENV: ci,ci-mac
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
