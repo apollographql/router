@@ -911,7 +911,7 @@ impl Verifier for OtlpTraceSpec<'_> {
             for (key, value) in attributes {
                 // extracts a list of span attribute values with the provided key
                 let binding = trace.select_path(&format!(
-                    "$..spans[?(@.operationName == '{span}')]..attributes..[?(@.key == '{key}')].value.*"
+                    "$..resourceSpans[?(@.resource.attributes[?(@.key == 'service.name' && @.value.stringValue == '{span}')])]..spans..attributes..[?(@.key == '{key}')].value.*"
                 ))?;
                 let matches_value = binding.iter().any(|v| match v {
                     Value::Bool(v) => (*v).to_string() == *value,
