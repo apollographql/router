@@ -260,7 +260,7 @@ pub(crate) fn validate(
             return Err(Message {
                 code: context.code,
                 message: format!(
-                    "`{}` is not valid here, must be one of {}",
+                    "{} is not valid here, must be one of {}",
                     variable_ref.namespace.namespace,
                     context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
                 ),
@@ -361,7 +361,7 @@ fn resolve_shape(
                     .ok_or_else(|| Message {
                         code: context.code,
                         message: format!(
-                            "`{namespace}` is not valid here, must be one of {namespaces}",
+                            "{namespace} is not valid here, must be one of {namespaces}",
                             namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                         ),
                         locations: transform_locations(&shape.locations, context, expression),

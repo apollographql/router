@@ -14,14 +14,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/errors.gr
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_args_variable\" errors.extensions:)`: `$args` is not valid here, must be one of $config, $context, $status, $request, $response",
+        message: "In `@source(name: \"invalid_source_args_variable\" errors.extensions:)`: $args is not valid here, must be one of $config, $context, $status, $request, $response",
         locations: [
             23:63..23:76,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_this_variable\" errors.extensions:)`: `$this` is not valid here, must be one of $config, $context, $status, $request, $response",
+        message: "In `@source(name: \"invalid_source_this_variable\" errors.extensions:)`: $this is not valid here, must be one of $config, $context, $status, $request, $response",
         locations: [
             28:63..28:76,
         ],
