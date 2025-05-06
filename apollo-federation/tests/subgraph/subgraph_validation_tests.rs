@@ -1932,8 +1932,6 @@ mod interface_object_and_key_on_interfaces_validation_tests {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn only_allow_interface_object_on_entity_types() {
         // There is no meaningful way to make @interfaceObject work on a value type at the moment,
         // because if you have an @interfaceObject, some other subgraph needs to be able to resolve
