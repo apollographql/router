@@ -16,6 +16,7 @@
 
 mod connect;
 mod coordinates;
+mod errors;
 mod expression;
 mod graphql;
 mod http;
@@ -265,6 +266,10 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `errors.message` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsMessage,
+    /// The `errors.extensions` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsExtensions,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.

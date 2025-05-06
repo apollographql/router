@@ -389,8 +389,6 @@ impl Executable {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        // Enable crypto
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();

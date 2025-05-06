@@ -56,9 +56,6 @@ async fn tls_server(
     key: PrivateKeyDer<'static>,
     body: &'static str,
 ) {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let tls_config = Arc::new(
         ServerConfig::builder()
             .with_no_client_auth()
@@ -446,8 +443,6 @@ async fn tls_server_with_client_auth(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_client_auth() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let server_certificate_pem = include_str!("./testdata/server.crt");
     let ca_pem = include_str!("./testdata/CA/ca.crt");
     let server_key_pem = include_str!("./testdata/server.key");
@@ -522,8 +517,6 @@ async fn tls_client_auth() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_client_auth_connector() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let server_certificate_pem = include_str!("./testdata/server.crt");
     let ca_pem = include_str!("./testdata/CA/ca.crt");
     let server_key_pem = include_str!("./testdata/server.key");
@@ -618,9 +611,6 @@ async fn emulate_h2c_server(listener: TcpListener) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_h2c() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
     tokio::task::spawn(emulate_h2c_server(listener));
@@ -703,7 +693,6 @@ async fn emulate_subgraph_compressed_response(listener: TcpListener) {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_compressed_request_response_body() {
     // Though the server doesn't use TLS, the client still supports it, and so we need crypto stuff
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
