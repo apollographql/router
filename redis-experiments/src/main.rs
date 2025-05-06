@@ -65,7 +65,6 @@ async fn test_few() {
     assert_eq!(get("docA").await.as_deref(), Some("A"));
     assert_eq!(get("docB").await.as_deref(), Some("B"));
     assert_eq!(get("docC").await.as_deref(), Some("C"));
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(cache.invalidate("key1").await.unwrap(), 2);
     assert_eq!(get("docA").await.as_deref(), None);
     assert_eq!(get("docB").await.as_deref(), None);
@@ -92,7 +91,6 @@ async fn test_many() {
         }
         let duration = start.elapsed();
         println!("… inserted (one by one) in {} ms", duration.as_millis());
-        // tokio::time::sleep(std::time::Duration::from_millis(10_000)).await;
 
         let start = Instant::now();
         let deleted = cache.invalidate("key2").await.unwrap();
