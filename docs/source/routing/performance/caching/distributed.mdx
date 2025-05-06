@@ -87,7 +87,7 @@ In your router's YAML config file, **you should specify your Redis URLs via envi
 
 <Caution>
 
-Cached query plans are not invalidated on schema refresh, which can quickly fill a distributed cache when combined with [cache-warm up](/router/configuration/in-memory-caching#cache-warm-up) and frequent schema publishes. 
+Cached query plans are not evicted on schema refresh, which can quickly lead to distributed cache overflow when combined with [cache-warm up](/router/configuration/in-memory-caching#cache-warm-up) and frequent schema publishes. 
 
 Test your cache configuration with expected queries and consider decreasing the [TTL](/router/configuration/distributed-caching#ttl) to prevent cache overflow.
 
