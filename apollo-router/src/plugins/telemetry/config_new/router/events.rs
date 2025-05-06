@@ -21,7 +21,7 @@ use crate::services::router;
 
 #[derive(Clone)]
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub(crate) struct DisplayRouterResponse;
 #[derive(Default, Clone, Debug)]
 pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);

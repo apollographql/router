@@ -226,8 +226,15 @@ async fn test_graphql_metrics() {
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
+    router.print_logs();
     router
         .assert_log_not_contains("this is a bug and should not happen")
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"my_custom_router_instrument{otel_scope_name="apollo/router",my_response_body=""} 1"#,
+            None,
+        )
         .await;
     router
         .assert_metrics_contains(
