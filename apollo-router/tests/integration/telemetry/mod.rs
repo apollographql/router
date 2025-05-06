@@ -25,12 +25,7 @@ struct TraceSpec {
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
-<<<<<<< HEAD
     span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
-=======
-    resources: HashMap<&'static str, &'static str>,
-    attributes: HashMap<&'static str, &'static str>,
->>>>>>> 47925d01 (fix: propagate client name and version modifications through telemetry (#7369))
 }
 
 #[buildstructor::buildstructor]
@@ -46,12 +41,7 @@ impl TraceSpec {
         priority_sampled: Option<&'static str>,
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
-<<<<<<< HEAD
         span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
-=======
-        resources: HashMap<&'static str, &'static str>,
-        attributes: HashMap<&'static str, &'static str>,
->>>>>>> 47925d01 (fix: propagate client name and version modifications through telemetry (#7369))
     ) -> Self {
         Self {
             operation_name,
@@ -64,11 +54,6 @@ impl TraceSpec {
             subgraph_sampled,
             span_attributes,
             trace_id,
-<<<<<<< HEAD
-=======
-            resources,
-            attributes,
->>>>>>> 47925d01 (fix: propagate client name and version modifications through telemetry (#7369))
         }
     }
 }

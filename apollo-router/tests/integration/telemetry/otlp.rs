@@ -1,5 +1,6 @@
 extern crate core;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::time::Duration;
@@ -686,7 +687,7 @@ async fn test_attributes() -> Result<(), BoxError> {
 
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
-        .attribute("client.name", "foobar")
+        .span_attribute("router", vec![("client.name", "foobar")])
         .build()
         .validate_otlp_trace(
             &mut router,
@@ -731,7 +732,7 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
         let query = Query::builder().traced(true).headers(headers).build();
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
-            .attribute("client.name", "foo")
+            .span_attribute("router", vec![("client.name", "foo")])
             .build()
             .validate_otlp_trace(&mut router, &mock_server, query)
             .await
@@ -946,78 +947,29 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
-<<<<<<< HEAD
-=======
 
-    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
-        if !self.resources.is_empty() {
-            let resources = trace.select_path("$..resource.attributes")?;
-            // Find the attributes for the router service
-            let router_resources = resources
-                .iter()
-                .filter(|r| {
-                    !r.select_path("$..[?(@.stringValue == 'router')]")
-                        .unwrap()
-                        .is_empty()
-                })
-                .collect::<Vec<_>>();
-            // Let's map this to a map of key value pairs
-            let router_resources = router_resources
-                .iter()
-                .flat_map(|v| v.as_array().expect("array required"))
-                .map(|v| {
-                    let entry = v.as_object().expect("must be an object");
-                    (
-                        entry
-                            .get("key")
-                            .expect("must have key")
-                            .as_string()
-                            .expect("key must be a string"),
-                        entry
-                            .get("value")
-                            .expect("must have value")
-                            .as_object()
-                            .expect("value must be an object")
-                            .get("stringValue")
-                            .expect("value must be a string")
-                            .as_string()
-                            .expect("value must be a string"),
-                    )
-                })
-                .collect::<HashMap<_, _>>();
-
-            for (key, value) in &self.resources {
-                if let Some(actual_value) = router_resources.get(*key) {
-                    assert_eq!(actual_value, value);
-                } else {
-                    return Err(BoxError::from(format!("missing resource key: {}", *key)));
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (span, attributes) in self.span_attributes.iter() {
+            for (key, value) in attributes {
+                // extracts a list of span attribute values with the provided key
+                let binding = trace.select_path(&format!(
+                    "$..spans[?(@.operationName == '{span}')]..attributes..[?(@.key == '{key}')].value.*"
+                ))?;
+                let matches_value = binding.iter().any(|v| match v {
+                    Value::Bool(v) => (*v).to_string() == *value,
+                    Value::Number(n) => (*n).to_string() == *value,
+                    Value::String(s) => s == value,
+                    _ => false,
+                });
+                if !matches_value {
+                    return Err(BoxError::from(format!(
+                        "unexpected attribute values for span `{span}` and key `{key}`, expected value `{value}` but got {binding:?}"
+                    )));
                 }
             }
         }
         Ok(())
     }
-
-    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
-        for (key, value) in self.attributes.iter() {
-            // extracts a list of span attribute values with the provided key
-            let binding = trace.select_path(&format!(
-                "$..spans..attributes..[?(@.key == '{key}')].value.*"
-            ))?;
-            let matches_value = binding.iter().any(|v| match v {
-                Value::Bool(v) => (*v).to_string() == *value,
-                Value::Number(n) => (*n).to_string() == *value,
-                Value::String(s) => s == value,
-                _ => false,
-            });
-            if !matches_value {
-                return Err(BoxError::from(format!(
-                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
-                )));
-            }
-        }
-        Ok(())
-    }
->>>>>>> 47925d01 (fix: propagate client name and version modifications through telemetry (#7369))
 }
 
 async fn mock_otlp_server_delayed() -> MockServer {
