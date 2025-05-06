@@ -962,56 +962,70 @@ mod custom_error_message_for_misnamed_directives {
     use super::*;
 
     struct FedVersionSchemaParams {
-        extended_schema: &'static str,
+        build_option: BuildOption,
         extra_msg: &'static str,
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 3"#)]
     fn has_suggestions_if_a_federation_directive_is_misspelled_in_all_schema_versions() {
         let schema_versions = [
             FedVersionSchemaParams {
                 // fed1
-                extended_schema: r#""#,
+                build_option: BuildOption::AsIs,
                 extra_msg: " If so, note that it is a federation 2 directive but this schema is a federation 1 one. To be a federation 2 schema, it needs to @link to the federation specification v2.",
             },
             FedVersionSchemaParams {
                 // fed2
-                extended_schema: r#"
-                    extend schema
-                        @link(url: "https://specs.apollo.dev/federation/v2.0")
-                    "#,
+                build_option: BuildOption::AsFed2,
                 extra_msg: "",
             },
         ];
         for fed_ver in schema_versions {
-            let schema_str = format!(
-                r#"{}
-                    type T @keys(fields: "id") {{
+            let schema_str = r#"
+                    type T @keys(fields: "id") {
                         id: Int @foo
                         foo: String @sharable
-                    }}
-                "#,
-                fed_ver.extended_schema
-            );
-            let err = build_for_errors(&schema_str);
+                    }
+                "#;
+            let err = build_for_errors_with_option(schema_str, fed_ver.build_option);
 
             assert_errors!(
                 err,
                 [
-                    ("INVALID_GRAPHQL", r#"[S] Unknown directive "@foo"."#,),
                     (
                         "INVALID_GRAPHQL",
-                        format!(
-                            r#"[S] Unknown directive "@sharable". Did you mean "@shareable"?{}"#,
-                            fed_ver.extra_msg
-                        )
-                        .as_str(),
+                        r#"[S] Error: cannot find directive `@keys` in this document
+   ╭─[ S:2:28 ]
+   │
+ 2 │                     type T @keys(fields: "id") {
+   │                            ─────────┬─────────
+   │                                     ╰─────────── directive not defined
+───╯
+Did you mean "@key"?"#,
                     ),
                     (
                         "INVALID_GRAPHQL",
-                        r#"[S] Unknown directive "@keys". Did you mean "@key"?"#,
+                        r#"[S] Error: cannot find directive `@foo` in this document
+   ╭─[ S:3:33 ]
+   │
+ 3 │                         id: Int @foo
+   │                                 ──┬─
+   │                                   ╰─── directive not defined
+───╯"#,
+                    ),
+                    (
+                        "INVALID_GRAPHQL",
+                        &format!(
+                            r#"[S] Error: cannot find directive `@sharable` in this document
+   ╭─[ S:4:37 ]
+   │
+ 4 │                         foo: String @sharable
+   │                                     ────┬────
+   │                                         ╰────── directive not defined
+───╯
+Did you mean "@shareable"?{}"#,
+                            fed_ver.extra_msg
+                        ),
                     ),
                 ]
             );
