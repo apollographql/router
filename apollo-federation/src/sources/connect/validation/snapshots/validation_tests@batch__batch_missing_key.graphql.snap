@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch/bat
 [
     Message {
         code: ConnectorsUnresolvedField,
-        message: "The `@connect` directive on `User_0` specifies a batch entity resolver, but the key `id` is not a subset of the output shape `{ name: $root.results.*.name, profilePic: $root.results.*.profile_pic }`.",
+        message: "The `@connect` directive on `User_0` specifies a batch entity resolver, but the key `id` is not a subset of the output shape `{ name: $root.results.*.name, profilePic: $root.results.*.profile_pic }`",
         locations: [],
     },
 ]

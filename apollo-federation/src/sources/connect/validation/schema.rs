@@ -253,7 +253,7 @@ fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)>
 
 /// For an object type, get all the keys (and directive nodes) that are resolvable.
 ///
-/// The FieldSet returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
+/// The [`FieldSet`] returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
 fn resolvable_key_fields<'a>(
     object: &'a ObjectType,
     schema: &'a Schema,
@@ -306,20 +306,16 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     }
 
     for (_, connector) in &connectors {
-        match connector.entity_resolver {
-            Some(crate::sources::connect::EntityResolver::TypeBatch) => {
-                let input_key = connector
-                    .resolvable_key(schema)
-                    .expect("batch always has a key")
-                    .expect("expected to find a key");
-                let mut walker = SelectionSetWalker::new(&input_key.selection_set);
-                let result = walker.walk(&connector.selection.shape(), connector);
-                match result {
-                    Ok(res) => messages.extend(res),
-                    Err(err) => messages.push(err)
-                }
+        if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
+            let Ok(Some(input_key)) = connector.resolvable_key(schema) else {
+                unreachable!("TypeBatch is expected to always have a key");
+            };
+            match SelectionSetWalker::new(&input_key.selection_set)
+                .walk(&connector.selection.shape(), connector)
+            {
+                Ok(res) => messages.extend(res),
+                Err(err) => messages.push(err),
             }
-            _ => { /* TODO */ }
         }
     }
 
@@ -331,7 +327,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                 messages.push(field_set_error(
                     &variables,
                     &connector.id.directive.coordinate(),
-                ))
+                ));
             }
             Ok(Some(field_set)) => {
                 entity_checker.add_connector(field_set);
@@ -366,6 +362,46 @@ impl<'walker> SelectionSetWalker<'walker> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ShapeVisitorError<'error> {
+    #[error(
+        "The `@connect` directive on `{connector}` specifies a batch entity resolver, but the key `{unset}` is not a subset of the output shape `{output_shape}`"
+    )]
+    BatchKeyNotSubsetOfOutputShape {
+        connector: String,
+        unset: &'error Node<Field>,
+        output_shape: &'error Shape,
+    },
+    #[error("Attempted to resolve key on unexpected shape `{shape}`")]
+    UnexpectedKeyOnShape { shape: &'error Shape },
+    #[error("Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`)")]
+    NonRootBatch,
+}
+
+#[allow(clippy::extra_unused_lifetimes)]
+impl<'error> From<ShapeVisitorError<'_>> for Message {
+    fn from(value: ShapeVisitorError) -> Self {
+        match value {
+            ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { .. } => Message {
+                code: Code::ConnectorsUnresolvedField,
+                message: value.to_string(),
+                locations: Vec::new(),
+            },
+            ShapeVisitorError::UnexpectedKeyOnShape { .. } => Message {
+                code: Code::ConnectorsUnresolvedField,
+                message: value.to_string(),
+                locations: Vec::new(),
+            },
+            ShapeVisitorError::NonRootBatch => Message {
+                code: Code::ConnectBatchAndThis,
+                message: value.to_string(),
+                // TODO: Determine correct location
+                locations: vec![],
+            },
+        }
+    }
+}
+
 impl SelectionSetWalker<'_> {
     fn walk(
         &mut self,
@@ -377,16 +413,14 @@ impl SelectionSetWalker<'_> {
         // Collect messages from unset Names
         let mut vec = Vec::new();
         for unset in &self.unmapped_fields {
-            vec.push(Message {
-                code: Code::ConnectorsUnresolvedField,
-                message: format!(
-                    "The `@connect` directive on `{connector}` specifies a batch entity resolver, but the key `{unset}` is not a subset of the output shape `{output_shape}`.",
-                    connector = connector.id.directive.synthetic_name()
-                ),
-                // TODO: Get correct location?
-                locations: Vec::new(),
-                
-            });
+            vec.push(
+                ShapeVisitorError::BatchKeyNotSubsetOfOutputShape {
+                    connector: connector.id.directive.synthetic_name(),
+                    unset,
+                    output_shape,
+                }
+                .into(),
+            );
         }
         Ok(vec)
     }
@@ -398,12 +432,7 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
 
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
         // TODO: add a more appropriate error code.
-        Err(Message {
-            code: Code::ConnectorsUnresolvedField,
-            message: format!("Attempted to resolve key on unexpected shape `{shape}`"),
-            // TODO: How to get a reasonable location?
-            locations: vec![],
-        })
+        Err(ShapeVisitorError::UnexpectedKeyOnShape { shape }.into())
     }
 
     // This is likely the entry point?
@@ -419,32 +448,33 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
                 continue;
             };
 
-            // Object should contain all fields in the selection set. If not, then the field 
+            // Object should contain all fields in the selection set. If not, then the field
             // and all nested field sets are unmapped.
             // TODO: Should this also check alias?
             let field_name = field.alias.as_ref().unwrap_or(&field.name).as_str();
             if !fields.contains_key(field_name) {
-                self.unmapped_fields.insert(&field);
-                self.unmapped_fields.extend(&mut field.selection_set.selections.iter()
-                    .flat_map(|s| s.as_field())
+                self.unmapped_fields.insert(field);
+                self.unmapped_fields.extend(
+                    &mut field
+                        .selection_set
+                        .selections
+                        .iter()
+                        .filter_map(|s| s.as_field()),
                 );
                 continue;
             }
-            
-            let next_shape= fields.get(field_name).expect("nested shape expected");
-            
+
+            let Some(next_shape) = fields.get(field_name) else {
+                unreachable!("nested shape is expected")
+            };
+
             // Check that next shape doesn't come from a non-`$root` field.
             if let ShapeCase::Name(root, _) = next_shape.case() {
                 if root.value != "$root" {
-                    return Err(Message {
-                        code: Code::ConnectBatchAndThis,
-                        message: "Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`).".to_string(),
-                        // TODO: Determine correct location
-                        locations: vec![],
-                    })
+                    return Err(ShapeVisitorError::NonRootBatch.into());
                 }
             }
-            
+
             // If field has no nested selections, then we can stop walking down this branch.
             if field.selection_set.is_empty() {
                 continue;
@@ -453,7 +483,8 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
             // Continue walking with nested selection sets
             let mut nested = SelectionSetWalker::new(&field.selection_set);
             next_shape.visit_shape(&mut nested)?;
-            self.unmapped_fields.extend(nested.unmapped_fields.into_iter());
+            self.unmapped_fields
+                .extend(nested.unmapped_fields.into_iter());
         }
         Ok(())
     }
@@ -463,10 +494,7 @@ fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Direct
     schema
         .types
         .values()
-        .flat_map(|extended_type| match extended_type {
-            ExtendedType::Object(object) => Some(resolvable_key_fields(object, schema)),
-            _ => None,
-        })
-        .flatten()
+        .filter_map(|extended_type| extended_type.as_object())
+        .flat_map(|object| resolvable_key_fields(object, schema))
         .collect()
 }
