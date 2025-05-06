@@ -1,6 +1,5 @@
 extern crate core;
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::time::Duration;
