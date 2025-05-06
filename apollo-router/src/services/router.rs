@@ -210,11 +210,9 @@ pub struct Response {
 #[buildstructor::buildstructor]
 impl Response {
     fn stash_the_body_in_extensions(&mut self, body_string: String) {
-        let res = self
-            .response
-            .extensions_mut()
-            .insert(RouterResponseBodyExtensionType(body_string));
-        assert!(res.is_none())
+        self.context.extensions().with_lock(|ext| {
+            ext.insert(RouterResponseBodyExtensionType(body_string));
+        });
     }
 
     pub async fn next_response(&mut self) -> Option<Result<Bytes, axum::Error>> {
@@ -265,10 +263,7 @@ impl Response {
         let body = body::from_bytes(body_string.clone());
         let response = builder.body(body)?;
 
-        let mut res = Self { response, context };
-        res.stash_the_body_in_extensions(body_string);
-
-        Ok(res)
+        Ok(Self { response, context })
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
@@ -332,10 +327,7 @@ impl Response {
         let body = body::from_bytes(body_string.clone());
         let response = builder.body(body).expect("RouterBody is always valid");
 
-        let mut res = Self { response, context };
-        res.stash_the_body_in_extensions(body_string);
-
-        res
+        Self { response, context }
     }
 
     /// EXPERIMENTAL: THIS FUNCTION IS EXPERIMENTAL AND SUBJECT TO POTENTIAL CHANGE.

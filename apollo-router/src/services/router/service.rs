@@ -341,7 +341,7 @@ impl RouterService {
                     // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
                     let display_router_response = context
                         .extensions()
-                        .with_lock(|lock| lock.get::<DisplayRouterResponse>().is_some());
+                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
                     let mut res = router::Response {
                         response: Response::from_parts(
@@ -351,7 +351,7 @@ impl RouterService {
                         context,
                     };
 
-                    if display_router_response.0 {
+                    if display_router_response {
                         res.stash_the_body_in_extensions(body);
                     }
 

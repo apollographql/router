@@ -14,6 +14,7 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
+use config_new::router::events::RouterResponseBodyExtensionType;
 use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;

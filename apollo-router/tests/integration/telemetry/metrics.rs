@@ -232,7 +232,7 @@ async fn test_graphql_metrics() {
         .await;
     router
         .assert_metrics_contains(
-            r#"my_custom_router_instrument{otel_scope_name="apollo/router",my_response_body=""} 1"#,
+            r#"my_custom_router_instrument_total{my_response_body="{\"data\":{\"topProducts\":[{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;

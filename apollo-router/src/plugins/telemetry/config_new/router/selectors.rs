@@ -21,6 +21,8 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 
+use super::events::DisplayRouterResponse;
+
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum RouterValue {
@@ -215,6 +217,12 @@ impl Selector for RouterSelector {
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ResponseBody { response_body } if *response_body => {
+                request.context.extensions().with_lock(|ext| {
+                    ext.insert(DisplayRouterResponse);
+                });
+                None
+            }
             // Related to Response
             _ => None,
         }
