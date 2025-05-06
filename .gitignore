@@ -43,3 +43,7 @@ dhat-heap.json
 fuzz/crash-*
 fuzz/slow-unit-*
 fuzz/timeout-*
+
+# Ignore all files related to Claude Code or Cursor
+Claude.md
+.cursor/
