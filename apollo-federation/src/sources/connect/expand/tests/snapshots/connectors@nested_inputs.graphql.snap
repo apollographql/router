@@ -265,5 +265,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

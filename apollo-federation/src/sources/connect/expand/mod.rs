@@ -6,6 +6,7 @@ use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
+use multimap::MultiMap;
 
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
@@ -93,11 +94,22 @@ pub fn expand_connectors(
         FederationError::internal(format!("could not merge expanded subgraphs: {e:?}"))
     })?;
 
+    let subgraph_name_replacements = expanded_subgraphs
+        .iter()
+        .map(|(connector, _)| {
+            (
+                connector.id.subgraph_name.as_str(),
+                connector.id.synthetic_name(),
+            )
+        })
+        .collect::<MultiMap<_, _>>();
+
     let mut new_supergraph = FederationSchema::new(new_supergraph.schema.into_inner())?;
     carryover_directives(
         &supergraph.schema,
         &mut new_supergraph,
         spec_versions.into_iter(),
+        &subgraph_name_replacements,
     )
     .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 

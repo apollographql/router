@@ -358,7 +358,6 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
@@ -418,7 +417,6 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     request: router::Request,
     filter: T,
 ) -> u64 {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
