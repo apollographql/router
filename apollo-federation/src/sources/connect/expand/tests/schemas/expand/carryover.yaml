@@ -77,33 +77,35 @@ subgraphs:
         # @custom2 appears in the connector subgraph, so we have to add it and rewrite the join__* directives
         # @custom3 appears in the non-connector subgraph, so it's composed appropriately
         #
-        directive @custom on OBJECT | FIELD_DEFINITION
-        # directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
-        # scalar custom__Scalar
+        # this won't compose until after 2.11.0-preview.3
 
-        # enum custom__Enum {
-        #   ONE
-        #   TWO
-        # }
+        directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
 
-        # input custom__Input {
-        #   one: String
-        #   two: String
-        # }
+        scalar custom__Scalar
 
-        directive @custom2 on OBJECT | FIELD_DEFINITION
-        # directive @custom2(s: custom__Scalar2, e: custom__Enum2, i: custom__Input2) on OBJECT | FIELD_DEFINITION
-        # scalar custom__Scalar2
+        enum custom__Enum {
+          ONE
+          TWO
+        }
 
-        # enum custom__Enum2 {
-        #   ONE
-        #   TWO
-        # }
+        input custom__Input {
+          one: String
+          two: String
+        }
 
-        # input custom__Input2 {
-        #   one: String
-        #   two: String
-        # }
+        directive @custom2(s: custom__Scalar2, e: custom__Enum2, i: custom__Input2) on OBJECT | FIELD_DEFINITION
+
+        scalar custom__Scalar2
+
+        enum custom__Enum2 {
+          ONE
+          TWO
+        }
+
+        input custom__Input2 {
+          one: String
+          two: String
+        }
   two:
     routing_url: none
     schema:

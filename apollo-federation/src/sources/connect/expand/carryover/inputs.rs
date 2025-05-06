@@ -23,7 +23,7 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 /// the new supergraph.
 ///
 /// However, we can't just copy the definitions as-is, because their join__*
-/// directives may reference subgrapsh that no longer exist (were replaced by
+/// directives may reference subgraphs that no longer exist (were replaced by
 /// "expanded" subgraphs/connectors). Each time we encounter a join__* directive
 /// with a `graph:` argument referring to a missing subgraph, we'll need to
 /// replace it with **one or more** new directives, one for each "expanded"
@@ -46,13 +46,14 @@ pub(super) fn copy_input_types(
         to_join_graph_enum,
         subgraph_name_replacements,
     )
-    .map_err(|e| {
-        FederationError::internal(format!("Failed to get subgraph replacements: {}", e))
-    })?;
+    .map_err(|e| FederationError::internal(format!("Failed to get subgraph replacements: {e}")))?;
 
-    from.schema().types.iter().for_each(|(_, ty)| match ty {
-        ExtendedType::Scalar(node) => {
-            if to.schema().get_scalar(&node.name).is_none() {
+    for (name, ty) in &from.schema().types {
+        if to.schema().types.contains_key(name) {
+            continue;
+        }
+        match ty {
+            ExtendedType::Scalar(node) => {
                 let pos = ScalarTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -61,9 +62,7 @@ pub(super) fn copy_input_types(
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
-        }
-        ExtendedType::Enum(node) => {
-            if to.schema().get_enum(&node.name).is_none() {
+            ExtendedType::Enum(node) => {
                 let pos = EnumTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -72,9 +71,7 @@ pub(super) fn copy_input_types(
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
-        }
-        ExtendedType::InputObject(node) => {
-            if to.schema().get_input_object(&node.name).is_none() {
+            ExtendedType::InputObject(node) => {
                 let pos = InputObjectTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -85,9 +82,9 @@ pub(super) fn copy_input_types(
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
+            _ => {}
         }
-        _ => {}
-    });
+    }
 
     Ok(())
 }
@@ -129,43 +126,31 @@ fn subgraph_replacements(
 ) -> Result<MultiMap<Name, Name>, String> {
     let mut replacements = MultiMap::new();
 
-    let new_subgraph_names_to_enum_values: HashMap<_, _> = to_join_graph_enum
-        .values
-        .iter()
-        .map(|(name, value)| {
-            let new_subgraph_names = value
-                .directives
-                .iter()
-                .find(|d| d.name == name!(join__graph))
-                .and_then(|d| {
-                    d.arguments
-                        .iter()
-                        .find(|a| a.name == name!(name))
-                        .and_then(|a| a.value.as_str())
-                })
-                .ok_or_else(|| "no name argument on join__graph".to_string())?;
-            Ok::<_, String>((new_subgraph_names, name))
-        })
-        .try_collect()?;
+    fn subgraph_names_to_enum_values(enum_type: &EnumType) -> Result<HashMap<&str, &Name>, &str> {
+        enum_type
+            .values
+            .iter()
+            .map(|(name, value)| {
+                value
+                    .directives
+                    .iter()
+                    .find(|d| d.name == name!(join__graph))
+                    .and_then(|d| {
+                        d.arguments
+                            .iter()
+                            .find(|a| a.name == name!(name))
+                            .and_then(|a| a.value.as_str())
+                    })
+                    .ok_or("no name argument on join__graph")
+                    .map(|new_subgraph_name| (new_subgraph_name, name))
+            })
+            .try_collect()
+    }
 
-    let original_subgraph_names_to_enum_values: HashMap<_, _> = from_join_graph_enum
-        .values
-        .iter()
-        .map(|(name, value)| {
-            let original_subgraph_names = value
-                .directives
-                .iter()
-                .find(|d| d.name == name!(join__graph))
-                .and_then(|d| {
-                    d.arguments
-                        .iter()
-                        .find(|a| a.name == name!(name))
-                        .and_then(|a| a.value.as_str())
-                })
-                .ok_or_else(|| "no name argument on join__graph".to_string())?;
-            Ok::<_, String>((original_subgraph_names, name))
-        })
-        .try_collect()?;
+    let new_subgraph_names_to_enum_values = subgraph_names_to_enum_values(to_join_graph_enum)?;
+
+    let original_subgraph_names_to_enum_values =
+        subgraph_names_to_enum_values(from_join_graph_enum)?;
 
     for (original_subgraph_name, new_subgraph_names) in replaced_subgraph_names.iter_all() {
         if let Some(original_enum_value) = original_subgraph_names_to_enum_values
