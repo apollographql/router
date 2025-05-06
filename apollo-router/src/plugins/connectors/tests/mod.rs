@@ -44,6 +44,7 @@ mod content_type;
 mod error_handling;
 mod mock_api;
 mod progressive_override;
+mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
