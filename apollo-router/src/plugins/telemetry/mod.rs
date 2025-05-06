@@ -1990,6 +1990,11 @@ mod tests {
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
             let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let regexp = regex::Regex::new(
+                r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
+            )
+            .unwrap();
+            let prometheus_metrics = regexp.replace_all(&prometheus_metrics, "").to_owned();
             assert_snapshot!(prometheus_metrics.replace(
                 &format!(r#"service_version="{}""#, std::env!("CARGO_PKG_VERSION")),
                 r#"service_version="X""#

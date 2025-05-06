@@ -2,7 +2,7 @@
 source: apollo-router/src/plugins/telemetry/mod.rs
 expression: "prometheus_metrics.replace(& format!\n(r#\"service_version=\"{}\"\"#, std :: env! (\"CARGO_PKG_VERSION\")),\nr#\"service_version=\"X\"\"#)"
 ---
-apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="X",le="+Inf"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="X",le="10"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="X",le="20"} 1
-apollo_test_histo_bucket{otel_scope_name="apollo/router",process_executable_name="apollo_router-b8ae9bc0b9bc3c53",service_name="apollo-router",service_version="X",le="5"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",service_version="X",le="+Inf"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",service_version="X",le="10"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",service_version="X",le="20"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",service_version="X",le="5"} 1
