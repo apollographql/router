@@ -233,7 +233,7 @@ tokio-tungstenite = { version = "0.26.1", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.24.1"
+hickory-resolver = "0.25.0"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
