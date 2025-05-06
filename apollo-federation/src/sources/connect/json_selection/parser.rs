@@ -1105,6 +1105,10 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
+pub(super) fn is_identifier(input: &str) -> bool {
+    all_consuming(parse_identifier_no_space)(new_span(input)).is_ok()
+}
+
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
     preceded(spaces_or_comments, parse_identifier_no_space)(input)
 }
