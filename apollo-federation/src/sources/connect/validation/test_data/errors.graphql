@@ -1,0 +1,120 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"])
+  @source(
+    name: "valid_source"
+    http: {
+      baseURL: "http://127.0.0.1"
+      errors: { message: "error.message", extensions: "code: error.code status: $status" }
+    }
+  )
+  @source(
+    name: "invalid_source_message_not_string"
+    http: { baseURL: "http://127.0.0.1" }
+    errors: { message: "message: error.message", extensions: "code: error.code" }
+  )
+  @source(
+    name: "invalid_source_extensions_not_object"
+    http: { baseURL: "http://127.0.0.1" }
+    errors: { message: "error.message", extensions: "error.code" }
+  )
+  @source(
+    name: "invalid_source_args_variable"
+    http: { baseURL: "http://127.0.0.1" }
+    errors: { message: "error.message", extensions: "myValue: $args.myValue" }
+  )
+  @source(
+    name: "invalid_source_this_variable"
+    http: { baseURL: "http://127.0.0.1" }
+    errors: { message: "error.message", extensions: "myValue: $this.myField" }
+  )
+
+type Query {
+  valid_with_source: [String!]! @connect(source: "valid_source", http: { GET: "/" }, selection: "$")
+
+  invalid_source_message_not_string: [String!]!
+    @connect(source: "invalid_source_message_not_string", http: { GET: "/" }, selection: "$")
+
+  invalid_source_extensions_not_object: [String!]!
+    @connect(source: "invalid_source_extensions_not_object", http: { GET: "/" }, selection: "$")
+
+  invalid_source_args_variable: [String!]!
+    @connect(source: "invalid_source_args_variable", http: { GET: "/" }, selection: "$")
+
+  invalid_source_this_variable: [String!]!
+    @connect(source: "invalid_source_this_variable", http: { GET: "/" }, selection: "$")
+
+  valid_override_source: [String!]!
+    @connect(
+      source: "valid_source"
+      http: { GET: "/" }
+      errors: { message: "error.message", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  valid_sourceless: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "error.message", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  valid_sourceless_only_message: [String!]!
+    @connect(http: { GET: "http://127.0.0.1" }, errors: { message: "error.message" }, selection: "$")
+
+  valid_sourceless_only_extensions: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  valid_sourceless_literal_string: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: {
+        message: """
+        $("An error!")
+        """
+        extensions: "status: $status"
+      }
+      selection: "$"
+    )
+
+  invalid_sourceless_message_not_string: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "message: error.message", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  invalid_sourceless_extensions_not_object: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "error.message", extensions: "error.code" }
+      selection: "$"
+    )
+
+  invalid_sourceless_message_not_string_from_args(myArg: Int): [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "$args.myArg", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  invalid_sourceless_extensions_not_object(myArg: Int): [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "error.message", extensions: "$args.myArg" }
+      selection: "$"
+    )
+
+  invalid_sourceless_empty_message: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      errors: { message: "", extensions: "code: error.code status: $status" }
+      selection: "$"
+    )
+
+  invalid_sourceless_empty_extensions: [String!]!
+    @connect(http: { GET: "http://127.0.0.1" }, errors: { message: "error.message", extensions: "" }, selection: "$")
+}

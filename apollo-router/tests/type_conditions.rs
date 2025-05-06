@@ -354,8 +354,6 @@ fn setup_from_mocks(
     configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],
 ) -> TestHarness<'static> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let mut mocked_subgraphs = MockedSubgraphs::default();
 
     for (name, m) in mocks {
