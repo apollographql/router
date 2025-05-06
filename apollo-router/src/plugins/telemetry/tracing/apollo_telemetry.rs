@@ -212,13 +212,12 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
 ];
 
 pub(crate) fn emit_error_event(error_code: &str, error_message: &str, error_path: Option<Path>) {
-    if error_path.is_some() {
-        let path = error_path.expect("path should exist").to_string();
+    if let Some(path) = error_path {
         tracing::event!(
             Level::ERROR,
             { GRAPHQL_ERROR_EXT_CODE } = error_code,
             { FIELD_EXCEPTION_MESSAGE } = error_message,
-            { GRAPHQL_ERROR_PATH } = path.as_str(),
+            { GRAPHQL_ERROR_PATH } = path.to_string().as_str(),
             { EVENT_ATTRIBUTE_OMIT_LOG } = true,
             error_message
         );
