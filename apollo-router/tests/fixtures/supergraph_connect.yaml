@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/tests/fixtures/supergraph_connect.yaml > apollo-router/tests/fixtures/supergraph_connect.graphql
-federation_version: =2.10.0-preview.3
+federation_version: =2.10.0
 subgraphs:
   posts: # required for snapshot overrides
     routing_url: http://localhost
