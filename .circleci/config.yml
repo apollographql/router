@@ -5,7 +5,6 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.7.0
   slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
@@ -813,7 +812,6 @@ jobs:
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
-            - gh/setup
             - run:
                 command: >
                   cd artifacts && sha256sum *.tar.gz > sha256sums.txt
