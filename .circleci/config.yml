@@ -127,6 +127,7 @@ commands:
             - "<< pipeline.parameters.toolchain_version >>"
       - install_mise:
           platform: << parameters.platform >>
+      - fetch_dependencies
       - save_cache:
           key: "<< pipeline.parameters.toolchain_version >>"
           paths:
