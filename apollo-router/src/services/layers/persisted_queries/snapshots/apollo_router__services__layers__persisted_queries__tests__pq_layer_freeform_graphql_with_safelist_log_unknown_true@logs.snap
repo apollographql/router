@@ -6,6 +6,19 @@ expression: yaml
   level: INFO
   message: Loaded 2 persisted queries.
 - fields:
+    queue_capacity: 12000
+    threads: 12
+  level: INFO
+  message: compute job thread pool created
+  span:
+    job.type: query_parsing
+    name: compute_job
+  spans:
+    - name: parse_query
+      otel.kind: INTERNAL
+    - job.type: query_parsing
+      name: compute_job
+- fields:
     operation_body: "query SomeQuery { me { id } }"
   level: WARN
   message: unknown operation
