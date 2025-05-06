@@ -173,7 +173,7 @@ impl SubgraphMetadata {
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
             required_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
-                requires_directive.target.type_name.clone(),
+                requires_directive.target.type_name().clone(),
                 requires_directive.arguments.fields,
                 false,
             )?);

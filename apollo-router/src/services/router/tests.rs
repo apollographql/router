@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
-use http::HeaderMap;
-use http::HeaderValue;
 use http::Method;
 use http::Request;
 use http::Uri;
 use http::header::CONTENT_TYPE;
-use http::header::VARY;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
@@ -22,57 +19,20 @@ use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
-use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 use crate::test_harness::make_fake_batch;
-
-// Test Vary processing
-
-#[test]
-fn it_adds_default_with_value_origin_if_no_vary_header() {
-    let mut default_headers = HeaderMap::new();
-    process_vary_header(&mut default_headers);
-    let vary_opt = default_headers.get(VARY);
-    assert!(vary_opt.is_some());
-    let vary = vary_opt.expect("has a value");
-    assert_eq!(vary, "origin");
-}
-
-#[test]
-fn it_leaves_vary_alone_if_set() {
-    let mut default_headers = HeaderMap::new();
-    default_headers.insert(VARY, HeaderValue::from_static("*"));
-    process_vary_header(&mut default_headers);
-    let vary_opt = default_headers.get(VARY);
-    assert!(vary_opt.is_some());
-    let vary = vary_opt.expect("has a value");
-    assert_eq!(vary, "*");
-}
-
-#[test]
-fn it_leaves_varys_alone_if_there_are_more_than_one() {
-    let mut default_headers = HeaderMap::new();
-    default_headers.insert(VARY, HeaderValue::from_static("one"));
-    default_headers.append(VARY, HeaderValue::from_static("two"));
-    process_vary_header(&mut default_headers);
-    let vary = default_headers.get_all(VARY);
-    assert_eq!(vary.iter().count(), 2);
-    for value in vary {
-        assert!(value == "one" || value == "two");
-    }
-}
 
 #[tokio::test]
 async fn it_extracts_query_and_operation_name() {
@@ -444,7 +404,10 @@ async fn it_will_process_a_non_batched_defered_query() {
             }
         ";
         let http_request = supergraph::Request::canned_builder()
-            .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
+            .header(
+                http::header::ACCEPT,
+                MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE,
+            )
             .query(query)
             .build()
             .unwrap()
@@ -501,7 +464,10 @@ async fn it_will_not_process_a_batched_deferred_query() {
         ";
         let http_request = make_fake_batch(
             supergraph::Request::canned_builder()
-                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
+                .header(
+                    http::header::ACCEPT,
+                    MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE,
+                )
                 .query(query)
                 .build()
                 .unwrap()

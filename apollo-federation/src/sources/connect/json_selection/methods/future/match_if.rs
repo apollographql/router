@@ -44,7 +44,7 @@ fn match_if_method(
                         pair[0].apply_to_path(data, vars, input_path);
                     errors.extend(condition_errors);
 
-                    if let Some(JSON::Bool(true)) = condition_opt {
+                    if condition_opt == Some(JSON::Bool(true)) {
                         return pair[1]
                             .apply_to_path(data, vars, input_path)
                             .prepend_errors(errors);

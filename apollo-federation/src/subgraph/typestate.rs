@@ -1,9 +1,12 @@
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::Type;
 
 use crate::LinkSpecDefinition;
@@ -15,7 +18,13 @@ use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_I
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -117,7 +126,7 @@ impl Subgraph<Raw> {
     }
 
     pub fn parse(
-        name: &'static str,
+        name: &str,
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Raw>, FederationError> {
@@ -127,6 +136,18 @@ impl Subgraph<Raw> {
             .build()?;
 
         Ok(Self::new(name, url, schema))
+    }
+
+    /// Converts the schema to a fed2 schema.
+    /// - It is assumed to have no `@link` to the federation spec.
+    /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
+    /// - This is mainly for testing and not optimized.
+    // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
+    pub fn into_fed2_subgraph(self) -> Result<Self, FederationError> {
+        let mut schema = self.state.schema;
+        let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
+        add_federation_link_to_schema(&mut schema, federation_spec.version())?;
+        Ok(Self::new(&self.name, &self.url, schema))
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, FederationError> {
@@ -167,7 +188,7 @@ impl Subgraph<Raw> {
             // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
             //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
             add_fed1_link_to_schema(&mut schema)?;
-        }
+        };
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
         schema.collect_links_metadata()?;
@@ -199,6 +220,48 @@ impl Subgraph<Raw> {
             state: Expanded { schema, metadata },
         })
     }
+}
+
+/// Adds a federation (v2 or above) link directive to the schema.
+/// - Similar to `add_fed1_link_to_schema`, but the link is added before bootstrapping.
+/// - This is mainly for testing.
+fn add_federation_link_to_schema(
+    schema: &mut Schema,
+    federation_version: &Version,
+) -> Result<(), FederationError> {
+    let federation_spec = FEDERATION_VERSIONS
+        .find(federation_version)
+        .ok_or_else(|| internal_error!(
+            "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
+            federation_version,
+        ))?;
+
+    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
+    // - auto import all directives.
+    let imports: Vec<_> = federation_spec
+        .directive_specs()
+        .iter()
+        .map(|d| format!("@{}", d.name()).into())
+        .collect();
+
+    schema
+        .schema_definition
+        .make_mut()
+        .directives
+        .push(Component::new(Directive {
+            name: Identity::link_identity().name,
+            arguments: vec![
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: federation_spec.url().to_string().into(),
+                }),
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(ast::Value::List(imports)),
+                }),
+            ],
+        }));
+    Ok(())
 }
 
 fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -239,7 +302,7 @@ fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), Federa
 
     // Add `Query._service` (if not already present)
     let service_field_pos = ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
+        type_name: query_root_type_name,
         field_name: FEDERATION_SERVICE_FIELD_NAME,
     };
     if service_field_pos.try_get(schema.schema()).is_none() {
@@ -254,19 +317,11 @@ impl Subgraph<Expanded> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
 
-    pub fn validate(
-        mut self,
-        rename_root_types: bool,
-    ) -> Result<Subgraph<Validated>, SubgraphError> {
+    pub fn validate(self, rename_root_types: bool) -> Result<Subgraph<Validated>, SubgraphError> {
         let blueprint = FederationBlueprint::new(rename_root_types);
-        blueprint
-            .on_validation(&mut self.state.schema)
+        let schema = blueprint
+            .on_validation(self.state.schema)
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
-        let schema = self
-            .state
-            .schema
-            .validate_or_return_self()
-            .map_err(|t| SubgraphError::new(self.name.clone(), t.1))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -463,6 +518,7 @@ mod tests {
                 name!("requires"),
                 name!("skip"),
                 name!("specifiedBy"),
+                name!("tag"),
             ]
         );
     }
@@ -502,6 +558,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),
@@ -546,6 +603,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),
