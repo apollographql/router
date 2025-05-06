@@ -160,7 +160,7 @@ impl SourceDirectiveArguments {
                         "`http` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
-                let http_value = SourceHTTPArguments::from_values(http_value, directive_name)?;
+                let http_value = SourceHTTPArguments::try_from((http_value, directive_name))?;
 
                 http = Some(http_value);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
@@ -169,7 +169,7 @@ impl SourceDirectiveArguments {
                         "`errors` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
-                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
 
                 errors = Some(errors_value);
             } else {
@@ -197,8 +197,10 @@ impl SourceDirectiveArguments {
     }
 }
 
-impl SourceHTTPArguments {
-    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
+    type Error = FederationError;
+
+    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         let mut path = None;
@@ -258,8 +260,10 @@ impl SourceHTTPArguments {
     }
 }
 
-impl ErrorsArguments {
-    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+impl TryFrom<(&ObjectNode, &Name)> for ErrorsArguments {
+    type Error = FederationError;
+
+    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut message = None;
         let mut extensions = None;
         for (name, value) in values {
@@ -324,10 +328,10 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
 
-                http = Some(ConnectHTTPArguments::from_values(
+                http = Some(ConnectHTTPArguments::try_from((
                     http_value,
                     directive_name,
-                )?);
+                ))?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!(format!(
@@ -335,10 +339,10 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
 
-                batch = Some(ConnectBatchArguments::from_values(
+                batch = Some(ConnectBatchArguments::try_from((
                     http_value,
                     directive_name,
-                )?);
+                ))?);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!(format!(
@@ -346,7 +350,7 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
 
-                let errors_value = ErrorsArguments::from_values(http_value, directive_name)?;
+                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
 
                 errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
@@ -388,8 +392,10 @@ impl ConnectDirectiveArguments {
     }
 }
 
-impl ConnectHTTPArguments {
-    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
+    type Error = FederationError;
+
+    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -468,8 +474,10 @@ impl ConnectHTTPArguments {
     }
 }
 
-impl ConnectBatchArguments {
-    fn from_values(values: &ObjectNode, directive_name: &Name) -> Result<Self, FederationError> {
+impl TryFrom<(&ObjectNode, &Name)> for ConnectBatchArguments {
+    type Error = FederationError;
+
+    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut max_size = None;
         for (name, value) in values {
             let name = name.as_str();
