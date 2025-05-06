@@ -233,7 +233,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "[N+1] connectors.example http: GET /{$this.c}/d",
+            label: "connectors.example http: GET /{$this.c}/d",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",

@@ -268,9 +268,6 @@ fn make_label(
     let source = format!(".{}", source.as_deref().unwrap_or(""));
     let batch = match entity_resolver {
         Some(EntityResolver::TypeBatch) => "[BATCH] ",
-        Some(EntityResolver::TypeSingle) => "[N+1] ",
-        Some(EntityResolver::Explicit) => "", // this could be used as a root field, so we don't know if it's batch or not
-        Some(EntityResolver::Implicit) => "[N+1] ",
         _ => "",
     };
     format!("{}{}{} {}", batch, subgraph_name, source, transport.label())

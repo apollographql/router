@@ -365,7 +365,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
     },
     "one_T_r_0": Connector {
         id: ConnectId {
-            label: "[N+1] one.json http: GET /t/{$this.id}/r",
+            label: "one.json http: GET /t/{$this.id}/r",
             subgraph_name: "one",
             source_name: Some(
                 "json",
