@@ -1,3 +1,5 @@
+pub(crate) mod suggestion;
+
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -124,8 +126,11 @@ pub enum SingleFederationError {
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
-    #[error("{diagnostics}")]
-    InvalidGraphQL { diagnostics: DiagnosticList },
+    // InvalidGraphQL: We need to be able to modify the message text from apollo-compiler. So, we
+    //                 format the DiagnosticData into String here. We can add additional data as
+    //                 necessary.
+    #[error("{message}")]
+    InvalidGraphQL { message: String },
     #[error(transparent)]
     InvalidGraphQLName(#[from] InvalidNameError),
     #[error("Subgraph invalid: {message}")]
@@ -338,6 +343,18 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("Context name \"{name}\" may not contain an underscore.")]
+    ContextNameContainsUnderscore { name: String },
+    #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
+    ContextNameInvalid { name: String },
+    #[error("{message}")]
+    ContextNotSet { message: String },
+    #[error("{message}")]
+    NoContextReferenced { message: String },
+    #[error("{message}")]
+    NoSelectionForContext { message: String },
+    #[error("{message}")]
+    ContextNoResolvableKey { message: String },
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
@@ -546,6 +563,16 @@ impl SingleFederationError {
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
             }
+            SingleFederationError::ContextNameContainsUnderscore { .. } => {
+                ErrorCode::ContextNameContainsUnderscore
+            }
+            SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
+            SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
+            SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
+            SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
+            SingleFederationError::ContextNoResolvableKey { .. } => {
+                ErrorCode::ContextNoResolvableKey
+            }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
             }
@@ -655,12 +682,6 @@ impl Display for MultipleFederationErrors {
     }
 }
 
-impl From<DiagnosticList> for SingleFederationError {
-    fn from(diagnostics: DiagnosticList) -> Self {
-        SingleFederationError::InvalidGraphQL { diagnostics }
-    }
-}
-
 impl FromIterator<SingleFederationError> for MultipleFederationErrors {
     fn from_iter<T: IntoIterator<Item = SingleFederationError>>(iter: T) -> Self {
         Self {
@@ -719,7 +740,17 @@ impl std::fmt::Debug for FederationError {
 
 impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
-        SingleFederationError::from(value).into()
+        let errors: Vec<_> = value
+            .iter()
+            .map(|d| SingleFederationError::InvalidGraphQL {
+                message: d.to_string(),
+            })
+            .collect();
+        match errors.len().cmp(&1) {
+            Ordering::Less => internal_error!("diagnostic list is unexpectedly empty"),
+            Ordering::Equal => errors[0].clone().into(),
+            Ordering::Greater => MultipleFederationErrors { errors }.into(),
+        }
     }
 }
 
@@ -744,12 +775,26 @@ impl FederationError {
         result.into()
     }
 
+    pub fn into_errors(self) -> Vec<SingleFederationError> {
+        match self {
+            FederationError::SingleFederationError(e) => vec![e],
+            FederationError::MultipleFederationErrors(e) => e.errors,
+            FederationError::AggregateFederationError(e) => e.causes,
+        }
+    }
+
     pub fn errors(&self) -> Vec<&SingleFederationError> {
         match self {
             FederationError::SingleFederationError(e) => vec![e],
             FederationError::MultipleFederationErrors(e) => e.errors.iter().collect(),
             FederationError::AggregateFederationError(e) => e.causes.iter().collect(),
         }
+    }
+
+    pub fn has_invalid_graphql_error(&self) -> bool {
+        self.errors()
+            .into_iter()
+            .any(|e| matches!(e, SingleFederationError::InvalidGraphQL { .. }))
     }
 }
 
@@ -1701,6 +1746,73 @@ static LIST_SIZE_INVALID_SIZED_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::
     )
 });
 
+static CONTEXT_NAME_CONTAINS_UNDERSCORE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_CONTAINS_UNDERSCORE".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NAME_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_INVALID".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NOT_SET: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NOT_SET".to_owned(),
+        "Context is never set for context trying to be used".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_CONTEXT_REFERENCED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_CONTEXT_REFERENCED".to_owned(),
+        "Selection in @fromContext field argument does not reference a context".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_SELECTION_FOR_CONTEXT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_SELECTION_FOR_CONTEXT".to_owned(),
+        "field parameter in @fromContext must contain a selection set".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NO_RESOLVABLE_KEY".to_owned(),
+        "If an ObjectType uses a @fromContext, at least one of its keys must be resolvable"
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1789,6 +1901,12 @@ pub enum ErrorCode {
     ListSizeInvalidAssumedSize,
     ListSizeInvalidSlicingArgument,
     ListSizeInvalidSizedField,
+    ContextNameInvalid,
+    ContextNameContainsUnderscore,
+    ContextNotSet,
+    NoContextReferenced,
+    NoSelectionForContext,
+    ContextNoResolvableKey,
 }
 
 impl ErrorCode {
@@ -1895,6 +2013,12 @@ impl ErrorCode {
             ErrorCode::ListSizeInvalidAssumedSize => &LIST_SIZE_INVALID_ASSUMED_SIZE,
             ErrorCode::ListSizeInvalidSlicingArgument => &LIST_SIZE_INVALID_SLICING_ARGUMENT,
             ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
+            ErrorCode::ContextNameContainsUnderscore => &CONTEXT_NAME_CONTAINS_UNDERSCORE,
+            ErrorCode::ContextNameInvalid => &CONTEXT_NAME_INVALID,
+            ErrorCode::ContextNotSet => &CONTEXT_NOT_SET,
+            ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
+            ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
+            ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
         }
     }
 }

@@ -205,6 +205,7 @@ dependencies = [
  "indexmap 2.9.0",
  "insta",
  "itertools 0.14.0",
+ "levenshtein",
  "line-col",
  "multi_try",
  "multimap 0.10.0",
@@ -410,6 +411,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-futures",
+ "tracing-mock",
  "tracing-opentelemetry",
  "tracing-serde 0.1.3",
  "tracing-subscriber",
@@ -3841,6 +3843,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "levenshtein"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db13adb97ab515a3691f56e4dbab09283d0b86cb45abd991d8634a9d6f501760"
+
+[[package]]
 name = "libc"
 version = "0.2.171"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6920,6 +6928,16 @@ checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-mock"
+version = "0.1.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff59989fc8854bc58d3daeadbccf5d7fb0b722af043cf839c7785f1ff0daf0e"
+dependencies = [
+ "tracing",
  "tracing-core",
 ]
 

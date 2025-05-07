@@ -103,6 +103,8 @@ type Z @join__type(graph: TWO, key: "id") @context(name: "two__ctx") {
   x: X @join__field(graph: TWO, type: "X")
 }
 
-scalar requiresScopes__Scope
+scalar context__ContextFieldValue
 
 scalar policy__Policy
+
+scalar requiresScopes__Scope

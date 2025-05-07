@@ -77,6 +77,8 @@ enum Command {
     },
     /// Outputs the formatted query plan for the given query and schema
     Plan {
+        #[arg(long)]
+        json: bool,
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
@@ -172,10 +174,11 @@ fn main() -> ExitCode {
         Command::QueryGraph { schemas } => cmd_query_graph(&schemas),
         Command::FederatedGraph { schemas } => cmd_federated_graph(&schemas),
         Command::Plan {
+            json,
             query,
             schemas,
             planner,
-        } => cmd_plan(&query, &schemas, planner),
+        } => cmd_plan(json, &query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
@@ -285,6 +288,7 @@ fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
 }
 
 fn cmd_plan(
+    use_json: bool,
     query_path: &Path,
     schema_paths: &[PathBuf],
     planner: QueryPlannerArgs,
@@ -298,7 +302,11 @@ fn cmd_plan(
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
-    println!("{query_plan}");
+    if use_json {
+        println!("{}", serde_json::to_string_pretty(&query_plan).unwrap());
+    } else {
+        println!("{query_plan}");
+    }
 
     // Check the query plan
     let subgraphs_by_name = supergraph
@@ -333,10 +341,8 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .file_name()
         .and_then(|name| name.to_str().map(|x| x.to_string()));
     let name = name.unwrap_or("subgraph".to_string());
-    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
-        .expect("valid schema")
-        .expand_links()
-        .expect("expanded subgraph to be valid")
+    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)?
+        .expand_links()?
         .validate(true)
         .map_err(|e| e.into_inner())?;
     println!("{}", subgraph.schema_string());

@@ -224,7 +224,7 @@ impl Connector {
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
         let id = ConnectId {
-            label: make_label(subgraph_name, &source_name, &transport),
+            label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
             directive: connect.position,
@@ -328,9 +328,14 @@ fn make_label(
     subgraph_name: &str,
     source: &Option<String>,
     transport: &HttpJsonTransport,
+    entity_resolver: &Option<EntityResolver>,
 ) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
-    format!("{}{} {}", subgraph_name, source, transport.label())
+    let batch = match entity_resolver {
+        Some(EntityResolver::TypeBatch) => "[BATCH] ",
+        _ => "",
+    };
+    format!("{}{}{} {}", batch, subgraph_name, source, transport.label())
 }
 
 fn determine_entity_resolver(

@@ -145,6 +145,30 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
     }
 }
 
+/// A helper to call `assert_snapshot!` without prepending the module, since prepending the
+/// module makes all the paths in json_selection tests too long for Windows.
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_snapshot {
+    ($($arg:tt)*) => {
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!($($arg)*);
+        });
+    };
+}
+
+/// A helper to call `assert_debug_snapshot!` without prepending the module, since prepending the
+/// module makes all the paths in json_selection tests too long for Windows.
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_debug_snapshot {
+    ($($arg:tt)*) => {
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_debug_snapshot!($($arg)*);
+        });
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
