@@ -949,7 +949,7 @@ mod tests {
             Some(&|_| {
                 LINK_VERSIONS
                     .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &'static dyn SpecDefinition)
+                    .map(|v| v as &dyn SpecDefinition)
             }),
             None,
         );
@@ -976,7 +976,7 @@ mod tests {
             Some(&|_| {
                 LINK_VERSIONS
                     .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &'static dyn SpecDefinition)
+                    .map(|v| v as &dyn SpecDefinition)
             }),
             None,
         );
