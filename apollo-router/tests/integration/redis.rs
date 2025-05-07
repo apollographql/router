@@ -1131,13 +1131,16 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.start().await;
     router.assert_started().await;
 
-    let expected_metric = r#"apollo_router_cache_redis_connections{kind="query planner",otel_scope_name="apollo/router"} 4"#;
-    router.assert_metrics_contains(expected_metric, None).await;
+    let expected_metric = format!(
+        r#"apollo_router_cache_redis_connections{{kind="query planner",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 4"#,
+        std::env!("CARGO_PKG_VERSION")
+    );
+    router.assert_metrics_contains(&expected_metric, None).await;
 
     // check that reloading the schema yields the same number of redis connections
     let new_router_config = format!("{router_config}\ninclude_subgraph_errors:\n  all: true");
     router.update_config(&new_router_config).await;
     router.assert_reloaded().await;
 
-    router.assert_metrics_contains(expected_metric, None).await;
+    router.assert_metrics_contains(&expected_metric, None).await;
 }
