@@ -12,6 +12,8 @@ use shape::Shape;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
+use super::expression::MappingArgument;
+use super::expression::parse_mapping_argument;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
@@ -106,7 +108,7 @@ impl<'schema> Errors<'schema> {
             .as_ref()
             .into_iter()
             .flat_map(|m| {
-                m.selection
+                m.mapping
                     .variable_references()
                     .map(|var_ref| var_ref.namespace.namespace)
             })
@@ -119,8 +121,7 @@ impl<'schema> Errors<'schema> {
 }
 
 struct ErrorsMessage<'schema> {
-    selection: JSONSelection,
-    string: GraphQLString<'schema>,
+    mapping: MappingArgument<'schema>,
     coordinate: ErrorsMessageCoordinate<'schema>,
 }
 
@@ -138,29 +139,11 @@ impl<'schema> ErrorsMessage<'schema> {
         };
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
-        // Ensure that the selection is a valid JSONSelection string
-        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
-            return Err(Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        };
-        let selection = JSONSelection::parse(string.as_str()).map_err(|err| Message {
-            code: Code::InvalidErrorsMessage,
-            message: format!("{coordinate} is not valid: {err}"),
-            locations: value
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
+        let mapping =
+            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
 
         Ok(Some(Self {
-            selection,
-            string,
+            mapping,
             coordinate,
         }))
     }
@@ -168,31 +151,27 @@ impl<'schema> ErrorsMessage<'schema> {
     /// Check that only available variables are used, and the expression results in a string
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
-            selection,
-            string,
+            mapping,
             coordinate,
         } = self;
         let context = match coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &string, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &mapping.string, Code::InvalidErrorsMessage)
             }
-            ErrorsCoordinate::Connect { connect } => {
-                &Context::for_connect_response(schema, connect, &string, Code::InvalidErrorsMessage)
-            }
+            ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
+                schema,
+                connect,
+                &mapping.string,
+                Code::InvalidErrorsMessage,
+            ),
         };
 
-        expression::validate(
-            &Expression {
-                expression: selection,
-                location: 0..string.as_str().len(),
+        expression::validate(&mapping.expression, context, &Shape::string([])).map_err(
+            |mut message| {
+                message.message = format!("In {coordinate}: {message}", message = message.message);
+                message
             },
-            context,
-            &Shape::string([]),
         )
-        .map_err(|mut message| {
-            message.message = format!("In {coordinate}: {message}", message = message.message);
-            message
-        })
     }
 }
 
@@ -268,33 +247,11 @@ impl<'schema> ErrorsExtensions<'schema> {
         };
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
-        // Ensure that the selection is a valid JSONSelection string
-        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
-            return Err(Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidErrorsExtensions,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
+        let MappingArgument { expression, string } =
+            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
 
         Ok(Some(Self {
-            selection,
+            selection: expression.expression,
             string,
             coordinate,
         }))

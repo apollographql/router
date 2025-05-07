@@ -16,7 +16,7 @@ use crate::sources::connect::validation::Message;
 
 /// The `@link` in a subgraph which enables connectors
 #[derive(Clone, Debug)]
-pub(super) struct ConnectLink<'schema> {
+pub(crate) struct ConnectLink<'schema> {
     spec: ConnectSpec,
     source_directive_name: Name,
     connect_directive_name: Name,
