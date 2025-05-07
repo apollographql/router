@@ -1,6 +1,7 @@
 //! This module is all about validating [`Expression`]s for a given context. This isn't done at
 //! runtime, _only_ during composition because it could be expensive.
 
+use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -9,7 +10,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::parser::SourceMap;
 use itertools::Itertools;
 use shape::NamedShapePathKey;
 use shape::Shape;
@@ -28,6 +28,7 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     Shape::record(
@@ -514,22 +515,26 @@ pub(crate) struct MappingArgument<'schema> {
     pub(crate) string: GraphQLString<'schema>,
 }
 
+impl MappingArgument<'_> {
+    pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
+        self.expression.expression.variable_references()
+    }
+}
+
 pub(crate) fn parse_mapping_argument<'schema>(
     node: &'schema Node<Value>,
-    prefix: &str,
-    name: Option<&'schema str>,
+    coordinate: impl Display,
     code: Code,
-    source_map: &'schema SourceMap,
+    schema: &'schema SchemaInfo,
 ) -> Result<MappingArgument<'schema>, Message> {
-    let prefix = name
-        .map(|name| format!("{prefix}, the `{name}` argument"))
-        .unwrap_or_else(|| prefix.to_string());
-
-    let Ok(string) = GraphQLString::new(node, source_map) else {
+    let Ok(string) = GraphQLString::new(node, &schema.sources) else {
         return Err(Message {
             code: Code::GraphQLError,
-            message: format!("{prefix} must be a string."),
-            locations: node.line_column_range(source_map).into_iter().collect(),
+            message: format!("{coordinate} must be a string."),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
         });
     };
 
@@ -538,8 +543,11 @@ pub(crate) fn parse_mapping_argument<'schema>(
         Err(e) => {
             return Err(Message {
                 code,
-                message: format!("{prefix} is not valid: {e}"),
-                locations: node.line_column_range(source_map).into_iter().collect(),
+                message: format!("{coordinate} is not valid: {e}"),
+                locations: string
+                    .line_col_for_subslice(e.offset..e.offset + 1, schema)
+                    .into_iter()
+                    .collect(),
             });
         }
     };
@@ -547,8 +555,11 @@ pub(crate) fn parse_mapping_argument<'schema>(
     if selection.is_empty() {
         return Err(Message {
             code,
-            message: format!("{prefix} is empty"),
-            locations: node.line_column_range(source_map).into_iter().collect(),
+            message: format!("{coordinate} is empty"),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
         });
     }
 

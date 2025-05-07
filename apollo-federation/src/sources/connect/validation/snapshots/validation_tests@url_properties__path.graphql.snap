@@ -27,28 +27,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `path` is invalid: `*.bad` must start with one of $args, $config, $context, $request",
+        message: "In `@connect` on `Query.resources`, argument `path` is invalid: `*.bad` must start with one of $args, $config, $context, $request",
         locations: [
             23:53..23:56,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `path` is invalid: string values aren't valid here",
+        message: "In `@connect` on `Query.resources`, argument `path` is invalid: string values aren't valid here",
         locations: [
             24:55..24:60,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `path` is invalid: object values aren't valid here",
+        message: "In `@connect` on `Query.resources`, argument `path` is invalid: object values aren't valid here",
         locations: [
             27:34..27:46,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `path` is invalid: string values aren't valid here",
+        message: "In `@connect` on `Query.resources`, argument `path` is invalid: string values aren't valid here",
         locations: [
             12:16..12:22,
             12:13..12:22,

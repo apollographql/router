@@ -11,13 +11,11 @@ use multi_try::MultiTry;
 use shape::Shape;
 
 use crate::sources::connect::HTTPMethod;
-use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
-use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -141,7 +139,7 @@ impl<'schema> Http<'schema> {
                     .map(|var_ref| var_ref.namespace.namespace)
             })
             .chain(self.body.as_ref().into_iter().flat_map(|b| {
-                b.selection
+                b.mapping
                     .variable_references()
                     .map(|var_ref| var_ref.namespace.namespace)
             }))
@@ -149,8 +147,7 @@ impl<'schema> Http<'schema> {
 }
 
 struct Body<'schema> {
-    selection: JSONSelection,
-    string: GraphQLString<'schema>,
+    mapping: MappingArgument<'schema>,
     coordinate: BodyCoordinate<'schema>,
 }
 
@@ -168,17 +165,10 @@ impl<'schema> Body<'schema> {
         };
         let coordinate = BodyCoordinate { connect };
 
-        let MappingArgument { expression, string } = parse_mapping_argument(
-            value,
-            &coordinate.to_string(),
-            None,
-            Code::InvalidBody,
-            &schema.sources,
-        )?;
+        let mapping = parse_mapping_argument(value, coordinate, Code::InvalidBody, schema)?;
 
         Ok(Some(Self {
-            selection: expression.expression,
-            string,
+            mapping,
             coordinate,
         }))
     }
@@ -188,16 +178,17 @@ impl<'schema> Body<'schema> {
     /// TODO: check keys here?
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
-            selection,
-            string,
+            mapping,
             coordinate,
         } = self;
         expression::validate(
-            &Expression {
-                expression: selection,
-                location: 0..string.as_str().len(),
-            },
-            &Context::for_connect_request(schema, coordinate.connect, &string, Code::InvalidBody),
+            &mapping.expression,
+            &Context::for_connect_request(
+                schema,
+                coordinate.connect,
+                &mapping.string,
+                Code::InvalidBody,
+            ),
             &Shape::unknown([]),
         )
         .map_err(|mut message| {
@@ -277,8 +268,11 @@ impl<'schema> Transport<'schema> {
             }]);
         }
 
-        let url_properties =
-            UrlProperties::parse_for_connector(coordinate.clone(), schema, http_arg)?;
+        let url_properties = UrlProperties::parse_for_connector(
+            coordinate.connect_directive_coordinate,
+            schema,
+            http_arg,
+        )?;
 
         let coordinate = HttpMethodCoordinate {
             connect: coordinate.connect_directive_coordinate,

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -8,31 +9,50 @@ use shape::Shape;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::SchemaInfo;
-use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
+use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::SourceDirectiveCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::MappingArgument;
 use crate::sources::connect::validation::expression::parse_mapping_argument;
 
-enum PropertyLocation<'schema> {
+#[derive(Clone, Copy)]
+enum ConnectOrSource<'schema> {
     Source(SourceDirectiveCoordinate<'schema>),
-    Connect(ConnectHTTPCoordinate<'schema>),
+    Connect(ConnectDirectiveCoordinate<'schema>),
 }
 
-#[allow(unused)]
+#[derive(Clone, Copy)]
+struct Coordinate<'schema> {
+    directive: ConnectOrSource<'schema>,
+    property: &'schema str,
+}
+
+impl fmt::Display for Coordinate<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.directive {
+            ConnectOrSource::Source(source) => {
+                write!(f, "In {source}, the `http.{}` argument", self.property)
+            }
+            ConnectOrSource::Connect(connect) => {
+                write!(f, "In {connect}, the `http.{}` argument", self.property)
+            }
+        }
+    }
+}
+
 pub(in crate::sources::connect::validation) struct UrlProperties<'schema> {
-    location: PropertyLocation<'schema>,
+    directive: ConnectOrSource<'schema>,
     path: Option<MappingArgument<'schema>>,
     query_params: Option<MappingArgument<'schema>>,
 }
 
 impl<'schema> UrlProperties<'schema> {
     pub(in crate::sources::connect::validation) fn parse_for_connector(
-        connector: ConnectHTTPCoordinate<'schema>,
+        connector: ConnectDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(PropertyLocation::Connect(connector), schema, http_arg)
+        Self::parse(ConnectOrSource::Connect(connector), schema, http_arg)
     }
 
     pub(in crate::sources::connect::validation) fn parse_for_source(
@@ -40,15 +60,11 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(
-            PropertyLocation::Source(source_coordinate),
-            schema,
-            http_arg,
-        )
+        Self::parse(ConnectOrSource::Source(source_coordinate), schema, http_arg)
     }
 
     fn parse(
-        location: PropertyLocation<'schema>,
+        directive: ConnectOrSource<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
@@ -56,33 +72,30 @@ impl<'schema> UrlProperties<'schema> {
         let mut query_params = None;
 
         let mut errors = Vec::new();
-        let source_map = &schema.sources;
-
-        let coordinate = match &location {
-            PropertyLocation::Source(source) => source.to_string(),
-            PropertyLocation::Connect(connector) => connector.to_string(),
-        };
-        let prefix = format!("In {coordinate}");
 
         for (name, value) in http_arg {
             match name.as_str() {
-                "path" => match parse_mapping_argument(
+                property @ "path" => match parse_mapping_argument(
                     value,
-                    &prefix,
-                    Some(name.as_str()),
+                    Coordinate {
+                        directive,
+                        property,
+                    },
                     Code::InvalidUrlProperty,
-                    source_map,
+                    schema,
                 ) {
                     Ok(p) => path = Some(p),
                     Err(e) => errors.push(e),
                 },
-                "queryParams" => {
+                property @ "queryParams" => {
                     match parse_mapping_argument(
                         value,
-                        &prefix,
-                        Some(name.as_str()),
+                        Coordinate {
+                            directive,
+                            property,
+                        },
                         Code::InvalidUrlProperty,
-                        source_map,
+                        schema,
                     ) {
                         Ok(qp) => query_params = Some(qp),
                         Err(e) => errors.push(e),
@@ -97,7 +110,7 @@ impl<'schema> UrlProperties<'schema> {
         }
 
         Ok(Self {
-            location,
+            directive,
             path,
             query_params,
         })
@@ -130,24 +143,24 @@ impl<'schema> UrlProperties<'schema> {
             return Ok(());
         };
 
-        let context = match &self.location {
-            PropertyLocation::Source(_) => {
+        let context = match &self.directive {
+            ConnectOrSource::Source(_) => {
                 expression::Context::for_source(schema, &property.string, Code::InvalidUrlProperty)
             }
-            PropertyLocation::Connect(coord) => expression::Context::for_connect_request(
+            ConnectOrSource::Connect(coord) => expression::Context::for_connect_request(
                 schema,
-                coord.connect_directive_coordinate,
+                *coord,
                 &property.string,
                 Code::InvalidUrlProperty,
             ),
         };
 
         expression::validate(&property.expression, &context, expected_shape).map_err(|e| {
-            let message = match &self.location {
-                PropertyLocation::Source(source) => {
+            let message = match &self.directive {
+                ConnectOrSource::Source(source) => {
                     format!("In {source}, argument `{name}` is invalid: {}", e.message,)
                 }
-                PropertyLocation::Connect(coord) => {
+                ConnectOrSource::Connect(coord) => {
                     format!("In {coord}, argument `{name}` is invalid: {}", e.message,)
                 }
             };

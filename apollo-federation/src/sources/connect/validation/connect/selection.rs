@@ -68,10 +68,9 @@ impl<'schema> Selection<'schema> {
 
         let MappingArgument { expression, string } = parse_mapping_argument(
             &selection_arg.value,
-            &coordinate.to_string(),
-            None,
+            coordinate,
             Code::InvalidSelection,
-            &schema.sources,
+            schema,
         )?;
 
         Ok(Self {

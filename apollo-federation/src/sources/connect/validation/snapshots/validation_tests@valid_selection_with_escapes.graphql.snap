@@ -8,14 +8,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/valid_sel
         code: InvalidSelection,
         message: "`@connect(selection:)` on `Query.block` is not valid: Path selection . must be followed by key (identifier or quoted string literal): .",
         locations: [
-            8:20..17:12,
+            16:30..16:31,
         ],
     },
     Message {
         code: InvalidSelection,
         message: "`@connect(selection:)` on `Query.standard` is not valid: Path selection . must be followed by key (identifier or quoted string literal): .",
         locations: [
-            22:20..22:97,
+            22:95..22:96,
         ],
     },
 ]
