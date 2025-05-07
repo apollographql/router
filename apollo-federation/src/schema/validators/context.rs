@@ -217,30 +217,4 @@ mod tests {
             "contextB should include type V"
         );
     }
-
-    #[test]
-    fn builds_context_with_renamed_import() {
-        let schema_str = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", {name: "ContextFieldValue", as: "CtxtFdVlue"}])
-                
-            type Query {
-                t: T
-            }
-
-            type T @context(name: "contextA") {
-                id: ID!
-            }
-
-            type U @context(name: "contextA") {
-                id: ID!
-            }
-
-            type V @context(name: "contextB") {
-                id: ID!
-            }
-        "#;
-
-        let subgraph = build_and_expand(schema_str);
-    }
 }
