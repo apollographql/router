@@ -155,6 +155,10 @@ Connecting and sending commands to Redis are subject to a timeout, set by defaul
 
 The `ttl` option defines the default global expiration for Redis entries. For APQ caching, the default is no expiration, while for query plan caching, the default expiration is set to 30 days.
 
+When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router will [pre-warm](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but will *not* invalidate existing cached queries in the distributed cache,
+creating an additive effect on cache utilization. Consider decreasing the TTL e.g. to 24 hours or twice the median publish interval when publishing frequently to prevent cache overflow and monitor cache utilization in your environment.
+Also, be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization.
+
 ### Namespace
 
 When using the same Redis instance for multiple purposes, the `namespace` option defines a prefix for all the keys defined by the router.
