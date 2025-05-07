@@ -892,9 +892,15 @@ impl SpecDefinition for FederationSpecDefinition {
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![Box::new(ScalarTypeSpecification {
-            name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
-        })]
+        let mut type_specs: Vec<Box<dyn TypeAndDirectiveSpecification>> =
+            vec![Box::new(ScalarTypeSpecification {
+                name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+            })];
+
+        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+            type_specs.extend(ContextSpecDefinition::new(self.version().clone()).type_specs());
+        }
+        type_specs
     }
 }
 
