@@ -753,10 +753,6 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "supergraph": {
-                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
-                "generate_query_fragments": false,
-            },
             "experimental_mock_subgraphs": subgraphs.clone()
         }))
         .unwrap()
@@ -827,10 +823,6 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
-            },
-            "supergraph": {
-                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
-                "generate_query_fragments": false,
             },
             "experimental_mock_subgraphs": subgraphs.clone()
         }))
@@ -906,10 +898,6 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             },
             "include_subgraph_errors": {
                 "all": true
-            },
-            "supergraph": {
-                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
-                "generate_query_fragments": false,
             },
             "experimental_mock_subgraphs": subgraphs.clone()
         }))
