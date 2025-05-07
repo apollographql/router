@@ -2369,16 +2369,16 @@ expression: "&schema"
     },
     "DeduplicationConfig": {
       "additionalProperties": false,
-      "description": "Deduplication configuration",
+      "description": "Subscription deduplication configuration",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Enable the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
+          "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode. (default: true)",
           "type": "boolean"
         },
         "ignored_headers": {
           "default": [],
-          "description": "List of headers to ignore for deduplication, for example if you forward 'user-agent' header but doesn't interfere with data returned by the subscription we can just ignore it to not create a new subscription connection",
+          "description": "List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical. For example, if you forward the \"User-Agent\" header, but the subgraph doesn't depend on the value of that header, adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.",
           "items": {
             "type": "string"
           },
