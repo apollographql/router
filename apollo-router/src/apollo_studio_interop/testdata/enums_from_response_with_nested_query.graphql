@@ -1,0 +1,7 @@
+query QueryWithNestedQuery {
+  enumNestedQuery {
+    nestedQuery(input: SOME_VALUE_1) {
+      str
+    }
+  }
+}

@@ -134,7 +134,7 @@ impl BaseQueryGraphBuilder {
             .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::default());
+            .insert(source, IndexMap::default());
         Self { query_graph }
     }
 
@@ -382,12 +382,12 @@ impl SchemaQueryGraphBuilder {
                 if self.subgraph.is_some() {
                     self.maybe_add_interface_fields_edges(pos.clone(), node)?;
                 }
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             OutputTypeDefinitionPosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             // Any other case (scalar or enum; input objects are not possible here) is terminal and
             // has no edges to consider.
@@ -1170,6 +1170,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1295,6 +1296,7 @@ impl FederatedQueryGraphBuilder {
                                     .type_name()
                                     .clone(),
                                 application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1361,6 +1363,7 @@ impl FederatedQueryGraphBuilder {
                     &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1709,6 +1712,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -2127,6 +2131,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -2517,7 +2525,7 @@ mod tests {
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
             source: SCHEMA_NAME.into(),
-            field_definition_position: field_pos.clone().into(),
+            field_definition_position: field_pos.into(),
             is_part_of_provides: false,
         };
         let mut tails = query_graph

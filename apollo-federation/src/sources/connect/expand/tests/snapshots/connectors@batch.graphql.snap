@@ -21,43 +21,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -93,10 +75,15 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
     "one_User_0": Connector {
         id: ConnectId {
-            label: "one.json http: POST /users-batch",
+            label: "[BATCH] one.json http: POST /users-batch",
             subgraph_name: "one",
             source_name: Some(
                 "json",
@@ -111,39 +98,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users-batch",
-                                    location: 1..12,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users-batch",
+                            location: 0..12,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Post,
             headers: {},
@@ -212,6 +177,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                     },
                 ),
             ),
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -275,5 +244,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

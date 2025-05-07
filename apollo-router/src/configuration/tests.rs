@@ -786,9 +786,6 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
@@ -1167,6 +1164,36 @@ fn it_processes_specified_maximum_batch_limit_correctly() {
     let config: Batching = serde_json::from_value(json_config).unwrap();
 
     assert_eq!(config.maximum_size, Some(10));
+}
+
+#[test]
+fn it_includes_default_header_read_timeout_when_server_config_omitted() {
+    let json_config = json!({});
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(10)
+    );
+}
+
+#[test]
+fn it_processes_specified_server_config_correctly() {
+    let json_config = json!({
+        "server": {
+            "http": {
+                "header_read_timeout": "30s"
+            }
+        }
+    });
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(30)
+    );
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

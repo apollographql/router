@@ -154,10 +154,20 @@ pub enum SingleFederationError {
     UnknownFederationLinkVersion { message: String },
     #[error("{message}")]
     UnknownLinkVersion { message: String },
-    #[error("{message}")]
-    KeyFieldsHasArgs { message: String },
-    #[error("{message}")]
-    ProvidesFieldsHasArgs { message: String },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+    )]
+    KeyFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+    )]
+    ProvidesFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
     #[error("{message}")]
     ProvidesFieldsMissingExternal { message: String },
     #[error("{message}")]
@@ -168,16 +178,24 @@ pub enum SingleFederationError {
     ProvidesUnsupportedOnInterface { message: String },
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
-    #[error("{message}")]
-    KeyDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    ProvidesDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    RequiresDirectiveInFieldsArgs { message: String },
+    #[error(
+        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+    )]
+    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+    )]
+    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+    )]
+    RequiresHasDirectiveInFieldsArg { applied_directives: String },
     #[error("{message}")]
     ExternalUnused { message: String },
-    #[error("{message}")]
-    TypeWithOnlyUnusedExternal { message: String },
+    #[error(
+        "Type {type_name} contains only external fields and all those fields are all unused (they do not appear in any @key, @provides or @requires)."
+    )]
+    TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
     #[error("{message}")]
@@ -320,6 +338,16 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
+    CostAppliedToInterfaceField { interface: Name, field: Name },
+    #[error("{message}")]
+    ListSizeAppliedToNonList { message: String },
+    #[error("{message}")]
+    ListSizeInvalidAssumedSize { message: String },
+    #[error("{message}")]
+    ListSizeInvalidSlicingArgument { message: String },
+    #[error("{message}")]
+    ListSizeInvalidSizedField { message: String },
 }
 
 impl SingleFederationError {
@@ -375,13 +403,13 @@ impl SingleFederationError {
             SingleFederationError::RequiresUnsupportedOnInterface { .. } => {
                 ErrorCode::RequiresUnsupportedOnInterface
             }
-            SingleFederationError::KeyDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::KeyHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::KeyDirectiveInFieldsArgs
             }
-            SingleFederationError::ProvidesDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::ProvidesHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::ProvidesDirectiveInFieldsArgs
             }
-            SingleFederationError::RequiresDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::RequiresHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::RequiresDirectiveInFieldsArgs
             }
             SingleFederationError::ExternalUnused { .. } => ErrorCode::ExternalUnused,
@@ -518,7 +546,26 @@ impl SingleFederationError {
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
             }
+            SingleFederationError::CostAppliedToInterfaceField { .. } => {
+                ErrorCode::CostAppliedToInterfaceField
+            }
+            SingleFederationError::ListSizeAppliedToNonList { .. } => {
+                ErrorCode::ListSizeAppliedToNonList
+            }
+            SingleFederationError::ListSizeInvalidAssumedSize { .. } => {
+                ErrorCode::ListSizeInvalidAssumedSize
+            }
+            SingleFederationError::ListSizeInvalidSlicingArgument { .. } => {
+                ErrorCode::ListSizeInvalidSlicingArgument
+            }
+            SingleFederationError::ListSizeInvalidSizedField { .. } => {
+                ErrorCode::ListSizeInvalidSizedField
+            }
         }
+    }
+
+    pub fn code_string(&self) -> String {
+        self.code().definition().code().to_string()
     }
 
     pub(crate) fn root_already_used(
@@ -568,7 +615,7 @@ impl From<FederationSpecError> for FederationError {
 
 #[derive(Debug, Clone, thiserror::Error, Default)]
 pub struct MultipleFederationErrors {
-    pub errors: Vec<SingleFederationError>,
+    pub(crate) errors: Vec<SingleFederationError>,
 }
 
 impl MultipleFederationErrors {
@@ -695,6 +742,14 @@ impl FederationError {
         result.push(self);
         result.push(other);
         result.into()
+    }
+
+    pub fn errors(&self) -> Vec<&SingleFederationError> {
+        match self {
+            FederationError::SingleFederationError(e) => vec![e],
+            FederationError::MultipleFederationErrors(e) => e.errors.iter().collect(),
+            FederationError::AggregateFederationError(e) => e.causes.iter().collect(),
+        }
     }
 }
 
@@ -1591,6 +1646,61 @@ static NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS: LazyLock<ErrorCodeDefinition> = La
     )
 });
 
+static COST_APPLIED_TO_INTERFACE_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "COST_APPLIED_TO_INTERFACE_FIELD".to_owned(),
+        "The `@cost` directive must be applied to concrete types".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_APPLIED_TO_NON_LIST: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_APPLIED_TO_NON_LIST".to_owned(),
+        "The `@listSize` directive must be applied to list types".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_ASSUMED_SIZE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_ASSUMED_SIZE".to_owned(),
+        "The `@listSize` directive assumed size cannot be negative".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_SLICING_ARGUMENT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_SLICING_ARGUMENT".to_owned(),
+        "The `@listSize` directive must have existing integer slicing arguments".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
+static LIST_SIZE_INVALID_SIZED_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LIST_SIZE_INVALID_SIZED_FIELD".to_owned(),
+        "The `@listSize` directive must reference existing list fields as sized fields".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.2",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1674,6 +1784,11 @@ pub enum ErrorCode {
     UnsupportedFederationDirective,
     QueryPlanComplexityExceededError,
     NoPlanFoundWithDisabledSubgraphs,
+    CostAppliedToInterfaceField,
+    ListSizeAppliedToNonList,
+    ListSizeInvalidAssumedSize,
+    ListSizeInvalidSlicingArgument,
+    ListSizeInvalidSizedField,
 }
 
 impl ErrorCode {
@@ -1775,6 +1890,11 @@ impl ErrorCode {
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
             ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
             ErrorCode::NoPlanFoundWithDisabledSubgraphs => &NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS,
+            ErrorCode::CostAppliedToInterfaceField => &COST_APPLIED_TO_INTERFACE_FIELD,
+            ErrorCode::ListSizeAppliedToNonList => &LIST_SIZE_APPLIED_TO_NON_LIST,
+            ErrorCode::ListSizeInvalidAssumedSize => &LIST_SIZE_INVALID_ASSUMED_SIZE,
+            ErrorCode::ListSizeInvalidSlicingArgument => &LIST_SIZE_INVALID_SLICING_ARGUMENT,
+            ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
         }
     }
 }

@@ -7,10 +7,12 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use position::ObjectFieldDefinitionPosition;
+use apollo_compiler::validation::WithErrors;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
@@ -21,9 +23,12 @@ use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::cost_spec_definition;
+use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_SERVICE_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
@@ -38,6 +43,7 @@ use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -52,6 +58,7 @@ pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
+pub(crate) mod validators;
 
 pub(crate) fn compute_subgraph_metadata(
     schema: &FederationSchema,
@@ -94,10 +101,6 @@ impl FederationSchema {
 
     pub(crate) fn referencers(&self) -> &Referencers {
         &self.referencers
-    }
-
-    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
-        self.subgraph_metadata.as_deref()
     }
 
     /// Returns all the types in the schema, minus builtins.
@@ -220,6 +223,7 @@ impl FederationSchema {
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
+    // PORT_NOTE: Corresponds to `FederationMetadata.entityType` in JS
     pub(crate) fn entity_type(
         &self,
     ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
@@ -236,6 +240,24 @@ impl FederationSchema {
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
             ))),
             None => Ok(None),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.serviceType` in JS
+    pub(crate) fn service_type(&self) -> Result<ObjectTypeDefinitionPosition, FederationError> {
+        // Note: `_Service` type name can't be renamed.
+        match self.schema.types.get(&FEDERATION_SERVICE_TYPE_NAME_IN_SPEC) {
+            Some(ExtendedType::Object(_)) => Ok(ObjectTypeDefinitionPosition {
+                type_name: FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{spec_name}` type definition",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
+            None => bail!(
+                "Unexpected: type not found for federation spec's `{spec_name}`",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
         }
     }
 
@@ -467,7 +489,8 @@ impl FederationSchema {
             .get_directive(&provides_directive_definition.name)?;
 
         let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
-        for field_definition_position in &provides_directive_referencers.object_fields {
+        for field_definition_position in provides_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
@@ -478,6 +501,7 @@ impl FederationSchema {
                             .provides_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| ProvidesDirective {
                             arguments: args,
+                            target: field_definition_position.clone(),
                             target_return_type: field_definition.ty.inner_named_type(),
                         }));
                     }
@@ -498,18 +522,19 @@ impl FederationSchema {
             .get_directive(&requires_directive_definition.name)?;
 
         let mut applications = Vec::new();
-        for field_definition_position in &requires_directive_referencers.object_fields {
+        for field_definition_position in requires_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
-                    for provides_directive_application in
+                    for directive_application in
                         directives.get_all(&requires_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .requires_directive_arguments(provides_directive_application);
+                        let arguments =
+                            federation_spec.requires_directive_arguments(directive_application);
                         applications.push(arguments.map(|args| RequiresDirective {
                             arguments: args,
-                            target: field_definition_position,
+                            target: field_definition_position.clone(),
                         }));
                     }
                 }
@@ -572,6 +597,51 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn list_size_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ListSizeDirective> {
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        else {
+            return Ok(Vec::new());
+        };
+        let Ok(list_size_directive_referencers) = self
+            .referencers()
+            .get_directive(list_size_directive_name.as_str())
+        else {
+            return Ok(Vec::new());
+        };
+
+        let mut applications = Vec::new();
+        for field_definition_position in
+            list_size_directive_referencers.object_or_interface_fields()
+        {
+            let field_definition = field_definition_position.get(self.schema())?;
+            match CostSpecDefinition::list_size_directive_from_field_definition(
+                self,
+                field_definition,
+            ) {
+                Ok(Some(list_size_directive)) => {
+                    applications.push(Ok(ListSizeDirective {
+                        directive: list_size_directive,
+                        parent_type: field_definition_position.type_name().clone(),
+                        target: field_definition,
+                    }));
+                }
+                Ok(None) => {
+                    // No listSize directive found, continue
+                }
+                Err(error) => {
+                    applications.push(Err(error));
+                }
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
+        self.referencers().interface_types.contains_key(type_name)
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
@@ -599,18 +669,71 @@ pub(crate) struct KeyDirective<'schema> {
     target: ObjectOrInterfaceTypeDefinitionPosition,
 }
 
+impl HasFields for KeyDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
+}
+
+impl KeyDirective<'_> {
+    pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
+        &self.target
+    }
+}
+
+pub(crate) struct ListSizeDirective<'schema> {
+    /// The parsed directive
+    directive: cost_spec_definition::ListSizeDirective,
+    /// The parent type of `target`
+    parent_type: Name,
+    /// The schema position to which this directive is applied
+    target: &'schema FieldDefinition,
+}
+
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
+}
+
+impl HasFields for ProvidesDirective<'_> {
+    /// The string representation of the field set
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    /// The type from which the field set selects
+    fn target_type(&self) -> &Name {
+        self.target_return_type
+    }
 }
 
 pub(crate) struct RequiresDirective<'schema> {
     /// The parsed arguments of this `@requires` application
     arguments: RequiresDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
-    target: &'schema ObjectFieldDefinitionPosition,
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
+}
+
+impl HasFields for RequiresDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
 }
 
 pub(crate) struct TagDirective<'schema> {
@@ -620,6 +743,20 @@ pub(crate) struct TagDirective<'schema> {
     target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
+}
+
+pub(crate) trait HasFields {
+    fn fields(&self) -> &str;
+    fn target_type(&self) -> &Name;
+
+    fn parse_fields(&self, schema: &Schema) -> Result<Valid<FieldSet>, WithErrors<FieldSet>> {
+        FieldSet::parse_and_validate(
+            Valid::assume_valid_ref(schema),
+            self.target_type().clone(),
+            self.fields(),
+            "field_set.graphql",
+        )
+    }
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

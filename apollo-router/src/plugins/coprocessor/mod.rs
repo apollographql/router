@@ -24,7 +24,6 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -38,13 +37,14 @@ use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
@@ -95,9 +95,6 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
 
-        // Enable crypto
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
         let tls_config = rustls::ClientConfig::builder()
             .with_native_roots()?
             .with_no_client_auth();
@@ -113,6 +110,71 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         } else {
             builder.wrap_connector(http_connector)
         };
+
+        if matches!(
+            init.config.router.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.router.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.supergraph.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.supergraph.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.execution.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.execution.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.subgraph.all.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.subgraph.all.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
 
         let http_client = ServiceBuilder::new()
             .map_response(
@@ -246,11 +308,10 @@ where
     }
 }
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
     pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
@@ -267,12 +328,11 @@ pub(super) struct RouterRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<RouterSelector>>,
+    pub(super) condition: Condition<RouterSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -285,12 +345,11 @@ pub(super) struct RouterResponseConf {
     pub(super) status_code: bool,
 }
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -308,12 +367,11 @@ pub(super) struct SubgraphRequestConf {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -355,7 +413,7 @@ struct Conf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(super) enum ContextConf {
     /// Deprecated configuration using a boolean
@@ -370,7 +428,7 @@ impl Default for ContextConf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(super) enum NewContextConf {
     /// Send all context keys to coprocessor
@@ -426,7 +484,7 @@ fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     );
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct RouterStage {
     /// The request configuration
@@ -553,7 +611,7 @@ impl RouterStage {
 // -----------------------------------------------------------------------------------------
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStages {
     #[serde(default)]
@@ -561,7 +619,7 @@ pub(super) struct SubgraphStages {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
@@ -769,11 +827,11 @@ where
             .body
             .as_ref()
             .and_then(|b| serde_json::from_str(b).ok())
-            .unwrap_or(serde_json::Value::Null);
+            .unwrap_or(Value::Null);
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response: crate::graphql::Response = match body_as_value {
-            serde_json::Value::Null => crate::graphql::Response::builder()
+        let graphql_response = match body_as_value {
+            Value::Null => graphql::Response::builder()
                 .errors(vec![
                     Error::builder()
                         .message(co_processor_output.body.take().unwrap_or_default())
@@ -781,8 +839,8 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
-                crate::graphql::Response::builder()
+            _ => graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
+                graphql::Response::builder()
                     .errors(vec![
                         Error::builder()
                             .message(format!(
@@ -870,12 +928,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // split the response into parts + body
@@ -1074,12 +1127,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = request_config
-        .condition
-        .as_mut()
-        .map(|c| c.evaluate_request(&request) == Some(true))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
     }
     // Call into our out of process processor with a body of our body
@@ -1094,7 +1142,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::to_value(&body))
+        .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
@@ -1137,29 +1185,28 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response: crate::graphql::Response =
-                match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
-                    serde_json::Value::String(s) => crate::graphql::Response::builder()
+            let graphql_response = match co_processor_output.body.unwrap_or(Value::Null) {
+                Value::String(s) => graphql::Response::builder()
+                    .errors(vec![
+                        Error::builder()
+                            .message(s.as_str().to_owned())
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                            .build(),
+                    ])
+                    .build(),
+                value => graphql::Response::from_value(value).unwrap_or_else(|error| {
+                    graphql::Response::builder()
                         .errors(vec![
                             Error::builder()
-                                .message(s)
-                                .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                                .message(format!(
+                                    "couldn't deserialize coprocessor output body: {error}"
+                                ))
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build(),
                         ])
-                        .build(),
-                    value => serde_json::from_value(value).unwrap_or_else(|error| {
-                        crate::graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                    .build(),
-                            ])
-                            .build()
-                    }),
-                };
+                        .build()
+                }),
+            };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -1196,9 +1243,8 @@ where
     // Finally, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
-
-    let new_body: crate::graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
+    let new_body: graphql::Request = match co_processor_output.body {
+        Some(value) => serde_json_bytes::from_value(value)?,
         None => body,
     };
 
@@ -1242,12 +1288,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // Call into our out of process processor with a body of our body
@@ -1265,7 +1306,7 @@ where
 
     let body_to_send = response_config
         .body
-        .then(|| serde_json::to_value(&body))
+        .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.get_context(&response.context);
     let service_name = response_config.service_name.then_some(service_name);
@@ -1300,8 +1341,7 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body: crate::graphql::Response =
-        handle_graphql_response(body, co_processor_output.body)?;
+    let new_body = handle_graphql_response(body, co_processor_output.body)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1377,27 +1417,25 @@ pub(super) fn internalize_header_map(
 
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
-    copro_response_body: Option<serde_json::Value>,
+    copro_response_body: Option<Value>,
 ) -> Result<graphql::Response, BoxError> {
-    let new_body: graphql::Response = match copro_response_body {
+    Ok(match copro_response_body {
         Some(value) => {
-            let mut new_body: graphql::Response = serde_json::from_value(value)?;
+            let mut new_body = graphql::Response::from_value(value)?;
             // Needs to take back these 2 fields because it's skipped by serde
             new_body.subscribed = original_response_body.subscribed;
             new_body.created_at = original_response_body.created_at;
             // Required because for subscription if data is Some(Null) it won't cut the subscription
             // And in some languages they don't have any differences between Some(Null) and Null
-            if original_response_body.data == Some(serde_json_bytes::Value::Null)
+            if original_response_body.data == Some(Value::Null)
                 && new_body.data.is_none()
                 && new_body.subscribed == Some(true)
             {
-                new_body.data = Some(serde_json_bytes::Value::Null);
+                new_body.data = Some(Value::Null);
             }
 
             new_body
         }
         None => original_response_body,
-    };
-
-    Ok(new_body)
+    })
 }

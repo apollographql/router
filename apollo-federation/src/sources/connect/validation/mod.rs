@@ -16,6 +16,7 @@
 
 mod connect;
 mod coordinates;
+mod errors;
 mod expression;
 mod graphql;
 mod http;
@@ -25,7 +26,9 @@ mod source;
 
 use std::fmt::Display;
 use std::ops::Range;
+use std::str::FromStr;
 
+use ::http::Uri;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -35,8 +38,8 @@ use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
-use url::Url;
 
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::validation::connect::fields_seen_by_all_connects;
 use crate::sources::connect::validation::graphql::GraphQLString;
@@ -55,18 +58,21 @@ pub struct ValidationResult {
 
     /// The parsed (and potentially invalid) schema of the subgraph
     pub schema: Schema,
+
+    /// The optionally transformed schema to be used in later steps.
+    pub transformed: String,
 }
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
-pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
+pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     // TODO: Use parse_and_validate (adding in directives as needed)
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = SchemaBuilder::new()
         .adopt_orphan_extensions()
-        .parse(source_text, file_name)
+        .parse(&source_text, file_name)
         .build()
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
     let link = match ConnectLink::new(&schema) {
@@ -75,6 +81,7 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
                 errors: Vec::new(),
                 has_connectors: false,
                 schema,
+                transformed: source_text,
             };
         }
         Some(Err(err)) => {
@@ -82,11 +89,12 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
                 errors: vec![err],
                 has_connectors: true,
                 schema,
+                transformed: source_text,
             };
         }
         Some(Ok(link)) => link,
     };
-    let schema_info = SchemaInfo::new(&schema, source_text, link);
+    let schema_info = SchemaInfo::new(&schema, &source_text, link);
 
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
@@ -108,7 +116,7 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         }
     }
 
-    if schema_info.connect_link.source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
+    if schema_info.connect_link.source_directive_name() == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
             .iter()
             .any(|error| error.code == Code::NoSourcesDefined)
@@ -116,16 +124,44 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `{link}`", link=schema_info.connect_link),
-            locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
+            locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
+    }
+
+    // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
+    // incorrect line/col info.
+    if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
+        if let Some(replace_range) = schema_info.connect_link.directive().location() {
+            let mut new_link = schema_info.connect_link.clone();
+            new_link.set_spec(ConnectSpec::V0_2);
+            source_text.replace_range(
+                replace_range.offset()..replace_range.end_offset(),
+                &new_link.to_string(),
+            );
+        } else {
+            messages.push(Message {
+                code: Code::UnknownConnectorsVersion,
+                message: "Failed to auto-upgrade 0.1 to 0.2, you must manually update the version in `@link`".to_string(),
+                locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+            return ValidationResult {
+                errors: messages,
+                has_connectors: true,
+                schema,
+                transformed: source_text,
+            };
+        };
     }
 
     ValidationResult {
         errors: messages,
         has_connectors: true,
         schema,
+        transformed: source_text,
     }
 }
 
@@ -144,7 +180,7 @@ fn parse_url<Coordinate: Display + Copy>(
             .into_iter()
             .collect(),
     })?;
-    let url = Url::parse(str_value.as_str()).map_err(|inner| Message {
+    let url = Uri::from_str(str_value.as_str()).map_err(|inner| Message {
         code: Code::InvalidUrl,
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
         locations: value
@@ -152,7 +188,7 @@ fn parse_url<Coordinate: Display + Copy>(
             .into_iter()
             .collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, str_value, schema)
+    http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
 }
 
 type DirectiveName = Name;
@@ -230,6 +266,10 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `errors.message` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsMessage,
+    /// The `errors.extensions` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsExtensions,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
@@ -271,7 +311,7 @@ pub enum Code {
 }
 
 impl Code {
-    pub const fn severity(&self) -> Severity {
+    pub fn severity(&self) -> Severity {
         match self {
             Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
             _ => Severity::Error,
@@ -294,6 +334,7 @@ mod test_validate_source {
 
     use insta::assert_snapshot;
     use insta::glob;
+    use pretty_assertions::assert_str_eq;
 
     use super::*;
 
@@ -303,9 +344,19 @@ mod test_validate_source {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
                 let start_time = std::time::Instant::now();
-                let result = validate(&schema, path.to_str().unwrap());
+                let result = validate(schema.clone(), path.to_str().unwrap());
                 let end_time = std::time::Instant::now();
                 assert_snapshot!(format!("{:#?}", result.errors));
+                if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
+                    assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
+                    diff::Result::Left(line) => Some(format!("- {line}")),
+                    diff::Result::Right(line) => Some(format!("+ {line}")),
+                    diff::Result::Both(_, _) => None,
+                }).join("\n"));
+                } else {
+                    assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
+                }
+
                 assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });

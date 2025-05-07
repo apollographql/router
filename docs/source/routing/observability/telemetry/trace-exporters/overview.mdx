@@ -6,13 +6,14 @@ context:
   - telemetry
 ---
 
-The GraphOS Router and Apollo Router Core support collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+Apollo Router supports a collection of tracing exporters:
 
-* [Jaeger](/router/configuration/telemetry/exporters/tracing/jaeger)
-* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin)
-* [Datadog](/router/configuration/telemetry/exporters/tracing/datadog)
-* [New Relic](/router/configuration/telemetry/exporters/tracing/new-relic)
 * [OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/exporters/tracing/otlp) over HTTP or gRPC
+* [Datadog (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/datadog)
+* [Dynatrace (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/dynatrace)
+* [Jaeger (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/jaeger)
+* [New Relic (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/new-relic)
+* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin).
 
 The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
@@ -90,8 +91,8 @@ telemetry:
      tracing:
        common:
          resource:
-           "environment.name": "production"
-           "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+           "deployment.environment.name": "production"
+           "k8s.namespace.name": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```
 
 For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).

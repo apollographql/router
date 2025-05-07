@@ -573,24 +573,24 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
     use http::HeaderMap;
+    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
     use tower::Service;
-    use url::Url;
 
     use super::*;
     use crate::Configuration;
@@ -776,11 +776,9 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Uri::from_str("http://localhost/api").ok(),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -791,6 +789,7 @@ mod test {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -917,7 +916,7 @@ mod test {
             r#"
         all:
           deduplicate_query: true
-        subgraphs: 
+        subgraphs:
           products:
             deduplicate_query: false
         "#,
@@ -947,7 +946,7 @@ mod test {
             r#"
         all:
           experimental_http2: disable
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
           reviews:
@@ -991,7 +990,7 @@ mod test {
         all:
           experimental_http2: disable
           dns_resolution_strategy: ipv6_only
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
             dns_resolution_strategy: ipv6_then_ipv4

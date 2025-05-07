@@ -154,7 +154,7 @@ fn resolve_path(
                             "`{variable_type}` does not have a field named `{nested_field_name}`."
                         ),
                         locations: expression.line_col_for_subslice(
-                            path_component_range.start..path_component_range.end,
+                            path_component_range,
                             schema
                         ).into_iter().collect(),
                     })
@@ -178,7 +178,7 @@ pub(crate) struct ThisResolver<'a> {
 }
 
 impl<'a> ThisResolver<'a> {
-    pub(crate) fn new(object: &'a ObjectType, field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) const fn new(object: &'a ObjectType, field: &'a Component<FieldDefinition>) -> Self {
         Self { object, field }
     }
 }
@@ -222,7 +222,7 @@ pub(crate) struct ArgsResolver<'a> {
 }
 
 impl<'a> ArgsResolver<'a> {
-    pub(crate) fn new(field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) const fn new(field: &'a Component<FieldDefinition>) -> Self {
         Self { field }
     }
 }

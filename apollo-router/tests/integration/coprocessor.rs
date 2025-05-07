@@ -103,11 +103,11 @@ async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
     test_full_pipeline(500, "RouterRequest", empty_body_object).await;
     test_full_pipeline(500, "RouterResponse", empty_body_object).await;
     test_full_pipeline(200, "SupergraphRequest", empty_body_object).await;
-    test_full_pipeline(200, "SupergraphResponse", empty_body_object).await;
+    test_full_pipeline(500, "SupergraphResponse", empty_body_object).await;
     test_full_pipeline(200, "SubgraphRequest", empty_body_object).await;
     test_full_pipeline(200, "SubgraphResponse", empty_body_object).await;
     test_full_pipeline(200, "ExecutionRequest", empty_body_object).await;
-    test_full_pipeline(200, "ExecutionResponse", empty_body_object).await;
+    test_full_pipeline(500, "ExecutionResponse", empty_body_object).await;
 
     test_full_pipeline(200, "RouterRequest", remove_body).await;
     test_full_pipeline(200, "RouterResponse", remove_body).await;
@@ -130,20 +130,12 @@ async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
 }
 
 fn empty_body_object(mut body: serde_json::Value) -> serde_json::Value {
-    *body
-        .as_object_mut()
-        .expect("body")
-        .get_mut("body")
-        .expect("body") = serde_json::Value::Object(serde_json::Map::new());
+    *body.pointer_mut("/body").expect("body") = json!({});
     body
 }
 
 fn empty_body_string(mut body: serde_json::Value) -> serde_json::Value {
-    *body
-        .as_object_mut()
-        .expect("body")
-        .get_mut("body")
-        .expect("body") = serde_json::Value::String("".to_string());
+    *body.pointer_mut("/body").expect("body") = json!("");
     body
 }
 
@@ -153,7 +145,7 @@ fn remove_body(mut body: serde_json::Value) -> serde_json::Value {
 }
 
 fn null_out_response(_body: serde_json::Value) -> serde_json::Value {
-    serde_json::Value::String("".to_string())
+    json!("")
 }
 
 async fn test_full_pipeline(
@@ -269,6 +261,54 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
 
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_coprocessor.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(|req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_coprocessor)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "errors": [{ "message": "subgraph error", "path": [] }],
+            "data": null
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "errors": [{ "message": "Subgraph errors redacted", "path": [] }],
+            "data": null
+        })
+    );
 
     router.graceful_shutdown().await;
 

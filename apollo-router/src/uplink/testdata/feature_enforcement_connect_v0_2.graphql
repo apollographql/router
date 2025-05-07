@@ -2,7 +2,7 @@ schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION)
-  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"]})
+  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@source", "@connect"]})
 {
   query: Query
 }
@@ -56,7 +56,6 @@ enum link__Purpose {
 
 type Product
   @join__type(graph: ONE)
-  @join__directive(graphs: [ONE], name: "connect", args: {http: {GET: "http://localhost:4001/products", body: "ids: $batch.id"}, selection: "id"})
 {
   id: ID!
 }

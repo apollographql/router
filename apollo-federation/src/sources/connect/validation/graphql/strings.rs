@@ -18,7 +18,7 @@ use nom::AsChar;
 
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-fn is_whitespace(c: char) -> bool {
+const fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t')
 }
 
@@ -110,7 +110,7 @@ impl<'schema> GraphQLString<'schema> {
         })
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         match self {
             GraphQLString::Standard { data } => data.compiled_string,
             GraphQLString::Block { data, .. } => data.compiled_string,

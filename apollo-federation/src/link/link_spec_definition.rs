@@ -4,11 +4,13 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -17,7 +19,10 @@ use crate::error::MultiTryAll;
 use crate::error::SingleFederationError;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::link::Import;
 use crate::link::Link;
+use crate::link::argument::directive_optional_list_argument;
+use crate::link::argument::directive_optional_string_argument;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -127,13 +132,12 @@ impl LinkSpecDefinition {
     /// Add `self` (the @link spec definition) and a directive application of it to the schema.
     // Note: we may want to allow some `import` as argument to this method. When we do, we need to
     // watch for imports of `Purpose` and `Import` and add the types under their imported name.
-    #[allow(dead_code)]
     pub(crate) fn add_to_schema(
         &self,
         schema: &mut FederationSchema,
         alias: Option<Name>,
     ) -> Result<(), FederationError> {
-        self.add_definitions_to_schema(schema, alias.clone())?;
+        self.add_definitions_to_schema(schema, alias.clone(), vec![])?;
 
         // This adds `@link(url: "https://specs.apollo.dev/link/v1.0")` to the "schema" definition.
         // And we have a choice to add it either the main definition, or to an `extend schema`.
@@ -175,15 +179,46 @@ impl LinkSpecDefinition {
             }));
         }
         SchemaDefinitionPosition
-            .insert_directive(schema, Component::new(ast::Directive { name, arguments }))?;
+            .insert_directive(schema, Component::new(Directive { name, arguments }))?;
         Ok(())
+    }
+
+    pub(crate) fn extract_alias_and_imports_on_missing_link_directive_definition(
+        application: &Node<Directive>,
+    ) -> Result<(Option<Name>, Vec<Arc<Import>>), FederationError> {
+        // PORT_NOTE: This is really logic encapsulated from onMissingDirectiveDefinition() in the
+        // JS codebase's FederationBlueprint, but moved here since it's all link-specific. The logic
+        // itself has a lot of problems, but we're porting it as-is for now, and we'll address the
+        // problems with it in a later version bump.
+        let url =
+            directive_optional_string_argument(application, &LINK_DIRECTIVE_URL_ARGUMENT_NAME)?;
+        if let Some(url) = url {
+            if url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string()) {
+                let alias = directive_optional_string_argument(
+                    application,
+                    &LINK_DIRECTIVE_AS_ARGUMENT_NAME,
+                )?
+                .map(Name::new)
+                .transpose()?;
+                let imports = directive_optional_list_argument(
+                    application,
+                    &LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                )?
+                .into_iter()
+                .flatten()
+                .map(|value| Ok::<_, FederationError>(Arc::new(Import::from_value(value)?)))
+                .process_results(|r| r.collect::<Vec<_>>())?;
+                return Ok((alias, imports));
+            }
+        }
+        Ok((None, vec![]))
     }
 
     pub(crate) fn add_definitions_to_schema(
         &self,
         schema: &mut FederationSchema,
         alias: Option<Name>,
-        // imports: Vec<Import>, // Used by `onMissingDirectiveDefinition` in JS (FED-428)
+        imports: Vec<Arc<Import>>,
     ) -> Result<(), FederationError> {
         if let Some(metadata) = schema.metadata() {
             let link_spec_def = metadata.link_spec_definition()?;
@@ -208,7 +243,7 @@ impl LinkSpecDefinition {
         let mock_link = Arc::new(Link {
             url: self.url.clone(),
             spec_alias: alias,
-            imports: vec![], // TODO (FED-428)
+            imports,
             purpose: None,
         });
         Ok(())
@@ -221,7 +256,7 @@ impl LinkSpecDefinition {
             )
     }
 
-    #[allow(dead_code)]
+    #[allow(unused)]
     pub(crate) fn fed1_latest() -> &'static Self {
         // Note: The `unwrap()` calls won't panic, since `CORE_VERSIONS` will always have at
         // least one version.

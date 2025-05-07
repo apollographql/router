@@ -1,0 +1,28 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  entireDomain: String
+    @connect(
+      http: { GET: "http://{$config.notAllowed}" }
+      selection: "$"
+    )
+  endOfDomain: String
+    @connect(
+      http: { GET: "http://example.com{$config.notAllowed}" }
+      selection: "$"
+    )
+  startOfDomain: String
+    @connect(
+      http: { GET: "http://{$config.notAllowed}.example.com" }
+      selection: "$"
+    )
+  middleOfDomain: String
+    @connect(
+      http: { GET: "http://example{$config.notAllowed}.com" }
+      selection: "$"
+    )
+}

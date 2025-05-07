@@ -50,10 +50,12 @@ pub(super) struct JwksManager {
     _drop_signal: Arc<oneshot::Sender<()>>,
 }
 
+pub(super) type Issuers = HashSet<String>;
+
 #[derive(Clone)]
 pub(super) struct JwksConfig {
     pub(super) url: Url,
-    pub(super) issuer: Option<String>,
+    pub(super) issuers: Option<Issuers>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
     pub(super) headers: Vec<Header>,
@@ -62,7 +64,7 @@ pub(super) struct JwksConfig {
 #[derive(Clone)]
 pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
-    pub(super) issuer: Option<String>,
+    pub(super) issuers: Option<Issuers>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
@@ -263,7 +265,7 @@ impl Iterator for Iter<'_> {
                     if let Some(jwks) = map.get(&config.url) {
                         return Some(JwkSetInfo {
                             jwks: jwks.clone(),
-                            issuer: config.issuer.clone(),
+                            issuers: config.issuers.clone(),
                             algorithms: config.algorithms.clone(),
                         });
                     }
@@ -287,13 +289,13 @@ pub(super) struct JWTCriteria {
 pub(super) fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Option<Vec<(Option<String>, Jwk)>> {
+) -> Option<Vec<(Option<Issuers>, Jwk)>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
-        issuer,
+        issuers,
         algorithms,
     } in jwks_manager.iter_jwks()
     {
@@ -402,7 +404,7 @@ pub(super) fn search_jwks(
                 found_highest_score = true;
             }
 
-            candidates.push((key_score, (issuer.clone(), key)));
+            candidates.push((key_score, (issuers.clone(), key)));
         }
     }
 
@@ -548,11 +550,11 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
 
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<(Option<String>, Jwk)>,
+    keys: Vec<(Option<Issuers>, Jwk)>,
     criteria: JWTCriteria,
-) -> Result<(Option<String>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+) -> Result<(Option<Issuers>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for (issuer, jwk) in keys.into_iter() {
+    for (issuers, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
             Ok(k) => k,
             Err(e) => {
@@ -593,7 +595,7 @@ pub(super) fn decode_jwt(
         validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuer, v)),
+            Ok(v) => return Ok((issuers, v)),
             Err(e) => {
                 tracing::trace!("JWT decoding failed with error `{e}`");
                 error = Some((
