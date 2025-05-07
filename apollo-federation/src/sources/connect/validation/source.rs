@@ -113,7 +113,7 @@ impl<'schema> SourceDirective<'schema> {
 
             match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
                 Ok(url_properties) => errors.extend(url_properties.type_check(schema)),
-                Err(err) => errors.push(err),
+                Err(errs) => errors.extend(errs),
             };
 
             errors.extend(

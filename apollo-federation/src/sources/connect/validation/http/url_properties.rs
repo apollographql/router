@@ -39,7 +39,7 @@ impl<'schema> UrlProperties<'schema> {
         connector: ConnectHTTPCoordinate<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
-    ) -> Result<Self, Message> {
+    ) -> Result<Self, Vec<Message>> {
         Self::parse(PropertyLocation::Connect(connector), schema, http_arg)
     }
 
@@ -47,7 +47,7 @@ impl<'schema> UrlProperties<'schema> {
         source_coordinate: SourceDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
-    ) -> Result<Self, Message> {
+    ) -> Result<Self, Vec<Message>> {
         Self::parse(
             PropertyLocation::Source(source_coordinate),
             schema,
@@ -59,7 +59,7 @@ impl<'schema> UrlProperties<'schema> {
         location: PropertyLocation<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
-    ) -> Result<Self, Message> {
+    ) -> Result<Self, Vec<Message>> {
         let mut path = None;
         let mut query_params = None;
 
@@ -72,7 +72,7 @@ impl<'schema> UrlProperties<'schema> {
             let Ok(string) = GraphQLString::new(node, source_map) else {
                 errors.push(Message {
                     code: Code::InvalidUrlProperty,
-                    message: format!("The `{name}` argument must be a string."),
+                    message: format!("the `{name}` argument must be a string."),
                     locations: node.line_column_range(source_map).into_iter().collect(),
                 });
                 return None;
@@ -83,7 +83,7 @@ impl<'schema> UrlProperties<'schema> {
                 Err(e) => {
                     errors.push(Message {
                         code: Code::InvalidUrlProperty,
-                        message: format!("The `{name}` argument is invalid: {e}"),
+                        message: format!("the `{name}` argument is invalid: {e}"),
                         locations: node.line_column_range(source_map).into_iter().collect(),
                     });
                     return None;
@@ -119,14 +119,22 @@ impl<'schema> UrlProperties<'schema> {
             };
 
             // TODO return all errors individually
-            return Err(Message {
-                code: Code::InvalidUrlProperty,
-                message: format!(
-                    "{coordinate} has invalid syntax in URL properties.\n  - {}",
-                    errors.iter().map(|e| e.message.clone()).join("\n  - ")
-                ),
-                locations: errors.into_iter().flat_map(|err| err.locations).collect(),
-            });
+            // return Err(Message {
+            //     code: Code::InvalidUrlProperty,
+            //     message: format!(
+            //         "{coordinate} has invalid syntax in URL properties.\n  - {}",
+            //         errors.iter().map(|e| e.message.clone()).join("\n  - ")
+            //     ),
+            //     locations: errors.into_iter().flat_map(|err| err.locations).collect(),
+            // });
+
+            return Err(errors
+                .into_iter()
+                .map(|e| Message {
+                    message: format!("In {coordinate}, {}", e.message),
+                    ..e
+                })
+                .collect_vec());
         }
 
         Ok(Self {

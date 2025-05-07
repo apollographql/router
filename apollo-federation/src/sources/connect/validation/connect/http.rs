@@ -86,16 +86,13 @@ impl<'schema> Http<'schema> {
                 },
                 schema,
             ))
-            .and_try(
-                Transport::parse(
-                    http_arg,
-                    ConnectHTTPCoordinate::from(coordinate),
-                    http_arg_node,
-                    source_name,
-                    schema,
-                )
-                .map_err(|err| vec![err]),
-            )
+            .and_try(Transport::parse(
+                http_arg,
+                ConnectHTTPCoordinate::from(coordinate),
+                http_arg_node,
+                source_name,
+                schema,
+            ))
             .map_err(|nested| nested.into_iter().flatten().collect())
             .map(|(body, headers, transport)| Self {
                 body,
@@ -273,7 +270,7 @@ impl<'schema> Transport<'schema> {
         http_arg_node: &Node<Value>,
         source_name: Option<&SourceName<'schema>>,
         schema: &'schema SchemaInfo<'schema>,
-    ) -> Result<Self, Message> {
+    ) -> Result<Self, Vec<Message>> {
         let source_map = &schema.sources;
         let mut methods = http_arg
             .iter()
@@ -285,14 +282,14 @@ impl<'schema> Transport<'schema> {
             .peekable();
 
         let Some((method, method_value)) = methods.next() else {
-            return Err(Message {
+            return Err(vec![Message {
                 code: Code::MissingHttpMethod,
                 message: format!("{coordinate} must specify an HTTP method."),
                 locations: http_arg_node
                     .line_column_range(source_map)
                     .into_iter()
                     .collect(),
-            });
+            }]);
         };
 
         if methods.peek().is_some() {
@@ -301,11 +298,11 @@ impl<'schema> Transport<'schema> {
                 .into_iter()
                 .chain(methods.filter_map(|(_, node)| node.line_column_range(source_map)))
                 .collect();
-            return Err(Message {
+            return Err(vec![Message {
                 code: Code::MultipleHttpMethods,
                 message: format!("{coordinate} cannot specify more than one HTTP method."),
                 locations,
-            });
+            }]);
         }
 
         let url_properties =
@@ -317,8 +314,8 @@ impl<'schema> Transport<'schema> {
             node: method_value,
         };
 
-        let url_string =
-            GraphQLString::new(coordinate.node, &schema.sources).map_err(|_| Message {
+        let url_string = GraphQLString::new(coordinate.node, &schema.sources)
+            .map_err(|_| Message {
                 code: Code::GraphQLError,
                 message: format!("The value for {coordinate} must be a string."),
                 locations: coordinate
@@ -326,23 +323,24 @@ impl<'schema> Transport<'schema> {
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            })?;
-        let url = StringTemplate::from_str(url_string.as_str()).map_err(
-            |string_template::Error { message, location }| Message {
+            })
+            .map_err(|e| vec![e])?;
+        let url = StringTemplate::from_str(url_string.as_str())
+            .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
                 locations: url_string
                     .line_col_for_subslice(location, schema)
                     .into_iter()
                     .collect(),
-            },
-        )?;
+            })
+            .map_err(|e| vec![e])?;
 
         if source_name.is_some() {
             return if url_string.as_str().starts_with("http://")
                 || url_string.as_str().starts_with("https://")
             {
-                Err(Message {
+                Err(vec![Message {
                     code: Code::AbsoluteConnectUrlWithSource,
                     message: format!(
                         "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to be relative.",
@@ -353,7 +351,7 @@ impl<'schema> Transport<'schema> {
                         .line_column_range(source_map)
                         .into_iter()
                         .collect(),
-                })
+                }])
             } else {
                 Ok(Self {
                     method,
@@ -364,7 +362,8 @@ impl<'schema> Transport<'schema> {
                 })
             };
         } else {
-            validate_absolute_connect_url(&url, coordinate, coordinate.node, url_string, schema)?;
+            validate_absolute_connect_url(&url, coordinate, coordinate.node, url_string, schema)
+                .map_err(|e| vec![e])?;
         }
         Ok(Self {
             method,

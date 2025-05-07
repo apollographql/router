@@ -6,17 +6,29 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
 [
     Message {
         code: InvalidUrlProperty,
-        message: "`@source(name: \"v1\")` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        message: "In `@source(name: \"v1\")`, the `path` argument is invalid: nom::error::ErrorKind::Eof: .",
         locations: [
             6:37..6:40,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v1\")`, the `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
             6:55..6:58,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "`@connect(http:)` on `Query.resources` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        message: "In `@connect(http:)` on `Query.resources`, the `path` argument is invalid: nom::error::ErrorKind::Eof: .",
         locations: [
             12:31..12:34,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect(http:)` on `Query.resources`, the `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
             12:49..12:52,
         ],
     },
