@@ -176,6 +176,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .license(license)
+                                .global_config(configuration.clone())
                                 .build(),
                         )
                         .await
@@ -565,6 +566,7 @@ pub(crate) async fn add_plugin(
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: LicenseState,
+    configuration: Option<Arc<Configuration>>
 ) {
     match factory
         .create_instance(
@@ -577,6 +579,7 @@ pub(crate) async fn add_plugin(
                 .launch_id(launch_id)
                 .notify(notify.clone())
                 .license(license)
+                .and_global_config(configuration)
                 .build(),
         )
         .await
@@ -625,7 +628,7 @@ pub(crate) async fn create_plugins(
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
-        ($name: expr, $factory: expr, $plugin_config: expr) => {{
+        ($name: expr, $factory: expr, $plugin_config: expr, $maybe_global_config: expr) => {{
             add_plugin(
                 $name,
                 $factory,
@@ -639,6 +642,7 @@ pub(crate) async fn create_plugins(
                 &mut plugin_instances,
                 &mut errors,
                 license.clone(),
+                $maybe_global_config
             )
             .await;
         }};
@@ -653,13 +657,17 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
+                    let mut global_config = Option::None;
                     if name == "apollo.telemetry" {
                         // The apollo.telemetry" plugin isn't happy with empty config, so we
                         // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
+
+                        // Only the telemetry plugin should use the global configuration
+                        global_config = Some(Arc::new(configuration.clone()));
                     }
-                    add_plugin!(name.to_string(), factory, plugin_config);
+                    add_plugin!(name.to_string(), factory, plugin_config, global_config);
                 }
             }
             .instrument(span)
@@ -695,7 +703,7 @@ pub(crate) async fn create_plugins(
                     if let Some(factory) =
                         plugin_registry.iter().find(|factory| factory.name == name)
                     {
-                        add_plugin!(name, factory, plugin_config);
+                        add_plugin!(name, factory, plugin_config, None);
                     } else {
                         errors.push(ConfigurationError::PluginUnknown(name))
                     }

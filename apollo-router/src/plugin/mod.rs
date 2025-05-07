@@ -43,7 +43,7 @@ use tower::ServiceBuilder;
 use tower::buffer::Buffer;
 use tower::buffer::future::ResponseFuture;
 
-use crate::ListenAddr;
+use crate::{Configuration, ListenAddr};
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
@@ -85,6 +85,9 @@ pub struct PluginInit<T> {
 
     /// User's license's state, including any limits of use
     pub(crate) license: LicenseState,
+
+    // TODO warning comment here
+    pub(crate) global_config: Option<Arc<Configuration>>
 }
 
 impl<T> PluginInit<T>
@@ -131,6 +134,7 @@ where
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        global_config: Option<Arc<Configuration>>
     ) -> Self {
         PluginInit {
             config,
@@ -141,6 +145,7 @@ where
             launch_id: launch_id.flatten(),
             notify,
             license,
+            global_config,
         }
     }
 
@@ -158,6 +163,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        global_config: Option<Arc<Configuration>>
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -169,6 +175,7 @@ where
             launch_id,
             notify,
             license,
+            global_config,
         })
     }
 
@@ -183,6 +190,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<LicenseState>,
+        global_config: Option<Arc<Configuration>>
     ) -> Self {
         PluginInit {
             config,
@@ -194,6 +202,7 @@ where
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
+            global_config,
         }
     }
 }
@@ -212,6 +221,7 @@ impl PluginInit<serde_json::Value> {
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
             .license(self.license)
+            .and_global_config(self.global_config)
             .build()
     }
 }
