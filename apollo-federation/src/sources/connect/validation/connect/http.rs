@@ -28,6 +28,8 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
+use crate::sources::connect::validation::expression::MappingArgument;
+use crate::sources::connect::validation::expression::parse_mapping_argument;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -166,46 +168,16 @@ impl<'schema> Body<'schema> {
         };
         let coordinate = BodyCoordinate { connect };
 
-        // Ensure that the body selection is a valid JSON selection string
-        let string = match GraphQLString::new(value, &schema.sources) {
-            Ok(selection_str) => selection_str,
-            Err(_) => {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!("{coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidBody,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        if selection.is_empty() {
-            return Err(Message {
-                code: Code::InvalidBody,
-                message: format!("{coordinate} is empty"),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+        let MappingArgument { expression, string } = parse_mapping_argument(
+            value,
+            &coordinate.to_string(),
+            None,
+            Code::InvalidBody,
+            &schema.sources,
+        )?;
 
         Ok(Some(Self {
-            selection,
+            selection: expression.expression,
             string,
             coordinate,
         }))

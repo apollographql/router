@@ -3,24 +3,16 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
-use apollo_compiler::parser::SourceMap;
-use itertools::Itertools;
 use shape::Shape;
 
-use crate::sources::connect::JSONSelection;
-use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::GraphQLString;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::SchemaInfo;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::coordinates::SourceDirectiveCoordinate;
 use crate::sources::connect::validation::expression;
-
-pub(crate) struct Property<'schema> {
-    expression: Expression,
-    string: GraphQLString<'schema>,
-}
+use crate::sources::connect::validation::expression::MappingArgument;
+use crate::sources::connect::validation::expression::parse_mapping_argument;
 
 enum PropertyLocation<'schema> {
     Source(SourceDirectiveCoordinate<'schema>),
@@ -30,8 +22,8 @@ enum PropertyLocation<'schema> {
 #[allow(unused)]
 pub(in crate::sources::connect::validation) struct UrlProperties<'schema> {
     location: PropertyLocation<'schema>,
-    path: Option<Property<'schema>>,
-    query_params: Option<Property<'schema>>,
+    path: Option<MappingArgument<'schema>>,
+    query_params: Option<MappingArgument<'schema>>,
 }
 
 impl<'schema> UrlProperties<'schema> {
@@ -63,78 +55,45 @@ impl<'schema> UrlProperties<'schema> {
         let mut path = None;
         let mut query_params = None;
 
-        fn parse_http_arg<'schema>(
-            node: &'schema Node<Value>,
-            name: &'schema str,
-            errors: &mut Vec<Message>,
-            source_map: &'schema SourceMap,
-        ) -> Option<Property<'schema>> {
-            let Ok(string) = GraphQLString::new(node, source_map) else {
-                errors.push(Message {
-                    code: Code::InvalidUrlProperty,
-                    message: format!("the `{name}` argument must be a string."),
-                    locations: node.line_column_range(source_map).into_iter().collect(),
-                });
-                return None;
-            };
-
-            let selection = match JSONSelection::parse(string.as_str()) {
-                Ok(selection) => selection,
-                Err(e) => {
-                    errors.push(Message {
-                        code: Code::InvalidUrlProperty,
-                        message: format!("the `{name}` argument is invalid: {e}"),
-                        locations: node.line_column_range(source_map).into_iter().collect(),
-                    });
-                    return None;
-                }
-            };
-
-            Some(Property {
-                expression: Expression {
-                    expression: selection,
-                    location: 0..string.as_str().len(),
-                },
-                string,
-            })
-        }
-
         let mut errors = Vec::new();
         let source_map = &schema.sources;
 
+        let coordinate = match &location {
+            PropertyLocation::Source(source) => source.to_string(),
+            PropertyLocation::Connect(connector) => connector.to_string(),
+        };
+        let prefix = format!("In {coordinate}");
+
         for (name, value) in http_arg {
             match name.as_str() {
-                "path" => path = parse_http_arg(value, name.as_str(), &mut errors, source_map),
+                "path" => match parse_mapping_argument(
+                    value,
+                    &prefix,
+                    Some(name.as_str()),
+                    Code::InvalidUrlProperty,
+                    source_map,
+                ) {
+                    Ok(p) => path = Some(p),
+                    Err(e) => errors.push(e),
+                },
                 "queryParams" => {
-                    query_params = parse_http_arg(value, name.as_str(), &mut errors, source_map)
+                    match parse_mapping_argument(
+                        value,
+                        &prefix,
+                        Some(name.as_str()),
+                        Code::InvalidUrlProperty,
+                        source_map,
+                    ) {
+                        Ok(qp) => query_params = Some(qp),
+                        Err(e) => errors.push(e),
+                    }
                 }
                 _ => {}
             }
         }
 
         if !errors.is_empty() {
-            let coordinate = match location {
-                PropertyLocation::Source(source) => source.to_string(),
-                PropertyLocation::Connect(connector) => connector.to_string(),
-            };
-
-            // TODO return all errors individually
-            // return Err(Message {
-            //     code: Code::InvalidUrlProperty,
-            //     message: format!(
-            //         "{coordinate} has invalid syntax in URL properties.\n  - {}",
-            //         errors.iter().map(|e| e.message.clone()).join("\n  - ")
-            //     ),
-            //     locations: errors.into_iter().flat_map(|err| err.locations).collect(),
-            // });
-
-            return Err(errors
-                .into_iter()
-                .map(|e| Message {
-                    message: format!("In {coordinate}, {}", e.message),
-                    ..e
-                })
-                .collect_vec());
+            return Err(errors);
         }
 
         Ok(Self {
@@ -162,7 +121,7 @@ impl<'schema> UrlProperties<'schema> {
 
     fn property_type_check(
         &self,
-        property: Option<&Property>,
+        property: Option<&MappingArgument>,
         name: &str,
         schema: &SchemaInfo<'_>,
         expected_shape: &Shape,
@@ -200,7 +159,7 @@ impl<'schema> UrlProperties<'schema> {
 impl<'a, 's> IntoIterator for &'a UrlProperties<'s> {
     type Item = (
         &'static str,
-        Option<&'a Property<'s>>,
+        Option<&'a MappingArgument<'s>>,
         &'static LazyLock<Shape>,
     );
     type IntoIter = std::array::IntoIter<Self::Item, 2>;

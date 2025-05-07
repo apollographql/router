@@ -28,6 +28,8 @@ use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::SelectionCoordinate;
+use crate::sources::connect::validation::expression::MappingArgument;
+use crate::sources::connect::validation::expression::parse_mapping_argument;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::variable::Phase;
@@ -63,41 +65,19 @@ impl<'schema> Selection<'schema> {
                     .into_iter()
                     .collect(),
             })?;
-        let string =
-            GraphQLString::new(&selection_arg.value, &schema.sources).map_err(|_| Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: selection_arg
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            })?;
 
-        let parsed = JSONSelection::parse(string.as_str()).map_err(|err| Message {
-            code: Code::InvalidSelection,
-            message: format!("{coordinate} is not valid: {err}",),
-            locations: string
-                .line_col_for_subslice(err.offset..err.offset + 1, schema)
-                .into_iter()
-                .collect(),
-        })?;
-
-        if parsed.is_empty() {
-            return Err(Message {
-                code: Code::InvalidSelection,
-                message: format!("{coordinate} is empty",),
-                locations: selection_arg
-                    .value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+        let MappingArgument { expression, string } = parse_mapping_argument(
+            &selection_arg.value,
+            &coordinate.to_string(),
+            None,
+            Code::InvalidSelection,
+            &schema.sources,
+        )?;
 
         Ok(Self {
             string,
             coordinate,
-            parsed,
+            parsed: expression.expression,
         })
     }
 

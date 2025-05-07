@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: InvalidSelection,
         message: "`@connect(selection:)` on `Query.something` is not valid: nom::error::ErrorKind::Eof: &how",
         locations: [
-            8:87..8:88,
+            8:86..8:92,
         ],
     },
 ]

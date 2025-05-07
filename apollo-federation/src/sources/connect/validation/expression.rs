@@ -5,8 +5,11 @@ use std::ops::Range;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
+use apollo_compiler::parser::SourceMap;
 use itertools::Itertools;
 use shape::NamedShapePathKey;
 use shape::Shape;
@@ -15,6 +18,7 @@ use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
 
+use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
@@ -503,6 +507,58 @@ fn shape_name(shape: &Shape) -> &'static str {
         ShapeCase::None => "none",
         ShapeCase::Error(_) => "error",
     }
+}
+
+pub(crate) struct MappingArgument<'schema> {
+    pub(crate) expression: Expression,
+    pub(crate) string: GraphQLString<'schema>,
+}
+
+pub(crate) fn parse_mapping_argument<'schema>(
+    node: &'schema Node<Value>,
+    prefix: &str,
+    name: Option<&'schema str>,
+    code: Code,
+    source_map: &'schema SourceMap,
+) -> Result<MappingArgument<'schema>, Message> {
+    let prefix = name
+        .map(|name| format!("{prefix}, the `{name}` argument"))
+        .unwrap_or_else(|| prefix.to_string());
+
+    let Ok(string) = GraphQLString::new(node, source_map) else {
+        return Err(Message {
+            code: Code::GraphQLError,
+            message: format!("{prefix} must be a string."),
+            locations: node.line_column_range(source_map).into_iter().collect(),
+        });
+    };
+
+    let selection = match JSONSelection::parse(string.as_str()) {
+        Ok(selection) => selection,
+        Err(e) => {
+            return Err(Message {
+                code,
+                message: format!("{prefix} is not valid: {e}"),
+                locations: node.line_column_range(source_map).into_iter().collect(),
+            });
+        }
+    };
+
+    if selection.is_empty() {
+        return Err(Message {
+            code,
+            message: format!("{prefix} is empty"),
+            locations: node.line_column_range(source_map).into_iter().collect(),
+        });
+    }
+
+    Ok(MappingArgument {
+        expression: Expression {
+            expression: selection,
+            location: 0..string.as_str().len(),
+        },
+        string,
+    })
 }
 
 #[cfg(test)]
