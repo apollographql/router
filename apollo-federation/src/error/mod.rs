@@ -343,6 +343,18 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("Context name \"{name}\" may not contain an underscore.")]
+    ContextNameContainsUnderscore { name: String },
+    #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
+    ContextNameInvalid { name: String },
+    #[error("{message}")]
+    ContextNotSet { message: String },
+    #[error("{message}")]
+    NoContextReferenced { message: String },
+    #[error("{message}")]
+    NoSelectionForContext { message: String },
+    #[error("{message}")]
+    ContextNoResolvableKey { message: String },
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
@@ -550,6 +562,16 @@ impl SingleFederationError {
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
+            }
+            SingleFederationError::ContextNameContainsUnderscore { .. } => {
+                ErrorCode::ContextNameContainsUnderscore
+            }
+            SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
+            SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
+            SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
+            SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
+            SingleFederationError::ContextNoResolvableKey { .. } => {
+                ErrorCode::ContextNoResolvableKey
             }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
@@ -1724,6 +1746,73 @@ static LIST_SIZE_INVALID_SIZED_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::
     )
 });
 
+static CONTEXT_NAME_CONTAINS_UNDERSCORE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_CONTAINS_UNDERSCORE".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NAME_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_INVALID".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NOT_SET: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NOT_SET".to_owned(),
+        "Context is never set for context trying to be used".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_CONTEXT_REFERENCED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_CONTEXT_REFERENCED".to_owned(),
+        "Selection in @fromContext field argument does not reference a context".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_SELECTION_FOR_CONTEXT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_SELECTION_FOR_CONTEXT".to_owned(),
+        "field parameter in @fromContext must contain a selection set".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NO_RESOLVABLE_KEY".to_owned(),
+        "If an ObjectType uses a @fromContext, at least one of its keys must be resolvable"
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1812,6 +1901,12 @@ pub enum ErrorCode {
     ListSizeInvalidAssumedSize,
     ListSizeInvalidSlicingArgument,
     ListSizeInvalidSizedField,
+    ContextNameInvalid,
+    ContextNameContainsUnderscore,
+    ContextNotSet,
+    NoContextReferenced,
+    NoSelectionForContext,
+    ContextNoResolvableKey,
 }
 
 impl ErrorCode {
@@ -1918,6 +2013,12 @@ impl ErrorCode {
             ErrorCode::ListSizeInvalidAssumedSize => &LIST_SIZE_INVALID_ASSUMED_SIZE,
             ErrorCode::ListSizeInvalidSlicingArgument => &LIST_SIZE_INVALID_SLICING_ARGUMENT,
             ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
+            ErrorCode::ContextNameContainsUnderscore => &CONTEXT_NAME_CONTAINS_UNDERSCORE,
+            ErrorCode::ContextNameInvalid => &CONTEXT_NAME_INVALID,
+            ErrorCode::ContextNotSet => &CONTEXT_NOT_SET,
+            ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
+            ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
+            ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
         }
     }
 }
