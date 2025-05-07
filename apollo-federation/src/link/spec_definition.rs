@@ -203,9 +203,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
     pub(crate) fn versions(&self) -> Keys<Version, T> {
         self.definitions.keys()
     }
-}
 
-impl<T: SpecDefinition + 'static> SpecDefinitions<T> {
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,
