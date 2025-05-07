@@ -67,6 +67,11 @@ type T
     source: "json"
     http: { GET: "/ts?json={$batch.id->jsonStringify}&id={$this.id}" } # $batch & $this
     selection: "id name username"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.id->joinNotNull(',')}" }
+    selection: "id name: $this.name username" # $batch & $this
   ) {
   id: ID!
   name: String
