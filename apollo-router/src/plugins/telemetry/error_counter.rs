@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
-use crate::context::COUNTED_ERRORS;
+use crate::context::{COUNTED_ERRORS, ROUTER_RESPONSE_ERRORS};
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
@@ -157,29 +157,21 @@ pub(crate) async fn count_router_errors(
     let context = response.context.clone();
     let errors_config = errors_config.clone();
 
-    let (parts, body) = response.response.into_parts();
-
-    // TODO is this a bad idea? Probably...
-    // Deserialize the response body back into a response obj so we can pull the errors
-    let bytes = router::body::into_bytes(body)
-        .await
-        .unwrap();
-    let response_body: graphql::Response = serde_json::from_slice(&bytes).unwrap();
-
-    if !response_body.errors.is_empty() {
-        count_operation_errors(&response_body.errors, &context, &errors_config);
+    let errors: Vec<Error> = unwrap_from_context(&context, ROUTER_RESPONSE_ERRORS);
+    if !errors.is_empty() {
+        count_operation_errors(&errors, &context, &errors_config);
     }
 
     // Refresh context with the most up-to-date list of errors
     context
-        .insert(COUNTED_ERRORS, to_map(&response_body.errors))
+        .insert(COUNTED_ERRORS, to_map(&errors))
         .expect("Unable to insert errors into context.");
 
     // TODO confirm the count_operation_error_codes() INVALID_ACCEPT_HEADER case is handled here
 
     RouterResponse {
         context: response.context,
-        response: http::Response::from_parts(parts, router::body::from_bytes(bytes)),
+        response: response.response,
     }
 }
 

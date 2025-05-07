@@ -76,6 +76,8 @@ pub(crate) const DEPRECATED_OPERATION_KIND: &str = "operation_kind";
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
 /// The key to a map of errors that were already counted in a previous layer
 pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
+/// The key for the full list of errors in the router response. This allows us to pull the value in plugins without having to deserialize the router response.
+pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;

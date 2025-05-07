@@ -144,7 +144,7 @@ impl Request {
 use displaydoc::Display;
 use thiserror::Error;
 
-use crate::context::CONTAINS_GRAPHQL_ERROR;
+use crate::context::{CONTAINS_GRAPHQL_ERROR, ROUTER_RESPONSE_ERRORS};
 
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
@@ -232,6 +232,9 @@ impl Response {
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            context
+                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .expect("Unable to serialize router response errors list for context");
         }
         // Build a response
         let b = graphql::Response::builder()
