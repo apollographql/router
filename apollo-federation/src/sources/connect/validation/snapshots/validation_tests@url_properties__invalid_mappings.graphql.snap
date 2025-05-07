@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v1\")`, the `http.path` argument is not valid: nom::error::ErrorKind::Eof: .",
+        message: "In `@source(name: \"v1\")`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
             6:38..6:39,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v1\")`, the `http.queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
+        message: "In `@source(name: \"v1\")`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
             6:56..6:57,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `http.path` argument is not valid: nom::error::ErrorKind::Eof: .",
+        message: "In `@connect` on `Query.resources`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
             12:32..12:33,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `http.queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
             12:50..12:51,
         ],
