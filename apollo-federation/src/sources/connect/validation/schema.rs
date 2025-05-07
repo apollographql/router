@@ -340,11 +340,6 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
         return messages;
     }
 
-    // connector.selection -> correctly gives names!
-    // we want to compare connector.selection against input arguments
-    // 1. How to get input keys?
-    // 2. What does the FieldSet actually represent?
-
     entity_checker.check_for_missing_entity_connectors(schema)
 }
 
@@ -426,17 +421,13 @@ impl SelectionSetWalker<'_> {
     }
 }
 impl ShapeVisitor for SelectionSetWalker<'_> {
-    // TODO: Add more appropriate error type
     type Error = Message;
     type Output = ();
 
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
-        // TODO: add a more appropriate error code.
         Err(ShapeVisitorError::UnexpectedKeyOnShape { shape }.into())
     }
 
-    // This is likely the entry point?
-    // TODO: Should this use "rest"?
     fn visit_object(
         &mut self,
         _: &Shape,
@@ -450,7 +441,6 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
 
             // Object should contain all fields in the selection set. If not, then the field
             // and all nested field sets are unmapped.
-            // TODO: Should this also check alias?
             let field_name = field.alias.as_ref().unwrap_or(&field.name).as_str();
             if !fields.contains_key(field_name) {
                 self.unmapped_fields.insert(field);
