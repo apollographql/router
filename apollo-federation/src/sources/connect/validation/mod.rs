@@ -39,6 +39,7 @@ use itertools::Itertools;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
+use super::JSONSelection;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::validation::connect::fields_seen_by_all_connects;
@@ -189,6 +190,63 @@ fn parse_url<Coordinate: Display + Copy>(
             .collect(),
     })?;
     http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
+}
+
+enum LocationCalculateMethod {
+    LineColumnRange,
+    LineColForSubslice,
+}
+
+/// Standard method for parsing a directive argument which is expected to be a valid JSONSelection.
+/// Returns the parsed JSONSelection + original string OR an error Message if parsing failed
+fn parse_json_for_arg<'schema, T>(
+    value: &'schema Node<Value>,
+    coordinate: T,
+    schema: &'schema SchemaInfo<'schema>,
+    error_code: Code,
+    location_calculation_method: LocationCalculateMethod,
+) -> Result<(JSONSelection, GraphQLString<'schema>), Message>
+where
+    T: Display,
+{
+    let Ok(string) = GraphQLString::new(value, &schema.sources) else {
+        return Err(Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must be a string."),
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    };
+
+    let selection = JSONSelection::parse(string.as_str()).map_err(|err| Message {
+        code: error_code,
+        message: format!("{coordinate} is not valid: {err}"),
+        locations: match location_calculation_method {
+            LocationCalculateMethod::LineColumnRange => value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+            LocationCalculateMethod::LineColForSubslice => string
+                .line_col_for_subslice(err.offset..err.offset + 1, schema)
+                .into_iter()
+                .collect(),
+        },
+    })?;
+
+    if selection.is_empty() {
+        return Err(Message {
+            code: error_code,
+            message: format!("{coordinate} is empty",),
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    Ok((selection, string))
 }
 
 type DirectiveName = Name;

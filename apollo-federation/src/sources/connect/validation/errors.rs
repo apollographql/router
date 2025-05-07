@@ -10,8 +10,10 @@ use apollo_compiler::ast::Value;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use super::LocationCalculateMethod;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
+use super::parse_json_for_arg;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
@@ -139,24 +141,13 @@ impl<'schema> ErrorsMessage<'schema> {
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
         // Ensure that the selection is a valid JSONSelection string
-        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
-            return Err(Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        };
-        let selection = JSONSelection::parse(string.as_str()).map_err(|err| Message {
-            code: Code::InvalidErrorsMessage,
-            message: format!("{coordinate} is not valid: {err}"),
-            locations: value
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
+        let (selection, string) = parse_json_for_arg(
+            value,
+            coordinate,
+            schema,
+            Code::InvalidErrorsMessage,
+            LocationCalculateMethod::LineColumnRange,
+        )?;
 
         Ok(Some(Self {
             selection,
@@ -269,29 +260,13 @@ impl<'schema> ErrorsExtensions<'schema> {
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
         // Ensure that the selection is a valid JSONSelection string
-        let Ok(string) = GraphQLString::new(value, &schema.sources) else {
-            return Err(Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidErrorsExtensions,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
+        let (selection, string) = parse_json_for_arg(
+            value,
+            coordinate,
+            schema,
+            Code::InvalidErrorsExtensions,
+            LocationCalculateMethod::LineColumnRange,
+        )?;
 
         Ok(Some(Self {
             selection,

@@ -26,10 +26,12 @@ use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::sources::connect::validation::LocationCalculateMethod;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::SelectionCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::parse_json_for_arg;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
@@ -63,36 +65,15 @@ impl<'schema> Selection<'schema> {
                     .into_iter()
                     .collect(),
             })?;
-        let string =
-            GraphQLString::new(&selection_arg.value, &schema.sources).map_err(|_| Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: selection_arg
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            })?;
 
-        let parsed = JSONSelection::parse(string.as_str()).map_err(|err| Message {
-            code: Code::InvalidSelection,
-            message: format!("{coordinate} is not valid: {err}",),
-            locations: string
-                .line_col_for_subslice(err.offset..err.offset + 1, schema)
-                .into_iter()
-                .collect(),
-        })?;
-
-        if parsed.is_empty() {
-            return Err(Message {
-                code: Code::InvalidSelection,
-                message: format!("{coordinate} is empty",),
-                locations: selection_arg
-                    .value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+        // Ensure that the selection is a valid JSONSelection string
+        let (parsed, string) = parse_json_for_arg(
+            &selection_arg.value,
+            coordinate,
+            schema,
+            Code::InvalidSelection,
+            LocationCalculateMethod::LineColForSubslice,
+        )?;
 
         Ok(Self {
             string,
