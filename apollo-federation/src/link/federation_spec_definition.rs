@@ -889,6 +889,10 @@ impl SpecDefinition for FederationSpecDefinition {
             name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
         })]
     }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.url.version
+    }
 }
 
 pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
