@@ -83,7 +83,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
     },
     "one_User_0": Connector {
         id: ConnectId {
-            label: "one.json http: POST /users-batch",
+            label: "[BATCH] one.json http: POST /users-batch",
             subgraph_name: "one",
             source_name: Some(
                 "json",

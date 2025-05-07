@@ -448,7 +448,7 @@ where
 }
 
 /// a list of subgraphs with pregenerated responses
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
 
 impl MockedSubgraphs {

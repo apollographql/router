@@ -437,17 +437,13 @@ impl PluginPrivate for Telemetry {
                         .attributes
                         .on_request(request);
 
-                    custom_attributes.extend([
-                        KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or("").to_string()),
-                        KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or("").to_string()),
-                        KeyValue::new(
-                            Key::from_static_str("apollo_private.http.request_headers"),
-                            filter_headers(
-                                request.router_request.headers(),
-                                &config_request.apollo.send_headers,
-                            ),
+                    custom_attributes.push(KeyValue::new(
+                        Key::from_static_str("apollo_private.http.request_headers"),
+                        filter_headers(
+                            request.router_request.headers(),
+                            &config_request.apollo.send_headers,
                         ),
-                    ]);
+                    ));
 
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
@@ -466,7 +462,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
+                move |(mut custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -480,6 +476,20 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
+                        // NB: client name and version must be picked up here, rather than in the
+                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
+                        //  at the router service to modify the name and version.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_NAME));
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_VERSION));
+                        custom_attributes.extend([
+                            KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
+                            KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
+                        ]);
+
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
