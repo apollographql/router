@@ -21,6 +21,7 @@ use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::LocationCalculateMethod;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
@@ -33,6 +34,7 @@ use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::http::url::validate_url_scheme;
+use crate::sources::connect::validation::parse_json_for_arg;
 use crate::sources::connect::validation::source::SourceName;
 
 /// A valid, parsed (but not type-checked) `@connect(http:)`.
@@ -168,43 +170,14 @@ impl<'schema> Body<'schema> {
         };
         let coordinate = BodyCoordinate { connect };
 
-        // Ensure that the body selection is a valid JSON selection string
-        let string = match GraphQLString::new(value, &schema.sources) {
-            Ok(selection_str) => selection_str,
-            Err(_) => {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!("{coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidBody,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        if selection.is_empty() {
-            return Err(Message {
-                code: Code::InvalidBody,
-                message: format!("{coordinate} is empty"),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+        // Ensure that the selection is a valid JSONSelection string
+        let (selection, string) = parse_json_for_arg(
+            value,
+            coordinate,
+            schema,
+            Code::InvalidBody,
+            LocationCalculateMethod::LineColumnRange,
+        )?;
 
         Ok(Some(Self {
             selection,
