@@ -3588,10 +3588,10 @@ mod tests {
                         }
                     }
                 })
-                    .to_string()
-                    .as_str(),
+                .to_string()
+                .as_str(),
             )
-                .unwrap();
+            .unwrap();
 
             let router_instruments =
                 config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
@@ -3719,8 +3719,8 @@ mod tests {
                 "http.response.status_code" = 500
             );
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]

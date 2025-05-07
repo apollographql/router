@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use sha2::Digest;
 
+use super::events::DisplayRouterResponse;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
@@ -20,8 +21,6 @@ use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
-
-use super::events::DisplayRouterResponse;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -428,7 +427,6 @@ mod test {
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -903,20 +901,14 @@ mod test {
         let selector = RouterSelector::ResponseBody {
             response_body: true,
         };
-        let context = crate::context::Context::new();
-        context.extensions().with_lock(|ext| {
-            ext.insert(RouterResponseBodyExtensionType(
-                r#"{"data": {"data": "res"}}"#.to_string(),
-            ));
-        });
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::OK)
-            .context(context)
+            .data("some data")
             .build()
             .unwrap();
         assert_eq!(
-            selector.on_response(res).unwrap(),
-            r#"{"data": {"data": "res"}}"#.into()
+            selector.on_response(res).unwrap().as_str(),
+            r#"{"data":"some data"}"#
         );
     }
 }

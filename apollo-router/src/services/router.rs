@@ -223,7 +223,7 @@ impl Response {
     ///
     /// Required parameters are required in non-testing code to create a Response.
     #[builder(visibility = "pub")]
-    fn new(
+    pub(crate) fn new(
         label: Option<String>,
         data: Option<serde_json_bytes::Value>,
         path: Option<Path>,
@@ -262,8 +262,11 @@ impl Response {
 
         let body = body::from_bytes(body_string.clone());
         let response = builder.body(body)?;
+        // Stash the body in the extensions so we can access it later
+        let mut response = Self { response, context };
+        response.stash_the_body_in_extensions(body_string);
 
-        Ok(Self { response, context })
+        Ok(response)
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
