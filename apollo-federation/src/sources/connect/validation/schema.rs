@@ -8,9 +8,13 @@ use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
+use crate::sources::connect::json_selection::ExternalVarPaths;
+use crate::sources::connect::json_selection::SelectionTrie;
 use crate::sources::connect::Connector;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::{Code, Message};
+use crate::sources::connect::Namespace;
+use crate::sources::connect::PathSelection;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -308,14 +312,18 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
 
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
-            let Ok(Some(input_key)) = connector.resolvable_key(schema)
-            .inspect_err(|err| {
-                println!("\n\nERROR: {err}\n\n");
-            }) else {
+            connector.selection.external_var_paths().iter().for_each(|e| {
+                let Some(b) = e.variable_reference::<Namespace>() else {
+                    return;
+                };
+                println!("\n\nBBSS: {b:?}\n\n");
+
+            });
+
+            let Ok(Some(input_key)) = connector.resolvable_key(schema) else {
                 unreachable!("TypeBatch is expected to always have a key");
             };
 
-            println!("\n\nKEY: {input_key}\n\n");
             match SelectionSetWalker::new(&input_key.selection_set)
                 .walk(&connector.selection.shape(), connector)
             {
