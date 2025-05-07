@@ -25,6 +25,7 @@ struct TraceSpec {
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
     resources: HashMap<&'static str, &'static str>,
+    attributes: HashMap<&'static str, &'static str>,
 }
 
 #[buildstructor::buildstructor]
@@ -41,6 +42,7 @@ impl TraceSpec {
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
         resources: HashMap<&'static str, &'static str>,
+        attributes: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
             operation_name,
@@ -53,6 +55,7 @@ impl TraceSpec {
             subgraph_sampled,
             trace_id,
             resources,
+            attributes,
         }
     }
 }

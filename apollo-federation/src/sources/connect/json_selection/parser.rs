@@ -1223,10 +1223,10 @@ impl MethodArgs {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
-    use insta::assert_debug_snapshot;
 
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::assert_debug_snapshot;
     use crate::selection;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
