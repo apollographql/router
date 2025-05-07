@@ -27,6 +27,7 @@
 
 mod api_schema;
 mod compat;
+pub mod composition;
 #[cfg(feature = "correctness")]
 pub mod correctness;
 mod display_helpers;
@@ -61,6 +62,7 @@ use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
 use crate::schema::ValidFederationSchema;
+pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::sources::connect::ConnectSpec;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
