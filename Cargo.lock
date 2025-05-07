@@ -205,6 +205,7 @@ dependencies = [
  "indexmap 2.9.0",
  "insta",
  "itertools 0.14.0",
+ "levenshtein",
  "line-col",
  "multi_try",
  "multimap 0.10.0",
@@ -3840,6 +3841,12 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "levenshtein"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db13adb97ab515a3691f56e4dbab09283d0b86cb45abd991d8634a9d6f501760"
 
 [[package]]
 name = "libc"

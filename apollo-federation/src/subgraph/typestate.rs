@@ -167,11 +167,14 @@ impl Subgraph<Raw> {
     }
 
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, FederationError> {
+        tracing::debug!("expand_links: expand_links start");
         let mut schema = FederationSchema::new_uninitialized(self.state.schema)?;
         // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
+        tracing::debug!("expand_links: collect_shallow_references");
         schema.collect_shallow_references();
 
         // Backfill missing directive definitions. This is primarily making sure we have a definition for `@link`.
+        tracing::debug!("expand_links: missing directive definitions");
         for directive in &schema.schema().schema_definition.directives.clone() {
             if schema.get_directive_definition(&directive.name).is_none() {
                 FederationBlueprint::on_missing_directive_definition(&mut schema, directive)?;
@@ -180,8 +183,10 @@ impl Subgraph<Raw> {
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
         if schema.get_directive_definition(&name!("link")).is_some() {
+            tracing::debug!("expand_links: add @link spec definition to schema");
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
         } else {
+            tracing::debug!("expand_links: add fed1 @link and its spec definition to schema");
             // This must be a Fed 1 schema.
             LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
@@ -191,22 +196,30 @@ impl Subgraph<Raw> {
         };
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
+        tracing::debug!("expand_links: collect_links_metadata");
         schema.collect_links_metadata()?;
 
+        tracing::debug!("expand_links: on_directive_definition_and_schema_parsed");
         FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
 
         // Also, the backfilled definitions mean we can collect deep references.
-        schema.collect_deep_references()?;
+        // Ignore the error case, which means the schema has invalid references. It will be
+        // reported later in the validation phase.
+        tracing::debug!("expand_links: collect_deep_references");
+        _ = schema.collect_deep_references();
 
         // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
+        tracing::debug!("expand_links: on_constructed");
         FederationBlueprint::on_constructed(&mut schema)?;
 
         // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
         //            It seems to make sense for it to be a part of expansion stage. We can create
         //            a separate stage for it between `Expanded` and `Validated` if we need a stage
         //            that is expanded, but federation operations are not added.
+        tracing::debug!("expand_links: add_federation_operations");
         add_federation_operations(&mut schema)?;
 
+        tracing::debug!("expand_links: compute_subgraph_metadata");
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -214,6 +227,7 @@ impl Subgraph<Raw> {
             )
         })?;
 
+        tracing::debug!("expand_links finished");
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -318,6 +332,9 @@ impl Subgraph<Expanded> {
     }
 
     pub fn validate(self, rename_root_types: bool) -> Result<Subgraph<Validated>, SubgraphError> {
+        // PORT_NOTE: The JS version calls GraphQL-js's `validateSDL` function and federation's
+        //            `validateSchema` function here. But, Rust version performs general GraphQL
+        //            validation in the `FederationBlueprint::on_validation` method.
         let blueprint = FederationBlueprint::new(rename_root_types);
         let schema = blueprint
             .on_validation(self.state.schema)
@@ -336,6 +353,9 @@ impl Subgraph<Expanded> {
 
 impl Subgraph<Validated> {
     pub fn invalidate(self) -> Subgraph<Expanded> {
+        // PORT_NOTE: In JS, the metadata gets invalidated by calling
+        // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
+        // doesn't seem necessary in Rust, since the metadata is computed eagerly.
         Subgraph {
             name: self.name,
             url: self.url,
