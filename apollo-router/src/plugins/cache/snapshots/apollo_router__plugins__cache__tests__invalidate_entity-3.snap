@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: response.response.headers().get(CACHE_CONTROL)
+---
+Some(
+    "public",
+)
