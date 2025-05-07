@@ -87,7 +87,9 @@ impl ContextSpecDefinition {
     fn context_field_value_type(
         schema: &FederationSchema,
     ) -> Result<ScalarTypeDefinitionPosition, FederationError> {
-        let name_in_schema = Self::context_field_value_name(schema)?.unwrap();
+        let Some(name_in_schema) = Self::context_field_value_name(schema)? else {
+            bail!("Unexpectedly could not find ContextFieldValue type in schema");
+        };
         match schema.schema().types.get(&name_in_schema) {
             Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
                 type_name: name_in_schema,
