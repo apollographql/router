@@ -314,7 +314,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                 .walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
-                Err(err) => messages.push(err),
+                Err(err) => messages.push(err.into()),
             }
         }
     }
@@ -367,8 +367,8 @@ enum ShapeVisitorError<'error> {
         unset: &'error Node<Field>,
         output_shape: &'error Shape,
     },
-    #[error("Attempted to resolve key on unexpected shape `{shape}`")]
-    UnexpectedKeyOnShape { shape: &'error Shape },
+    #[error("Attempted to resolve key on unexpected shape `{shape_str}`")]
+    UnexpectedKeyOnShape { shape_str: String },
     #[error("Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`)")]
     NonRootBatch,
 }
@@ -420,12 +420,12 @@ impl SelectionSetWalker<'_> {
         Ok(vec)
     }
 }
-impl ShapeVisitor for SelectionSetWalker<'_> {
-    type Error = Message;
+impl <'walker> ShapeVisitor for SelectionSetWalker<'walker> {
+    type Error = ShapeVisitorError<'walker>;
     type Output = ();
 
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
-        Err(ShapeVisitorError::UnexpectedKeyOnShape { shape }.into())
+        Err(ShapeVisitorError::UnexpectedKeyOnShape { shape_str: shape.pretty_print() })
     }
 
     fn visit_object(
@@ -461,7 +461,7 @@ impl ShapeVisitor for SelectionSetWalker<'_> {
             // Check that next shape doesn't come from a non-`$root` field.
             if let ShapeCase::Name(root, _) = next_shape.case() {
                 if root.value != "$root" {
-                    return Err(ShapeVisitorError::NonRootBatch.into());
+                    return Err(ShapeVisitorError::NonRootBatch);
                 }
             }
 
