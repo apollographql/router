@@ -902,6 +902,10 @@ impl SpecDefinition for FederationSpecDefinition {
         }
         type_specs
     }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.url.version
+    }
 }
 
 pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =

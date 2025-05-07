@@ -1,3 +1,5 @@
+pub(crate) mod suggestion;
+
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -124,8 +126,11 @@ pub enum SingleFederationError {
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
-    #[error("{diagnostics}")]
-    InvalidGraphQL { diagnostics: DiagnosticList },
+    // InvalidGraphQL: We need to be able to modify the message text from apollo-compiler. So, we
+    //                 format the DiagnosticData into String here. We can add additional data as
+    //                 necessary.
+    #[error("{message}")]
+    InvalidGraphQL { message: String },
     #[error(transparent)]
     InvalidGraphQLName(#[from] InvalidNameError),
     #[error("Subgraph invalid: {message}")]
@@ -677,12 +682,6 @@ impl Display for MultipleFederationErrors {
     }
 }
 
-impl From<DiagnosticList> for SingleFederationError {
-    fn from(diagnostics: DiagnosticList) -> Self {
-        SingleFederationError::InvalidGraphQL { diagnostics }
-    }
-}
-
 impl FromIterator<SingleFederationError> for MultipleFederationErrors {
     fn from_iter<T: IntoIterator<Item = SingleFederationError>>(iter: T) -> Self {
         Self {
@@ -741,7 +740,17 @@ impl std::fmt::Debug for FederationError {
 
 impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
-        SingleFederationError::from(value).into()
+        let errors: Vec<_> = value
+            .iter()
+            .map(|d| SingleFederationError::InvalidGraphQL {
+                message: d.to_string(),
+            })
+            .collect();
+        match errors.len().cmp(&1) {
+            Ordering::Less => internal_error!("diagnostic list is unexpectedly empty"),
+            Ordering::Equal => errors[0].clone().into(),
+            Ordering::Greater => MultipleFederationErrors { errors }.into(),
+        }
     }
 }
 
@@ -766,12 +775,26 @@ impl FederationError {
         result.into()
     }
 
+    pub fn into_errors(self) -> Vec<SingleFederationError> {
+        match self {
+            FederationError::SingleFederationError(e) => vec![e],
+            FederationError::MultipleFederationErrors(e) => e.errors,
+            FederationError::AggregateFederationError(e) => e.causes,
+        }
+    }
+
     pub fn errors(&self) -> Vec<&SingleFederationError> {
         match self {
             FederationError::SingleFederationError(e) => vec![e],
             FederationError::MultipleFederationErrors(e) => e.errors.iter().collect(),
             FederationError::AggregateFederationError(e) => e.causes.iter().collect(),
         }
+    }
+
+    pub fn has_invalid_graphql_error(&self) -> bool {
+        self.errors()
+            .into_iter()
+            .any(|e| matches!(e, SingleFederationError::InvalidGraphQL { .. }))
     }
 }
 

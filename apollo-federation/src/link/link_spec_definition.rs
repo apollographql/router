@@ -46,12 +46,18 @@ pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); 
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl LinkSpecDefinition {
-    pub(crate) fn new(version: Version, identity: Identity) -> Self {
+    pub(crate) fn new(
+        version: Version,
+        identity: Identity,
+        minimum_federation_version: Version,
+    ) -> Self {
         Self {
             url: Url { identity, version },
+            minimum_federation_version,
         }
     }
 
@@ -301,6 +307,10 @@ impl SpecDefinition for LinkSpecDefinition {
         specs
     }
 
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
+
     fn add_elements_to_schema(
         &self,
         _schema: &mut FederationSchema,
@@ -344,10 +354,12 @@ pub(crate) static CORE_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
             Identity::core_identity(),
+            Version { major: 1, minor: 0 },
         ));
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 2 },
             Identity::core_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });
@@ -357,6 +369,7 @@ pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Identity::link_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });

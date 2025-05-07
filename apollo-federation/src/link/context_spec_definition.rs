@@ -41,15 +41,17 @@ pub(crate) struct ContextDirectiveArguments<'doc> {
 #[derive(Clone)]
 pub(crate) struct ContextSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl ContextSpecDefinition {
-    pub(crate) fn new(version: Version) -> Self {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::context_identity(),
                 version,
             },
+            minimum_federation_version,
         }
     }
 
@@ -193,11 +195,18 @@ impl SpecDefinition for ContextSpecDefinition {
             name: CONTEXTFIELDVALUE_SCALAR_NAME,
         })]
     }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
 }
 
 pub(crate) static CONTEXT_VERSIONS: LazyLock<SpecDefinitions<ContextSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::context_identity());
-        definitions.add(ContextSpecDefinition::new(Version { major: 0, minor: 1 }));
+        definitions.add(ContextSpecDefinition::new(
+            Version { major: 0, minor: 1 },
+            Version { major: 2, minor: 8 },
+        ));
         definitions
     });
