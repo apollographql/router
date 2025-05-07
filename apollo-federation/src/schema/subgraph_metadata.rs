@@ -12,13 +12,13 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::query_graph::build_query_graph::parse_context;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::validators::from_context::parse_context;
 
 fn unwrap_schema(fed_schema: &FederationSchema) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -250,7 +250,11 @@ impl SubgraphMetadata {
             .into_iter()
             .filter_map(|d| d.ok())
         {
-            let (context, selection) = parse_context(from_context_directive.arguments.field)?;
+            let (Some(context), Some(selection)) =
+                parse_context(from_context_directive.arguments.field)
+            else {
+                continue;
+            };
             if let Some(entry_point) = entry_points.get(context.as_str()) {
                 for context_type in entry_point {
                     used_context_fields.extend(collect_target_fields_from_field_set(
