@@ -308,12 +308,6 @@ impl PluginPrivate for Telemetry {
                 "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
             );
         }
-        
-        // if enabled add to list
-        let _apq_enabled = init.global_config.clone().unwrap().expect("").apq.enabled;
-        // if let Value::Bool(cache_enabled) = init.global_config.clone().unwrap().apollo_plugins.plugins.get("preview_entity_cache").unwrap().get("enabled").unwrap() {
-        //
-        // }
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
