@@ -7,9 +7,12 @@ use regex::Regex;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::schema::FederationSchema;
 use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 use crate::utils::iter_into_single_item;
 
@@ -359,6 +362,72 @@ fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
     }
 }
 
+#[allow(dead_code)]
+fn validate_field_value_type_inner(
+    selection_set: &SelectionSet,
+    schema: &FederationSchema,
+    from_context_parent: &FieldArgumentDefinitionPosition,
+    errors: &mut MultipleFederationErrors,
+) -> Option<Name> {
+    let types_array = selection_set
+        .selections
+        .values()
+        .map(|selection| -> Option<Name> {
+            dbg!(&selection);
+            
+            if let Selection::Field(field) = selection {
+                if let Some(field_selection_set) = &field.selection_set {
+                    return validate_field_value_type_inner(
+                        field_selection_set,
+                        schema,
+                        from_context_parent,
+                        errors,
+                    );
+                }
+                dbg!(&field.field.field_position.type_name());
+                return Some(field.field.field_position.type_name().clone());
+            }
+            None
+        })
+        .collect::<Vec<_>>();
+
+    types_array
+        .into_iter()
+        .reduce(|acc, curr| if acc == curr { acc } else { None })
+        .flatten()
+}
+
+#[allow(dead_code)]
+fn validate_field_value_type(
+    current_type: &TypeDefinitionPosition,
+    selection_set: &SelectionSet,
+    schema: &FederationSchema,
+    from_context_parent: &FieldArgumentDefinitionPosition,
+    errors: &mut MultipleFederationErrors,
+) -> Result<Option<Name>, FederationError> {
+    if let Some(metadata) = &schema.subgraph_metadata {
+        if let Some(interface_object_directive) = metadata
+            .federation_spec_definition()
+            .interface_object_directive_definition(schema)?
+        {
+            if current_type.has_applied_directive(schema, &interface_object_directive.name) {
+                errors.push(
+                    SingleFederationError::ContextSelectionInvalid {
+                        message: format!("Context is used in \"{}\" but the selection is invalid: One of the types in the selection is an interface Object: \"{}\".", as_coordinate(from_context_parent), current_type.type_name())
+                    }
+                    .into(),
+                );
+            }
+        }
+    }
+    Ok(validate_field_value_type_inner(
+        selection_set,
+        schema,
+        from_context_parent,
+        errors,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -366,7 +435,9 @@ mod tests {
     use super::*;
     use crate::error::MultipleFederationErrors;
     use crate::error::SingleFederationError;
+    use crate::schema::ValidFederationSchema;
     use crate::subgraph::test_utils::build_and_expand;
+    use apollo_compiler::ast::Type;
 
     #[test]
     fn test_deny_on_abstract_type() {
@@ -628,5 +699,210 @@ mod tests {
             parsed_selection,
             Some("multiple fields selected".to_string())
         );
+    }
+
+    #[test]
+    fn test_validate_field_value_type() {
+        use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+        use crate::schema::position::ObjectFieldDefinitionPosition;
+        use crate::schema::position::ObjectTypeDefinitionPosition;
+        // Create a test schema with various field types
+        let schema_str = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
+                
+            type Query {
+                contextual(id: ID): User
+            }
+
+            type User {
+                id: ID
+                ids: [ID!]
+                
+                idNonNull: ID!
+                idsNonNull: [ID!]!
+            }
+            
+            type OtherUserType {
+                id: ID
+                ids: [ID!]
+                
+                idNonNull: ID!
+                idsNonNull: [ID!]!
+            }
+
+        "#;
+
+        let subgraph = build_and_expand(schema_str);
+        let mut errors = MultipleFederationErrors::new();
+
+        // Setup a mock type definition position for User
+
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
+        let query_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("Query")));
+
+        // Test case 1: Simple field selection (non-null field)
+        // Create a selection set for a non-null field (ID!)
+        let id_field_type = Type::NonNullNamed(Name::new_unchecked("ID"));
+        let query_contextual_pos = ObjectFieldDefinitionPosition {
+            type_name: query_type.type_name().clone(),
+            field_name: Name::new_unchecked("contextual"),
+        };
+
+        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+            type_name: query_type.type_name().clone(),
+            field_name: Name::new_unchecked("contextual"),
+            argument_name: Name::new_unchecked("id"),
+        });
+
+        let valid_schema =
+            ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
+        let selection_set = SelectionSet::parse(
+            valid_schema.clone(),
+            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            "id",
+        ).expect("valid selection set");
+        let z = validate_field_value_type(
+            &user_type,
+            &selection_set,
+            &valid_schema,
+            &query_contextual_arg_pos,
+            &mut errors,
+        ).expect("valid field value type");
+        dbg!(&z);
+        // let id_field = Field {
+        //     field: TypedField { field_definition: id_field_def },
+        //     selection_set: None,
+        // };
+        // let mut id_selection_set = SelectionSet::new();
+        // id_selection_set.insert_field(id_field);
+
+        // // Test with a non-null ID field
+        // let mock_arg_pos = FieldArgumentDefinitionPosition::Object(
+        //     crate::schema::position::FieldArgumentPosition {
+        //         type_name: Name::new("Query").unwrap(),
+        //         field_name: Name::new("user").unwrap(),
+        //         argument_name: Name::new("id").unwrap(),
+        //     }
+        // );
+
+        // let result = validate_field_value_type(
+        //     &user_type,
+        //     &id_selection_set,
+        //     subgraph.schema(),
+        //     &mock_arg_pos,
+        //     &mut errors,
+        // ).expect("validation should succeed");
+
+        // assert_eq!(result, Some(Name::new("ID").unwrap()), "Non-null ID should return ID type");
+
+        // // Test case 2: List field selection ([User])
+        // // Create a selection set for a list field ([User])
+        // let friends_field_type = Type::ListType(Box::new(Type::NamedType(Name::new("User").unwrap())));
+        // let friends_field_def = FieldDefinition {
+        //     field_position: FieldTypeDefinition {
+        //         type_name: friends_field_type,
+        //         parent_type_name: Name::new("User").unwrap(),
+        //         field_name: Name::new("friends").unwrap(),
+        //     },
+        // };
+        // let friends_field = Field {
+        //     field: TypedField { field_definition: friends_field_def },
+        //     selection_set: None,
+        // };
+        // let mut list_selection_set = SelectionSet::new();
+        // list_selection_set.insert_field(friends_field);
+
+        // // Test with a list field
+        // let mock_list_arg_pos = FieldArgumentDefinitionPosition::Object(
+        //     crate::schema::position::FieldArgumentPosition {
+        //         type_name: Name::new("Query").unwrap(),
+        //         field_name: Name::new("users").unwrap(),
+        //         argument_name: Name::new("ids").unwrap(),
+        //     }
+        // );
+
+        // let result = validate_field_value_type(
+        //     &user_type,
+        //     &list_selection_set,
+        //     subgraph.schema(),
+        //     &mock_list_arg_pos,
+        //     &mut errors,
+        // ).expect("validation should succeed");
+
+        // assert_eq!(result, Some(Name::new("User").unwrap()), "List of User should return User type");
+
+        // // Test case 3: Non-null list field selection ([User!]!)
+        // // Create a selection set for a non-null list of non-null field ([User!]!)
+        // let best_friends_field_type = Type::NonNullType(Box::new(Type::ListType(Box::new(
+        //     Type::NonNullType(Box::new(Type::NamedType(Name::new("User").unwrap())))
+        // ))));
+        // let best_friends_field_def = FieldDefinition {
+        //     field_position: FieldTypeDefinition {
+        //         type_name: best_friends_field_type,
+        //         parent_type_name: Name::new("User").unwrap(),
+        //         field_name: Name::new("bestFriends").unwrap(),
+        //     },
+        // };
+        // let best_friends_field = Field {
+        //     field: TypedField { field_definition: best_friends_field_def },
+        //     selection_set: None,
+        // };
+        // let mut non_null_list_selection_set = SelectionSet::new();
+        // non_null_list_selection_set.insert_field(best_friends_field);
+
+        // let result = validate_field_value_type(
+        //     &user_type,
+        //     &non_null_list_selection_set,
+        //     subgraph.schema(),
+        //     &mock_list_arg_pos,
+        //     &mut errors,
+        // ).expect("validation should succeed");
+
+        // assert_eq!(result, Some(Name::new("User").unwrap()), "Non-null list of non-null User should return User type");
+
+        // // Test case 4: Mixed types (should return None since types don't match)
+        // // Create a selection set with mixed field types
+        // let mut mixed_selection_set = SelectionSet::new();
+        // // Create a new id field since the old one was consumed
+        // let id_field_type = Type::NonNullType(Box::new(Type::NamedType(Name::new("ID").unwrap())));
+        // let id_field_def = FieldDefinition {
+        //     field_position: FieldTypeDefinition {
+        //         type_name: id_field_type,
+        //         parent_type_name: Name::new("User").unwrap(),
+        //         field_name: Name::new("id").unwrap(),
+        //     },
+        // };
+        // let id_field = Field {
+        //     field: TypedField { field_definition: id_field_def },
+        //     selection_set: None,
+        // };
+        // mixed_selection_set.insert_field(id_field);
+
+        // // Create a new friends field since the old one was consumed
+        // let friends_field_type = Type::ListType(Box::new(Type::NamedType(Name::new("User").unwrap())));
+        // let friends_field_def = FieldDefinition {
+        //     field_position: FieldTypeDefinition {
+        //         type_name: friends_field_type,
+        //         parent_type_name: Name::new("User").unwrap(),
+        //         field_name: Name::new("friends").unwrap(),
+        //     },
+        // };
+        // let friends_field = Field {
+        //     field: TypedField { field_definition: friends_field_def },
+        //     selection_set: None,
+        // };
+        // mixed_selection_set.insert_field(friends_field);
+
+        // let result = validate_field_value_type(
+        //     &user_type,
+        //     &mixed_selection_set,
+        //     subgraph.schema(),
+        //     &mock_arg_pos,
+        //     &mut errors,
+        // ).expect("validation should succeed");
+
+        // assert_eq!(result, None, "Mixed types should return None");
     }
 }

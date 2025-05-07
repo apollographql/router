@@ -358,6 +358,8 @@ pub enum SingleFederationError {
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
+    ContextSelectionInvalid { message: String },
+    #[error("{message}")]
     ListSizeAppliedToNonList { message: String },
     #[error("{message}")]
     ListSizeInvalidAssumedSize { message: String },
@@ -572,6 +574,9 @@ impl SingleFederationError {
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
             SingleFederationError::ContextNoResolvableKey { .. } => {
                 ErrorCode::ContextNoResolvableKey
+            }
+            SingleFederationError::ContextSelectionInvalid { .. } => {
+                ErrorCode::ContextSelectionInvalid
             }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
@@ -1813,6 +1818,17 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
+static CONTEXT_SELECTION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_SELECTION_INVALID".to_owned(),
+        "The selection set is invalid".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1907,6 +1923,7 @@ pub enum ErrorCode {
     NoContextReferenced,
     NoSelectionForContext,
     ContextNoResolvableKey,
+    ContextSelectionInvalid,
 }
 
 impl ErrorCode {
@@ -2019,6 +2036,7 @@ impl ErrorCode {
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
+            ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
         }
     }
 }
