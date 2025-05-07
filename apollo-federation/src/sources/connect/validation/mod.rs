@@ -351,10 +351,10 @@ mod test_validate_source {
                 assert_snapshot!(format!("{:#?}", result.errors));
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
-                    diff::Result::Left(line) => Some(format!("- {line}")),
-                    diff::Result::Right(line) => Some(format!("+ {line}")),
-                    diff::Result::Both(_, _) => None,
-                }).join("\n"));
+                        diff::Result::Left(line) => Some(format!("- {line}")),
+                        diff::Result::Right(line) => Some(format!("+ {line}")),
+                        diff::Result::Both(_, _) => None,
+                    }).join("\n"));
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }
