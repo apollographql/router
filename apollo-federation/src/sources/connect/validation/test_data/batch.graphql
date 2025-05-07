@@ -77,4 +77,10 @@ type T
       http: { GET: "/friends/{$this.id}" }
       selection: "id name username"
     )
+  listRelationship: [String]
+    @connect(
+      source: "json"
+      http: { GET: "/list/{$batch.id->joinNotNull(',')}" }
+      selection: "$"
+    )
 }

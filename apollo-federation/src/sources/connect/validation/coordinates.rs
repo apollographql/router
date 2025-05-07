@@ -79,6 +79,8 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
 }
 
 /// The coordinate of an `HTTP` arg within a connect directive.
+
+#[derive(Clone)]
 pub(super) struct ConnectHTTPCoordinate<'a> {
     pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
 }
