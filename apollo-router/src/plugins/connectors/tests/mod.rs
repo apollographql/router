@@ -40,8 +40,11 @@ use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
+mod content_type;
+mod error_handling;
 mod mock_api;
 mod progressive_override;
+mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
@@ -449,7 +452,7 @@ async fn basic_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null,
@@ -470,14 +473,14 @@ async fn basic_errors() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -488,14 +491,14 @@ async fn basic_errors() {
             "user"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -507,19 +510,19 @@ async fn basic_errors() {
             "nickname"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -1359,7 +1362,7 @@ async fn error_not_redacted() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null
@@ -1371,19 +1374,19 @@ async fn error_not_redacted() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),

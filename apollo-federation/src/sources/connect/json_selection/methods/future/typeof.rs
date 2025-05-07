@@ -41,7 +41,7 @@ fn typeof_method(
         )
     } else {
         let typeof_string = JSON::String(json_type_name(data).to_string().into());
-        (Some(typeof_string), vec![])
+        (Some(typeof_string), Vec::new())
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution

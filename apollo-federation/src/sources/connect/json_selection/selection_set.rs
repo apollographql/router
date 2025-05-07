@@ -61,16 +61,18 @@ impl JSONSelection {
         selection_set: &SelectionSet,
         required_keys: Option<&FieldSet>,
     ) -> Self {
-        let selection_set = match required_keys {
-            Some(keys) => {
-                let mut new_set = selection_set.clone();
-                for selection in keys.selection_set.selections.iter() {
-                    new_set.push(selection.clone());
-                }
-                new_set
-            }
-            None => selection_set.clone(),
-        };
+        let selection_set = required_keys.map_or_else(
+            || selection_set.clone(),
+            |keys| {
+                keys.selection_set.selections.iter().cloned().fold(
+                    selection_set.clone(),
+                    |mut acc, selection| {
+                        acc.push(selection);
+                        acc
+                    },
+                )
+            },
+        );
 
         match self {
             Self::Named(sub) => Self::Named(sub.apply_selection_set(document, &selection_set)),
@@ -307,8 +309,9 @@ mod tests {
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
-    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
+
+    use crate::assert_snapshot;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {
         let document = ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();

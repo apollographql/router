@@ -914,7 +914,7 @@ fn extract_interface_type_content(
                     ),
                 }
             })?;
-            Ok(match subgraph.schema.get_type(type_name.clone())? {
+            Ok(match subgraph.schema.get_type(type_name)? {
                 TypeDefinitionPosition::Object(pos) => {
                     if !is_interface_object {
                         return Err(
@@ -1773,7 +1773,7 @@ fn add_federation_operations(
 
     // `Query._service`
     ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
+        type_name: query_root_type_name,
         field_name: FEDERATION_SERVICE_FIELD_NAME,
     }
     .insert(

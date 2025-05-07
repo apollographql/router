@@ -183,9 +183,6 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let tls_builder = rustls::ClientConfig::builder();
     Ok(match (tls_cert_store, client_cert_config) {
         (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
@@ -1708,7 +1705,6 @@ mod tests {
 
         // Not sure this is the *right* place to do it, because it's actually clients that
         // use crypto, not the server.
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         loop {
             let (stream, _) = listener.accept().await?;

@@ -387,7 +387,7 @@ mod test {
         is_subscription: bool,
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -434,7 +434,6 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         create_plugin_with_apollo_config(apollo::Config {
             endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
             apollo_key: Some("key".to_string()),

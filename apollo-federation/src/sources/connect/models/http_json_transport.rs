@@ -12,6 +12,7 @@ use apollo_compiler::parser::SourceSpan;
 use either::Either;
 use http::HeaderName;
 use http::Uri;
+use http::header;
 use http::uri::InvalidUri;
 use http::uri::InvalidUriParts;
 use http::uri::Parts;
@@ -34,7 +35,6 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
-use crate::sources::connect::spec::versions::AllowedHeaders;
 use crate::sources::connect::string_template;
 use crate::sources::connect::string_template::UriString;
 use crate::sources::connect::string_template::write_value;
@@ -253,14 +253,17 @@ fn extend_query_from_expression(
         ));
     };
 
-    let all_params = map.iter().flat_map(|(key, value)| {
-        if let Value::Array(values) = value {
-            // If the top-level value is an array, we're going to turn that into repeated params
-            Either::Left(values.iter().map(|value| (key.as_str(), value)))
-        } else {
-            Either::Right(once((key.as_str(), value)))
-        }
-    });
+    let all_params = map
+        .iter()
+        .filter(|(_, value)| !value.is_null())
+        .flat_map(|(key, value)| {
+            if let Value::Array(values) = value {
+                // If the top-level value is an array, we're going to turn that into repeated params
+                Either::Left(values.iter().map(|value| (key.as_str(), value)))
+            } else {
+                Either::Right(once((key.as_str(), value)))
+            }
+        });
 
     for (key, value) in all_params {
         if !query.is_empty() && !query.ends_with('&') {
@@ -303,7 +306,7 @@ pub enum HTTPMethod {
 
 impl HTTPMethod {
     #[inline]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             HTTPMethod::Get => "GET",
             HTTPMethod::Post => "POST",
@@ -362,28 +365,19 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
-        allowed_headers: &AllowedHeaders,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
-        if let Some(values) = node.as_list() {
-            values
-                .iter()
-                .map(|v| Self::from_single(v, allowed_headers))
-                .collect()
-        } else if node.as_object().is_some() {
-            vec![Self::from_single(node, allowed_headers)]
-        } else {
-            vec![Err(HeaderParseError::Other {
+        match (node.as_list(), node.as_object()) {
+            (Some(values), _) => values.iter().map(Self::from_single).collect(),
+            (None, Some(_)) => vec![Self::from_single(node)],
+            _ => vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
                 node,
-            })]
+            })],
         }
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(
-        node: &'a Node<ast::Value>,
-        allowed_headers: &AllowedHeaders,
-    ) -> Result<Self, HeaderParseError<'a>> {
+    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
             node,
@@ -409,7 +403,7 @@ impl<'a> Header<'a> {
                 node: name_node,
             })?;
 
-        if allowed_headers.header_name_is_reserved(&name) {
+        if RESERVED_HEADERS.contains(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
                 node: name_node,
@@ -424,7 +418,7 @@ impl<'a> Header<'a> {
             .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
-            (Some(_), None) if allowed_headers.header_name_allowed_static(&name) => {
+            (Some(_), None) if STATIC_HEADERS.contains(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
                     "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})
@@ -508,6 +502,22 @@ impl Display for HeaderParseError<'_> {
 }
 
 impl Error for HeaderParseError<'_> {}
+
+const RESERVED_HEADERS: [HeaderName; 11] = [
+    header::CONNECTION,
+    header::PROXY_AUTHENTICATE,
+    header::PROXY_AUTHORIZATION,
+    header::TE,
+    header::TRAILER,
+    header::TRANSFER_ENCODING,
+    header::UPGRADE,
+    header::CONTENT_LENGTH,
+    header::CONTENT_ENCODING,
+    header::ACCEPT_ENCODING,
+    HeaderName::from_static("keep-alive"),
+];
+
+const STATIC_HEADERS: [HeaderName; 3] = [header::CONTENT_TYPE, header::ACCEPT, header::HOST];
 
 #[cfg(test)]
 mod test_make_uri {
@@ -801,6 +811,36 @@ mod test_make_uri {
         assert_eq!(
             transport.make_uri(&Default::default()).unwrap(),
             "http://localhost/"
+        )
+    }
+
+    #[test]
+    fn skip_null_query_params() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            connect_query_params: JSONSelection::parse("something: $(null)").ok(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/"
+        )
+    }
+
+    #[test]
+    fn skip_null_path_params() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            connect_path: JSONSelection::parse("$([1, null, 2])").ok(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/1/2"
         )
     }
 }

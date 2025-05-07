@@ -62,7 +62,7 @@ fn entries_method(
                     JSON::Object(key_value_pair)
                 })
                 .collect();
-            (Some(JSON::Array(entries)), vec![])
+            (Some(JSON::Array(entries)), Vec::new())
         }
         _ => (
             None,

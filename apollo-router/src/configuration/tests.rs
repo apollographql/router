@@ -785,9 +785,6 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
