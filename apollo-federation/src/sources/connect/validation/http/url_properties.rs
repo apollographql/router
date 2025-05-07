@@ -4,7 +4,10 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use itertools::Itertools;
 use shape::Shape;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -15,35 +18,8 @@ use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::MappingArgument;
 use crate::sources::connect::validation::expression::parse_mapping_argument;
 
-#[derive(Clone, Copy)]
-enum ConnectOrSource<'schema> {
-    Source(SourceDirectiveCoordinate<'schema>),
-    Connect(ConnectDirectiveCoordinate<'schema>),
-}
-
-#[derive(Clone, Copy)]
-struct Coordinate<'schema> {
-    directive: ConnectOrSource<'schema>,
-    property: &'schema str,
-}
-
-impl fmt::Display for Coordinate<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.directive {
-            ConnectOrSource::Source(source) => {
-                write!(f, "In {source}, the `http.{}` argument", self.property)
-            }
-            ConnectOrSource::Connect(connect) => {
-                write!(f, "In {connect}, the `http.{}` argument", self.property)
-            }
-        }
-    }
-}
-
 pub(in crate::sources::connect::validation) struct UrlProperties<'schema> {
-    directive: ConnectOrSource<'schema>,
-    path: Option<MappingArgument<'schema>>,
-    query_params: Option<MappingArgument<'schema>>,
+    properties: Vec<Property<'schema>>,
 }
 
 impl<'schema> UrlProperties<'schema> {
@@ -68,52 +44,32 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        let mut path = None;
-        let mut query_params = None;
-
-        let mut errors = Vec::new();
-
-        for (name, value) in http_arg {
-            match name.as_str() {
-                property @ "path" => match parse_mapping_argument(
-                    value,
-                    Coordinate {
-                        directive,
-                        property,
-                    },
-                    Code::InvalidUrlProperty,
-                    schema,
-                ) {
-                    Ok(p) => path = Some(p),
-                    Err(e) => errors.push(e),
-                },
-                property @ "queryParams" => {
-                    match parse_mapping_argument(
-                        value,
-                        Coordinate {
-                            directive,
-                            property,
-                        },
-                        Code::InvalidUrlProperty,
-                        schema,
-                    ) {
-                        Ok(qp) => query_params = Some(qp),
-                        Err(e) => errors.push(e),
-                    }
-                }
-                _ => {}
-            }
-        }
+        let (properties, errors): (Vec<Property>, Vec<Message>) = http_arg
+            .iter()
+            .filter_map(|(name, value)| {
+                PropertyName::iter()
+                    .find(|prop_name| prop_name.as_str() == name.as_str())
+                    .map(|name| (name, value))
+            })
+            .map(|(property, value)| {
+                let coordinate = Coordinate {
+                    directive,
+                    property,
+                };
+                let mapping =
+                    parse_mapping_argument(value, coordinate, Code::InvalidUrlProperty, schema)?;
+                Ok(Property {
+                    coordinate,
+                    mapping,
+                })
+            })
+            .partition_result();
 
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        Ok(Self {
-            directive,
-            path,
-            query_params,
-        })
+        Ok(Self { properties })
     }
 
     pub(in crate::sources::connect::validation) fn type_check(
@@ -122,11 +78,8 @@ impl<'schema> UrlProperties<'schema> {
     ) -> Vec<Message> {
         let mut messages = vec![];
 
-        for (name, property, shape) in self {
-            messages.extend(
-                self.property_type_check(property, name, schema, shape)
-                    .err(),
-            );
+        for property in &self.properties {
+            messages.extend(self.property_type_check(property, schema).err());
         }
 
         messages
@@ -134,55 +87,101 @@ impl<'schema> UrlProperties<'schema> {
 
     fn property_type_check(
         &self,
-        property: Option<&MappingArgument>,
-        name: &str,
+        property: &Property<'_>,
         schema: &SchemaInfo<'_>,
-        expected_shape: &Shape,
     ) -> Result<(), Message> {
-        let Some(property) = property else {
-            return Ok(());
-        };
-
-        let context = match &self.directive {
-            ConnectOrSource::Source(_) => {
-                expression::Context::for_source(schema, &property.string, Code::InvalidUrlProperty)
-            }
+        let context = match property.coordinate.directive {
+            ConnectOrSource::Source(_) => expression::Context::for_source(
+                schema,
+                &property.mapping.string,
+                Code::InvalidUrlProperty,
+            ),
             ConnectOrSource::Connect(coord) => expression::Context::for_connect_request(
                 schema,
-                *coord,
-                &property.string,
+                coord,
+                &property.mapping.string,
                 Code::InvalidUrlProperty,
             ),
         };
 
-        expression::validate(&property.expression, &context, expected_shape).map_err(|e| {
-            let message = match &self.directive {
-                ConnectOrSource::Source(source) => {
-                    format!("In {source}, argument `{name}` is invalid: {}", e.message,)
-                }
-                ConnectOrSource::Connect(coord) => {
-                    format!("In {coord}, argument `{name}` is invalid: {}", e.message,)
-                }
-            };
+        expression::validate(
+            &property.mapping.expression,
+            &context,
+            property.expected_shape(),
+        )
+        .map_err(|e| {
+            let message = format!("{} is invalid: {}", property.coordinate, e.message);
             Message { message, ..e }
         })
     }
 }
 
-impl<'a, 's> IntoIterator for &'a UrlProperties<'s> {
-    type Item = (
-        &'static str,
-        Option<&'a MappingArgument<'s>>,
-        &'static LazyLock<Shape>,
-    );
-    type IntoIter = std::array::IntoIter<Self::Item, 2>;
+struct Property<'schema> {
+    coordinate: Coordinate<'schema>,
+    mapping: MappingArgument<'schema>,
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        [
-            ("path", self.path.as_ref(), &PATH_SHAPE),
-            ("queryParams", self.query_params.as_ref(), &QUERY_SHAPE),
-        ]
-        .into_iter()
+impl Property<'_> {
+    fn expected_shape(&self) -> &Shape {
+        match self.coordinate.property {
+            PropertyName::Path => &PATH_SHAPE,
+            PropertyName::QueryParams => &QUERY_SHAPE,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Coordinate<'schema> {
+    directive: ConnectOrSource<'schema>,
+    property: PropertyName,
+}
+
+impl fmt::Display for Coordinate<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.directive {
+            ConnectOrSource::Source(source) => {
+                write!(f, "In {source}, the `{}` argument", self.property)
+            }
+            ConnectOrSource::Connect(connect) => {
+                write!(f, "In {connect}, the `{}` argument", self.property)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConnectOrSource<'schema> {
+    Source(SourceDirectiveCoordinate<'schema>),
+    Connect(ConnectDirectiveCoordinate<'schema>),
+}
+
+impl fmt::Display for ConnectOrSource<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ConnectOrSource::Source(source) => write!(f, "{source}"),
+            ConnectOrSource::Connect(connect) => write!(f, "{connect}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, EnumIter)]
+enum PropertyName {
+    Path,
+    QueryParams,
+}
+
+impl PropertyName {
+    const fn as_str(&self) -> &'static str {
+        match self {
+            PropertyName::Path => "path",
+            PropertyName::QueryParams => "queryParams",
+        }
+    }
+}
+
+impl fmt::Display for PropertyName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
