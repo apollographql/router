@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
 [
     Message {
         code: InvalidUrlProperty,
-        message: "`@source(http:)` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
+        message: "`@source(name: \"v1\")` has invalid syntax in URL properties.\n  - The `path` argument is invalid: nom::error::ErrorKind::Eof: .\n  - The `queryParams` argument is invalid: nom::error::ErrorKind::Eof: .",
         locations: [
             6:37..6:40,
             6:55..6:58,

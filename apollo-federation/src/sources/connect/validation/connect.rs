@@ -28,7 +28,6 @@ use crate::sources::connect::validation::graphql::SchemaInfo;
 mod entity;
 mod http;
 mod selection;
-pub(crate) use http::url_properties::UrlProperties;
 
 pub(super) fn fields_seen_by_all_connects(
     schema: &SchemaInfo,

@@ -14,6 +14,7 @@ use crate::sources::connect::validation::GraphQLString;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::SchemaInfo;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
+use crate::sources::connect::validation::coordinates::SourceDirectiveCoordinate;
 use crate::sources::connect::validation::expression;
 
 pub(crate) struct Property<'schema> {
@@ -22,12 +23,12 @@ pub(crate) struct Property<'schema> {
 }
 
 enum PropertyLocation<'schema> {
-    Source(String),
+    Source(SourceDirectiveCoordinate<'schema>),
     Connect(ConnectHTTPCoordinate<'schema>),
 }
 
 #[allow(unused)]
-pub(crate) struct UrlProperties<'schema> {
+pub(in crate::sources::connect::validation) struct UrlProperties<'schema> {
     location: PropertyLocation<'schema>,
     path: Option<Property<'schema>>,
     query_params: Option<Property<'schema>>,
@@ -43,7 +44,7 @@ impl<'schema> UrlProperties<'schema> {
     }
 
     pub(in crate::sources::connect::validation) fn parse_for_source(
-        source_coordinate: String,
+        source_coordinate: SourceDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Message> {
@@ -92,7 +93,7 @@ impl<'schema> UrlProperties<'schema> {
             Some(Property {
                 expression: Expression {
                     expression: selection,
-                    location: 0..0,
+                    location: 0..string.as_str().len(),
                 },
                 string,
             })
@@ -113,7 +114,7 @@ impl<'schema> UrlProperties<'schema> {
 
         if !errors.is_empty() {
             let coordinate = match location {
-                PropertyLocation::Source(source) => source,
+                PropertyLocation::Source(source) => source.to_string(),
                 PropertyLocation::Connect(connector) => connector.to_string(),
             };
 

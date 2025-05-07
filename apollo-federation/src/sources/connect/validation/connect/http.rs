@@ -1,7 +1,5 @@
 //! Parsing and validation for `@connect(http:)`
 
-pub(crate) mod url_properties;
-
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -11,7 +9,6 @@ use apollo_compiler::ast::Value;
 use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
-use url_properties::UrlProperties;
 
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
@@ -34,6 +31,7 @@ use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::http::UrlProperties;
 use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::http::url::validate_url_scheme;
 use crate::sources::connect::validation::source::SourceName;

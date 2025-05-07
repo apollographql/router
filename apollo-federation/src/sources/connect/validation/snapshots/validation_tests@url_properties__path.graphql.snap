@@ -6,21 +6,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `path` is invalid: `*.bad` must start with one of $config, $context, $request",
+        message: "In `@source(name: \"v2\")`, argument `path` is invalid: `*.bad` must start with one of $config, $context, $request",
         locations: [
-            7:38..7:38,
+            7:38..7:41,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `path` is invalid: string values aren't valid here",
+        message: "In `@source(name: \"v3\")`, argument `path` is invalid: string values aren't valid here",
         locations: [
             8:40..8:45,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `path` is invalid: object values aren't valid here",
+        message: "In `@source(name: \"v4\")`, argument `path` is invalid: object values aren't valid here",
         locations: [
             9:40..9:52,
         ],
@@ -29,7 +29,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
         code: InvalidUrlProperty,
         message: "In `@connect(http:)` on `Query.resources`, argument `path` is invalid: `*.bad` must start with one of $args, $config, $context, $request",
         locations: [
-            23:53..23:53,
+            23:53..23:56,
         ],
     },
     Message {
