@@ -881,7 +881,8 @@ impl SpecDefinition for FederationSpecDefinition {
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             let context_spec_definitions =
-                ContextSpecDefinition::new(self.version().clone()).directive_specs();
+                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
+                    .directive_specs();
             specs.extend(context_spec_definitions);
         }
 
@@ -898,7 +899,10 @@ impl SpecDefinition for FederationSpecDefinition {
             })];
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
-            type_specs.extend(ContextSpecDefinition::new(self.version().clone()).type_specs());
+            type_specs.extend(
+                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
+                    .type_specs(),
+            );
         }
         type_specs
     }
