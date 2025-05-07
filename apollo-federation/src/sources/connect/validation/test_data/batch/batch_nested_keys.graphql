@@ -1,0 +1,14 @@
+type T 
+  @connect(
+    http: { GET: "http://localhost/?ids={$($batch.a { id c })->jsonStringify}" }
+    selection: "a { id } b"
+  )
+{
+  a: A
+  b: Int
+}
+
+type A {
+  id: ID!
+  c: Int 
+}

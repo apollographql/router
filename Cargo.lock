@@ -5885,7 +5885,7 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "apollo-compiler",
  "indexmap 2.9.0",

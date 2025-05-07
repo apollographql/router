@@ -32,6 +32,7 @@ use hashbrown::HashSet;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use shape::{Shape, ShapeCase, ShapeVisitor};
+use tracing::warn;
 
 mod keys;
 
@@ -307,14 +308,19 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
 
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
-            let Ok(Some(input_key)) = connector.resolvable_key(schema) else {
+            let Ok(Some(input_key)) = connector.resolvable_key(schema)
+            .inspect_err(|err| {
+                println!("\n\nERROR: {err}\n\n");
+            }) else {
                 unreachable!("TypeBatch is expected to always have a key");
             };
+
+            println!("\n\nKEY: {input_key}\n\n");
             match SelectionSetWalker::new(&input_key.selection_set)
                 .walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
-                Err(err) => messages.push(err.into()),
+                Err(err) => messages.push(err),
             }
         }
     }
