@@ -126,6 +126,11 @@ pub enum SingleFederationError {
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
+    #[error("[{subgraph}] {error}")]
+    SubgraphError {
+        subgraph: String,
+        error: Box<SingleFederationError>,
+    },
     // InvalidGraphQL: We need to be able to modify the message text from apollo-compiler. So, we
     //                 format the DiagnosticData into String here. We can add additional data as
     //                 necessary.
@@ -373,6 +378,7 @@ impl SingleFederationError {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
             SingleFederationError::InternalUnmergeableFields { .. } => ErrorCode::Internal,
+            SingleFederationError::SubgraphError { error, .. } => error.code(),
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
@@ -615,6 +621,19 @@ impl SingleFederationError {
             },
         }
     }
+
+    pub(crate) fn unwrap_subgraph_error(self, expected_subgraph: &str) -> Self {
+        if let Self::SubgraphError { subgraph, error } = self {
+            debug_assert_eq!(
+                subgraph, expected_subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                subgraph, expected_subgraph, error,
+            );
+            *error
+        } else {
+            self
+        }
+    }
 }
 
 impl From<InvalidNameError> for FederationError {
@@ -663,6 +682,16 @@ impl MultipleFederationErrors {
             }
         }
     }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
 }
 
 impl Display for MultipleFederationErrors {
@@ -695,6 +724,20 @@ pub struct AggregateFederationError {
     pub code: String,
     pub message: String,
     pub causes: Vec<SingleFederationError>,
+}
+
+impl AggregateFederationError {
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
 }
 
 impl Display for AggregateFederationError {
@@ -795,6 +838,20 @@ impl FederationError {
         self.errors()
             .into_iter()
             .any(|e| matches!(e, SingleFederationError::InvalidGraphQL { .. }))
+    }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => {
+                e.unwrap_subgraph_error(expected_subgraph).into()
+            }
+            FederationError::MultipleFederationErrors(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+            FederationError::AggregateFederationError(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+        }
     }
 }
 
