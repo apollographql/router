@@ -145,12 +145,12 @@ supergraph:
         pool_size: 4 # Optional, defaults to 1
 ```
 
-#### Timeout
+### Timeout
 
 Connecting and sending commands to Redis are subject to a timeout, set by default to 500ms, that can be overriden.
 
 
-#### TTL
+### TTL
 
 The `ttl` option defines the default global expiration for Redis entries. For APQ caching, the default is no expiration, while for query plan caching, the default expiration is set to 30 days.
 
