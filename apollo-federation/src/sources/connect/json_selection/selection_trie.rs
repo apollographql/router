@@ -116,7 +116,7 @@ impl SelectionTrie {
             .cloned()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn has_str_path<'a>(&self, path: impl IntoIterator<Item = &'a str>) -> bool {
         let mut current = self;
         for key in path {
@@ -129,7 +129,7 @@ impl SelectionTrie {
         current.is_leaf()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn add_str_path<'a>(
         &mut self,
         path: impl IntoIterator<Item = &'a str>,
@@ -200,7 +200,7 @@ impl SelectionTrie {
 
     /// Like [`SelectionTrie::extend`] but producing a new SelectionTrie
     /// instance instead of modifying self.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn merge(&self, other: &SelectionTrie) -> Self {
         let mut merged = SelectionTrie::new();
         merged.extend(self);
