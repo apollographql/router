@@ -161,9 +161,7 @@ impl<N: FromStr + ToString> Display for VariableReference<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.namespace.namespace.to_string().as_str())?;
         if !self.selection.is_empty() {
-            f.write_str(" { ")?;
-            f.write_str(self.selection.to_string().as_str())?;
-            f.write_str(" }")?;
+            write!(f, " {{ {} }}", self.selection)?;
         }
         Ok(())
     }
