@@ -371,11 +371,13 @@ fn extract_header_references(
             if var_ref.namespace.namespace != Namespace::Request
                 && var_ref.namespace.namespace != Namespace::Response
             {
-                vec![]
-            } else if let Some(headers_subselection) = var_ref.selection.get("headers") {
-                headers_subselection.keys().cloned().collect()
+                Vec::new()
             } else {
-                vec![]
+                var_ref
+                    .selection
+                    .get("headers")
+                    .map(|headers_subtrie| headers_subtrie.keys().cloned().collect())
+                    .unwrap_or_default()
             }
         })
         .collect()
