@@ -82,7 +82,7 @@ clap = { version = "4.5.8", default-features = false, features = [
 cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
-dashmap = { version = "5.5.3", features = ["serde"] }
+dashmap = { version = "6.0.0", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
