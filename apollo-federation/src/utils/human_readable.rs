@@ -148,3 +148,20 @@ pub(crate) fn human_readable_list(
         joined_strings
     }
 }
+
+// PORT_NOTE: Named `printSubgraphNames` in the JS codebase, but "print" in Rust has the implication
+// it prints to stdout/stderr, so we've renamed it here to `human_readable_subgraph_names`
+pub(crate) fn human_readable_subgraph_names(
+    subgraph_names: impl Iterator<Item = impl AsRef<str>>,
+) -> String {
+    human_readable_list(
+        subgraph_names.map(|name| format!("\"{}\"", name.as_ref())),
+        HumanReadableListOptions {
+            prefix: Some(HumanReadableListPrefix {
+                singular: "subgraph",
+                plural: "subgraphs",
+            }),
+            ..Default::default()
+        },
+    )
+}
