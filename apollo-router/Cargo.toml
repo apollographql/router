@@ -82,7 +82,7 @@ clap = { version = "4.5.8", default-features = false, features = [
 cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
-dashmap = { version = "5.5.3", features = ["serde"] }
+dashmap = { version = "6.0.0", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -97,7 +97,6 @@ futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
 http.workspace = true
-http-0_2 = { version = "0.2.12", package = "http" }
 http-body = "1.0.1"
 http-body-util = { version = "0.1.2" }
 heck = "0.5.0"
@@ -227,7 +226,7 @@ url = { version = "2.5.4", features = ["serde"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
-wiremock = "0.5.22"
+wiremock = "0.6"
 wsl = "0.1.0"
 tokio-tungstenite = { version = "0.26.1", features = [
     "rustls-tls-native-roots",
@@ -330,7 +329,7 @@ tracing-opentelemetry = "0.25.0"
 tracing-test = "0.2.5"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
-wiremock = "0.5.22"
+wiremock = "0.6"
 libtest-mimic = "0.8.0"
 rstest = "0.25.0"
 

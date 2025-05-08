@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
-use wiremock::http::HeaderValues;
 
 #[derive(Clone)]
 pub(crate) struct Matcher {
@@ -12,7 +11,7 @@ pub(crate) struct Matcher {
     path: Option<String>,
     query: Option<String>,
     body: Option<serde_json::Value>,
-    headers: HashMap<HeaderName, HeaderValues>,
+    headers: HashMap<HeaderName, Vec<HeaderValue>>,
 }
 
 impl Matcher {
@@ -47,8 +46,8 @@ impl Matcher {
     }
 
     pub(crate) fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
-        let values = self.headers.entry(name).or_insert(Vec::new().into());
-        values.append(&mut Vec::from([value]).into());
+        let values = self.headers.entry(name).or_default();
+        values.push(value);
         self
     }
 
@@ -87,23 +86,34 @@ impl Matcher {
         }
 
         for (name, expected) in self.headers.iter() {
-            match request.headers.get(name) {
-                Some(actual) => {
-                    let expected: HashSet<String> =
-                        expected.iter().map(|v| v.as_str().to_owned()).collect();
-                    let actual: HashSet<String> =
-                        actual.iter().map(|v| v.as_str().to_owned()).collect();
-                    if expected != actual {
-                        return Err(format!(
-                            "[Request {index}]: expected header {name} to be [{}], was [{}]",
-                            expected.iter().join(", "),
-                            actual.iter().join(", ")
-                        ));
-                    }
-                }
-                None => {
+            let actual: HashSet<String> = request
+                .headers
+                .get_all(name)
+                .iter()
+                .map(|v| {
+                    v.to_str()
+                        .expect("non-UTF-8 header value in tests")
+                        .to_owned()
+                })
+                .collect();
+            if actual.is_empty() {
+                return Err(format!(
+                    "[Request {index}]: expected header {name}, was missing"
+                ));
+            } else {
+                let expected: HashSet<String> = expected
+                    .iter()
+                    .map(|v| {
+                        v.to_str()
+                            .expect("non-UTF-8 header value in tests")
+                            .to_owned()
+                    })
+                    .collect();
+                if expected != actual {
                     return Err(format!(
-                        "[Request {index}]: expected header {name}, was missing"
+                        "[Request {index}]: expected header {name} to be [{}], was [{}]",
+                        expected.iter().join(", "),
+                        actual.iter().join(", ")
                     ));
                 }
             }

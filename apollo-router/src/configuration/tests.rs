@@ -676,9 +676,8 @@ fn upgrade_old_minor_configuration() {
                 Mode::NoUpgrade,
             );
 
-            // FIXME: this test will change once we have our first minor upgrade
-            if result.is_ok() {
-                panic!("minor upgrade should raise errors, but it did not for {file_name}")
+            if let Err(err) = result {
+                panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
             }
         }
     }

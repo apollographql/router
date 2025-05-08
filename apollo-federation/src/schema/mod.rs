@@ -13,6 +13,7 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
+use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
@@ -409,8 +410,10 @@ impl FederationSchema {
                     let directives = &interface_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: interface_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -424,8 +427,10 @@ impl FederationSchema {
                     let directives = &object_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: object_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -656,6 +661,8 @@ pub(crate) struct ContextDirective<'schema> {
 pub(crate) struct FromContextDirective<'schema> {
     /// The parsed arguments of this `@fromContext` application
     arguments: FromContextDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: FieldArgumentDefinitionPosition,
 }
 
 pub(crate) struct KeyDirective<'schema> {
