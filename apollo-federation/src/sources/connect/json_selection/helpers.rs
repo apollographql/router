@@ -288,6 +288,10 @@ mod tests {
         assert!(is_identifier("hello"));
         assert!(is_identifier("hello_world"));
         assert!(is_identifier("hello_world_123"));
+        assert!(is_identifier("_hello_world"));
+        assert!(is_identifier("hello_world_"));
+        assert!(is_identifier("__hello_world"));
+        assert!(is_identifier("__hello_world__"));
         assert!(!is_identifier("hello world"));
         assert!(!is_identifier("hello-world"));
         assert!(!is_identifier("123hello"));
