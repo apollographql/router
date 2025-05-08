@@ -566,7 +566,7 @@ pub(crate) async fn add_plugin(
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: LicenseState,
-    full_config: Option<Value>
+    full_config: Option<Value>,
 ) {
     match factory
         .create_instance(
@@ -642,7 +642,7 @@ pub(crate) async fn create_plugins(
                 &mut plugin_instances,
                 &mut errors,
                 license.clone(),
-                $maybe_full_config
+                $maybe_full_config,
             )
             .await;
         }};

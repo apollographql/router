@@ -90,7 +90,7 @@ pub struct PluginInit<T> {
     /// The full router configuration json for use by the telemetry plugin ONLY.
     /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
     /// configuration subset.
-    pub(crate) full_config: Option<Value>
+    pub(crate) full_config: Option<Value>,
 }
 
 impl<T> PluginInit<T>
@@ -137,7 +137,7 @@ where
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
-        full_config: Option<Value>
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
@@ -166,7 +166,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
-        full_config: Option<Value>
+        full_config: Option<Value>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -193,7 +193,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<LicenseState>,
-        full_config: Option<Value>
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
