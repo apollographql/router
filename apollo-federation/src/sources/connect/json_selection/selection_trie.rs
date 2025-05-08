@@ -29,9 +29,10 @@ pub(crate) struct SelectionTrie {
     /// The top-level sub-selections of this [`SelectionTrie`].
     selections: IndexMap<String, Ref<SelectionTrie>>,
 
-    /// Whether the path terminating at this [`SelectionTrie`] node was
-    /// explicitly added to the trie.
-    used: bool,
+    /// Whether the path terminating with this [`SelectionTrie`] node was
+    /// explicitly added to the trie, rather than existing only as a prefix of
+    /// other paths that have been added.
+    is_leaf: bool,
 
     /// Collected as metadata but ignored by [`PartialEq`] and [`Hash`].
     key_ranges: IndexMap<String, IndexSet<Range<usize>>>,
@@ -47,7 +48,7 @@ impl Display for SelectionTrie {
             }
 
             if sub.is_empty() {
-                if sub.is_used() {
+                if sub.is_leaf() {
                     write!(f, "{}", quote_if_necessary(key))?;
                     need_space = true;
                 }
@@ -63,7 +64,7 @@ impl Display for SelectionTrie {
 
 impl PartialEq for SelectionTrie {
     fn eq(&self, other: &Self) -> bool {
-        self.used == other.used && self.selections == other.selections
+        self.is_leaf == other.is_leaf && self.selections == other.selections
     }
 }
 
@@ -83,16 +84,7 @@ impl Hash for SelectionTrie {
 impl SelectionTrie {
     pub(crate) fn new() -> Self {
         Self {
-            used: false,
-            selections: IndexMap::default(),
-            key_ranges: IndexMap::default(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn new_used() -> Self {
-        Self {
-            used: true,
+            is_leaf: false,
             selections: IndexMap::default(),
             key_ranges: IndexMap::default(),
         }
@@ -134,7 +126,7 @@ impl SelectionTrie {
                 return false;
             }
         }
-        current.is_used()
+        current.is_leaf()
     }
 
     #[allow(dead_code)]
@@ -144,7 +136,7 @@ impl SelectionTrie {
     ) -> &mut Self {
         path.into_iter()
             .fold(self, |trie, key| trie.add_str(key))
-            .set_used()
+            .set_leaf()
     }
 
     pub(super) fn add_path_list(&mut self, path_list: &PathList) -> &mut Self {
@@ -152,11 +144,11 @@ impl SelectionTrie {
             PathList::Key(key, tail) => self.add_key(key).add_path_list(tail.as_ref()),
             PathList::Selection(sub) => self.add_subselection(sub),
             // If we get to the end of the PathList, mark the path used.
-            PathList::Empty => self.set_used(),
+            PathList::Empty => self.set_leaf(),
             // TODO Support PathList::Method and inputs used within method
             // arguments. For now, assume we use the whole path up to the
             // unhandled PathList element.
-            _ => self.set_used(),
+            _ => self.set_leaf(),
         }
     }
 
@@ -168,7 +160,7 @@ impl SelectionTrie {
                     if let Some(nested) = nested_selection {
                         result.add_subselection(nested);
                     } else {
-                        result.set_used();
+                        result.set_leaf();
                     }
                 }
                 NamedSelection::Path { path, .. } => {
@@ -199,8 +191,8 @@ impl SelectionTrie {
                 .or_default()
                 .extend(other.key_ranges(key));
         }
-        if self.is_used() || other.is_used() {
-            self.set_used()
+        if self.is_leaf() || other.is_leaf() {
+            self.set_leaf()
         } else {
             self
         }
@@ -240,13 +232,13 @@ impl SelectionTrie {
         self.add_str_with_ranges(key.as_str(), key.range())
     }
 
-    fn set_used(&mut self) -> &mut Self {
-        self.used = true;
+    fn set_leaf(&mut self) -> &mut Self {
+        self.is_leaf = true;
         self
     }
 
-    fn is_used(&self) -> bool {
-        self.used
+    fn is_leaf(&self) -> bool {
+        self.is_leaf
     }
 }
 
@@ -261,29 +253,33 @@ mod tests {
         assert_eq!(trie.keys().count(), 0);
         assert_eq!(trie.iter().count(), 0);
         assert_eq!(trie.key_ranges("field").count(), 0);
-        assert!(!trie.is_used());
+        assert!(!trie.is_leaf());
 
-        let used = SelectionTrie::new_used();
-        assert!(used.is_empty());
-        assert_eq!(used.keys().count(), 0);
-        assert_eq!(used.iter().count(), 0);
-        assert_eq!(used.key_ranges("saves").count(), 0);
-        assert!(used.is_used());
+        let empty_leaf = {
+            let mut trie = SelectionTrie::new();
+            trie.set_leaf();
+            trie
+        };
+        assert!(empty_leaf.is_empty());
+        assert_eq!(empty_leaf.keys().count(), 0);
+        assert_eq!(empty_leaf.iter().count(), 0);
+        assert_eq!(empty_leaf.key_ranges("saves").count(), 0);
+        assert!(empty_leaf.is_leaf());
     }
 
     #[test]
     fn test_selection_trie_add_key() {
         let mut trie = SelectionTrie::new();
         trie.add_key(&WithRange::new(Key::Field("field".to_string()), Some(0..5)))
-            .set_used();
+            .set_leaf();
 
         assert!(!trie.is_empty());
         assert_eq!(trie.keys().count(), 1);
         assert_eq!(trie.key_ranges("field").count(), 1);
-        assert!(!trie.is_used());
+        assert!(!trie.is_leaf());
 
-        assert!(trie.set_used().is_used());
-        assert!(trie.is_used());
+        assert!(trie.set_leaf().is_leaf());
+        assert!(trie.is_leaf());
 
         assert_eq!(trie.key_ranges("field").collect::<Vec<_>>(), vec![0..5]);
 
@@ -291,7 +287,7 @@ mod tests {
             Key::Field("field".to_string()),
             Some(5..10),
         ))
-        .set_used();
+        .set_leaf();
         assert_eq!(
             trie.key_ranges("field").collect::<Vec<_>>(),
             vec![0..5, 5..10]
@@ -302,14 +298,14 @@ mod tests {
             Key::Field("other".to_string()),
             Some(15..20),
         ))
-        .set_used();
+        .set_leaf();
         assert_eq!(trie.keys().count(), 2);
         assert_eq!(trie.key_ranges("other").collect::<Vec<_>>(), vec![15..20]);
         assert_eq!(
             trie.key_ranges("field").collect::<Vec<_>>(),
             vec![0..5, 5..10]
         );
-        assert!(trie.is_used());
+        assert!(trie.is_leaf());
 
         assert_eq!(trie.to_string(), "field other");
     }
@@ -324,7 +320,7 @@ mod tests {
         assert_eq!(trie.key_ranges("a").count(), 0);
         assert_eq!(trie.key_ranges("b").count(), 0);
         assert_eq!(trie.key_ranges("c").count(), 0);
-        assert!(!trie.is_used());
+        assert!(!trie.is_leaf());
         assert_eq!(trie.to_string(), "a { b { c } }");
 
         assert!(trie.has_str_path(["a", "b", "c"]));

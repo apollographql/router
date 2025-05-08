@@ -3041,7 +3041,11 @@ mod tests {
                     namespace: Namespace::This,
                     location: Some(0..5),
                 },
-                selection: SelectionTrie::new_used(),
+                selection: {
+                    let mut selection = SelectionTrie::new();
+                    selection.add_str_path([]);
+                    selection
+                },
                 location: Some(0..5),
             })
         );
