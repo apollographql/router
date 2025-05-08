@@ -2,7 +2,6 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
@@ -69,34 +68,28 @@ pub(super) fn check_or_add(
     };
 
     // -------------------------------------------------------------------------
-    let http_header_mapping_field_list = vec![
-        InputValueDefinition {
-            description: None,
-            name: HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME,
-            ty: ty!(String!).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME,
-            ty: ty!(String).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME,
-            ty: ty!([String!]).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ];
-
-    let mut http_header_mapping_fields = IndexMap::with_hasher(Default::default());
-    for field in http_header_mapping_field_list {
-        http_header_mapping_fields.insert(field.name.clone(), Component::new(field));
-    }
+    let http_header_mapping_fields = [
+        (HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME, ty!(String!).into()),
+        (HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME, ty!(String).into()),
+        (
+            HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME,
+            ty!([String!]).into(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, ty)| {
+        (
+            name.clone(),
+            Component::new(InputValueDefinition {
+                description: None,
+                name,
+                ty,
+                default_value: None,
+                directives: Default::default(),
+            }),
+        )
+    })
+    .collect();
 
     // input HTTPHeaderMapping {
     //   name: String!
@@ -115,83 +108,61 @@ pub(super) fn check_or_add(
     };
 
     // -------------------------------------------------------------------------
-
-    let mut connect_http_field_list = vec![
-        InputValueDefinition {
-            description: None,
-            name: name!(GET),
-            ty: Type::Named(url_path_template_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(POST),
-            ty: Type::Named(url_path_template_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(PUT),
-            ty: Type::Named(url_path_template_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(PATCH),
-            ty: Type::Named(url_path_template_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(DELETE),
-            ty: Type::Named(url_path_template_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: CONNECT_BODY_ARGUMENT_NAME,
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: HEADERS_ARGUMENT_NAME,
-            ty: Type::List(Box::new(Type::NonNullNamed(
+    let connect_http_fields = [
+        (
+            name!(GET),
+            Type::Named(url_path_template_spec.name.clone()).into(),
+        ),
+        (
+            name!(POST),
+            Type::Named(url_path_template_spec.name.clone()).into(),
+        ),
+        (
+            name!(PUT),
+            Type::Named(url_path_template_spec.name.clone()).into(),
+        ),
+        (
+            name!(PATCH),
+            Type::Named(url_path_template_spec.name.clone()).into(),
+        ),
+        (
+            name!(DELETE),
+            Type::Named(url_path_template_spec.name.clone()).into(),
+        ),
+        (
+            CONNECT_BODY_ARGUMENT_NAME,
+            Type::Named(json_selection_spec.name.clone()).into(),
+        ),
+        (
+            HEADERS_ARGUMENT_NAME,
+            Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
             .into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ];
-
-    connect_http_field_list.extend([
-        InputValueDefinition {
-            description: None,
-            name: PATH_ARGUMENT_NAME,
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: QUERY_PARAMS_ARGUMENT_NAME,
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ]);
-
-    let mut connect_http_fields = IndexMap::with_hasher(Default::default());
-    for field in connect_http_field_list {
-        connect_http_fields.insert(field.name.clone(), Component::new(field));
-    }
+        ),
+        (
+            PATH_ARGUMENT_NAME,
+            Type::Named(json_selection_spec.name.clone()).into(),
+        ),
+        (
+            QUERY_PARAMS_ARGUMENT_NAME,
+            Type::Named(json_selection_spec.name.clone()).into(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, ty)| {
+        (
+            name.clone(),
+            Component::new(InputValueDefinition {
+                description: None,
+                name,
+                ty,
+                default_value: None,
+                directives: Default::default(),
+            }),
+        )
+    })
+    .collect();
 
     let connect_http = InputObjectType {
         name: link.type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC),
@@ -205,19 +176,21 @@ pub(super) fn check_or_add(
     };
 
     // @connect batch settings
-
-    let connect_batch_field_list = vec![InputValueDefinition {
-        description: None,
-        name: name!(maxSize),
-        ty: ty!(Int).into(),
-        default_value: None,
-        directives: Default::default(),
-    }];
-
-    let mut connect_batch_fields = IndexMap::with_hasher(Default::default());
-    for field in connect_batch_field_list {
-        connect_batch_fields.insert(field.name.clone(), Component::new(field));
-    }
+    let connect_batch_fields = [(name!(maxSize), ty!(Int).into())]
+        .into_iter()
+        .map(|(name, ty)| {
+            (
+                name.clone(),
+                Component::new(InputValueDefinition {
+                    description: None,
+                    name,
+                    ty,
+                    default_value: None,
+                    directives: Default::default(),
+                }),
+            )
+        })
+        .collect();
 
     let connect_batch = InputObjectType {
         name: link.type_name_in_schema(&CONNECT_BATCH_NAME_IN_SPEC),
@@ -231,28 +204,21 @@ pub(super) fn check_or_add(
     };
 
     // @connect error settings
-
-    let connector_errors_field_list = vec![
-        InputValueDefinition {
-            description: None,
-            name: name!(message),
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(extensions),
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ];
-
-    let mut connector_errors_fields = IndexMap::with_hasher(Default::default());
-    for field in connector_errors_field_list {
-        connector_errors_fields.insert(field.name.clone(), Component::new(field));
-    }
+    let connector_errors_fields = [name!(message), name!(extensions)]
+        .into_iter()
+        .map(|name| {
+            (
+                name.clone(),
+                Component::new(InputValueDefinition {
+                    description: None,
+                    name,
+                    ty: Type::Named(json_selection_spec.name.clone()).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }),
+            )
+        })
+        .collect();
 
     let connector_errors = InputObjectType {
         name: link.type_name_in_schema(&ERRORS_NAME_IN_SPEC),
@@ -379,48 +345,38 @@ pub(super) fn check_or_add(
     );
 
     // -------------------------------------------------------------------------
-
-    let mut source_http_field_list = vec![
-        InputValueDefinition {
-            description: None,
-            name: SOURCE_BASE_URL_ARGUMENT_NAME,
-            ty: ty!(String!).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: HEADERS_ARGUMENT_NAME,
-            ty: Type::List(Box::new(Type::NonNullNamed(
+    let source_http_fields = [
+        (SOURCE_BASE_URL_ARGUMENT_NAME, ty!(String!).into()),
+        (
+            HEADERS_ARGUMENT_NAME,
+            Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
             .into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ];
-
-    source_http_field_list.extend([
-        InputValueDefinition {
-            description: None,
-            name: PATH_ARGUMENT_NAME,
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: QUERY_PARAMS_ARGUMENT_NAME,
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ]);
-
-    let mut source_http_fields = IndexMap::with_hasher(Default::default());
-    for field in source_http_field_list {
-        source_http_fields.insert(field.name.clone(), Component::new(field));
-    }
+        ),
+        (
+            PATH_ARGUMENT_NAME,
+            Type::Named(json_selection_spec.name.clone()).into(),
+        ),
+        (
+            QUERY_PARAMS_ARGUMENT_NAME,
+            Type::Named(json_selection_spec.name.clone()).into(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, ty)| {
+        (
+            name.clone(),
+            Component::new(InputValueDefinition {
+                description: None,
+                name,
+                ty,
+                default_value: None,
+                directives: Default::default(),
+            }),
+        )
+    })
+    .collect();
 
     // input SourceHTTP {
     //   baseURL: String!

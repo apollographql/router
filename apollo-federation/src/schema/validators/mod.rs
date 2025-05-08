@@ -18,8 +18,10 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
+pub(crate) mod context;
 pub(crate) mod cost;
 pub(crate) mod external;
+pub(crate) mod from_context;
 pub(crate) mod key;
 pub(crate) mod list_size;
 pub(crate) mod provides;
