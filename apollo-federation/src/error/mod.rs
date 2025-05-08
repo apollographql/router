@@ -126,6 +126,11 @@ pub enum SingleFederationError {
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
+    #[error("[{subgraph}] {error}")]
+    SubgraphError {
+        subgraph: String,
+        error: Box<SingleFederationError>,
+    },
     // InvalidGraphQL: We need to be able to modify the message text from apollo-compiler. So, we
     //                 format the DiagnosticData into String here. We can add additional data as
     //                 necessary.
@@ -373,6 +378,7 @@ impl SingleFederationError {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
             SingleFederationError::InternalUnmergeableFields { .. } => ErrorCode::Internal,
+            SingleFederationError::SubgraphError { error, .. } => error.code(),
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
@@ -615,6 +621,43 @@ impl SingleFederationError {
             },
         }
     }
+
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
+    pub(crate) fn unwrap_subgraph_error(self, expected_subgraph: &str) -> Self {
+        if let Self::SubgraphError { subgraph, error } = self {
+            debug_assert_eq!(
+                subgraph, expected_subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                subgraph, expected_subgraph, error,
+            );
+            *error
+        } else {
+            self
+        }
+    }
+
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        if let Self::SubgraphError {
+            subgraph: existing_subgraph,
+            error,
+        } = &self
+        {
+            debug_assert_eq!(
+                existing_subgraph, &subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                existing_subgraph, subgraph, error,
+            );
+            self
+        } else {
+            Self::SubgraphError {
+                subgraph,
+                error: Box::new(self),
+            }
+        }
+    }
 }
 
 impl From<InvalidNameError> for FederationError {
@@ -663,6 +706,26 @@ impl MultipleFederationErrors {
             }
         }
     }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl Display for MultipleFederationErrors {
@@ -695,6 +758,32 @@ pub struct AggregateFederationError {
     pub code: String,
     pub message: String,
     pub causes: Vec<SingleFederationError>,
+}
+
+impl AggregateFederationError {
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl Display for AggregateFederationError {
@@ -795,6 +884,30 @@ impl FederationError {
         self.errors()
             .into_iter()
             .any(|e| matches!(e, SingleFederationError::InvalidGraphQL { .. }))
+    }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => {
+                e.unwrap_subgraph_error(expected_subgraph).into()
+            }
+            FederationError::MultipleFederationErrors(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+            FederationError::AggregateFederationError(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+        }
+    }
+
+    // PORT_NOTE: Named `addSubgraphToError` in the JS codebase, but converted into a method here.
+    #[allow(dead_code)]
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => e.add_subgraph(subgraph).into(),
+            FederationError::MultipleFederationErrors(e) => e.add_subgraph(subgraph).into(),
+            FederationError::AggregateFederationError(e) => e.add_subgraph(subgraph).into(),
+        }
     }
 }
 
