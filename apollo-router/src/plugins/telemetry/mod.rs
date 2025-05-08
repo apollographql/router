@@ -313,11 +313,14 @@ impl PluginPrivate for Telemetry {
         let full_config = init.full_config
             .as_ref()
             .expect("Required full router configuration not found in telemetry plugin");
+        let _full_config_str = full_config.to_string();
         let mut v = Vec::new();
-        if full_config.apq.enabled {
+        if full_config["apq"]["enabled"]
+            .as_bool()
+            .unwrap_or(false) {
             v.push("apq");
         }
-        if full_config.apollo_plugins.plugins["preview_entity_cache"]["enabled"]
+        if full_config["preview_entity_cache"]["enabled"]
             .as_bool()
             .unwrap_or(false) {
             v.push("preview_entity_cache");

@@ -37,6 +37,7 @@ use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
+use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -87,7 +88,7 @@ pub struct PluginInit<T> {
     pub(crate) license: LicenseState,
 
     // TODO warning comment here
-    pub(crate) full_config: Option<Arc<Configuration>>
+    pub(crate) full_config: Option<Value>
 }
 
 impl<T> PluginInit<T>
@@ -134,7 +135,7 @@ where
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
-        full_config: Option<Arc<Configuration>>
+        full_config: Option<Value>
     ) -> Self {
         PluginInit {
             config,
@@ -145,7 +146,7 @@ where
             launch_id: launch_id.flatten(),
             notify,
             license,
-            full_config: full_config,
+            full_config,
         }
     }
 
@@ -163,7 +164,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
-        full_config: Option<Arc<Configuration>>
+        full_config: Option<Value>
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -190,7 +191,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<LicenseState>,
-        full_config: Option<Arc<Configuration>>
+        full_config: Option<Value>
     ) -> Self {
         PluginInit {
             config,

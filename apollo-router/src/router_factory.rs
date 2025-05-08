@@ -176,7 +176,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .license(license)
-                                .full_config(configuration.clone())
+                                .full_config(configuration.validated_yaml.clone())
                                 .build(),
                         )
                         .await
@@ -566,7 +566,7 @@ pub(crate) async fn add_plugin(
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: LicenseState,
-    configuration: Option<Arc<Configuration>>
+    full_config: Option<Value>
 ) {
     match factory
         .create_instance(
@@ -579,7 +579,7 @@ pub(crate) async fn add_plugin(
                 .launch_id(launch_id)
                 .notify(notify.clone())
                 .license(license)
-                .and_full_config(configuration)
+                .and_full_config(full_config)
                 .build(),
         )
         .await
@@ -657,7 +657,7 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
-                    let mut full_config = Option::None;
+                    let mut full_config = None;
                     if name == "apollo.telemetry" {
                         // The apollo.telemetry" plugin isn't happy with empty config, so we
                         // give it some. If any of the other mandatory plugins need special
@@ -665,7 +665,7 @@ pub(crate) async fn create_plugins(
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
 
                         // Only the telemetry plugin should have access to the full configuration
-                        full_config = Some(Arc::new(configuration.clone()));
+                        full_config = configuration.validated_yaml.clone();
                     }
                     add_plugin!(name.to_string(), factory, plugin_config, full_config);
                 }
