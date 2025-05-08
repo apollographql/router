@@ -1,5 +1,11 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
+
 use insta::assert_yaml_snapshot;
 use serde_json::json;
+use tokio_stream::StreamExt;
 use tower::BoxError;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
@@ -313,4 +319,379 @@ async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
     router.graceful_shutdown().await;
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_supergraph_error_selector() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_coprocessor.uri();
+
+    // this response pushes an error to the body with a message that
+    let coprocessor_response = |req: &wiremock::Request| {
+        let mut req_body = req.body_json::<serde_json::Value>().expect("body");
+        let stage = req_body.as_object()?.get("stage")?.as_str()?.to_string();
+
+        match stage.as_str() {
+            "SupergraphResponse" => {
+                let body = req_body.as_object_mut()?.get_mut("body")?.as_object_mut()?;
+                body.get_mut("errors")?
+                    .as_array_mut()?
+                    .push(json!({"message": "reached_coprocessor", "path": [stage]}));
+                Some(ResponseTemplate::new(200).set_body_json(req_body))
+            }
+            "RouterResponse" => {
+                let mut body_as_json: serde_json::Value =
+                    serde_json::from_str(req_body.as_object()?.get("body")?.as_str()?).ok()?;
+                body_as_json
+                    .as_object_mut()?
+                    .get_mut("errors")?
+                    .as_array_mut()?
+                    .push(json!({"message": "reached_coprocessor", "path": [stage]}));
+                req_body
+                    .as_object_mut()?
+                    .insert("body".to_string(), body_as_json.to_string().into());
+                Some(ResponseTemplate::new(200).set_body_json(req_body))
+            }
+            _ => None,
+        }
+    };
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| coprocessor_response(req).unwrap())
+        .mount(&mock_coprocessor)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_conditional.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "errors": [{ "message": "subgraph error", "path": [] }],
+            "data": null
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "errors": [
+                { "message": "Subgraph errors redacted", "path": [] },
+                { "message": "reached_coprocessor", "path": ["SupergraphResponse"] },
+                { "message": "reached_coprocessor", "path": ["RouterResponse"] },
+            ],
+            "data": null
+        })
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+/// A variety of tests that illustrate some different issues with coprocessors and selectors.
+///
+/// # Overview
+/// The tests all spin up a router and a few mock servers:
+/// * coprocessor: increments a counter if the coprocessor was hit during a specific stage
+/// * subgraph servers: can return either a data payload or an error, optionally with latency via `set_delay`
+///
+/// The router is configured to send responses to the coprocessor on the router or supergraph stage
+/// if the `on_graphql_error` selector is `true`.
+///
+/// The tests are a matrix combination of deferred/non-deferred, subgraph error/data parameters.
+///
+/// # Bugs
+/// (1) `on_graphql_error` selector never fires at the supergraph stage
+/// (2) selectors are only applied to _first_ response on the router stage, so:
+///     (a) `on_graphql_error` doesn't fire if the error is deferred (likely also applies to subscriptions!)
+///     (b) `on_graphql_error` fires on _all_ responses if the first fails, even if the later responses succeed
+///
+/// I suspect (2) will also apply to other selectors, but I've focused on `on_graphql_error` for now.
+///
+/// # Notes
+/// I've commented out the failing tests, look for `TODO` to find them.
+///
+/// TODO: These should be separated into a module within this file and have descriptive names.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // don't forget about __typename or you will spend 4 hours debugging the query planner internals
+    let products_response = |errors: bool| {
+        if errors {
+            json!([{ "message": "products error", "path": [] }])
+        } else {
+            json!({
+                "data": {
+                    "topProducts": [
+                        { "__typename": "Product", "name": "Table", "upc": "1" },
+                        { "__typename": "Product", "name": "Chair", "upc": "2" },
+                    ]
+                },
+            })
+        }
+    };
+
+    let inventory_response = |errors: bool| {
+        if errors {
+            json!([{ "message": "inventory error", "path": [] }])
+        } else {
+            json!({
+                "data": {
+                    "_entities": [
+                        {"inStock": true},
+                        {"inStock": false}
+                    ]
+                }
+            })
+        }
+    };
+
+    let reviews_response = |errors: bool| {
+        if errors {
+            json!([{ "message": "reviews error", "path": [] }])
+        } else {
+            json!({
+                "data": {
+                    "_entities": [
+                        {"reviews": [{"id": "1"}, {"id": "2"}]},
+                        {"reviews": [{"id": "3"}]},
+                    ]
+                }
+            })
+        }
+    };
+
+    // --- ALL SUCCESSFUL, NOT DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        false,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200).set_body_json(inventory_response(false)),
+        ResponseTemplate::new(200).set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 1);
+    assert!(coprocessor_hits.is_empty());
+
+    // --- ALL SUCCESSFUL, DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        true,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(100))
+            .set_body_json(inventory_response(false)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(200))
+            .set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 3);
+    assert!(coprocessor_hits.is_empty());
+
+    // --- FIRST RESPONSE FAILURE, NOT DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        false,
+        ResponseTemplate::new(200).set_body_json(products_response(true)),
+        ResponseTemplate::new(200).set_body_json(inventory_response(false)),
+        ResponseTemplate::new(200).set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 1);
+    assert!(!coprocessor_hits.is_empty());
+    assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+    // --- FIRST RESPONSE FAILURE, DEFERRED
+    // NB: interestingly this still spawns the deferred tasks
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        true,
+        ResponseTemplate::new(200).set_body_json(products_response(true)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(100))
+            .set_body_json(inventory_response(false)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(200))
+            .set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 3,);
+    assert!(!coprocessor_hits.is_empty());
+    // TODO: bug 2b
+    // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3);
+
+    // --- SECOND RESPONSE FAILURE, NOT DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        false,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200).set_body_json(inventory_response(true)),
+        ResponseTemplate::new(200).set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 1);
+    assert!(!coprocessor_hits.is_empty());
+    assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+    // --- SECOND RESPONSE FAILURE, DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        true,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(100))
+            .set_body_json(inventory_response(true)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(200))
+            .set_body_json(reviews_response(false)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 3);
+    // assert!(!coprocessor_hits.is_empty());
+    // TODO: bug 2a
+    // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+    // --- SECOND AND THIRD RESPONSE FAILURE, NOT DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        false,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200).set_body_json(inventory_response(true)),
+        ResponseTemplate::new(200).set_body_json(reviews_response(true)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 1);
+    assert!(!coprocessor_hits.is_empty());
+    assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+    // --- SECOND AND THIRD RESPONSE FAILURE, DEFERRED
+    let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        true,
+        ResponseTemplate::new(200).set_body_json(products_response(false)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(100))
+            .set_body_json(inventory_response(true)),
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(200))
+            .set_body_json(reviews_response(true)),
+    )
+    .await?;
+    assert_eq!(response_chunks.len(), 3);
+    // assert!(!coprocessor_hits.is_empty());
+    // TODO: bug 2a
+    // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 2);
+    // TODO: bug 1
+    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 2);
+
+    Ok(())
+}
+
+async fn send_query_to_coprocessor_enabled_router(
+    deferred: bool,
+    subgraph_response_products: ResponseTemplate,
+    subgraph_response_inventory: ResponseTemplate,
+    subgraph_response_reviews: ResponseTemplate,
+) -> Result<(Vec<String>, HashMap<String, usize>), BoxError> {
+    let coprocessor_hits: Arc<RwLock<HashMap<String, usize>>> =
+        Arc::new(RwLock::new(HashMap::default()));
+    let coprocessor_hits_clone = coprocessor_hits.clone();
+    let coprocessor_response = move |req: &wiremock::Request| {
+        let req_body = req.body_json::<serde_json::Value>().expect("body");
+        let stage = req_body.as_object()?.get("stage")?.as_str()?.to_string();
+
+        let mut binding = coprocessor_hits_clone.write().ok()?;
+        let entry = binding.entry(stage).or_default();
+        *entry += 1;
+        Some(ResponseTemplate::new(200).set_body_json(req_body))
+    };
+
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |r: &wiremock::Request| coprocessor_response(r).unwrap())
+        .mount(&mock_coprocessor)
+        .await;
+
+    let mock_products = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(subgraph_response_products)
+        .mount(&mock_products)
+        .await;
+
+    let mock_inventory = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(subgraph_response_inventory)
+        .mount(&mock_inventory)
+        .await;
+
+    let mock_reviews = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(subgraph_response_reviews)
+        .mount(&mock_reviews)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_conditional.router.yaml")
+                .replace("<replace>", &mock_coprocessor.uri()),
+        )
+        .subgraph_override("products", mock_products.uri())
+        .subgraph_override("inventory", mock_inventory.uri())
+        .subgraph_override("reviews", mock_reviews.uri())
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+
+    let query = if deferred {
+        r#"query Q { topProducts { name ... @defer { inStock } ... @defer { reviews { id } } } }"#
+    } else {
+        r#"query Q { topProducts { name inStock reviews { id } } }"#
+    };
+
+    let (_, response) = router
+        .execute_query(
+            Query::builder()
+                .traced(true)
+                .body(json!({"query": query}))
+                .header("Accept", "multipart/mixed;deferSpec=20220824")
+                .build(),
+        )
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let mut response_chunks = Vec::default();
+    let mut stream = response.bytes_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        response_chunks.push(String::from_utf8(chunk.into()).unwrap());
+    }
+
+    // router.read_logs();
+    // router.print_logs();
+
+    // NB: should be ok to read and clone bc response should have finished
+    Ok((response_chunks, coprocessor_hits.read().unwrap().clone()))
 }

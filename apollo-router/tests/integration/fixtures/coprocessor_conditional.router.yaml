@@ -1,0 +1,14 @@
+coprocessor:
+  url: "<replace>"
+  router:
+    response:
+      condition:
+        eq:
+          - on_graphql_error: true
+          - true
+  supergraph:
+    response:
+      condition:
+        eq:
+          - on_graphql_error: true
+          - true
