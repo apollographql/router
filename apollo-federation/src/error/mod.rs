@@ -634,6 +634,26 @@ impl SingleFederationError {
             self
         }
     }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        if let Self::SubgraphError {
+            subgraph: existing_subgraph,
+            error,
+        } = &self
+        {
+            debug_assert_eq!(
+                existing_subgraph, &subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                existing_subgraph, subgraph, error,
+            );
+            self
+        } else {
+            Self::SubgraphError {
+                subgraph,
+                error: Box::new(self),
+            }
+        }
+    }
 }
 
 impl From<InvalidNameError> for FederationError {
@@ -692,6 +712,16 @@ impl MultipleFederationErrors {
                 .collect(),
         }
     }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl Display for MultipleFederationErrors {
@@ -735,6 +765,18 @@ impl AggregateFederationError {
                 .causes
                 .into_iter()
                 .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
                 .collect(),
         }
     }
@@ -851,6 +893,16 @@ impl FederationError {
             FederationError::AggregateFederationError(e) => {
                 e.unwrap_subgraph_errors(expected_subgraph).into()
             }
+        }
+    }
+
+    // PORT_NOTE: Named `addSubgraphToError` in the JS codebase, but converted into a method here.
+    #[allow(dead_code)]
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => e.add_subgraph(subgraph).into(),
+            FederationError::MultipleFederationErrors(e) => e.add_subgraph(subgraph).into(),
+            FederationError::AggregateFederationError(e) => e.add_subgraph(subgraph).into(),
         }
     }
 }
