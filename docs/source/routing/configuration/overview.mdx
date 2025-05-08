@@ -4,20 +4,20 @@ subtitle: Overview and reference for router configuration
 description: Learn how to configure the Apollo GraphOS Router or Apollo Router Core with environment variables, command-line options and commands, and YAML configuration files.
 ---
 
-Running an Apollo Router involves some key configuration steps:
+Running an Apollo Router instance involves some key steps:
 - Getting the schema of the federated supergraph that your router is running
 - Configuring runtime features declaratively in YAML
-- Running for development or production 
+- Deploying to different environments (dev, prod, etc.)
 - Providing configuration command-line options, YAML, and environment variables at startup
 
-## Setting supergraph schema
+## Getting supergraph schema
 
 As the runtime for a federated graph, a router needs to know the schema of the graph it's running. We call the schema for a federated graph a _supergraph schema_. 
 
 You need to configure the router at startup to know where to get its supergraph schema. That configuration depends on whether or not its supergraph schema is managed by GraphOS:
 
-- If your supergraph schema is managed by GraphOS, you can configure your router with the GraphOS graph reference and API key as environment variables (`APOLLO_GRAPH_REF` and `APOLLO_KEY`). Based on these, the router can automatically fetch the supergraph schema from GraphOS.
-- Otherwise, you can provide a supergraph schema file. You can save a supergraph schema file and provide its path to the router. 
+- If your supergraph schema is managed by GraphOS, you can configure your router with the GraphOS graph ref and API key as environment variables (`APOLLO_GRAPH_REF` and `APOLLO_KEY`). Based on these, the router can automatically fetch the supergraph schema from GraphOS.
+- Otherwise, you can provide the router a supergraph schema file [via command line or environment variable](/graphos/routing/configuration/cli#-s----supergraph).
 
 ## Configuring features in YAML
 

@@ -10,7 +10,7 @@ This reference covers the command-line options for configuring an Apollo Router.
 
 ## Command-line options
 
-This reference lists and describes the options supported by the `router` binary. Where indicated, some of these options can also be provided via an environment variable. 
+This reference lists and describes the options supported by the `router` binary via command-line options. Where indicated, some of these options can also be provided via an environment variable. 
 
 <Tip>
 
@@ -76,9 +76,9 @@ The absolute or relative path to the router's optional [YAML configuration file]
 </td>
 <td>
 
-⚠️ **This is not available on Windows.**
-
 The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
+
+⚠️ **This is not available on Windows.**
 
 </td>
 </tr>
@@ -92,7 +92,7 @@ The absolute or relative path to a file containing the Apollo graph API key for 
 <td>
 
 ⚠️ **Do not set this option in production!**
-
+<br/>
 If set, a router runs in dev mode to help with local development.
 
 [Learn more about dev mode.](/graphos/routing/configuration/yaml#dev-mode-defaults)
@@ -264,7 +264,7 @@ plugins:
 
 ## Configuration schema for IDE validation
 
-The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
+The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assistance.
 
 Generate the schema with the following command:
 

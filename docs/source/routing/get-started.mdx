@@ -49,15 +49,15 @@ Let's start by downloading and installing a router binary locally.
 
 ## 2. Download supergraph schema
 
-A router needs a schema for the federated graph, or "supergraph", that it's orchestrating. For this guide, we're downloading an example supergraph schema, which we'll provide to the router when running it.
+A router needs a schema for the federated graph, or _supergraph_, that it's orchestrating. This guide uses an example supergraph schema, which you download and provide to the router.
 
-1. From your project's root directory, run the following to download and save a supergraph schema to a file:
+1. From your project's root directory, run the following to download and save an example supergraph schema:
 
   ```bash showLineNumbers=false
   curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
   ```
 
-<ExpansionPanel title="Content of supergraph schema">
+<ExpansionPanel title="Example supergraph schema contents">
 
 ```graphql title="supergraph-schema.graphql"
 schema
@@ -198,7 +198,7 @@ The router's many features are configurable via a YAML configuration file. You s
 
 Let's customize a common setting: the router's _supergraph listen address_. It's the network address and port on which the router receives client requests. By default the address is `127.0.0.1:4000`. As an exercise, let's change the port to `5555`.
 
-1. Create a file named `router.yaml`. Open it for editing.
+1. In your same working directory, create a file named `router.yaml`. Open it for editing.
 1. Add the following configuration that sets `supergraph.listen` to `127.0.0.1:5555`:
 
   ```yaml title="router.yaml"
@@ -210,7 +210,7 @@ Let's customize a common setting: the router's _supergraph listen address_. It's
 
 When you're developing with the router locally, it's useful to run the router in _dev mode_. Dev mode is a collection of settings that make router development and debugging easier.
 
-Let's run the router in dev mode. We'll also use both the supergraph schema and YAML configuration files you saved: 
+Let's run the router in dev mode, using both the supergraph schema and YAML configuration files you created: 
 
 1. Run the router with these command-line options:
     - `--dev` enables dev mode
@@ -218,7 +218,7 @@ Let's run the router in dev mode. We'll also use both the supergraph schema and 
     - `--supergraph` provides the path to your supergraph schema
 
     ```sh showLineNumbers=false
-    ./router --dev --supergraph supergraph-schema.graphql --config router.yaml
+    ./router --dev --config router.yaml --supergraph supergraph-schema.graphql
     ```
 
 1. Check that your router is running, with output similar to the example: 
