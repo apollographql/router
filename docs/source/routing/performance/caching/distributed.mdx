@@ -88,7 +88,6 @@ In your router's YAML config file, **you should specify your Redis URLs via envi
 <Caution>
 
 Cached query plans are not evicted on schema refresh, which can quickly lead to distributed cache overflow when combined with [cache-warm up](/router/configuration/in-memory-caching#cache-warm-up) and frequent schema publishes. 
-
 Test your cache configuration with expected queries and consider decreasing the [TTL](/router/configuration/distributed-caching#ttl) to prevent cache overflow.
 
 </Caution>
@@ -155,9 +154,12 @@ Connecting and sending commands to Redis are subject to a timeout, set by defaul
 
 The `ttl` option defines the default global expiration for Redis entries. For APQ caching, the default is no expiration, while for query plan caching, the default expiration is set to 30 days.
 
-When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router will [pre-warm](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but will *not* invalidate existing cached queries in the distributed cache,
+When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router will [pre-warm](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but **will not** invalidate existing cached queries in the distributed cache,
 creating an additive effect on cache utilization. Consider decreasing the TTL e.g. to 24 hours or twice the median publish interval when publishing frequently to prevent cache overflow and monitor cache utilization in your environment.
-Also, be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization.
+
+<Tip>
+Be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization
+</Tip>
 
 ### Namespace
 
