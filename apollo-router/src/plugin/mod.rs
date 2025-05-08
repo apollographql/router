@@ -87,7 +87,9 @@ pub struct PluginInit<T> {
     /// User's license's state, including any limits of use
     pub(crate) license: LicenseState,
 
-    // TODO warning comment here
+    /// The full router configuration json for use by the telemetry plugin ONLY.
+    /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
+    /// configuration subset.
     pub(crate) full_config: Option<Value>
 }
 
