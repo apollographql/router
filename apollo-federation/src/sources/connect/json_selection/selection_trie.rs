@@ -6,6 +6,7 @@ use std::ops::Range;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 
+use super::JSONSelection;
 use super::Key;
 use super::NamedSelection;
 use super::PathList;
@@ -13,6 +14,49 @@ use super::Ranged;
 use super::SubSelection;
 use super::helpers::quote_if_necessary;
 use super::location::WithRange;
+
+impl JSONSelection {
+    #[cfg(test)]
+    pub(crate) fn compute_selection_trie(&self) -> SelectionTrie {
+        let mut trie = SelectionTrie::new();
+
+        // TODO Neither external_var_paths nor the root_trie logic below
+        // properly considers "internal" variables like $ and @, even though
+        // they could potentially refer to external input data. This state of
+        // affairs could be improved by examining the tail of each
+        // &PathSelection for those variables, even if we cannot (yet)
+        // understand their usage in all cases, such as after an -> method call.
+        // Ultimately, getting this completely right will require support from
+        // the shape library tracking the names of all shapes.
+
+        use super::ExternalVarPaths;
+        for path in self.external_var_paths() {
+            match path.path.as_ref() {
+                PathList::Var(known_var, tail) => {
+                    trie.add_str(known_var.as_str())
+                        .add_path_list(tail.as_ref());
+                }
+                _ => {
+                    // The self.external_var_paths() method should only return
+                    // PathList::Var elements.
+                }
+            }
+        }
+
+        let mut root_trie = SelectionTrie::new();
+        match self {
+            JSONSelection::Path(path) => {
+                root_trie.add_path_list(path.path.as_ref());
+            }
+            JSONSelection::Named(selection) => {
+                root_trie.add_subselection(selection);
+            }
+        };
+        trie.add_str("$root").extend(&root_trie);
+
+        trie
+    }
+}
 
 impl PathList {
     pub(crate) fn compute_selection_trie(&self) -> SelectionTrie {
@@ -245,6 +289,7 @@ impl SelectionTrie {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::selection;
 
     #[test]
     fn test_empty() {
@@ -382,5 +427,22 @@ mod tests {
         );
         assert_eq!(trie1.to_string(), "a { b { c } d { e } }");
         assert_eq!(trie2.to_string(), "a { b { f } } g { h }");
+    }
+
+    #[test]
+    fn test_whole_selection_trie() {
+        assert_eq!(
+            selection!("a { b { c } d { e } }")
+                .compute_selection_trie()
+                .to_string(),
+            "$root { a { b { c } d { e } } }",
+        );
+
+        assert_eq!(
+            selection!("a { b { c: $args.c } d { e: $this.e } }")
+                .compute_selection_trie()
+                .to_string(),
+            "$args { c } $this { e } $root { a { b d } }",
+        );
     }
 }
