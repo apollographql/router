@@ -410,7 +410,7 @@ pub(crate) struct ArgumentMerger {
 
 /// Returns the version of directive spec definition required for the given Federation version to
 /// be used in the supergraph.
-type SupergraphSpecification = dyn Fn(Version) -> Box<dyn SpecDefinition>;
+type SupergraphSpecification = dyn Fn(&Version) -> Option<&'static dyn SpecDefinition>;
 
 type ArgumentMergerFactory =
     dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
@@ -419,7 +419,7 @@ type StaticArgumentsTransform =
     dyn Fn(&ValidFederationSubgraph, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
 pub(crate) struct DirectiveCompositionSpecification {
-    pub(crate) supergraph_specification: Box<SupergraphSpecification>,
+    pub(crate) supergraph_specification: &'static SupergraphSpecification,
     /// Factory function returning an actual argument merger for given federation schema.
     pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
     pub(crate) static_argument_transform: Option<Box<StaticArgumentsTransform>>,
@@ -443,7 +443,7 @@ impl DirectiveSpecification {
         repeatable: bool,
         locations: &[DirectiveLocation],
         composes: bool,
-        supergraph_specification: Option<Box<SupergraphSpecification>>,
+        supergraph_specification: Option<&'static SupergraphSpecification>,
         static_argument_transform: Option<Box<StaticArgumentsTransform>>,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
@@ -891,8 +891,7 @@ mod tests {
 
     use super::ArgumentSpecification;
     use super::DirectiveArgumentSpecification;
-    use crate::link::link_spec_definition::LinkSpecDefinition;
-    use crate::link::spec::Identity;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::link::spec_definition::SpecDefinition;
     use crate::schema::FederationSchema;
@@ -920,16 +919,6 @@ mod tests {
         expected = "Invalid directive specification for @foo: not all arguments define a composition strategy"
     )]
     fn must_have_a_merge_strategy_on_all_arguments_if_any() {
-        fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
-            Box::new(LinkSpecDefinition::new(
-                Version { major: 1, minor: 0 },
-                Identity {
-                    domain: String::from("https://specs.apollo.dev/link/v1.0"),
-                    name: name!("link"),
-                },
-            ))
-        }
-
         DirectiveSpecification::new(
             name!("foo"),
             &[
@@ -957,7 +946,11 @@ mod tests {
             false,
             &[DirectiveLocation::Object],
             true,
-            Some(Box::new(link_spec)),
+            Some(&|_| {
+                LINK_VERSIONS
+                    .find(&Version { major: 1, minor: 0 })
+                    .map(|v| v as &dyn SpecDefinition)
+            }),
             None,
         );
     }
@@ -967,16 +960,6 @@ mod tests {
         expected = "Invalid directive specification for @foo: @foo is repeatable and should not define composition strategy for its arguments"
     )]
     fn must_be_not_be_repeatable_if_it_has_a_merge_strategy() {
-        fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
-            Box::new(LinkSpecDefinition::new(
-                Version { major: 1, minor: 0 },
-                Identity {
-                    domain: String::from("https://specs.apollo.dev/link/v1.0"),
-                    name: name!("link"),
-                },
-            ))
-        }
-
         DirectiveSpecification::new(
             name!("foo"),
             &[DirectiveArgumentSpecification {
@@ -990,7 +973,11 @@ mod tests {
             true,
             &[DirectiveLocation::Object],
             true,
-            Some(Box::new(link_spec)),
+            Some(&|_| {
+                LINK_VERSIONS
+                    .find(&Version { major: 1, minor: 0 })
+                    .map(|v| v as &dyn SpecDefinition)
+            }),
             None,
         );
     }

@@ -69,3 +69,5 @@ type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNEC
   users: [User] @join__field(graph: CONNECTORS_QUERY_USERS_0, type: "[User]")
   _: ID @inaccessible @join__field(graph: CONNECTORS_USER_D_1, type: "ID")
 }
+
+scalar JSON @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_USER_D_1)
