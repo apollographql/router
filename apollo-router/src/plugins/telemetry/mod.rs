@@ -1983,11 +1983,11 @@ mod tests {
     use serde_json::Value;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
-    use tower::Service;
+    use tower::{BoxError, Service};
     use tower::ServiceExt;
     use tower::util::BoxService;
 
-    use super::CustomTraceIdPropagator;
+    use super::{CustomTraceIdPropagator};
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
@@ -1998,7 +1998,7 @@ mod tests {
     use crate::http_ext;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::DynPlugin;
+    use crate::plugin::{DynPlugin, PluginInit, PluginPrivate};
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
@@ -2042,6 +2042,24 @@ mod tests {
                 .reload_metrics();
         }
         plugin
+    }
+
+    async fn create_raw_plugin_from_full_config(full_config: &str) -> Result<Telemetry, BoxError> {
+        let full_config = serde_yaml::from_str::<Value>(full_config)
+            .expect("yaml must be valid");
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let all_features_init = PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+
+        Telemetry::new(all_features_init).await
     }
 
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
@@ -2112,6 +2130,27 @@ mod tests {
     #[tokio::test]
     async fn config_serialization() {
         create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_features() {
+        // Explicitly enabled
+        let plugin = create_raw_plugin_from_full_config(include_str!("testdata/full_config_all_features_enabled.router.yaml")).await.unwrap();
+        let enabled_features = &plugin.enabled_features;
+        assert!(enabled_features.apq, "Telemetry plugin should properly parse apq feature when explicitly enabled");
+        assert!(enabled_features.entity_cache, "Telemetry plugin should properly parse entity cache feature when explicitly enabled");
+
+        // Explicitly disabled
+        let plugin = create_raw_plugin_from_full_config(include_str!("testdata/full_config_all_features_explicitly_disabled.router.yaml")).await.unwrap();
+        let enabled_features = &plugin.enabled_features;
+        assert!(!enabled_features.apq, "Telemetry plugin should properly parse apq feature when explicitly disabled");
+        assert!(!enabled_features.entity_cache, "Telemetry plugin should properly parse entity cache feature when explicitly disabled");
+
+        // Implicitly disabled (not defined in yaml)
+        let plugin = create_raw_plugin_from_full_config(include_str!("testdata/full_config_all_features_implicitly_disabled.router.yaml")).await.unwrap();
+        let enabled_features = &plugin.enabled_features;
+        assert!(!enabled_features.apq, "Telemetry plugin should properly parse apq feature when explicitly disabled");
+        assert!(!enabled_features.entity_cache, "Telemetry plugin should properly parse entity cache feature when explicitly disabled");
     }
 
     #[tokio::test]

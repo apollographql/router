@@ -44,7 +44,7 @@ use tower::ServiceBuilder;
 use tower::buffer::Buffer;
 use tower::buffer::future::ResponseFuture;
 
-use crate::{Configuration, ListenAddr};
+use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
