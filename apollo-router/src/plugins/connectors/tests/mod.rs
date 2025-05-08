@@ -631,11 +631,7 @@ async fn test_headers() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("first").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("second").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
                 )
                 .header(
                     HeaderName::from_str("x-config-variable-source").unwrap(),
@@ -751,11 +747,7 @@ async fn test_override_headers_with_config() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("third").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("fourth").unwrap(),
+                    HeaderValue::from_str("third,fourth").unwrap(),
                 )
                 .path("/users"),
         ],
