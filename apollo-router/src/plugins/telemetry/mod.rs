@@ -2054,14 +2054,14 @@ mod tests {
             .expect("must be an object")
             .get("telemetry")
             .expect("telemetry must be a root key");
-        let all_features_init = PluginInit::fake_builder()
+        let init = PluginInit::fake_builder()
             .config(telemetry_config.clone())
             .full_config(full_config)
             .build()
             .with_deserialized_config()
             .expect("unable to deserialize telemetry config");
 
-        Telemetry::new(all_features_init).await
+        Telemetry::new(init).await
     }
 
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
