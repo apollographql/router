@@ -169,15 +169,17 @@ pub(crate) struct EnumValueDirectiveArguments {
 #[derive(Clone)]
 pub(crate) struct JoinSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl JoinSpecDefinition {
-    pub(crate) fn new(version: Version) -> Self {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::join_identity(),
                 version,
             },
+            minimum_federation_version,
         }
     }
 
@@ -418,15 +420,34 @@ impl SpecDefinition for JoinSpecDefinition {
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
         todo!()
     }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
 }
 
 pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
-        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 1 }));
-        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 2 }));
-        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 3 }));
-        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 4 }));
-        definitions.add(JoinSpecDefinition::new(Version { major: 0, minor: 5 }));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 1 },
+            Version { major: 1, minor: 0 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 2 },
+            Version { major: 1, minor: 0 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 3 },
+            Version { major: 2, minor: 0 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 4 },
+            Version { major: 2, minor: 7 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 5 },
+            Version { major: 2, minor: 8 },
+        ));
         definitions
     });

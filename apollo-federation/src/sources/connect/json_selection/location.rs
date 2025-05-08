@@ -310,10 +310,9 @@ pub(crate) mod strip_ranges {
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-    use insta::assert_snapshot;
-
     use super::*;
+    use crate::assert_debug_snapshot;
+    use crate::assert_snapshot;
     use crate::sources::connect::JSONSelection;
 
     #[test]

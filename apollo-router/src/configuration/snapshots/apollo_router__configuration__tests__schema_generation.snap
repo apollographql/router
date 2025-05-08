@@ -2367,6 +2367,27 @@ expression: "&schema"
         }
       ]
     },
+    "DeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Subscription deduplication configuration",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode. (default: true)",
+          "type": "boolean"
+        },
+        "ignored_headers": {
+          "default": [],
+          "description": "List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical. For example, if you forward the \"User-Agent\" header, but the subgraph doesn't depend on the value of that header, adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "DefaultAttributeRequirementLevel": {
       "oneOf": [
         {
@@ -7200,10 +7221,9 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Subscriptions configuration",
       "properties": {
-        "enable_deduplication": {
-          "default": true,
-          "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "type": "boolean"
+        "deduplication": {
+          "$ref": "#/definitions/DeduplicationConfig",
+          "description": "#/definitions/DeduplicationConfig"
         },
         "enabled": {
           "default": true,

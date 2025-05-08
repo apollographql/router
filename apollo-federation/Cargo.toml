@@ -29,6 +29,7 @@ hashbrown = "0.15.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 line-col = "0.2.1"
+levenshtein = "1"
 multimap = "0.10.0"
 multi_try = "0.3.0"
 nom = "7.1.3"
