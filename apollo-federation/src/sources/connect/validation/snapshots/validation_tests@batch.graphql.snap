@@ -100,7 +100,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `T.listRelationship`: $batch is not valid here, must be one of $args, $config, $context, $request, $this",
         locations: [
-            83:28..83:37,
+            88:28..88:37,
         ],
     },
 ]
