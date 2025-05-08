@@ -205,6 +205,7 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<TelemetryActivation>,
+    enabled_features: EnabledFeatures,
 }
 
 struct TelemetryActivation {
@@ -281,6 +282,11 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
     }
 }
 
+struct EnabledFeatures {
+    apq: bool,
+    entity_cache: bool,
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;
@@ -313,18 +319,14 @@ impl PluginPrivate for Telemetry {
         let full_config = init.full_config
             .as_ref()
             .expect("Required full router configuration not found in telemetry plugin");
-        let _full_config_str = full_config.to_string();
-        let mut v = Vec::new();
-        if full_config["apq"]["enabled"]
-            .as_bool()
-            .unwrap_or(false) {
-            v.push("apq");
-        }
-        if full_config["preview_entity_cache"]["enabled"]
-            .as_bool()
-            .unwrap_or(false) {
-            v.push("preview_entity_cache");
-        }
+        let enabled_features = EnabledFeatures {
+            apq: full_config["apq"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
+            entity_cache: full_config["preview_entity_cache"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
+        };
 
 
         Ok(Telemetry {
@@ -353,6 +355,7 @@ impl PluginPrivate for Telemetry {
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
+            enabled_features,
             config: Arc::new(config),
         })
     }
