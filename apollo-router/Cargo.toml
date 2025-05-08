@@ -97,7 +97,6 @@ futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
 http.workspace = true
-http-0_2 = { version = "0.2.12", package = "http" }
 http-body = "1.0.1"
 http-body-util = { version = "0.1.2" }
 heck = "0.5.0"
