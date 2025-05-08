@@ -16,6 +16,7 @@ use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
 use crate::ContextSpecDefinition;
+use crate::LinkSpecDefinition;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -23,14 +24,12 @@ use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
-use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -987,20 +986,22 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
 /// Adds a bootstrap fed 1 link directive to the schema.
 pub(crate) fn add_fed1_link_to_schema(
     schema: &mut FederationSchema,
+    link_spec: &LinkSpecDefinition,
+    link_name_in_schema: Name,
 ) -> Result<(), FederationError> {
-    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
+    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")` directive (or a `@link`
+    // directive, if applicable) to the schema definition.
     // We can't use `import` argument here since fed1 @core does not support `import`.
     // We will add imports later (see `fed1_link_imports`).
-    SchemaDefinitionPosition.insert_directive(
-        schema,
-        Component::new(Directive {
-            name: Identity::core_identity().name,
-            arguments: vec![Node::new(Argument {
-                name: LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME,
-                value: FED_1.url.to_string().into(),
-            })],
-        }),
-    )
+    let directive = Directive {
+        name: link_name_in_schema,
+        arguments: vec![Node::new(Argument {
+            name: link_spec.url_arg_name(),
+            value: FED_1.url().to_string().into(),
+        })],
+    };
+    crate::schema::position::SchemaDefinitionPosition
+        .insert_directive(schema, Component::new(directive))
 }
 
 /// Creates a fake imports for fed 1 link directive.
