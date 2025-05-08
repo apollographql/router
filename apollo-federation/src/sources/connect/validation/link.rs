@@ -65,10 +65,6 @@ impl<'schema> ConnectLink<'schema> {
     pub(super) fn spec(&self) -> ConnectSpec {
         self.spec
     }
-    pub(super) fn set_spec(&mut self, spec: ConnectSpec) {
-        self.spec = spec;
-        self.link.url.version = spec.into();
-    }
 
     pub(super) fn source_directive_name(&self) -> &Name {
         &self.source_directive_name
