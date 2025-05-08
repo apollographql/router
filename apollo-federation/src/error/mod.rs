@@ -622,6 +622,8 @@ impl SingleFederationError {
         }
     }
 
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
     pub(crate) fn unwrap_subgraph_error(self, expected_subgraph: &str) -> Self {
         if let Self::SubgraphError { subgraph, error } = self {
             debug_assert_eq!(
@@ -635,6 +637,8 @@ impl SingleFederationError {
         }
     }
 
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
     pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
         if let Self::SubgraphError {
             subgraph: existing_subgraph,
