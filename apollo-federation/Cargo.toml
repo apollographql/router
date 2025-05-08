@@ -23,7 +23,7 @@ apollo-compiler.workspace = true
 time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
-derive_more = "0.99.17"
+derive_more = "2.0.0"
 http.workspace = true
 hashbrown = "0.15.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
