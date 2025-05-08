@@ -464,6 +464,7 @@ impl Selector for SupergraphSelector {
                     .map(opentelemetry::Value::from),
             },
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                // TODO: consider `!response.errors.is_empty()`
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))
                 {

@@ -159,6 +159,15 @@ impl ExecutionService {
                 req.source_stream_value,
             )
             .await;
+
+        // before the result becomes a stream, make note of any errors.
+        // this saves us from needing to pull apart the stream later, and enables the
+        // on_graphql_error selector to work properly.
+        // TODO: consider adding the following
+        // if !first.errors.is_empty() {
+        //     ctx.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        // }
+
         let query = req.query_plan.query.clone();
         let stream = if (is_deferred || is_subscription) && !has_initial_data {
             let stream_mode = if is_deferred {
@@ -193,6 +202,8 @@ impl ExecutionService {
 
         let execution_span = Span::current();
 
+        // TODO: can an error happen during the stream later? if so, should coprocessor
+        //  pick that up?
         let stream = stream
             .map(move |mut response: Response| {
                 // Enforce JWT expiry for deferred responses
