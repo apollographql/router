@@ -241,6 +241,7 @@ impl NamespaceResolver for ArgsResolver<'_> {
                 .arguments
                 .iter()
                 .find(|arg| arg.name == root)
+                .map(|arg| arg.ty.clone())
                 .ok_or_else(|| Message {
                     code: Code::UndefinedArgument,
                     message: format!(
@@ -252,8 +253,7 @@ impl NamespaceResolver for ArgsResolver<'_> {
                         .key_ranges(root)
                         .flat_map(|range| expression.line_col_for_subslice(range, schema))
                         .collect(),
-                })
-                .map(|field| field.ty.clone())?;
+                })?;
 
             resolve_path(schema, sub_trie, expression, &field_type, self.field)?;
         }
