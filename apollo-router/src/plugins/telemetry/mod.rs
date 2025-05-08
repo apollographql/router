@@ -309,6 +309,21 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        // Set up feature usage list
+        let full_config = init.full_config
+            .as_ref()
+            .expect("Required full router configuration not found in telemetry plugin");
+        let mut v = Vec::new();
+        if full_config.apq.enabled {
+            v.push("apq");
+        }
+        if full_config.apollo_plugins.plugins["preview_entity_cache"]["enabled"]
+            .as_bool()
+            .unwrap_or(false) {
+            v.push("preview_entity_cache");
+        }
+
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
