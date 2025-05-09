@@ -1,16 +1,35 @@
 use std::time::Instant;
 
 use fred::prelude::*;
+use fred::types::config::TlsConnector;
 use redis_experiments::Cache;
 use redis_experiments::CacheConfig;
 use redis_experiments::Expire;
 
 const TEMPORARY: bool = true;
 
+fn create_tls_config() -> TlsConnector {
+    TlsConnector::default_rustls().unwrap()
+}
+
 async fn cache() -> Cache {
-    // let config = Config::from_url("redis://localhost:6379").unwrap();
-    // let client = Builder::from_config(config).build().unwrap();
-    let client = Client::default();
+    let config = Config {
+        server: ServerConfig::Centralized {
+            server: Server {
+                host: std::env::var("REDIS_HOST").into(),
+                port: 6379,
+                tls_server_name: None,
+            },
+        },
+        tls: Some(TlsConfig {
+            connector: create_tls_config(),
+            hostnames: fred::types::config::TlsHostMapping::None,
+        }),
+        ..Config::default()
+    };
+    let client = Builder::from_config(config).build().unwrap();
+    // let client = Client::default();
+
     client.init().await.unwrap();
     Cache {
         client,

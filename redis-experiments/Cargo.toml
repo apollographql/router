@@ -14,4 +14,4 @@ uuid = { version = "1.16.0", features = ["v4"] }
 # https://github.com/aembke/fred.rs/issues/346 and https://github.com/aembke/fred.rs/pull/349
 git = "https://github.com/SimonSapin/fred.rs"
 rev = "32391ec56ac18ee83d02e9f112910b0382bc082c"
-features = ["i-redisearch"]
+features = ["i-redisearch", "enable-rustls"]
