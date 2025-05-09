@@ -165,23 +165,33 @@ pub enum SingleFederationError {
     #[error("{message}")]
     UnknownLinkVersion { message: String },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+        "On type \"{target_type}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @key)"
     )]
     KeyFieldsHasArgs {
-        type_name: String,
-        field_name: String,
+        target_type: Name,
+        application: String,
+        inner_coordinate: String,
     },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+        "On field \"{coordinate}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @provides)"
     )]
     ProvidesFieldsHasArgs {
-        type_name: String,
-        field_name: String,
+        coordinate: String,
+        application: String,
+        inner_coordinate: String,
     },
-    #[error("{message}")]
-    ProvidesFieldsMissingExternal { message: String },
-    #[error("{message}")]
-    RequiresFieldsMissingExternal { message: String },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    ProvidesFieldsMissingExternal {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    RequiresFieldsMissingExternal {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
     #[error("{message}")]
     KeyUnsupportedOnInterface { message: String },
     #[error("{message}")]
@@ -189,17 +199,29 @@ pub enum SingleFederationError {
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
     #[error(
-        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+        "On type \"{target_type}\", for {application}: cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
     )]
-    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    KeyHasDirectiveInFieldsArg {
+        target_type: Name,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
     )]
-    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    ProvidesHasDirectiveInFieldsArg {
+        coordinate: String,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
     )]
-    RequiresHasDirectiveInFieldsArg { applied_directives: String },
+    RequiresHasDirectiveInFieldsArg {
+        coordinate: String,
+        application: String,
+        applied_directives: String,
+    },
     #[error("{message}")]
     ExternalUnused { message: String },
     #[error(
@@ -208,20 +230,51 @@ pub enum SingleFederationError {
     TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
-    #[error("{message}")]
-    KeyInvalidFieldsType { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFieldsType { message: String },
-    #[error("{message}")]
-    RequiresInvalidFieldsType { message: String },
-    #[error("{message}")]
-    KeyInvalidFields { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFields { message: String },
-    #[error("{message}")]
-    RequiresInvalidFields { message: String },
-    #[error("{message}")]
-    KeyFieldsSelectInvalidType { message: String },
+    #[error(
+        "On type \"{target_type}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    KeyInvalidFieldsType {
+        target_type: Name,
+        application: String,
+    },
+    #[error(
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    ProvidesInvalidFieldsType {
+        coordinate: String,
+        application: String,
+    },
+    #[error(
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    RequiresInvalidFieldsType {
+        coordinate: String,
+        application: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyInvalidFields {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    ProvidesInvalidFields {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    RequiresInvalidFields {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyFieldsSelectInvalidType {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
     #[error(
         "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
     )]
