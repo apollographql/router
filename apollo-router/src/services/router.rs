@@ -223,7 +223,7 @@ impl Response {
     ///
     /// Required parameters are required in non-testing code to create a Response.
     #[builder(visibility = "pub")]
-    pub(crate) fn new(
+    fn new(
         label: Option<String>,
         data: Option<serde_json_bytes::Value>,
         path: Option<Path>,
