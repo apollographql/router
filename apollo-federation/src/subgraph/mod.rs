@@ -411,8 +411,7 @@ pub mod test_utils {
             subgraph
         };
         subgraph
-            .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))?
+            .expand_links()?
             .assume_upgraded()
             .validate(true)
     }
@@ -433,7 +432,6 @@ pub mod test_utils {
         };
         subgraph
             .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
