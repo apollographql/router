@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
+
 use serde::de::Error as DeserializeError;
 use serde::ser::Error as SerializeError;
 use tower::BoxError;
@@ -157,8 +158,8 @@ impl<'a> TestHarness<'a> {
         // Convert from a json Value to yaml str to Configuration so that we can ensure we validate
         // and populate the Configuration's validated_yaml attribute
         let yaml = serde_yaml::to_string(&configuration).map_err(SerializeError::custom)?;
-        let configuration: Configuration = Configuration::from_str(&yaml)
-            .map_err(DeserializeError::custom)?;
+        let configuration: Configuration =
+            Configuration::from_str(&yaml).map_err(DeserializeError::custom)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
