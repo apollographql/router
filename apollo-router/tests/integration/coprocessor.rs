@@ -433,7 +433,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     // don't forget about __typename or you will spend 4 hours debugging the query planner internals
     let products_response = |errors: bool| {
         if errors {
-            json!([{ "message": "products error", "path": [] }])
+            json!({"errors": [{ "message": "products error", "path": [] }]})
         } else {
             json!({
                 "data": {
@@ -448,7 +448,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
 
     let inventory_response = |errors: bool| {
         if errors {
-            json!([{ "message": "inventory error", "path": [] }])
+            json!({"badly_formatted": true})
         } else {
             json!({
                 "data": {
@@ -463,7 +463,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
 
     let reviews_response = |errors: bool| {
         if errors {
-            json!([{ "message": "reviews error", "path": [] }])
+            json!({"errors": [{ "message": "reviews error", "path": [] }]})
         } else {
             json!({
                 "data": {
@@ -513,8 +513,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     assert_eq!(response_chunks.len(), 1);
     assert!(!coprocessor_hits.is_empty());
     assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
 
     // --- FIRST RESPONSE FAILURE, DEFERRED
     // NB: interestingly this still spawns the deferred tasks
@@ -533,8 +532,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     assert!(!coprocessor_hits.is_empty());
     // TODO: bug 2b
     // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1); // returns 3
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
 
     // --- SECOND RESPONSE FAILURE, NOT DEFERRED
     let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
@@ -547,8 +545,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     assert_eq!(response_chunks.len(), 1);
     assert!(!coprocessor_hits.is_empty());
     assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
 
     // --- SECOND RESPONSE FAILURE, DEFERRED
     let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
@@ -563,11 +560,10 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     )
     .await?;
     assert_eq!(response_chunks.len(), 3);
-    // assert!(!coprocessor_hits.is_empty());
+    assert!(!coprocessor_hits.is_empty());
     // TODO: bug 2a
     // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1); // returns 0
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
 
     // --- SECOND AND THIRD RESPONSE FAILURE, NOT DEFERRED
     let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
@@ -580,8 +576,7 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     assert_eq!(response_chunks.len(), 1);
     assert!(!coprocessor_hits.is_empty());
     assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
 
     // --- SECOND AND THIRD RESPONSE FAILURE, DEFERRED
     let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
@@ -596,11 +591,10 @@ async fn test_coprocessor_selectors_on_deferred_response() -> Result<(), BoxErro
     )
     .await?;
     assert_eq!(response_chunks.len(), 3);
-    // assert!(!coprocessor_hits.is_empty());
+    assert!(!coprocessor_hits.is_empty());
     // TODO: bug 2a
     // assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 2); // returns 0
-    // TODO: bug 1
-    // assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 2); // returns 0
+    assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 2);
 
     Ok(())
 }
