@@ -966,10 +966,7 @@ impl Verifier for OtlpTraceSpec<'_> {
             }
             for sampling_priority in binding {
                 assert_eq!(
-                    sampling_priority
-                        .as_i64()
-                        .expect("psr not an integer")
-                        .to_string(),
+                    sampling_priority.as_str().expect("psr not a string"),
                     psr
                 );
             }
