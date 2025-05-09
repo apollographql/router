@@ -154,14 +154,16 @@ Connecting and sending commands to Redis are subject to a timeout, set by defaul
 
 The `ttl` option defines the default global expiration for Redis entries. For APQ caching, the default is no expiration, while for query plan caching, the default expiration is set to 30 days.
 
-When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router [pre-warms](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but **does not** invalidate existing cached query plans in the distributed cache,
-creating an additive effect on cache utilization. To prevent cache overflow, consider decreasing the TTL to 24 hours or twice the median publish interval and monitor cache utilization in your environment especially during schema publish events.
+When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router [pre-warms](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but doesn't invalidate existing cached query plans in the distributed cache,
+creating an additive effect on cache utilization. 
+
+To prevent cache overflow, consider decreasing the TTL to 24 hours or twice the median publish interval (whichever's lesser), and monitor cache utilization in your environment, especially during schema publish events.
 
 Also note that when [cache warm-up](/router/configuration/in-memory-caching#cache-warm-up) is enabled, each router instance will warm the distributed cache with query plans from *its own in-memory cache*. In the worst case, a schema publish will increase the number of query plans in the distributed cache by the number 
 of router instances multiplied by the number of warmed-up queries per instance, which may noticeably increase the total cache utilization.
 
 <Tip>
-Be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization
+Be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization.
 </Tip>
 
 ### Namespace
