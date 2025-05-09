@@ -126,6 +126,7 @@ pub struct Satisfiable {
 
 #[derive(Clone, Debug)]
 #[allow(unused)]
+#[allow(unreachable_pub)]
 pub struct SupergraphMetadata {
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
@@ -139,6 +140,7 @@ pub struct SupergraphMetadata {
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
 #[allow(unused)]
+#[allow(unreachable_pub)]
 pub struct CompositionHint {
     message: String,
 }

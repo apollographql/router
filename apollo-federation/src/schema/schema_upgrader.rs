@@ -61,7 +61,7 @@ struct UpgradeMetadata {
 }
 
 impl SchemaUpgrader {
-    pub(crate) fn new(subgraphs: &Vec<Subgraph<Expanded>>) -> Self {
+    pub(crate) fn new(subgraphs: &[Subgraph<Expanded>]) -> Self {
         let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
         for subgraph in subgraphs.iter() {
             for pos in subgraph.schema().get_types() {
@@ -712,7 +712,7 @@ impl SchemaUpgrader {
                 for field in pos.fields(schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
-                    let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
+                    let metadata = compute_subgraph_metadata(schema)?.ok_or_else(|| {
                         internal_error!(
                             "Unable to detect federation version used in subgraph '{}'",
                             upgrade_metadata.subgraph_name
