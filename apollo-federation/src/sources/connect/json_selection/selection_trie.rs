@@ -31,15 +31,12 @@ impl JSONSelection {
 
         use super::ExternalVarPaths;
         for path in self.external_var_paths() {
-            match path.path.as_ref() {
-                PathList::Var(known_var, tail) => {
-                    trie.add_str(known_var.as_str())
-                        .add_path_list(tail.as_ref());
-                }
-                _ => {
-                    // The self.external_var_paths() method should only return
-                    // PathList::Var elements.
-                }
+            if let PathList::Var(known_var, tail) = path.path.as_ref() {
+                trie.add_str(known_var.as_str())
+                    .add_path_list(tail.as_ref());
+            } else {
+                // The self.external_var_paths() method should only return
+                // PathSelection elements whose path starts with PathList::Var.
             }
         }
 
