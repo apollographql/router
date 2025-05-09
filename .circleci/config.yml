@@ -27,8 +27,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.1.0
-      - image: cimg/redis:7.4.2
-      - image: openzipkin/zipkin:3.5.0
+      - image: cimg/redis:7.4.3
+      - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.21.1
     resource_class: 2xlarge
     environment:

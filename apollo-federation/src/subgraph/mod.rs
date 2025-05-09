@@ -340,10 +340,9 @@ pub struct SubgraphError {
 
 impl SubgraphError {
     pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
-        SubgraphError {
-            subgraph: subgraph.into(),
-            error: error.into(),
-        }
+        let subgraph = subgraph.into();
+        let error = error.into().unwrap_subgraph_errors(&subgraph);
+        SubgraphError { subgraph, error }
     }
 
     pub fn error(&self) -> &FederationError {
