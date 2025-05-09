@@ -7,6 +7,11 @@ description: Learn how to manage the license for a Apollo GraphOS Router, includ
 
 Whenever your instance of GraphOS Router starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of GraphOS features:
 
+A router instance retains its license for the duration of its execution. If you stop a router instance and then later start a new instance on the same machine, it must fetch a new license. 
+
+Licenses are served via [Apollo Uplink](/graphos/routing/uplink), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected. To learn more about multi-cloud Uplink, read the [Apollo blog post](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink).
+
+
 ```mermaid
 flowchart LR;
   subgraph "Your Infrastructure";
@@ -18,11 +23,42 @@ flowchart LR;
   router--"Fetches supergraph schema<br/>and license"-->uplink;
 ```
 
-A router instance retains its license for the duration of its execution. If you stop a router instance and then later start a new instance on the same machine, it must fetch a new license. 
-
-Licenses are served via [Apollo Uplink](/graphos/routing/uplink), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected. To learn more about multi-cloud Uplink, read the [Apollo blog post](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink).
-
 A router instance's license is valid for the duration of your organization's current subscription billing period (plus a [grace period](#grace-period-for-expired-plans)), even if the router temporarily becomes disconnected from GraphOS.
+
+## Licenses with local development
+
+You might also need to run an GraphOS Router instance on your local machine, such as with the [`rover dev`](/graphos/graphs/local-development) command. It's likely that your local router instance doesn't connect to GraphOS to get its supergraph schema from Uplink. For example, you can run `rover dev` to perform composition locally.
+
+**You _can_ use GraphOS Router features with a locally composed supergraph schema!** To do so, your router must still connect to GraphOS to obtain its [license](#the-graphos-license).
+
+### Set up local development
+
+These steps work both for running the router executable directly (`./router`) and for running it via `rover dev`:
+
+1. [Create a new variant](/graphos/graphs/federated-graphs/#adding-a-variant-via-the-rover-cli) for your supergraph that you'll use _only_ to fetch GraphOS licenses.
+    - Give the variant a name that clearly distinguishes it from variants that track schemas and metrics.
+    - Every team member that runs a router locally can use this same variant.
+    - When you create this variant, publish a dummy subgraph schema like the following (your router won't use it):
+
+    ```graphql
+    type Query {
+      hello: String
+    }
+    ```
+
+2. Create a [graph API key](/graphos/platform/access-management/api-keys#graph-api-keys) for your supergraph and assign it the **Contributor** role.
+    - We recommend creating a separate graph API key for _each team member_ that will run the router locally.
+
+3. When you start up your local router with your usual command, set the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables for that command:
+
+    ```bash
+    APOLLO_GRAPH_REF="..." APOLLO_KEY="..." ./router --supergraph schema.graphql
+    ```
+
+    - The value of `APOLLO_GRAPH_REF` is the graph ref for the new, license-specific variant you created (for example, `docs-example-graph@local-licenses`).
+    - The value of `APOLLO_KEY` is the graph API key you created.
+
+4. Your router will fetch an GraphOS license while using its locally composed supergraph schema.
 
 <MinVersion version="1.37.0">
 
@@ -90,41 +126,6 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](/graphos/reference/router/configuration#apollo_key) and [`APOLLO_GRAPH_REF`](/graphos/reference/router/configuration#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
-
-## Licenses with local development
-
-You might also need to run an GraphOS Router instance on your local machine, such as with the [`rover dev`](/graphos/graphs/local-development) command. It's likely that your local router instance doesn't connect to GraphOS to get its supergraph schema from Uplink. For example, you can run `rover dev` to perform composition locally.
-
-**You _can_ use GraphOS Router features with a locally composed supergraph schema!** To do so, your router must still connect to GraphOS to obtain its [license](#the-graphos-license).
-
-### Set up local development
-
-These steps work both for running the router executable directly (`./router`) and for running it via `rover dev`:
-
-1. [Create a new variant](/graphos/graphs/federated-graphs/#adding-a-variant-via-the-rover-cli) for your supergraph that you'll use _only_ to fetch GraphOS licenses.
-    - Give the variant a name that clearly distinguishes it from variants that track schemas and metrics.
-    - Every team member that runs a router locally can use this same variant.
-    - When you create this variant, publish a dummy subgraph schema like the following (your router won't use it):
-
-    ```graphql
-    type Query {
-      hello: String
-    }
-    ```
-
-2. Create a [graph API key](/graphos/platform/access-management/api-keys#graph-api-keys) for your supergraph and assign it the **Contributor** role.
-    - We recommend creating a separate graph API key for _each team member_ that will run the router locally.
-
-3. When you start up your local router with your usual command, set the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables for that command:
-
-    ```bash
-    APOLLO_GRAPH_REF="..." APOLLO_KEY="..." ./router --supergraph schema.graphql
-    ```
-
-    - The value of `APOLLO_GRAPH_REF` is the graph ref for the new, license-specific variant you created (for example, `docs-example-graph@local-licenses`).
-    - The value of `APOLLO_KEY` is the graph API key you created.
-
-4. Your router will fetch an GraphOS license while using its locally composed supergraph schema.
 
 ## Troubleshooting
 
