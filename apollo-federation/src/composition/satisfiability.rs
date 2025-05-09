@@ -1,8 +1,10 @@
+use crate::error::FederationError;
 use crate::supergraph::Merged;
 use crate::supergraph::Satisfiable;
 use crate::supergraph::Supergraph;
 
-#[allow(unused)]
-pub(crate) fn validate_satisfiability(_supergraph: Supergraph<Merged>) -> Supergraph<Satisfiable> {
-    todo!("magic happens here")
+pub(crate) fn validate_satisfiability(
+    _supergraph: Supergraph<Merged>,
+) -> Result<Supergraph<Satisfiable>, Vec<FederationError>> {
+    panic!("validate_satisfiability is not implemented yet")
 }

@@ -2,6 +2,7 @@ mod satisfiability;
 
 use std::vec;
 
+use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::FederationError;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
@@ -9,6 +10,7 @@ use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::Merged;
 use crate::supergraph::Satisfiable;
 use crate::supergraph::Supergraph;
 
@@ -17,11 +19,10 @@ pub fn compose(
 ) -> Result<Supergraph<Satisfiable>, Vec<FederationError>> {
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
     let upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
-    let _validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
+    let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
-    todo!("implement magic here")
-    // let supergraph = merge_subgraphs(validated_subgraphs)?;
-    // validate_satisfiability(supergraph)?
+    let supergraph = merge_subgraphs(validated_subgraphs)?;
+    validate_satisfiability(supergraph)
 }
 
 pub fn expand_subgraphs(
@@ -54,4 +55,10 @@ pub fn validate_subgraphs(
     } else {
         Err(errors)
     }
+}
+
+pub fn merge_subgraphs(
+    _subgraphs: Vec<Subgraph<Validated>>,
+) -> Result<Supergraph<Merged>, Vec<FederationError>> {
+    panic!("merge_subgraphs is not implemented yet")
 }
