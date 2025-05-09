@@ -16,7 +16,7 @@ async fn cache() -> Cache {
     let config = Config {
         server: ServerConfig::Centralized {
             server: Server {
-                host: std::env::var("REDIS_HOST").into(),
+                host: std::env::var("REDIS_HOST").unwrap().into(),
                 port: 6379,
                 tls_server_name: None,
             },
