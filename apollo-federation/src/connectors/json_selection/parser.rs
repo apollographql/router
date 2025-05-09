@@ -143,7 +143,7 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        JSONSelection::parse_with_spec(input, ConnectSpec::V0_2)
+        JSONSelection::parse_with_spec(input, ConnectSpec::latest())
     }
 
     pub fn parse_with_spec(
@@ -644,6 +644,7 @@ impl PathList {
         // range before consuming leading spaces_or_comments.
         let offset_if_empty = input.location_offset();
         let range_if_empty: OffsetRange = Some(offset_if_empty..offset_if_empty);
+        let connect_spec = get_connect_spec(&input);
 
         // Consume leading spaces_or_comments for all cases below.
         let (input, _spaces) = spaces_or_comments(input)?;
@@ -660,7 +661,7 @@ impl PathList {
             if let Ok((after_dollar_open_paren, dollar_open_paren)) =
                 ranged_span("$(")(input.clone())
             {
-                if let Ok((suffix, dollar_method_args)) = match get_connect_spec(&input) {
+                if let Ok((suffix, dollar_method_args)) = match connect_spec {
                     ConnectSpec::V0_1 => {
                         tuple((LitExpr::parse, spaces_or_comments, ranged_span(")")))(
                             after_dollar_open_paren,
@@ -833,12 +834,16 @@ impl PathList {
             };
         }
 
-        // Parse PathList::NullToNone, the "?" production for PathList.
-        if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
-            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let full_range = merge_ranges(question.range(), rest.range());
-            let question_mark_string = Self::Question(question.take_as(|s| s.to_string()), rest);
-            return Ok((remainder, WithRange::new(question_mark_string, full_range)));
+        // Parse PathList::Question, the "?" production for PathList, first
+        // introduced/enabled in connect/v0.3.
+        if ![ConnectSpec::V0_1, ConnectSpec::V0_2].contains(&connect_spec) {
+            if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let full_range = merge_ranges(question.range(), rest.range());
+                let question_mark_string =
+                    Self::Question(question.take_as(|s| s.to_string()), rest);
+                return Ok((remainder, WithRange::new(question_mark_string, full_range)));
+            }
         }
 
         // Likewise, if the PathSelection has a SubSelection, it must appear at

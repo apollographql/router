@@ -31,7 +31,7 @@ pub(crate) struct SpanExtra {
 impl Default for SpanExtra {
     fn default() -> Self {
         SpanExtra {
-            spec: ConnectSpec::V0_2,
+            spec: ConnectSpec::latest(),
             errors: vec![],
         }
     }

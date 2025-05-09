@@ -60,6 +60,14 @@ impl PartialOrd for ConnectSpec {
 }
 
 impl ConnectSpec {
+    pub fn latest() -> Self {
+        Self::V0_2
+    }
+
+    pub fn next() -> Self {
+        Self::V0_3
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",
