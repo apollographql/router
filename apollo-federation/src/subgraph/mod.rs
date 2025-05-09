@@ -410,10 +410,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()?
-            .assume_upgraded()
-            .validate(true)
+        subgraph.expand_links()?.assume_upgraded().validate(true)
     }
 
     pub fn build_inner_expanded(
@@ -430,8 +427,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()
+        subgraph.expand_links()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {

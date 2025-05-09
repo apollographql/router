@@ -3,7 +3,7 @@ mod satisfiability;
 use std::vec;
 
 use crate::error::FederationError;
-use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
