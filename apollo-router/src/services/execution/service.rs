@@ -472,6 +472,11 @@ impl ExecutionService {
         let incremental = sub_responses
             .into_iter()
             .filter_map(move |(path, data)| {
+                let mut path_needle = path.clone();
+                if matches!(path_needle.last(), Some(PathElement::Index(_))) {
+                    path_needle.pop();
+                }
+
                 // filter errors that match the path of this incremental response
                 let errors = response
                     .errors
@@ -480,7 +485,7 @@ impl ExecutionService {
                         None => false,
                         Some(error_path) => {
                             query.contains_error_path(&response.label, error_path, variables_set)
-                                && error_path.starts_with(&path)
+                                && error_path.starts_with(&path_needle)
                         }
                     })
                     .cloned()
@@ -502,7 +507,7 @@ impl ExecutionService {
                                                     serde_json_bytes::from_value::<Path>(v.clone())
                                                         .ok()
                                                 })
-                                                .map(|ext_path| ext_path.starts_with(&path))
+                                                .map(|ext_path| ext_path.starts_with(&path_needle))
                                                 .unwrap_or(false)
                                         })
                                         .cloned()
