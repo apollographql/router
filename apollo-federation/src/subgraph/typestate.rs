@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -13,6 +16,8 @@ use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -46,6 +51,9 @@ use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_ENTITY_TYPE_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
+use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
+use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
+use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::SERVICE_TYPE_SPEC;
 
 #[derive(Clone, Debug)]
@@ -230,13 +238,23 @@ impl Subgraph<Expanded> {
 }
 
 impl Subgraph<Upgraded> {
-    pub fn validate(self, rename_root_types: bool) -> Result<Subgraph<Validated>, SubgraphError> {
-        // PORT_NOTE: The JS version calls GraphQL-js's `validateSDL` function and federation's
-        //            `validateSchema` function here. But, Rust version performs general GraphQL
-        //            validation in the `FederationBlueprint::on_validation` method.
-        let blueprint = FederationBlueprint::new(rename_root_types);
-        let schema = blueprint
-            .on_validation(self.state.schema)
+    pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
+        let schema = self
+            .state
+            .schema
+            .validate_or_return_self()
+            .map_err(|(schema, err)| {
+                // Specialize GraphQL validation errors.
+                let iter = err.into_errors().into_iter().map(|err| match err {
+                    SingleFederationError::InvalidGraphQL { message } => {
+                        FederationBlueprint::on_invalid_graphql_error(&schema, message)
+                    }
+                    _ => err,
+                });
+                SubgraphError::new(self.name.clone(), MultipleFederationErrors::from_iter(iter))
+            })?;
+
+        FederationBlueprint::on_validation(&schema, &self.state.metadata)
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
 
         Ok(Subgraph {
@@ -247,6 +265,55 @@ impl Subgraph<Upgraded> {
                 metadata: self.state.metadata,
             },
         })
+    }
+
+    pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
+        let mut operation_types_to_rename = HashMap::new();
+        for (op_type, op_name) in self
+            .state
+            .schema
+            .schema()
+            .schema_definition
+            .iter_root_operations()
+        {
+            let default_name = default_operation_name(&op_type);
+            if op_name.name != default_name {
+                operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+                if self
+                    .state
+                    .schema
+                    .try_get_type(default_name.clone())
+                    .is_some()
+                {
+                    return Err(SubgraphError::new(
+                        self.name.clone(),
+                        SingleFederationError::root_already_used(
+                            op_type,
+                            default_name,
+                            op_name.name.clone(),
+                        ),
+                    ));
+                }
+            }
+        }
+        for (current_name, new_name) in operation_types_to_rename {
+            self.state
+                .schema
+                .get_type(current_name)
+                .map_err(|e| SubgraphError::new(self.name.clone(), e))?
+                .rename(&mut self.state.schema, new_name)
+                .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+        }
+
+        Ok(())
+    }
+}
+
+fn default_operation_name(op_type: &OperationType) -> Name {
+    match op_type {
+        OperationType::Query => GRAPHQL_QUERY_TYPE_NAME,
+        OperationType::Mutation => GRAPHQL_MUTATION_TYPE_NAME,
+        OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
     }
 }
 
@@ -510,6 +577,9 @@ mod tests {
     use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
 
+    use crate::subgraph::test_utils::build_and_validate;
+    use crate::subgraph::test_utils::build_for_errors;
+
     use super::*;
 
     #[test]
@@ -756,9 +826,7 @@ mod tests {
 
     #[test]
     fn rejects_non_root_use_of_default_query_name() {
-        let error = Subgraph::parse(
-            "S",
-            "",
+        let errors = build_for_errors(
             r#"
             schema {
                 query: MyQuery
@@ -772,25 +840,18 @@ mod tests {
                 g: Int
             }
             "#,
-        )
-        .expect("parses schema")
-        .expand_links()
-        .expect("expands links")
-        .assume_upgraded()
-        .validate(true)
-        .expect_err("fails validation");
+        );
 
+        assert_eq!(errors.len(), 1);
         assert_eq!(
-            error.to_string(),
+            errors[0].1,
             r#"[S] The schema has a type named "Query" but it is not set as the query root type ("MyQuery" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#
         );
     }
 
     #[test]
     fn rejects_non_root_use_of_default_mutation_name() {
-        let error = Subgraph::parse(
-            "S",
-            "",
+        let errors = build_for_errors(
             r#"
             schema {
                 mutation: MyMutation
@@ -804,25 +865,18 @@ mod tests {
                 g: Int
             }
             "#,
-        )
-        .expect("parses schema")
-        .expand_links()
-        .expect("expands links")
-        .assume_upgraded()
-        .validate(true)
-        .expect_err("fails validation");
+        );
 
+        assert_eq!(errors.len(), 1);
         assert_eq!(
-            error.to_string(),
+            errors[0].1,
             r#"[S] The schema has a type named "Mutation" but it is not set as the mutation root type ("MyMutation" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
         );
     }
 
     #[test]
     fn rejects_non_root_use_of_default_subscription_name() {
-        let error = Subgraph::parse(
-            "S",
-            "",
+        let errors = build_for_errors(
             r#"
             schema {
                 subscription: MySubscription
@@ -836,25 +890,18 @@ mod tests {
                 g: Int
             }
             "#,
-        )
-        .expect("parses schema")
-        .expand_links()
-        .expect("expands links")
-        .assume_upgraded()
-        .validate(true)
-        .expect_err("fails validation");
+        );
 
+        assert_eq!(errors.len(), 1);
         assert_eq!(
-            error.to_string(),
+            errors[0].1,
             r#"[S] The schema has a type named "Subscription" but it is not set as the subscription root type ("MySubscription" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
         );
     }
 
     #[test]
     fn renames_root_operations_to_default_names() {
-        let subgraph = Subgraph::parse(
-            "S",
-            "",
+        let subgraph = build_and_validate(
             r#"
             schema {
                 query: MyQuery
@@ -874,13 +921,7 @@ mod tests {
                 h: Int
             }
             "#,
-        )
-        .expect("parses schema")
-        .expand_links()
-        .expect("expands links")
-        .assume_upgraded()
-        .validate(true)
-        .expect("is valid");
+        );
 
         assert_eq!(
             subgraph
@@ -937,7 +978,7 @@ mod tests {
         .expand_links()
         .expect("expands links")
         .assume_upgraded()
-        .validate(false)
+        .validate()
         .expect("is valid");
 
         assert_eq!(
