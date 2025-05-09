@@ -10,7 +10,8 @@ telemetry:
     spans:
       router:
         attributes:
-          response_body: true
+          "my_attribute":
+            response_body: true
 ```
 
 By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7363
