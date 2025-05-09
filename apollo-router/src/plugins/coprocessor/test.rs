@@ -61,6 +61,7 @@ mod tests {
                 "thisFieldDoesntExist": true
             }
         });
+        // TODO this will now fail on the configuration build b/c we do validation... Keep test or kill it?
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
@@ -76,11 +77,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
+        // TODO this is supposed to fail when a graphref isn't included. Figure out what's going on.
         let config = serde_json::json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081",
-                "stages": {
-                    "subgraph": {
+                "subgraph": {
+                    "all": {
                         "request": {
                             "uri": true
                         }

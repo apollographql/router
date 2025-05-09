@@ -80,6 +80,7 @@ async fn plugin_disables_itself_with_no_progressive_override_usages() {
     let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA_NO_USAGES.to_string()),
+        None
     ))
     .await
     .unwrap();
@@ -92,6 +93,7 @@ async fn plugin_enables_itself_with_progressive_override_usages() {
     let plugin = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA.to_string()),
+        None
     ))
     .await
     .unwrap();
@@ -128,6 +130,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA.to_string()),
+        None
     ))
     .await
     .unwrap()
@@ -183,6 +186,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA.to_string()),
+        None
     ))
     .await
     .unwrap()
@@ -332,6 +336,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
         Arc::new(SCHEMA.to_string()),
+        None
     ))
     .await
     .unwrap()

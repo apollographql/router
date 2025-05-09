@@ -46,7 +46,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
     });
 
     let service_stack =
-        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default(), None))
             .await
             .unwrap()
             .supergraph_service(mock_service.boxed());
@@ -85,7 +85,7 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
     });
 
     let service_stack =
-        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default(), None))
             .await
             .unwrap()
             .supergraph_service(mock_service.boxed());

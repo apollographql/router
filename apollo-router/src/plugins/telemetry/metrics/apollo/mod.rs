@@ -215,9 +215,12 @@ impl Config {
 #[cfg(test)]
 mod test {
     use std::future::Future;
+    use std::str::FromStr;
     use std::time::Duration;
 
     use http::header::HeaderName;
+    use serde_json::json;
+    use serde_json::Value;
     use tokio_stream::StreamExt;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
@@ -226,6 +229,7 @@ mod test {
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
     use crate::context::OPERATION_KIND;
@@ -244,17 +248,22 @@ mod test {
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
-        let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
-            endpoint: Url::parse("http://example.com")?,
-            apollo_key: None,
-            apollo_graph_ref: None,
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: default_buffer_size(),
-            schema_id: "schema_sha".to_string(),
-            ..Default::default()
-        })
-        .await?;
+        let config = json!({
+            "telemetry":
+                {
+                    "apollo": {
+                        "endpoint": "http://example.com",
+                        "client_name_header": "name_header",
+                        "client_version_header": "version_header",
+                        "buffer_size": 10000,
+                        "schema_id": "schema_sha"
+                    }
+                }
+        });
+
+
+
+        let plugin = create_plugin_with_config(config).await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
         Ok(())
     }
@@ -434,35 +443,42 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        create_plugin_with_apollo_config(apollo::Config {
-            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
-            apollo_key: Some("key".to_string()),
-            apollo_graph_ref: Some("ref".to_string()),
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: default_buffer_size(),
-            schema_id: "schema_sha".to_string(),
-            ..Default::default()
-        })
+        let config = json!({
+            "telemetry":
+                {
+                    "apollo": {
+                        "endpoint": ENDPOINT_DEFAULT,
+                        "apollo_key": "key",
+                        "apollo_graph_ref": "ref",
+                        "client_name_header": "name_header",
+                        "client_version_header": "version_header",
+                        "buffer_size": 10000,
+                        "schema_id": "schema_sha"
+                    }
+                }
+        });
+
+        create_plugin_with_config(config)
     }
 
-    async fn create_plugin_with_apollo_config(
-        apollo_config: apollo::Config,
-    ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInit::fake_new(
-            config::Conf {
-                apollo: apollo_config,
-                ..Default::default()
-            },
-            Default::default(),
-        ))
-        .await
+    async fn create_plugin_with_config(config: Value) -> Result<Telemetry, BoxError> {
+        let yaml = serde_yaml::to_string(&config).expect("json config must be valid");
+        let config = Configuration::from_str(&yaml).expect("json config must be valid");
+        let plugin_config = serde_json::from_value(config.apollo_plugins.plugins["telemetry"].clone()).expect("json config must be valid");
+        Telemetry::new(
+            PluginInit::fake_new(
+                plugin_config,
+                Default::default(),
+                config.validated_yaml
+            )
+        ).await
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
         <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
+            None
         ))
         .await
     }
