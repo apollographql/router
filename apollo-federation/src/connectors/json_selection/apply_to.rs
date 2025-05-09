@@ -92,6 +92,9 @@ impl JSONSelection {
     }
 
     pub(crate) fn compute_output_shape(&self, context: &ShapeContext, input_shape: Shape) -> Shape {
+        let context_clone = context.clone().with_spec(self.spec());
+        let context = &context_clone;
+
         match &self.inner {
             TopLevelSelection::Named(selection) => {
                 let dollar_shape = input_shape.clone();
@@ -158,6 +161,7 @@ pub(super) trait ApplyToInternal {
     ) -> Shape;
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ShapeContext {
     /// [`ConnectSpec`] version derived from the [`JSONSelection`] that created
     /// this [`ShapeContext`].
