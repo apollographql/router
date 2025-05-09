@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/string_template.rs
-expression: "StringTemplate::<String>::parse(\"{$config.one}\", 0).unwrap()"
+expression: "StringTemplate::from_str(\"{$config.one}\").unwrap()"
 ---
 StringTemplate {
     parts: [

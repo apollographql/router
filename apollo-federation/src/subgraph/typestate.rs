@@ -1,17 +1,52 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::Type;
 
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
+use crate::bail;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
-use crate::schema::KeyDirective;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::type_and_directive_specification::FieldSpecification;
+use crate::schema::type_and_directive_specification::ResolvedArgumentSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::subgraph::SubgraphError;
+use crate::supergraph::ANY_TYPE_SPEC;
+use crate::supergraph::EMPTY_QUERY_TYPE_SPEC;
+use crate::supergraph::FEDERATION_ANY_TYPE_NAME;
+use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
+use crate::supergraph::FEDERATION_ENTITY_TYPE_NAME;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
+use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
+use crate::supergraph::SERVICE_TYPE_SPEC;
 
 #[derive(Clone, Debug)]
 pub struct Raw {
@@ -91,7 +126,7 @@ impl Subgraph<Raw> {
     }
 
     pub fn parse(
-        name: &'static str,
+        name: &str,
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Raw>, FederationError> {
@@ -101,6 +136,18 @@ impl Subgraph<Raw> {
             .build()?;
 
         Ok(Self::new(name, url, schema))
+    }
+
+    /// Converts the schema to a fed2 schema.
+    /// - It is assumed to have no `@link` to the federation spec.
+    /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
+    /// - This is mainly for testing and not optimized.
+    // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
+    pub fn into_fed2_subgraph(self) -> Result<Self, FederationError> {
+        let mut schema = self.state.schema;
+        let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
+        add_federation_link_to_schema(&mut schema, federation_spec.version())?;
+        Ok(Self::new(&self.name, &self.url, schema))
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, FederationError> {
@@ -120,11 +167,14 @@ impl Subgraph<Raw> {
     }
 
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, FederationError> {
+        tracing::debug!("expand_links: expand_links start");
         let mut schema = FederationSchema::new_uninitialized(self.state.schema)?;
         // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
+        tracing::debug!("expand_links: collect_shallow_references");
         schema.collect_shallow_references();
 
         // Backfill missing directive definitions. This is primarily making sure we have a definition for `@link`.
+        tracing::debug!("expand_links: missing directive definitions");
         for directive in &schema.schema().schema_definition.directives.clone() {
             if schema.get_directive_definition(&directive.name).is_none() {
                 FederationBlueprint::on_missing_directive_definition(&mut schema, directive)?;
@@ -133,27 +183,43 @@ impl Subgraph<Raw> {
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
         if schema.get_directive_definition(&name!("link")).is_some() {
+            tracing::debug!("expand_links: add @link spec definition to schema");
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
         } else {
+            tracing::debug!("expand_links: add fed1 @link and its spec definition to schema");
             // This must be a Fed 1 schema.
             LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
 
             // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
             //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
             add_fed1_link_to_schema(&mut schema)?;
-        }
+        };
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
+        tracing::debug!("expand_links: collect_links_metadata");
         schema.collect_links_metadata()?;
 
+        tracing::debug!("expand_links: on_directive_definition_and_schema_parsed");
         FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
 
         // Also, the backfilled definitions mean we can collect deep references.
-        schema.collect_deep_references()?;
+        // Ignore the error case, which means the schema has invalid references. It will be
+        // reported later in the validation phase.
+        tracing::debug!("expand_links: collect_deep_references");
+        _ = schema.collect_deep_references();
 
         // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
+        tracing::debug!("expand_links: on_constructed");
         FederationBlueprint::on_constructed(&mut schema)?;
 
+        // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
+        //            It seems to make sense for it to be a part of expansion stage. We can create
+        //            a separate stage for it between `Expanded` and `Validated` if we need a stage
+        //            that is expanded, but federation operations are not added.
+        tracing::debug!("expand_links: add_federation_operations");
+        add_federation_operations(&mut schema)?;
+
+        tracing::debug!("expand_links: compute_subgraph_metadata");
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -161,6 +227,7 @@ impl Subgraph<Raw> {
             )
         })?;
 
+        tracing::debug!("expand_links finished");
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -169,24 +236,109 @@ impl Subgraph<Raw> {
     }
 }
 
+/// Adds a federation (v2 or above) link directive to the schema.
+/// - Similar to `add_fed1_link_to_schema`, but the link is added before bootstrapping.
+/// - This is mainly for testing.
+fn add_federation_link_to_schema(
+    schema: &mut Schema,
+    federation_version: &Version,
+) -> Result<(), FederationError> {
+    let federation_spec = FEDERATION_VERSIONS
+        .find(federation_version)
+        .ok_or_else(|| internal_error!(
+            "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
+            federation_version,
+        ))?;
+
+    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
+    // - auto import all directives.
+    let imports: Vec<_> = federation_spec
+        .directive_specs()
+        .iter()
+        .map(|d| format!("@{}", d.name()).into())
+        .collect();
+
+    schema
+        .schema_definition
+        .make_mut()
+        .directives
+        .push(Component::new(Directive {
+            name: Identity::link_identity().name,
+            arguments: vec![
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: federation_spec.url().to_string().into(),
+                }),
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(ast::Value::List(imports)),
+                }),
+            ],
+        }));
+    Ok(())
+}
+
+fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    // Add federation operation types
+    ANY_TYPE_SPEC.check_or_add(schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(schema, None)?;
+    entity_type_spec(schema)?.check_or_add(schema, None)?;
+
+    // Add the root `Query` Type (if not already present) and get the actual name in the schema.
+    let query_root_pos = SchemaRootDefinitionPosition {
+        root_kind: SchemaRootDefinitionKind::Query,
+    };
+    let query_root_type_name = if query_root_pos.try_get(schema.schema()).is_none() {
+        // If not present, add the default Query type with empty fields.
+        EMPTY_QUERY_TYPE_SPEC.check_or_add(schema, None)?;
+        query_root_pos.insert(schema, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
+        EMPTY_QUERY_TYPE_SPEC.name
+    } else {
+        query_root_pos.get(schema.schema())?.name.clone()
+    };
+
+    // Add or remove `Query._entities` (if applicable)
+    let entity_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name.clone(),
+        field_name: FEDERATION_ENTITIES_FIELD_NAME,
+    };
+    if let Some(_entity_type) = schema.entity_type()? {
+        if entity_field_pos.try_get(schema.schema()).is_none() {
+            entity_field_pos.insert(schema, Component::new(entities_field_spec(schema)?.into()))?;
+        }
+        // PORT_NOTE: JS version checks if the entity field definition's type is null when the
+        //            definition is found, but the `type` field is not nullable in Rust.
+    } else {
+        // Remove the `_entities` field if it is present
+        // PORT_NOTE: It's unclear why this is necessary. Maybe it's to avoid schema confusion?
+        entity_field_pos.remove(schema)?;
+    }
+
+    // Add `Query._service` (if not already present)
+    let service_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name,
+        field_name: FEDERATION_SERVICE_FIELD_NAME,
+    };
+    if service_field_pos.try_get(schema.schema()).is_none() {
+        service_field_pos.insert(schema, Component::new(service_field_spec(schema)?.into()))?;
+    }
+
+    Ok(())
+}
+
 impl Subgraph<Expanded> {
     pub fn upgrade(&mut self) -> Result<Self, SubgraphError> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
 
-    pub fn validate(
-        mut self,
-        rename_root_types: bool,
-    ) -> Result<Subgraph<Validated>, SubgraphError> {
+    pub fn validate(self, rename_root_types: bool) -> Result<Subgraph<Validated>, SubgraphError> {
+        // PORT_NOTE: The JS version calls GraphQL-js's `validateSDL` function and federation's
+        //            `validateSchema` function here. But, Rust version performs general GraphQL
+        //            validation in the `FederationBlueprint::on_validation` method.
         let blueprint = FederationBlueprint::new(rename_root_types);
-        blueprint
-            .on_validation(&mut self.state.schema)
+        let schema = blueprint
+            .on_validation(self.state.schema)
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
-        let schema = self
-            .state
-            .schema
-            .validate_or_return_self()
-            .map_err(|t| SubgraphError::new(self.name.clone(), t.1))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -197,17 +349,13 @@ impl Subgraph<Expanded> {
             },
         })
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(
-        &self,
-    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
-        self.state.schema.key_directive_applications()
-    }
 }
 
 impl Subgraph<Validated> {
     pub fn invalidate(self) -> Subgraph<Expanded> {
+        // PORT_NOTE: In JS, the metadata gets invalidated by calling
+        // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
+        // doesn't seem necessary in Rust, since the metadata is computed eagerly.
         Subgraph {
             name: self.name,
             url: self.url,
@@ -217,11 +365,6 @@ impl Subgraph<Validated> {
                 metadata: self.state.metadata,
             },
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective> {
-        todo!("Validated @key directives should be made available after validation")
     }
 }
 
@@ -234,6 +377,85 @@ impl<S: HasMetadata> Subgraph<S> {
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
     }
+
+    /// Returns the schema as a string. Mainly for testing purposes.
+    pub fn schema_string(&self) -> String {
+        self.schema().schema().to_string()
+    }
+
+    pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn provides_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn requires_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+}
+
+// Constructs the `_Entity` type spec for the subgraph schema.
+// PORT_NOTE: Corresponds to the `entityTypeSpec` constant definition.
+fn entity_type_spec(schema: &FederationSchema) -> Result<UnionTypeSpecification, FederationError> {
+    // Please note that `_Entity` cannot use "interface entities" since interface types cannot
+    // be in unions. It is ok in practice because _Entity is only use as return type for
+    // `_entities`, and even when interfaces are involve, the result of an `_entities` call
+    // will always be an object type anyway, and since we force all implementations of an
+    // interface entity to be entity themselves in a subgraph, we're fine.
+    let mut entity_members = IndexSet::default();
+    for key_directive_app in schema.key_directive_applications()?.into_iter() {
+        let key_directive_app = key_directive_app?;
+        let target = key_directive_app.target();
+        if let ObjectOrInterfaceTypeDefinitionPosition::Object(obj_ty) = target {
+            entity_members.insert(ComponentName::from(&obj_ty.type_name));
+        }
+    }
+
+    Ok(UnionTypeSpecification {
+        name: FEDERATION_ENTITY_TYPE_NAME,
+        members: Box::new(move |_| entity_members.clone()),
+    })
+}
+
+fn representations_arguments_field_spec() -> ResolvedArgumentSpecification {
+    ResolvedArgumentSpecification {
+        name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+        ty: Type::NonNullList(Box::new(Type::NonNullNamed(FEDERATION_ANY_TYPE_NAME))),
+        default_value: None,
+    }
+}
+
+fn entities_field_spec(schema: &FederationSchema) -> Result<FieldSpecification, FederationError> {
+    let Some(entity_type) = schema.entity_type()? else {
+        bail!("The federation entity type is expected to be defined, but not found")
+    };
+    Ok(FieldSpecification {
+        name: FEDERATION_ENTITIES_FIELD_NAME,
+        ty: Type::NonNullList(Box::new(Type::Named(entity_type.type_name))),
+        arguments: vec![representations_arguments_field_spec()],
+    })
+}
+
+fn service_field_spec(schema: &FederationSchema) -> Result<FieldSpecification, FederationError> {
+    Ok(FieldSpecification {
+        name: FEDERATION_SERVICE_FIELD_NAME,
+        ty: Type::NonNullNamed(schema.service_type()?.type_name),
+        arguments: vec![],
+    })
 }
 
 #[cfg(test)]
@@ -316,6 +538,7 @@ mod tests {
                 name!("requires"),
                 name!("skip"),
                 name!("specifiedBy"),
+                name!("tag"),
             ]
         );
     }
@@ -355,6 +578,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),
@@ -399,6 +623,7 @@ mod tests {
                 name!("federation__provides"),
                 name!("federation__requires"),
                 name!("federation__shareable"),
+                name!("federation__tag"),
                 name!("include"),
                 name!("link"),
                 name!("skip"),

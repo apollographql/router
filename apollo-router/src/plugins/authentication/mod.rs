@@ -36,6 +36,7 @@ use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::error::ErrorContext;
+use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
@@ -124,8 +125,8 @@ struct JwksConf {
     )]
     #[schemars(with = "String", default = "default_poll_interval")]
     poll_interval: Duration,
-    /// Expected issuer for tokens verified by that JWKS
-    issuer: Option<String>,
+    /// Expected issuers for tokens verified by that JWKS
+    issuers: Option<Issuers>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
@@ -335,7 +336,7 @@ impl AuthenticationPlugin {
             let url: Url = Url::from_str(jwks_conf.url.as_str())?;
             list.push(JwksConfig {
                 url,
-                issuer: jwks_conf.issuer.clone(),
+                issuers: jwks_conf.issuers.clone(),
                 algorithms: jwks_conf
                     .algorithms
                     .as_ref()
@@ -452,7 +453,7 @@ fn authenticate(
         let failed = true;
         increment_jwt_counter_metric(failed);
 
-        tracing::error!(message = %error, "jwt authentication failure");
+        tracing::info!(message = %error, "jwt authentication failure");
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
@@ -547,7 +548,7 @@ fn authenticate(
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
     if let Some(keys) = jwks::search_jwks(jwks_manager, &criteria) {
-        let (issuer, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
+        let (issuers, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
                 return failure_message(
@@ -560,19 +561,26 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuer) = issuer {
+        if let Some(configured_issuers) = issuers {
             if let Some(token_issuer) = token_data
                 .claims
                 .as_object()
                 .and_then(|o| o.get("iss"))
                 .and_then(|value| value.as_str())
             {
-                if configured_issuer != token_issuer {
+                if !configured_issuers.contains(token_issuer) {
+                    let mut issuers_for_error: Vec<String> =
+                        configured_issuers.into_iter().collect();
+                    issuers_for_error.sort(); // done to maintain consistent ordering in error message
                     return failure_message(
                         request,
                         config,
                         AuthenticationError::InvalidIssuer {
-                            expected: configured_issuer,
+                            expected: issuers_for_error
+                                .iter()
+                                .map(|issuer| issuer.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
                             token: token_issuer.to_string(),
                         },
                         StatusCode::INTERNAL_SERVER_ERROR,

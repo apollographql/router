@@ -6,31 +6,34 @@ use std::str::FromStr;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
 use crate::sources::connect::HTTPMethod;
-use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
-use crate::sources::connect::URLTemplate;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
-use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::string_template::Part;
+use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::validation::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
+use crate::sources::connect::validation::expression::MappingArgument;
+use crate::sources::connect::validation::expression::parse_mapping_argument;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::http::UrlProperties;
 use crate::sources::connect::validation::http::headers::Headers;
-use crate::sources::connect::validation::http::url::validate_base_url;
+use crate::sources::connect::validation::http::url::validate_url_scheme;
 use crate::sources::connect::validation::source::SourceName;
 
 /// A valid, parsed (but not type-checked) `@connect(http:)`.
@@ -83,16 +86,13 @@ impl<'schema> Http<'schema> {
                 },
                 schema,
             ))
-            .and_try(
-                Transport::parse(
-                    http_arg,
-                    ConnectHTTPCoordinate::from(coordinate),
-                    http_arg_node,
-                    source_name,
-                    schema,
-                )
-                .map_err(|err| vec![err]),
-            )
+            .and_try(Transport::parse(
+                http_arg,
+                ConnectHTTPCoordinate::from(coordinate),
+                http_arg_node,
+                source_name,
+                schema,
+            ))
             .map_err(|nested| nested.into_iter().flatten().collect())
             .map(|(body, headers, transport)| Self {
                 body,
@@ -139,7 +139,7 @@ impl<'schema> Http<'schema> {
                     .map(|var_ref| var_ref.namespace.namespace)
             })
             .chain(self.body.as_ref().into_iter().flat_map(|b| {
-                b.selection
+                b.mapping
                     .variable_references()
                     .map(|var_ref| var_ref.namespace.namespace)
             }))
@@ -147,8 +147,7 @@ impl<'schema> Http<'schema> {
 }
 
 struct Body<'schema> {
-    selection: JSONSelection,
-    string: GraphQLString<'schema>,
+    mapping: MappingArgument<'schema>,
     coordinate: BodyCoordinate<'schema>,
 }
 
@@ -166,47 +165,10 @@ impl<'schema> Body<'schema> {
         };
         let coordinate = BodyCoordinate { connect };
 
-        // Ensure that the body selection is a valid JSON selection string
-        let string = match GraphQLString::new(value, &schema.sources) {
-            Ok(selection_str) => selection_str,
-            Err(_) => {
-                return Err(Message {
-                    code: Code::GraphQLError,
-                    message: format!("{coordinate} must be a string."),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        let selection = match JSONSelection::parse(string.as_str()) {
-            Ok(selection) => selection,
-            Err(err) => {
-                return Err(Message {
-                    code: Code::InvalidBody,
-                    message: format!("{coordinate} is not valid: {err}"),
-                    locations: value
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        };
-        if selection.is_empty() {
-            return Err(Message {
-                code: Code::InvalidBody,
-                message: format!("{coordinate} is empty"),
-                locations: value
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+        let mapping = parse_mapping_argument(value, coordinate, Code::InvalidBody, schema)?;
 
         Ok(Some(Self {
-            selection,
-            string,
+            mapping,
             coordinate,
         }))
     }
@@ -216,16 +178,17 @@ impl<'schema> Body<'schema> {
     /// TODO: check keys here?
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
-            selection,
-            string,
+            mapping,
             coordinate,
         } = self;
         expression::validate(
-            &Expression {
-                expression: selection,
-                location: 0..string.as_str().len(),
-            },
-            &Context::for_connect_request(schema, coordinate.connect, &string, Code::InvalidBody),
+            &mapping.expression,
+            &Context::for_connect_request(
+                schema,
+                coordinate.connect,
+                &mapping.string,
+                Code::InvalidBody,
+            ),
             &Shape::unknown([]),
         )
         .map_err(|mut message| {
@@ -256,9 +219,11 @@ struct Transport<'schema> {
     // TODO: once this is shared with `HttpJsonTransport`, this will be used
     #[allow(dead_code)]
     method: HTTPMethod,
-    url: URLTemplate,
+    url: StringTemplate,
     url_string: GraphQLString<'schema>,
     coordinate: HttpMethodCoordinate<'schema>,
+
+    url_properties: UrlProperties<'schema>,
 }
 
 impl<'schema> Transport<'schema> {
@@ -268,7 +233,7 @@ impl<'schema> Transport<'schema> {
         http_arg_node: &Node<Value>,
         source_name: Option<&SourceName<'schema>>,
         schema: &'schema SchemaInfo<'schema>,
-    ) -> Result<Self, Message> {
+    ) -> Result<Self, Vec<Message>> {
         let source_map = &schema.sources;
         let mut methods = http_arg
             .iter()
@@ -280,14 +245,14 @@ impl<'schema> Transport<'schema> {
             .peekable();
 
         let Some((method, method_value)) = methods.next() else {
-            return Err(Message {
+            return Err(vec![Message {
                 code: Code::MissingHttpMethod,
                 message: format!("{coordinate} must specify an HTTP method."),
                 locations: http_arg_node
                     .line_column_range(source_map)
                     .into_iter()
                     .collect(),
-            });
+            }]);
         };
 
         if methods.peek().is_some() {
@@ -296,12 +261,18 @@ impl<'schema> Transport<'schema> {
                 .into_iter()
                 .chain(methods.filter_map(|(_, node)| node.line_column_range(source_map)))
                 .collect();
-            return Err(Message {
+            return Err(vec![Message {
                 code: Code::MultipleHttpMethods,
                 message: format!("{coordinate} cannot specify more than one HTTP method."),
                 locations,
-            });
+            }]);
         }
+
+        let url_properties = UrlProperties::parse_for_connector(
+            coordinate.connect_directive_coordinate,
+            schema,
+            http_arg,
+        )?;
 
         let coordinate = HttpMethodCoordinate {
             connect: coordinate.connect_directive_coordinate,
@@ -309,8 +280,8 @@ impl<'schema> Transport<'schema> {
             node: method_value,
         };
 
-        let url_string =
-            GraphQLString::new(coordinate.node, &schema.sources).map_err(|_| Message {
+        let url_string = GraphQLString::new(coordinate.node, &schema.sources)
+            .map_err(|_| Message {
                 code: Code::GraphQLError,
                 message: format!("The value for {coordinate} must be a string."),
                 locations: coordinate
@@ -318,56 +289,54 @@ impl<'schema> Transport<'schema> {
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            })?;
-        let url = URLTemplate::from_str(url_string.as_str()).map_err(
-            |string_template::Error { message, location }| Message {
+            })
+            .map_err(|e| vec![e])?;
+        let url = StringTemplate::from_str(url_string.as_str())
+            .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
                 locations: url_string
                     .line_col_for_subslice(location, schema)
                     .into_iter()
                     .collect(),
-            },
-        )?;
+            })
+            .map_err(|e| vec![e])?;
 
-        if let Some(base) = url.base.as_ref() {
-            validate_base_url(base, coordinate, coordinate.node, url_string, schema)?;
-        }
-
-        if source_name.is_some() && url.base.is_some() {
-            return Err(Message {
-                code: Code::AbsoluteConnectUrlWithSource,
-                message: format!(
-                    "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                    raw_value = coordinate.node
-                ),
-                locations: coordinate
-                    .node
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-        if source_name.is_none() && url.base.is_none() {
-            return Err(Message {
-                code: Code::RelativeConnectUrlWithoutSource,
-                message: format!(
-                    "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-                    raw_value = coordinate.node,
-                    source_directive_name = schema.source_directive_name(),
-                ),
-                locations: coordinate
-                    .node
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
+        if source_name.is_some() {
+            return if url_string.as_str().starts_with("http://")
+                || url_string.as_str().starts_with("https://")
+            {
+                Err(vec![Message {
+                    code: Code::AbsoluteConnectUrlWithSource,
+                    message: format!(
+                        "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to be relative.",
+                        raw_value = coordinate.node
+                    ),
+                    locations: coordinate
+                        .node
+                        .line_column_range(source_map)
+                        .into_iter()
+                        .collect(),
+                }])
+            } else {
+                Ok(Self {
+                    method,
+                    url,
+                    url_string,
+                    coordinate,
+                    url_properties,
+                })
+            };
+        } else {
+            validate_absolute_connect_url(&url, coordinate, coordinate.node, url_string, schema)
+                .map_err(|e| vec![e])?;
         }
         Ok(Self {
             method,
             url,
             url_string,
             coordinate,
+            url_properties,
         })
     }
 
@@ -398,6 +367,69 @@ impl<'schema> Transport<'schema> {
                     }),
             );
         }
+
+        messages.extend(self.url_properties.type_check(schema));
+
         messages
     }
+}
+
+/// Additional validation rules when using `@connect` without `source:`
+fn validate_absolute_connect_url(
+    url: &StringTemplate,
+    coordinate: HttpMethodCoordinate,
+    value: &Node<Value>,
+    str_value: GraphQLString,
+    schema: &SchemaInfo,
+) -> Result<(), Message> {
+    let relative_url_error = || Message {
+        code: Code::RelativeConnectUrlWithoutSource,
+        message: format!(
+            "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
+            raw_value = coordinate.node,
+            source_directive_name = schema.source_directive_name(),
+        ),
+        locations: coordinate
+            .node
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
+    };
+
+    let Some(Part::Constant(first)) = url.parts.first() else {
+        return Err(relative_url_error());
+    };
+
+    let Some((_scheme, without_scheme)) = first.value.split_once("://") else {
+        return Err(relative_url_error());
+    };
+
+    if url.parts.len() > 1
+        && !without_scheme.contains('/')
+        && !without_scheme.contains('?')
+        && !without_scheme.contains('#')
+    {
+        return Err(Message {
+            code: Code::InvalidUrl,
+            message: format!(
+                "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
+            ),
+            locations: str_value
+                .line_col_for_subslice(first.location.clone(), schema)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
+        code: Code::InvalidUrl,
+        message: format!("In {coordinate}: {err}"),
+        locations: str_value
+            .line_col_for_subslice(first.location.clone(), schema)
+            .into_iter()
+            .collect(),
+    })?;
+    validate_url_scheme(&base_url, coordinate, value, str_value, schema)?;
+
+    Ok(())
 }

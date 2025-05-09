@@ -212,7 +212,7 @@ impl Plugin for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
-            all = match RedisCacheStorage::new(redis_config).await {
+            all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
@@ -234,7 +234,7 @@ impl Plugin for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
-                let storage = match RedisCacheStorage::new(redis_config).await {
+                let storage = match RedisCacheStorage::new(redis_config, "entity").await {
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -465,6 +465,8 @@ impl Plugin for EntityCache {
     }
 }
 
+#[cfg(test)]
+pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl EntityCache {
     #[cfg(test)]
     pub(crate) async fn with_mocks(
@@ -491,7 +493,13 @@ impl EntityCache {
             enabled: true,
             expose_keys_in_context: true,
             subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph::default(),
+                all: Subgraph {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                    }),
+                    ..Default::default()
+                },
                 subgraphs,
             }),
             metrics: Metrics::default(),

@@ -40,9 +40,14 @@ use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
+mod content_type;
+mod error_handling;
 mod mock_api;
+mod progressive_override;
+mod query_plan;
 mod quickstart;
 mod req_asserts;
+mod url_properties;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
@@ -296,7 +301,7 @@ async fn test_root_field_plus_entity_plus_requires() {
             })))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header(wiremock::http::HeaderName::from_string(CONTENT_TYPE.to_string()).unwrap(), APPLICATION_JSON.essence_str())
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .set_body_json(json!({
                       "data": {
                         "_entities": [{
@@ -447,7 +452,7 @@ async fn basic_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null,
@@ -468,14 +473,14 @@ async fn basic_errors() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -486,14 +491,14 @@ async fn basic_errors() {
             "user"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -505,19 +510,19 @@ async fn basic_errors() {
             "nickname"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -626,11 +631,7 @@ async fn test_headers() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("first").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("second").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
                 )
                 .header(
                     HeaderName::from_str("x-config-variable-source").unwrap(),
@@ -746,11 +747,7 @@ async fn test_override_headers_with_config() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("third").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("fourth").unwrap(),
+                    HeaderValue::from_str("third,fourth").unwrap(),
                 )
                 .path("/users"),
         ],
@@ -1357,7 +1354,7 @@ async fn error_not_redacted() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null
@@ -1369,19 +1366,19 @@ async fn error_not_redacted() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -1715,23 +1712,23 @@ async fn test_variables() {
                 .method("POST")
                 .path("/f")
                 .query("arg=rg&context=B&config=C&header=coolheader")
-                .header("x-source-context".into(), "B".try_into().unwrap())
-                .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "g".try_into().unwrap())
-                .header("x-connect-context".into(), "B".try_into().unwrap())
-                .header("x-connect-config".into(), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-arg"), "g".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-config"), "C".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "request": "coolheader" }))
                 ,
             Matcher::new()
                 .method("POST")
                 .path("/f")
                 .query("arg=g&context=B&config=C&sibling=D")
-                .header("x-source-context".into(), "B".try_into().unwrap())
-                .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "a".try_into().unwrap())
-                .header("x-connect-context".into(), "B".try_into().unwrap())
-                .header("x-connect-config".into(), "C".try_into().unwrap())
-                .header("x-connect-sibling".into(), "D".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-arg"), "a".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-sibling"), "D".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "sibling": "D" }))
                 ,
         ],

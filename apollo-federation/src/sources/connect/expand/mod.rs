@@ -6,6 +6,7 @@ use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
+use multimap::MultiMap;
 
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
@@ -93,11 +94,22 @@ pub fn expand_connectors(
         FederationError::internal(format!("could not merge expanded subgraphs: {e:?}"))
     })?;
 
+    let subgraph_name_replacements = expanded_subgraphs
+        .iter()
+        .map(|(connector, _)| {
+            (
+                connector.id.subgraph_name.as_str(),
+                connector.id.synthetic_name(),
+            )
+        })
+        .collect::<MultiMap<_, _>>();
+
     let mut new_supergraph = FederationSchema::new(new_supergraph.schema.into_inner())?;
     carryover_directives(
         &supergraph.schema,
         &mut new_supergraph,
         spec_versions.into_iter(),
+        &subgraph_name_replacements,
     )
     .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 
@@ -254,7 +266,7 @@ mod helpers {
     }
 
     impl<'a> Expander<'a> {
-        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Expander<'a> {
+        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Self {
             let connect_name = ConnectSpec::connect_directive_name(link);
             let source_name = ConnectSpec::source_directive_name(link);
 
@@ -273,14 +285,16 @@ mod helpers {
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&KEY_DIRECTIVE_NAME))
-                .unwrap_or(KEY_DIRECTIVE_NAME);
+                .map_or(KEY_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&KEY_DIRECTIVE_NAME)
+                });
             let interface_object_name = subgraph
                 .schema
                 .metadata()
                 .and_then(|m| m.for_identity(&Identity::federation_identity()))
-                .map(|f| f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME))
-                .unwrap_or(INTF_OBJECT_DIRECTIVE_NAME);
+                .map_or(INTF_OBJECT_DIRECTIVE_NAME, |f| {
+                    f.directive_name_in_schema(&INTF_OBJECT_DIRECTIVE_NAME)
+                });
             let extra_excluded = [EXTERNAL_DIRECTIVE_NAME, REQUIRES_DIRECTIVE_NAME]
                 .into_iter()
                 .map(|d| {
@@ -361,9 +375,15 @@ mod helpers {
                             )
                             .walk((
                                 object,
-                                connector.selection.next_subselection().cloned().ok_or(
-                                    FederationError::internal("empty selections are not allowed"),
-                                )?,
+                                connector
+                                    .selection
+                                    .next_subselection()
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        FederationError::internal(
+                                            "empty selections are not allowed",
+                                        )
+                                    })?,
                             ))?;
                         }
 
@@ -431,9 +451,13 @@ mod helpers {
                         ObjectTypeDefinitionPosition {
                             type_name: type_def.name.clone(),
                         },
-                        connector.selection.next_subselection().cloned().ok_or(
-                            FederationError::internal("empty selections are not allowed"),
-                        )?,
+                        connector
+                            .selection
+                            .next_subselection()
+                            .cloned()
+                            .ok_or_else(|| {
+                                FederationError::internal("empty selections are not allowed")
+                            })?,
                     ))?;
 
                     // we need a Query root field to be valid
@@ -508,7 +532,7 @@ mod helpers {
             };
 
             let parent_type = self.original_schema.get_type(parent_type_name)?;
-            let output_type = to_schema.get_type(output_type_name.clone())?;
+            let output_type = to_schema.get_type(output_type_name)?;
             let key_for_type = match &connector.entity_resolver {
                 Some(EntityResolver::Explicit) => output_type,
                 _ => parent_type,
@@ -537,9 +561,7 @@ mod helpers {
                 parsed
                     .next_subselection()
                     .cloned()
-                    .ok_or(FederationError::internal(
-                        "empty selections are not allowed",
-                    ))?,
+                    .ok_or_else(|| FederationError::internal("empty selections are not allowed"))?,
             ))?;
 
             // This actually adds the key fields if necessary, which is only

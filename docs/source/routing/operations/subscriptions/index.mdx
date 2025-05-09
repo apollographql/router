@@ -339,7 +339,24 @@ For example, if thousands of clients all subscribe to real-time score updates fo
 The router considers subscription operations **identical** if all of the following are true:
 
 - The operations sent to the subgraph have identical GraphQL selection sets (i.e., requested fields).
-- The operations provide identical values for all headers that the router sends to the subgraph.
+- The operations provide identical values for all headers that the router sends to the subgraph, except those listed in `ignored_headers`.
+
+### Configuring deduplication
+
+You can ignore specific headers when deduplicating subscriptions.
+
+If you propagate a header with varying values to your subgraph (for example, `User-Agent`), but you still want to deduplicate subscriptions and you can accept that only one out of many values will be propagated, you can configure `ignored_headers` like this:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+# highlight-start
+  deduplication:
+    enabled: true # default: true
+    ignored_headers:
+      - user-agent # It won't include this header in the deduplication algorithm, so even if the value is different it will still deduplicate
+# highlight-end
+```
 
 ### Disabling deduplication
 
@@ -349,7 +366,8 @@ You can disable subscription deduplication by adding the following to your route
 subscription:
   enabled: true
 # highlight-start
-  enable_deduplication: false # default: true
+  deduplication:
+    enabled: false # default: true
 # highlight-end
 ```
 

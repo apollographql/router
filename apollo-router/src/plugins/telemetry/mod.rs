@@ -64,13 +64,13 @@ use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
 use self::config::TraceIdFormat;
-use self::config_new::events::RouterEvents;
-use self::config_new::events::SubgraphEvents;
-use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
-use self::config_new::instruments::RouterInstruments;
-use self::config_new::instruments::SubgraphInstruments;
+use self::config_new::router::events::RouterEvents;
+use self::config_new::router::instruments::RouterInstruments;
 use self::config_new::spans::Spans;
+use self::config_new::subgraph::events::SubgraphEvents;
+use self::config_new::subgraph::instruments::SubgraphInstruments;
+use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
@@ -170,8 +170,10 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
 pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
 pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_library_version";
 pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
@@ -435,17 +437,13 @@ impl PluginPrivate for Telemetry {
                         .attributes
                         .on_request(request);
 
-                    custom_attributes.extend([
-                        KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or("").to_string()),
-                        KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or("").to_string()),
-                        KeyValue::new(
-                            Key::from_static_str("apollo_private.http.request_headers"),
-                            filter_headers(
-                                request.router_request.headers(),
-                                &config_request.apollo.send_headers,
-                            ),
+                    custom_attributes.push(KeyValue::new(
+                        Key::from_static_str("apollo_private.http.request_headers"),
+                        filter_headers(
+                            request.router_request.headers(),
+                            &config_request.apollo.send_headers,
                         ),
-                    ]);
+                    ));
 
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
@@ -453,7 +451,7 @@ impl PluginPrivate for Telemetry {
                         .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
-                    let custom_events: RouterEvents =
+                    let mut custom_events: RouterEvents =
                         config_request.instrumentation.events.new_router_events();
                     custom_events.on_request(request);
 
@@ -464,7 +462,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, custom_events, ctx): (
+                move |(mut custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -478,6 +476,20 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
+                        // NB: client name and version must be picked up here, rather than in the
+                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
+                        //  at the router service to modify the name and version.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_NAME));
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_VERSION));
+                        custom_attributes.extend([
+                            KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
+                            KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
+                        ]);
+
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
@@ -660,7 +672,8 @@ impl PluginPrivate for Telemetry {
                         .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
-                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    let mut supergraph_events =
+                        config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
                     (
@@ -675,7 +688,7 @@ impl PluginPrivate for Telemetry {
                     ctx,
                     custom_instruments,
                     mut custom_attributes,
-                    supergraph_events,
+                    mut supergraph_events,
                     custom_graphql_instruments,
                 ): (
                     Context,
@@ -804,7 +817,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
-                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
                     let custom_cache_instruments: CacheInstruments = config
@@ -825,7 +838,7 @@ impl PluginPrivate for Telemetry {
                     context,
                     custom_instruments,
                     custom_attributes,
-                    custom_events,
+                    mut custom_events,
                     custom_cache_instruments,
                 ): (
                     Context,
@@ -907,7 +920,8 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
-                    let custom_events = req_fn_config.instrumentation.events.new_connector_events();
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
 
                     let custom_span_attributes = req_fn_config
@@ -933,7 +947,11 @@ impl PluginPrivate for Telemetry {
                     let conf = res_fn_config.clone();
                     async move {
                         match custom_telemetry {
-                            Some((custom_instruments, custom_events, custom_span_attributes)) => {
+                            Some((
+                                custom_instruments,
+                                mut custom_events,
+                                custom_span_attributes,
+                            )) => {
                                 let span = Span::current();
                                 span.set_span_dyn_attributes(custom_span_attributes);
 
@@ -1443,8 +1461,14 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
-                                    client_library_name: String::new(),
-                                    client_library_version: String::new(),
+                                    client_library_name: context
+                                        .get(CLIENT_LIBRARY_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_library_version: context
+                                        .get(CLIENT_LIBRARY_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
                                         .to_string(),

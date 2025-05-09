@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -13,7 +12,6 @@ use petgraph::Direction;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use regex::Regex;
 use strum::IntoEnumIterator;
 
 use crate::bail;
@@ -48,9 +46,9 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::validators::from_context::parse_context;
 use crate::supergraph::extract_subgraphs_from_supergraph;
 use crate::utils::FallibleIterator;
-use crate::utils::iter_into_single_item;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -134,7 +132,7 @@ impl BaseQueryGraphBuilder {
             .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::default());
+            .insert(source, IndexMap::default());
         Self { query_graph }
     }
 
@@ -382,12 +380,12 @@ impl SchemaQueryGraphBuilder {
                 if self.subgraph.is_some() {
                     self.maybe_add_interface_fields_edges(pos.clone(), node)?;
                 }
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             OutputTypeDefinitionPosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             // Any other case (scalar or enum; input objects are not possible here) is terminal and
             // has no edges to consider.
@@ -1170,6 +1168,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1295,6 +1294,7 @@ impl FederatedQueryGraphBuilder {
                                     .type_name()
                                     .clone(),
                                 application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1361,6 +1361,7 @@ impl FederatedQueryGraphBuilder {
                     &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1584,14 +1585,15 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .from_context_directive_arguments(dir)?;
-                let (context, selection) = parse_context(application.field)?;
+
+                // if parse_context returns None, assume that the @fromContext validator will return the actual error
+                // it isn't necessary to throw here, we can just ignore it
+                let (Some(context), Some(selection)) = parse_context(application.field) else {
+                    continue;
+                };
                 let Some(types_with_context_set) = context_name_to_types.get(context.as_str())
                 else {
-                    bail!(
-                        r#"Context ${} is never set in subgraph "{}""#,
-                        context,
-                        subgraph_name
-                    );
+                    continue;
                 };
                 let conditions = ContextCondition {
                     context,
@@ -1709,6 +1711,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -2127,6 +2130,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -2356,85 +2363,6 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
-static CONTEXT_PARSING_LEADING_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap());
-
-static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap());
-
-fn context_parse_error(context: &str, message: &str) -> FederationError {
-    SingleFederationError::FromContextParseError {
-        context: context.to_string(),
-        message: message.to_string(),
-    }
-    .into()
-}
-
-pub(crate) fn parse_context(field: &str) -> Result<(String, String), FederationError> {
-    // PORT_NOTE: The original JS regex, as shown below
-    //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
-    // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.
-    // There's a fancy_regex crate which does support this, but in the specific case above, the
-    // negative lookaheads are just used to ensure strict *-greediness for the preceding expression
-    // (i.e., it guarantees those *-expressions match greedily and won't backtrack).
-    //
-    // We can emulate that in this case by matching a series of regexes instead of a single regex,
-    // where for each regex, the relevant *-expression doesn't backtrack by virtue of the rest of
-    // the haystack guaranteeing a match. Also note that Rust has (?s:.) to match all characters
-    // including newlines, which we use in place of JS's common regex workaround of [\s\S].
-    fn strip_leading_ignored_tokens(input: &str) -> Result<&str, FederationError> {
-        iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str())
-            .ok_or_else(|| context_parse_error(input, "Failed to skip any leading ignored tokens"))
-    }
-
-    let dollar_start = strip_leading_ignored_tokens(field)?;
-    let mut dollar_iter = dollar_start.chars();
-    if dollar_iter.next() != Some('$') {
-        return Err(context_parse_error(
-            dollar_start,
-            r#"Failed to find leading "$""#,
-        ));
-    }
-    let after_dollar = dollar_iter.as_str();
-
-    let context_start = strip_leading_ignored_tokens(after_dollar)?;
-    let Some(context_captures) =
-        iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
-    else {
-        return Err(context_parse_error(
-            dollar_start,
-            "Failed to find context name token and selection",
-        ));
-    };
-
-    let context = match context_captures.get(1).map(|m| m.as_str()) {
-        Some(context) if !context.is_empty() => context,
-        _ => {
-            return Err(context_parse_error(
-                context_start,
-                "Expected to find non-empty context name",
-            ));
-        }
-    };
-
-    let selection = match context_captures.get(2).map(|m| m.as_str()) {
-        Some(selection) if !selection.is_empty() => selection,
-        _ => {
-            return Err(context_parse_error(
-                context_start,
-                "Expected to find non-empty selection",
-            ));
-        }
-    };
-
-    // PORT_NOTE: apollo_compiler's parsing code for field sets requires ignored tokens to be
-    // pre-stripped if curly braces are missing, so we additionally do that here.
-    let selection = strip_leading_ignored_tokens(selection)?;
-    Ok((context.to_owned(), selection.to_owned()))
-}
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Name;
@@ -2517,7 +2445,7 @@ mod tests {
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
             source: SCHEMA_NAME.into(),
-            field_definition_position: field_pos.clone().into(),
+            field_definition_position: field_pos.into(),
             is_part_of_provides: false,
         };
         let mut tails = query_graph
@@ -2535,46 +2463,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tails.len(), 1);
         Ok(tails.pop().unwrap())
-    }
-
-    #[test]
-    fn test_parse_context() {
-        let fields = [
-            ("$context { prop }", ("context", "{ prop }")),
-            (
-                "$context ... on A { prop } ... on B { prop }",
-                ("context", "... on A { prop } ... on B { prop }"),
-            ),
-            (
-                "$topLevelQuery { me { locale } }",
-                ("topLevelQuery", "{ me { locale } }"),
-            ),
-            (
-                "$context { a { b { c { prop }}} }",
-                ("context", "{ a { b { c { prop }}} }"),
-            ),
-            (
-                "$ctx { identifiers { legacyUserId } }",
-                ("ctx", "{ identifiers { legacyUserId } }"),
-            ),
-            (
-                "$retailCtx { identifiers { id5 } }",
-                ("retailCtx", "{ identifiers { id5 } }"),
-            ),
-            ("$retailCtx { mid }", ("retailCtx", "{ mid }")),
-            (
-                "$widCtx { identifiers { wid } }",
-                ("widCtx", "{ identifiers { wid } }"),
-            ),
-        ];
-        for (field, (known_context, known_selection)) in fields {
-            let (context, selection) = super::parse_context(field).unwrap();
-            assert_eq!(context, known_context);
-            assert_eq!(selection, known_selection);
-        }
-        // Ensure we don't backtrack in the comment regex.
-        assert!(super::parse_context("#comment $fakeContext fakeSelection").is_err());
-        assert!(super::parse_context("$ #comment fakeContext fakeSelection").is_err());
     }
 
     #[test]
