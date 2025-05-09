@@ -593,7 +593,7 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+    pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from
@@ -1228,6 +1228,7 @@ mod tests {
     use super::*;
     use crate::assert_debug_snapshot;
     use crate::selection;
+    use crate::sources::connect::json_selection::PrettyPrintable;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
@@ -3128,5 +3129,46 @@ mod tests {
         let selection = JSONSelection::parse("a.b.c").unwrap();
         let var_paths = selection.external_var_paths();
         assert_eq!(var_paths.len(), 0);
+    }
+
+    #[test]
+    fn test_naked_literal_path_for_connect_v0_2() {
+        let selection_null_stringify_v0_2 = JSONSelection::parse("$(null->jsonStringify)").unwrap();
+        assert_eq!(
+            selection_null_stringify_v0_2.pretty_print(),
+            "$(null->jsonStringify)"
+        );
+
+        let selection_hello_slice_v0_2 =
+            JSONSelection::parse("sliced: $('hello'->slice(1, 3))").unwrap();
+        assert_eq!(
+            selection_hello_slice_v0_2.pretty_print(),
+            "sliced: $(\"hello\"->slice(1, 3))"
+        );
+
+        let selection_true_not_v0_2 = JSONSelection::parse("true->not").unwrap();
+        assert_eq!(selection_true_not_v0_2.pretty_print(), "true->not");
+
+        let selection_false_not_v0_2 = JSONSelection::parse("false->not").unwrap();
+        assert_eq!(selection_false_not_v0_2.pretty_print(), "false->not");
+
+        let selection_object_path_v0_2 = JSONSelection::parse("$({ a: 123 }.a)").unwrap();
+        assert_eq!(
+            selection_object_path_v0_2.pretty_print_with_indentation(true, 0),
+            "$({ a: 123 }.a)"
+        );
+
+        let selection_array_path_v0_2 = JSONSelection::parse("$([1, 2, 3]->get(1))").unwrap();
+        assert_eq!(
+            selection_array_path_v0_2.pretty_print(),
+            "$([1, 2, 3]->get(1))"
+        );
+
+        assert_debug_snapshot!(selection_null_stringify_v0_2);
+        assert_debug_snapshot!(selection_hello_slice_v0_2);
+        assert_debug_snapshot!(selection_true_not_v0_2);
+        assert_debug_snapshot!(selection_false_not_v0_2);
+        assert_debug_snapshot!(selection_object_path_v0_2);
+        assert_debug_snapshot!(selection_array_path_v0_2);
     }
 }
