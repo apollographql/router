@@ -1021,11 +1021,11 @@ mod link_handling_tests {
         //                `insta::assert_snapshot` for now.
         // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
         insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+        schema {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"]) @link(url: "https://specs.apollo.dev/link/v1.0")
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 

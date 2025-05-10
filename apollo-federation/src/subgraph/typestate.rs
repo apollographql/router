@@ -20,19 +20,20 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -532,6 +533,34 @@ pub(crate) fn add_federation_link_to_schema(
     Ok(())
 }
 
+/// Turns a schema without a federation spec link into a federation 1 subgraph schema.
+/// - Adds a fed 1 spec link directive to the schema.
+pub(crate) fn add_fed1_link_to_schema(
+    schema: &mut FederationSchema,
+    link_spec: &LinkSpecDefinition,
+    link_name_in_schema: Name,
+) -> Result<(), FederationError> {
+    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")` directive (or a `@link`
+    // directive, if applicable) to the schema definition.
+    // We can't use `import` argument here since fed1 @core does not support `import`.
+    // We will add imports later (see `fed1_link_imports`).
+    let directive = Directive {
+        name: link_name_in_schema,
+        arguments: vec![Node::new(ast::Argument {
+            name: link_spec.url_arg_name(),
+            value: FED_1.url().to_string().into(),
+        })],
+    };
+    let origin = schema.schema().schema_definition.origin_to_use();
+    crate::schema::position::SchemaDefinitionPosition.insert_directive(
+        schema,
+        Component {
+            origin,
+            node: directive.into(),
+        },
+    )
+}
+
 /// Turns a schema without a federation spec link into a federation 2 subgraph schema.
 /// - It may have a link spec, but it must not have a federation spec.
 /// - This is related to `add_federation_link_to_schema` but for real subgraphs.
@@ -581,12 +610,20 @@ fn schema_as_fed2_subgraph(
 
     // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
     // - auto import certain directives.
+    // Note that there is a mismatch between url and directives that are imported. This is because
+    // we want to maintain backward compatibility for those who have already upgraded and we had
+    // been upgrading the url to latest, but we never automatically import directives that exist
+    // past 2.4
     let imports: Vec<_> = FederationSpecDefinition::auto_expanded_federation_spec()
         .directive_specs()
         .iter()
         .map(|d| format!("@{}", d.name()).into())
         .collect();
 
+    // PORT_NOTE: We are adding the fed spec link to the schema definition unconditionally, not
+    //            considering extensions. This seems consistent with the JS version. But, it's
+    //            not consistent with the `add_to_schema`'s behavior. We may change to use the
+    //            `schema_definition.origin_to_use()` method in the future.
     let mut inner_schema = schema.into_inner();
     inner_schema
         .schema_definition

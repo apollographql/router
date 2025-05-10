@@ -7,7 +7,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
@@ -16,7 +15,6 @@ use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
 use crate::ContextSpecDefinition;
-use crate::LinkSpecDefinition;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -981,27 +979,6 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
         // No federation link found in schema. The default is v1.0.
         Ok(&FED_1)
     }
-}
-
-/// Adds a bootstrap fed 1 link directive to the schema.
-pub(crate) fn add_fed1_link_to_schema(
-    schema: &mut FederationSchema,
-    link_spec: &LinkSpecDefinition,
-    link_name_in_schema: Name,
-) -> Result<(), FederationError> {
-    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")` directive (or a `@link`
-    // directive, if applicable) to the schema definition.
-    // We can't use `import` argument here since fed1 @core does not support `import`.
-    // We will add imports later (see `fed1_link_imports`).
-    let directive = Directive {
-        name: link_name_in_schema,
-        arguments: vec![Node::new(Argument {
-            name: link_spec.url_arg_name(),
-            value: FED_1.url().to_string().into(),
-        })],
-    };
-    crate::schema::position::SchemaDefinitionPosition
-        .insert_directive(schema, Component::new(directive))
 }
 
 /// Creates a fake imports for fed 1 link directive.
