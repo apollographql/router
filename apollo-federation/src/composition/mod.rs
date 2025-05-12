@@ -29,13 +29,13 @@ pub fn expand_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Vec<Subgraph<Expanded>>, Vec<FederationError>> {
     let mut errors: Vec<FederationError> = vec![];
-    let upgraded: Vec<Subgraph<Expanded>> = subgraphs
+    let expanded: Vec<Subgraph<Expanded>> = subgraphs
         .into_iter()
         .map(|s| s.expand_links())
         .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
         .collect();
     if errors.is_empty() {
-        Ok(upgraded)
+        Ok(expanded)
     } else {
         Err(errors)
     }
