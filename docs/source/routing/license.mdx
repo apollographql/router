@@ -1,11 +1,11 @@
 ---
 title: GraphOS Router License
-description: Learn how to manage the license for a Apollo GraphOS Router, including offline license configuration. 
+description: Learn how to manage the license for an Apollo GraphOS Router, including offline license configuration. 
 ---
 
 ## The GraphOS license
 
-Whenever your instance of GraphOS Router starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of GraphOS features:
+Whenever your instance of GraphOS Router starts up and connects to GraphOS, it fetches a __license__, which is the credential that authorizes its use of GraphOS features:
 
 A router instance retains its license for the duration of its execution. If you stop a router instance and then later start a new instance on the same machine, it must fetch a new license. 
 
@@ -46,7 +46,7 @@ These steps work both for running the router executable directly (`./router`) an
     }
     ```
 
-2. Create a [graph API key](/graphos/platform/access-management/api-keys#graph-api-keys) for your supergraph and assign it the **Contributor** role.
+2. Create a [graph API key](/graphos/platform/access-management/api-keys#graph-api-keys) for your supergraph and assign it the __Contributor__ role.
     - We recommend creating a separate graph API key for _each team member_ that will run the router locally.
 
 3. When you start up your local router with your usual command, set the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables for that command:
@@ -74,7 +74,7 @@ Offline license support is available on an as-needed basis to Enterprise organiz
 
 Running your GraphOS Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
 
-To support long-term disconnection scenarios, GraphOS supports **offline licenses** for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. Instead of fetching its supergraph schema from Apollo Uplink, an offline router gets its supergraph schema from a local supergraph schema file.
+To support long-term disconnection scenarios, GraphOS supports __offline licenses__ for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. Instead of fetching its supergraph schema from Apollo Uplink, an offline router gets its supergraph schema from a local supergraph schema file.
 
 <Note>
 
