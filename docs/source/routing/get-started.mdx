@@ -2,6 +2,8 @@
 title: Apollo Router Quickstart
 subtitle: Run the router locally
 description: This quickstart tutorial walks you through installing an Apollo Router binary, running it with an example supergraph schema and a YAML configuration file, and making test queries with Apollo Sandbox.
+redirectFrom:
+  - /graphos/routing/self-hosted/install
 ---
 
 import ElasticNotice from "../../shared/elastic-notice.mdx";
@@ -221,7 +223,7 @@ Let's run the router in dev mode, using both the supergraph schema and YAML conf
     ```sh showLineNumbers=false
     ./router --dev --config router.yaml --supergraph supergraph.graphql
     ```
-    
+
     <ExpansionPanel title="About dev mode">
 
     Running router with `--dev` is the same as using the following configuration:
