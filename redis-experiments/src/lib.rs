@@ -63,7 +63,7 @@ impl Cache {
                         self.document_id(&self.config.indexed_document_id_prefix)
                             .into(),
                     ],
-                    temporary: self.config.temporary_seconds,
+                    // temporary: self.config.temporary_seconds,
                     ..Default::default()
                 },
                 vec![SearchSchema {
