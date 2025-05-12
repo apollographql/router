@@ -141,7 +141,7 @@ By default, the context is not sent to the coprocessor (`context: false`).
 You can send _all_ context keys to your coprocessor using `context: all`.
 You can also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
 
-If you're upgrading from router 1.x, the [context key names changed](/docs/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
+If you're upgrading from router 1.x, the [context key names changed](/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
 
 <Note>
 
