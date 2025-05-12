@@ -291,7 +291,9 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             })
             .map_err(|e| vec![e])?;
-        let url = StringTemplate::from_str(url_string.as_str())
+
+        let multiplie_url = url_string.as_str().replace(char::is_whitespace, "");
+        let url = StringTemplate::from_str(&multiplie_url)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
@@ -421,8 +423,7 @@ fn validate_absolute_connect_url(
         });
     }
 
-    let multiplie_url = first.value.replace(char::is_whitespace, "");
-    let base_url = Uri::from_str(multiplie_url.trim()).map_err(|err| Message {
+    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
         code: Code::InvalidUrl,
         message: format!("In {coordinate}: {err}: {}", first.value.trim()),
         locations: str_value
