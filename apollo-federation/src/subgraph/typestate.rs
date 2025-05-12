@@ -577,10 +577,9 @@ mod tests {
     use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
 
+    use super::*;
     use crate::subgraph::test_utils::build_and_validate;
     use crate::subgraph::test_utils::build_for_errors;
-
-    use super::*;
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {
