@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::ty;
 use itertools::Itertools;
 
@@ -15,8 +13,7 @@ use crate::error::SingleFederationError;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::DEFAULT_LINK_NAME;
-use crate::link::Import;
-use crate::link::Purpose;
+use crate::link::Link;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -26,7 +23,6 @@ use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
-use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
@@ -46,34 +42,14 @@ use crate::schema::validators::requires::validate_requires_directives;
 use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
-use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
-use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
-use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::utils::human_readable::HumanReadableListOptions;
 use crate::utils::human_readable::HumanReadableListPrefix;
 use crate::utils::human_readable::human_readable_list;
 
-#[allow(dead_code)]
-struct CoreFeature {
-    url: Url,
-    name_in_schema: Name,
-    directive: Directive,
-    imports: Vec<Import>,
-    purpose: Option<Purpose>,
-}
-#[allow(dead_code)]
-pub(crate) struct FederationBlueprint {
-    with_root_type_renaming: bool,
-}
+pub(crate) struct FederationBlueprint {}
 
 #[allow(dead_code)]
 impl FederationBlueprint {
-    pub(crate) fn new(with_root_type_renaming: bool) -> Self {
-        Self {
-            with_root_type_renaming,
-        }
-    }
-
     pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
         directive: &Node<Directive>,
@@ -134,7 +110,7 @@ impl FederationBlueprint {
 
     fn on_added_core_feature(
         schema: &mut FederationSchema,
-        feature: &CoreFeature,
+        feature: &Link,
     ) -> Result<(), FederationError> {
         if feature.url.identity == Identity::federation_identity() {
             FEDERATION_VERSIONS
@@ -146,79 +122,42 @@ impl FederationBlueprint {
     }
 
     pub(crate) fn on_validation(
-        &self,
-        mut schema: FederationSchema,
-    ) -> Result<ValidFederationSchema, FederationError> {
+        schema: &ValidFederationSchema,
+        meta: &SubgraphMetadata,
+    ) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
-        if self.with_root_type_renaming {
-            let mut operation_types_to_rename = HashMap::new();
-            for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
-                let default_name = default_operation_name(&op_type);
-                if op_name.name != default_name {
-                    operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                    if schema.try_get_type(default_name.clone()).is_some() {
-                        error_collector.push(
-                            SingleFederationError::root_already_used(
-                                op_type,
-                                default_name,
-                                op_name.name.clone(),
-                            )
-                            .into(),
-                        );
-                    }
-                }
-            }
-            for (current_name, new_name) in operation_types_to_rename {
-                schema
-                    .get_type(current_name)?
-                    .rename(&mut schema, new_name)?;
-            }
-        }
 
-        let schema = schema.validate_or_return_self().map_err(|(schema, err)| {
-            // Specialize GraphQL validation errors.
-            let iter = err.into_errors().into_iter().map(|err| match err {
-                SingleFederationError::InvalidGraphQL { message } => {
-                    Self::on_invalid_graphql_error(&schema, message)
-                }
-                _ => err,
-            });
-            FederationError::from(MultipleFederationErrors::from_iter(iter))
-        })?;
-        let Some(meta) = schema.subgraph_metadata() else {
-            bail!("Federation schema should have had its metadata set on construction");
-        };
         // We skip the rest of validation for fed1 schemas because there is a number of validations that is stricter than what fed 1
         // accepted, and some of those issues are fixed by `SchemaUpgrader`. So insofar as any fed 1 schma is ultimately converted
         // to a fed 2 one before composition, then skipping some validation on fed 1 schema is fine.
         if !meta.is_fed_2_schema() {
-            return error_collector.into_result().map(|_| schema);
+            return error_collector.into_result();
         }
 
-        let context_map = validate_context_directives(&schema, &mut error_collector)?;
-        validate_from_context_directives(&schema, &context_map, &mut error_collector)?;
-        validate_key_directives(&schema, meta, &mut error_collector)?;
-        validate_provides_directives(&schema, meta, &mut error_collector)?;
-        validate_requires_directives(&schema, meta, &mut error_collector)?;
-        validate_external_directives(&schema, meta, &mut error_collector)?;
+        let context_map = validate_context_directives(schema, &mut error_collector)?;
+        validate_from_context_directives(schema, &context_map, &mut error_collector)?;
+        validate_key_directives(schema, meta, &mut error_collector)?;
+        validate_provides_directives(schema, meta, &mut error_collector)?;
+        validate_requires_directives(schema, meta, &mut error_collector)?;
+        validate_external_directives(schema, meta, &mut error_collector)?;
 
         // TODO: Remaining validations
         Self::validate_keys_on_interfaces_are_also_on_all_implementations(
-            &schema,
+            schema,
             meta,
             &mut error_collector,
         )?;
-        Self::validate_interface_objects_are_on_entities(&schema, meta, &mut error_collector)?;
+        Self::validate_interface_objects_are_on_entities(schema, meta, &mut error_collector)?;
 
-        validate_cost_directives(&schema, &mut error_collector)?;
-        validate_list_size_directives(&schema, &mut error_collector)?;
+        validate_cost_directives(schema, &mut error_collector)?;
+        validate_list_size_directives(schema, &mut error_collector)?;
 
-        error_collector.into_result().map(|_| schema)
+        error_collector.into_result()
     }
 
     // Allows to intercept some apollo-compiler error messages when we can provide additional
     // guidance to users.
-    fn on_invalid_graphql_error(
+    pub(crate) fn on_invalid_graphql_error(
         schema: &FederationSchema,
         message: String,
     ) -> SingleFederationError {
@@ -578,14 +517,6 @@ impl FederationBlueprint {
             }
         }
         Ok(())
-    }
-}
-
-fn default_operation_name(op_type: &OperationType) -> Name {
-    match op_type {
-        OperationType::Query => GRAPHQL_QUERY_TYPE_NAME,
-        OperationType::Mutation => GRAPHQL_MUTATION_TYPE_NAME,
-        OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
     }
 }
 

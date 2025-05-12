@@ -47,7 +47,7 @@ pub fn validate_subgraphs(
     let mut errors: Vec<FederationError> = vec![];
     let validated: Vec<Subgraph<Validated>> = subgraphs
         .into_iter()
-        .map(|s| s.validate(false))
+        .map(|s| s.validate())
         .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
         .collect();
     if errors.is_empty() {
