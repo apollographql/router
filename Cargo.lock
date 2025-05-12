@@ -5424,6 +5424,7 @@ version = "0.1.0"
 dependencies = [
  "fred 10.1.0",
  "futures",
+ "regex",
  "tokio",
  "uuid",
 ]
