@@ -343,6 +343,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
     let name = name.unwrap_or("subgraph".to_string());
     let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)?
         .expand_links()?
+        .assume_upgraded()
         .validate(true)
         .map_err(|e| e.into_inner())?;
     println!("{}", subgraph.schema_string());

@@ -14,6 +14,7 @@ use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
@@ -357,7 +358,7 @@ impl SubgraphError {
     // And return them as a vector of (error_code, error_message) tuples
     // - Gather associated errors from the validation error.
     // - Split each error into its code and message.
-    // - Add the subgraph name prefix to FederationError message.
+    // - Add the subgraph name prefix to CompositionError message.
     pub fn format_errors(&self) -> Vec<(String, String)> {
         self.error
             .errors()
@@ -375,6 +376,12 @@ impl SubgraphError {
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.subgraph, self.error)
+    }
+}
+
+impl From<SubgraphError> for FederationError {
+    fn from(value: SubgraphError) -> Self {
+        internal_error!("[{}] {}", value.subgraph, value.error)
     }
 }
 
@@ -403,10 +410,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))?
-            .validate(true)
+        subgraph.expand_links()?.assume_upgraded().validate(true)
     }
 
     pub fn build_inner_expanded(
@@ -423,9 +427,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))
+        subgraph.expand_links()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
