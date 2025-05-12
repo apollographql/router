@@ -1,28 +1,11 @@
 //! Validations that check the entire connectors schema together:
 
-use self::keys::EntityKeyChecker;
-use self::keys::field_set_error;
-use crate::link::Import;
-use crate::link::Link;
-use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
-use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
-use crate::link::spec::Identity;
-use crate::sources::connect::json_selection::ExternalVarPaths;
-use crate::sources::connect::json_selection::SelectionTrie;
-use crate::sources::connect::Connector;
-use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::{Code, Message};
-use crate::sources::connect::Namespace;
-use crate::sources::connect::PathSelection;
-use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
-use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::executable::{Field, FieldSet, SelectionSet};
 use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
@@ -31,12 +14,29 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{Name, Node};
 use hashbrown::HashSet;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use shape::{Shape, ShapeCase, ShapeVisitor};
-use tracing::warn;
+use shape::Shape;
+use shape::ShapeCase;
+use shape::ShapeVisitor;
+
+use self::keys::EntityKeyChecker;
+use self::keys::field_set_error;
+use crate::link::Import;
+use crate::link::Link;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
+use crate::link::spec::Identity;
+use crate::sources::connect::Connector;
+use crate::sources::connect::json_selection::SelectionTrie;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
+use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 
 mod keys;
 
@@ -312,20 +312,8 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
 
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
-            connector.selection.external_var_paths().iter().for_each(|e| {
-                let Some(b) = e.variable_reference::<Namespace>() else {
-                    return;
-                };
-                println!("\n\nBBSS: {b:?}\n\n");
-
-            });
-
-            let Ok(Some(input_key)) = connector.resolvable_key(schema) else {
-                unreachable!("TypeBatch is expected to always have a key");
-            };
-
-            match SelectionSetWalker::new(&input_key.selection_set)
-                .walk(&connector.selection.shape(), connector)
+            let input_trie = compute_input_trie(connector);
+            match SelectionSetWalker::new(&input_trie).walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
                 Err(err) => messages.push(err),
@@ -357,15 +345,23 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     entity_checker.check_for_missing_entity_connectors(schema)
 }
 
+fn compute_input_trie(connector: &Connector) -> SelectionTrie {
+    let mut merged = SelectionTrie::new();
+    for param in connector.variable_references() {
+        merged.extend(&param.selection);
+    }
+    merged
+}
+
 struct SelectionSetWalker<'walker> {
-    set: &'walker SelectionSet,
-    unmapped_fields: HashSet<&'walker Node<Field>>,
+    trie: &'walker SelectionTrie,
+    unmapped_fields: HashSet<String>,
 }
 
 impl<'walker> SelectionSetWalker<'walker> {
-    fn new(set: &'walker SelectionSet) -> Self {
+    fn new(trie: &'walker SelectionTrie) -> Self {
         SelectionSetWalker {
-            set,
+            trie,
             unmapped_fields: HashSet::new(),
         }
     }
@@ -378,7 +374,7 @@ enum ShapeVisitorError<'error> {
     )]
     BatchKeyNotSubsetOfOutputShape {
         connector: String,
-        unset: &'error Node<Field>,
+        unset: &'error String,
         output_shape: &'error Shape,
     },
     #[error("Attempted to resolve key on unexpected shape `{shape_str}`")]
@@ -390,7 +386,7 @@ enum ShapeVisitorError<'error> {
 #[allow(clippy::extra_unused_lifetimes)]
 impl<'error> From<ShapeVisitorError<'_>> for Message {
     fn from(value: ShapeVisitorError) -> Self {
-        match value {
+        match &value {
             ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { .. } => Message {
                 code: Code::ConnectorsUnresolvedField,
                 message: value.to_string(),
@@ -404,8 +400,7 @@ impl<'error> From<ShapeVisitorError<'_>> for Message {
             ShapeVisitorError::NonRootBatch => Message {
                 code: Code::ConnectBatchAndThis,
                 message: value.to_string(),
-                // TODO: Determine correct location
-                locations: vec![],
+                locations: Vec::new(),
             },
         }
     }
@@ -413,11 +408,11 @@ impl<'error> From<ShapeVisitorError<'_>> for Message {
 
 impl SelectionSetWalker<'_> {
     fn walk(
-        &mut self,
+        mut self,
         output_shape: &Shape,
         connector: &Connector,
     ) -> Result<Vec<Message>, Message> {
-        output_shape.visit_shape(self)?;
+        output_shape.visit_shape(&mut self)?;
 
         // Collect messages from unset Names
         let mut vec = Vec::new();
@@ -434,12 +429,14 @@ impl SelectionSetWalker<'_> {
         Ok(vec)
     }
 }
-impl <'walker> ShapeVisitor for SelectionSetWalker<'walker> {
+impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
     type Error = ShapeVisitorError<'walker>;
     type Output = ();
 
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
-        Err(ShapeVisitorError::UnexpectedKeyOnShape { shape_str: shape.pretty_print() })
+        Err(ShapeVisitorError::UnexpectedKeyOnShape {
+            shape_str: shape.pretty_print(),
+        })
     }
 
     fn visit_object(
@@ -448,27 +445,15 @@ impl <'walker> ShapeVisitor for SelectionSetWalker<'walker> {
         fields: &IndexMap<String, Shape>,
         _: &Shape,
     ) -> Result<Self::Output, Self::Error> {
-        for selection in &self.set.selections {
-            let Selection::Field(field) = selection else {
-                continue;
-            };
-
-            // Object should contain all fields in the selection set. If not, then the field
-            // and all nested field sets are unmapped.
-            let field_name = field.alias.as_ref().unwrap_or(&field.name).as_str();
-            if !fields.contains_key(field_name) {
-                self.unmapped_fields.insert(field);
-                self.unmapped_fields.extend(
-                    &mut field
-                        .selection_set
-                        .selections
-                        .iter()
-                        .filter_map(|s| s.as_field()),
-                );
+        for (key, sub_selection) in self.trie.iter() {
+            // Object should contain all keys in the selection set.
+            // If not, then the key is unmapped.
+            if !fields.contains_key(key) {
+                self.unmapped_fields.insert(key.to_string());
                 continue;
             }
 
-            let Some(next_shape) = fields.get(field_name) else {
+            let Some(next_shape) = fields.get(key) else {
                 unreachable!("nested shape is expected")
             };
 
@@ -479,13 +464,13 @@ impl <'walker> ShapeVisitor for SelectionSetWalker<'walker> {
                 }
             }
 
-            // If field has no nested selections, then we can stop walking down this branch.
-            if field.selection_set.is_empty() {
+            // If key has no nested selections, then we can stop walking down this branch.
+            if sub_selection.is_empty() {
                 continue;
             }
 
             // Continue walking with nested selection sets
-            let mut nested = SelectionSetWalker::new(&field.selection_set);
+            let mut nested = SelectionSetWalker::new(sub_selection);
             next_shape.visit_shape(&mut nested)?;
             self.unmapped_fields
                 .extend(nested.unmapped_fields.into_iter());
