@@ -1,9 +1,13 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 
+use fred::bytes::Bytes;
 use fred::bytes_utils::Str;
+use fred::bytes_utils::string::StrInner;
 use fred::prelude::*;
 use fred::types::MultipleKeys;
 use fred::types::RespVersion;
+use fred::types::cluster::ClusterRouting;
 use fred::types::redisearch::FtCreateOptions;
 use fred::types::redisearch::FtSearchOptions;
 use fred::types::redisearch::IndexKind;
@@ -214,7 +218,8 @@ impl Cache {
                 keys_to_delete.push(id_string);
                 let _values = iter.next();
             }
-            let deleted: u64 = self.client.del(keys_to_delete).await?;
+
+            let deleted: u64 = self.delete_cluster(keys_to_delete).await?;
             count += deleted;
         }
     }
@@ -233,5 +238,25 @@ impl Cache {
         } else {
             self.config.index_name.as_str().into()
         }
+    }
+
+    async fn delete_cluster(&self, keys: Vec<StrInner<Bytes>>) -> FredResult<u64> {
+        let mut h: HashMap<u16, Vec<StrInner<Bytes>>> = HashMap::new();
+        for key in keys.into_iter() {
+            let hash = ClusterRouting::hash_key(key.as_bytes());
+            let entry = h.entry(hash).or_default();
+            entry.push(key);
+        }
+
+        // then we query all the key groups at the same time
+        let results: Vec<Result<u64, fred::error::Error>> =
+            futures::future::join_all(h.into_values().map(|keys| self.client.del(keys))).await;
+        let mut total = 0u64;
+
+        for res in results {
+            total += res?;
+        }
+
+        Ok(total)
     }
 }

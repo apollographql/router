@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+futures = "0.3.31"
 # env_logger = "0.11.5"
 # fred = { version = "10.1.0", features = ["i-redisearch"] }
 # fred = { path = "../../fred.rs", features = ["i-redisearch"] }
@@ -14,4 +15,4 @@ uuid = { version = "1.16.0", features = ["v4"] }
 # https://github.com/aembke/fred.rs/issues/346 and https://github.com/aembke/fred.rs/pull/349
 git = "https://github.com/SimonSapin/fred.rs"
 rev = "32391ec56ac18ee83d02e9f112910b0382bc082c"
-features = ["i-redisearch", "enable-rustls"]
+features = ["i-redisearch", "enable-rustls", "i-cluster"]
