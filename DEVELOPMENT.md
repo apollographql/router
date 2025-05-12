@@ -20,7 +20,7 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 You will need a recent version of rust, as specified in `rust-toolchain.toml`.
 We recommend [using rustup](https://www.rust-lang.org/tools/install)
-as it will automatically install the required toolchain version,
+as it will automatically install the requiried toolchain version,
 including rustfmt and clippy
 that are not always included by default in other rust distribution channels.
 
@@ -53,7 +53,7 @@ in foreground.
 Once the subgraphs are up and running, run the router with this command:
 
 ```shell
-cargo run --release -- --dev -s ./examples/graphql/local.graphql -c examples/telemetry/datadog.router.yaml
+cargo run --release -- -s ./examples/graphql/local.graphql -c examples/telemetry/jaeger.router.yaml
 ```
 
 Go to <https://studio.apollographql.com/sandbox/explorer> to make queries and
