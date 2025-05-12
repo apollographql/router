@@ -152,14 +152,17 @@ fn test(path: &PathBuf, plan: Plan) -> Result<(), Failed> {
     let rt = Runtime::new()?;
 
     // Spawn the root task
-    let caught = rt.block_on(std::panic::AssertUnwindSafe(async {
-        let mut execution = TestExecution::new();
-        for action in plan.actions {
-            execution.execute_action(&action, path, &mut out).await?;
-        }
+    let caught = rt.block_on(
+        std::panic::AssertUnwindSafe(async {
+            let mut execution = TestExecution::new();
+            for action in plan.actions {
+                execution.execute_action(&action, path, &mut out).await?;
+            }
 
-        Ok(())
-    }).catch_unwind());
+            Ok(())
+        })
+        .catch_unwind(),
+    );
 
     match caught {
         Ok(result) => result,
