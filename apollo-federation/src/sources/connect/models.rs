@@ -258,7 +258,7 @@ impl Connector {
         )
     }
 
-    /// Create a field set for a `@key` using `$args` and `$this` variables.
+    /// Create a field set for a `@key` using `$args`, `$this`, or `$batch` variables.
     pub fn resolvable_key(&self, schema: &Schema) -> Result<Option<Valid<FieldSet>>, String> {
         match &self.entity_resolver {
             None => Ok(None),

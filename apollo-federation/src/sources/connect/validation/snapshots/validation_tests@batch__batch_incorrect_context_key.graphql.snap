@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch/bat
 [
     Message {
         code: ConnectBatchAndThis,
-        message: "Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`)",
+        message: "`$batch` fields must be mapped from the API response body. Variables such as `$context` and `$this` are not supported",
         locations: [],
     },
 ]

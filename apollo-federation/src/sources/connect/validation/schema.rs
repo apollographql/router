@@ -30,6 +30,7 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::sources::connect::Connector;
+use crate::sources::connect::Namespace::Batch;
 use crate::sources::connect::json_selection::SelectionTrie;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -312,7 +313,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
 
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
-            let input_trie = compute_input_trie(connector);
+            let input_trie = compute_batch_input_trie(connector);
             match SelectionSetWalker::new(&input_trie).walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
@@ -345,12 +346,15 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     entity_checker.check_for_missing_entity_connectors(schema)
 }
 
-fn compute_input_trie(connector: &Connector) -> SelectionTrie {
-    let mut merged = SelectionTrie::new();
-    for param in connector.variable_references() {
-        merged.extend(&param.selection);
-    }
-    merged
+fn compute_batch_input_trie(connector: &Connector) -> SelectionTrie {
+    let mut trie = SelectionTrie::new();
+    connector
+        .variable_references()
+        .filter(|var| var.namespace.namespace == Batch)
+        .for_each(|var| {
+            let _ = &trie.extend(&var.selection);
+        });
+    trie
 }
 
 struct SelectionSetWalker<'walker> {
@@ -370,16 +374,17 @@ impl<'walker> SelectionSetWalker<'walker> {
 #[derive(Debug, thiserror::Error)]
 enum ShapeVisitorError<'error> {
     #[error(
-        "The `@connect` directive on `{connector}` specifies a batch entity resolver, but the key `{unset}` is not a subset of the output shape `{output_shape}`"
+        "The `@connect` directive on `{connector}` specifies a `$batch` entity resolver, but the field `{unset}` could not be found in the output selection"
     )]
     BatchKeyNotSubsetOfOutputShape {
         connector: String,
         unset: &'error String,
-        output_shape: &'error Shape,
     },
     #[error("Attempted to resolve key on unexpected shape `{shape_str}`")]
     UnexpectedKeyOnShape { shape_str: String },
-    #[error("Batch keys cannot be mapped from non-`$root` sources (i.e. `$context`, `$this`)")]
+    #[error(
+        "`$batch` fields must be mapped from the API response body. Variables such as `$context` and `$this` are not supported"
+    )]
     NonRootBatch,
 }
 
@@ -407,6 +412,8 @@ impl<'error> From<ShapeVisitorError<'_>> for Message {
 }
 
 impl SelectionSetWalker<'_> {
+    const ROOT_SHAPE: &'static str = "$root";
+
     fn walk(
         mut self,
         output_shape: &Shape,
@@ -419,9 +426,8 @@ impl SelectionSetWalker<'_> {
         for unset in &self.unmapped_fields {
             vec.push(
                 ShapeVisitorError::BatchKeyNotSubsetOfOutputShape {
-                    connector: connector.id.directive.synthetic_name(),
+                    connector: connector.id.directive.simple_name(),
                     unset,
-                    output_shape,
                 }
                 .into(),
             );
@@ -459,7 +465,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
 
             // Check that next shape doesn't come from a non-`$root` field.
             if let ShapeCase::Name(root, _) = next_shape.case() {
-                if root.value != "$root" {
+                if root.value != Self::ROOT_SHAPE {
                     return Err(ShapeVisitorError::NonRootBatch);
                 }
             }

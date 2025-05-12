@@ -12,7 +12,7 @@ type User
   @connect(
     source: "my-source"
     http: {
-      GET: "/users?ids={$batch.id->joinNotNull(',')}"
+      GET: "/users?a={$context.id}&ids={$batch.id->joinNotNull(',')}"
     }
     selection: """
     $.results {
