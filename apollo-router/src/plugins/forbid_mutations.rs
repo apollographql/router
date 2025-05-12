@@ -96,7 +96,7 @@ mod forbid_http_get_mutations_tests {
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
-            None
+            None,
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
@@ -124,7 +124,7 @@ mod forbid_http_get_mutations_tests {
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
-            None
+            None,
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
@@ -149,7 +149,7 @@ mod forbid_http_get_mutations_tests {
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(false),
             Default::default(),
-            None
+            None,
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")

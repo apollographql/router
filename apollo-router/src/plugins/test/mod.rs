@@ -116,7 +116,10 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .unwrap_or(Value::Object(Default::default()));
 
         // Only the telemetry plugin should have access to the full router config (even in tests)
-        let full_config = config.validated_yaml.clone().filter(|_| name == "telemetry");
+        let full_config = config
+            .validated_yaml
+            .clone()
+            .filter(|_| name == "telemetry");
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
             let schema = Schema::parse(schema, &config).unwrap();

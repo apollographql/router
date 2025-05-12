@@ -98,7 +98,11 @@ where
     T: for<'de> Deserialize<'de>,
 {
     #[cfg(test)]
-    pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>, full_config: Option<Value>) -> Self {
+    pub(crate) fn fake_new(
+        config: T,
+        supergraph_sdl: Arc<String>,
+        full_config: Option<Value>,
+    ) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
             Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                 .expect("failed to parse supergraph schema")
@@ -325,7 +329,7 @@ impl PluginFactory {
     pub(crate) async fn create_telemetry_instance_without_schema(
         &self,
         telemetry_config: &Value,
-        full_config: Value
+        full_config: Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
         (self.instance_factory)(
             PluginInit::fake_builder()
@@ -333,7 +337,7 @@ impl PluginFactory {
                 .full_config(full_config)
                 .build(),
         )
-            .await
+        .await
     }
 
     pub(crate) fn create_schema(

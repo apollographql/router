@@ -2032,7 +2032,7 @@ mod tests {
         let mut plugin = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_telemetry_instance_without_schema(telemetry_config, full_config,)
+            .create_telemetry_instance_without_schema(telemetry_config, full_config)
             .await
             .unwrap();
 
@@ -2125,10 +2125,7 @@ mod tests {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_telemetry_instance_without_schema(
-                &telemetry_config,
-                full_config,
-            )
+            .create_telemetry_instance_without_schema(&telemetry_config, full_config)
             .await
             .unwrap();
     }

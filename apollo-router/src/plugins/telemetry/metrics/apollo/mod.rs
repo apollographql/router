@@ -215,22 +215,15 @@ impl Config {
 #[cfg(test)]
 mod test {
     use std::future::Future;
-    use std::str::FromStr;
     use std::time::Duration;
 
-    use http::header::HeaderName;
-    use libc::ledger_t;
-    use serde_json::json;
     use serde_json::Value;
     use tokio_stream::StreamExt;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
-    use url::Url;
 
-    use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
-    use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
     use crate::context::OPERATION_KIND;
@@ -437,7 +430,8 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        let config = format!(r#"
+        let config = format!(
+            r#"
             telemetry:
               apollo:
                 endpoint: "{endpoint}"
@@ -451,9 +445,7 @@ mod test {
             endpoint = ENDPOINT_DEFAULT
         );
 
-        async move {
-            create_plugin_from_full_config(&config).await
-        }
+        async move { create_plugin_from_full_config(&config).await }
     }
 
     async fn create_plugin_from_full_config(full_config: &str) -> Result<Telemetry, BoxError> {
@@ -477,7 +469,7 @@ mod test {
         <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
-            None
+            None,
         ))
         .await
     }
