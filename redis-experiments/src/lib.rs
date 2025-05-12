@@ -45,7 +45,7 @@ impl Cache {
     pub async fn create_index_if_not_exists(&self) -> FredResult<()> {
         let result = self.create_index().await;
         if let Err(err) = &result {
-            if err.details() == "Index already exists" {
+            if err.details().contains("already exists") {
                 return Ok(());
             }
         }
