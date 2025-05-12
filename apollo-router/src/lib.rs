@@ -83,6 +83,7 @@ mod uplink;
 
 #[doc(hidden)]
 pub mod otel_compat;
+mod registry;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;

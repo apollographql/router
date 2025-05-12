@@ -83,6 +83,7 @@ cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
 dashmap = { version = "6.0.0", features = ["serde"] }
+docker_credential = "1.3.1"
 derivative = "2.2.0"
 derive_more = { version = "2.0.0", default-features = false, features = [
     "from",
@@ -127,6 +128,7 @@ notify = { version = "6.1.1", default-features = false, features = [
 ] }
 nu-ansi-term = "0.50"
 num-traits = "0.2.19"
+oci-client = { version = "0.14.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns", "test-registry"] }
 once_cell = "1.19.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care

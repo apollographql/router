@@ -2,12 +2,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
-use derivative::Derivative;
-use derive_more::Display;
-use derive_more::From;
-use futures::prelude::*;
-use url::Url;
-
+use crate::registry::{OCIConfig, fetch_oci};
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -15,6 +10,11 @@ use crate::uplink::UplinkConfig;
 use crate::uplink::schema::SchemaState;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
+use derivative::Derivative;
+use derive_more::Display;
+use derive_more::From;
+use futures::prelude::*;
+use url::Url;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -51,6 +51,9 @@ pub enum SchemaSource {
         /// The URLs to fetch the schema from.
         urls: Vec<Url>,
     },
+
+    #[display("Registry")]
+    OCI(OCIConfig),
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -153,6 +156,25 @@ impl SchemaSource {
                 })
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
                 .boxed()
+            }
+            SchemaSource::OCI(oci_config) => {
+                futures::stream::once(async move {
+                    // TODO: Fix error handling
+                    match fetch_oci(oci_config).await {
+                        Ok(oci_result) => {
+                            Some(SchemaState {
+                                sdl: oci_result.schema,
+                                launch_id: None,
+                            })
+                        }
+                        Err(err) => {
+                            tracing::error!("{}", err);
+                            None
+                        }
+                    }
+                })
+                    .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                    .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
