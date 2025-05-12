@@ -2023,6 +2023,7 @@ mod tests {
     async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
         let prometheus_support = config.contains("prometheus");
         let config: Value = serde_yaml::from_str(config).expect("yaml must be valid");
+        let full_config = config.clone();
         let telemetry_config = config
             .as_object()
             .expect("must be an object")
@@ -2031,7 +2032,7 @@ mod tests {
         let mut plugin = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance_without_schema(telemetry_config)
+            .create_telemetry_instance_without_schema(telemetry_config, full_config,)
             .await
             .unwrap();
 
@@ -2119,11 +2120,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
+        let full_config = serde_json::json!({ "telemetry": {"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}});
+        let telemetry_config = full_config["telemetry"].clone();
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance_without_schema(
-                &serde_json::json!({"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}),
+            .create_telemetry_instance_without_schema(
+                &telemetry_config,
+                full_config,
             )
             .await
             .unwrap();

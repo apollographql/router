@@ -320,6 +320,22 @@ impl PluginFactory {
         .await
     }
 
+    // TODO not loving the telemetry-specificness of this, but it is test only :shrug:
+    #[cfg(test)]
+    pub(crate) async fn create_telemetry_instance_without_schema(
+        &self,
+        telemetry_config: &Value,
+        full_config: Value
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(
+            PluginInit::fake_builder()
+                .config(telemetry_config.clone())
+                .full_config(full_config)
+                .build(),
+        )
+            .await
+    }
+
     pub(crate) fn create_schema(
         &self,
         generator: &mut SchemaGenerator,
