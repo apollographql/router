@@ -1,140 +1,13 @@
-use apollo_federation::subgraph::SubgraphError;
-use apollo_federation::subgraph::typestate::Subgraph;
-use apollo_federation::subgraph::typestate::Validated;
-
-enum BuildOption {
-    AsIs,
-    AsFed2,
-}
-
-fn build_inner(
-    schema_str: &str,
-    build_option: BuildOption,
-) -> Result<Subgraph<Validated>, SubgraphError> {
-    let name = "S";
-    let subgraph =
-        Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
-    let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-        subgraph
-            .into_fed2_subgraph()
-            .map_err(|e| SubgraphError::new(name, e))?
-    } else {
-        subgraph
-    };
-    subgraph
-        .expand_links()
-        .map_err(|e| SubgraphError::new(name, e))?
-        .validate(true)
-}
-
-fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
-    build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
-}
-
-fn build_for_errors_with_option(schema: &str, build_option: BuildOption) -> Vec<(String, String)> {
-    build_inner(schema, build_option)
-        .expect_err("subgraph error was expected")
-        .format_errors()
-}
-
-/// Build subgraph expecting errors, assuming fed 2.
-fn build_for_errors(schema: &str) -> Vec<(String, String)> {
-    build_for_errors_with_option(schema, BuildOption::AsFed2)
-}
-
-fn remove_indentation(s: &str) -> String {
-    // count the last lines that are space-only
-    let first_empty_lines = s.lines().take_while(|line| line.trim().is_empty()).count();
-    let last_empty_lines = s
-        .lines()
-        .rev()
-        .take_while(|line| line.trim().is_empty())
-        .count();
-
-    // lines without the space-only first/last lines
-    let lines = s
-        .lines()
-        .skip(first_empty_lines)
-        .take(s.lines().count() - first_empty_lines - last_empty_lines);
-
-    // compute the indentation
-    let indentation = lines
-        .clone()
-        .map(|line| line.chars().take_while(|c| *c == ' ').count())
-        .min()
-        .unwrap_or(0);
-
-    // remove the indentation
-    lines
-        .map(|line| {
-            line.trim_end()
-                .chars()
-                .skip(indentation)
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// True if a and b contain the same error messages
-fn check_errors(a: &[(String, String)], b: &[(&str, &str)]) -> Result<(), String> {
-    if a.len() != b.len() {
-        return Err(format!(
-            "Mismatched error counts: {} != {}\n\nexpected:\n{}\n\nactual:\n{}",
-            b.len(),
-            a.len(),
-            b.iter()
-                .map(|(code, msg)| { format!("- {}: {}", code, msg) })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            a.iter()
-                .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ));
-    }
-
-    // remove indentations from messages to ignore indentation differences
-    let b_iter = b
-        .iter()
-        .map(|(code, message)| (*code, remove_indentation(message)));
-    let diff: Vec<_> = a
-        .iter()
-        .map(|(code, message)| (code.as_str(), remove_indentation(message)))
-        .zip(b_iter)
-        .filter(|(a_i, b_i)| a_i.0 != b_i.0 || a_i.1 != b_i.1)
-        .collect();
-    if diff.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Mismatched errors:\n{}\n",
-            diff.iter()
-                .map(|(a_i, b_i)| { format!("- {}: {}\n+ {}: {}", b_i.0, b_i.1, a_i.0, a_i.1) })
-                .collect::<Vec<_>>()
-                .join("\n")
-        ))
-    }
-}
-
-macro_rules! assert_errors {
-    ($a:expr, $b:expr) => {
-        match check_errors(&$a, &$b) {
-            Ok(()) => {
-                // Success
-            }
-            Err(e) => {
-                panic!("{e}")
-            }
-        }
-    };
-}
+use apollo_federation::assert_errors;
+use apollo_federation::subgraph::test_utils::BuildOption;
+use apollo_federation::subgraph::test_utils::build_and_validate;
+use apollo_federation::subgraph::test_utils::build_for_errors;
+use apollo_federation::subgraph::test_utils::build_for_errors_with_option;
 
 mod fieldset_based_directives {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_key() {
         let schema_str = r#"
             type Query {		
@@ -156,7 +29,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_provides() {
         let schema_str = r#"
             type Query {
@@ -179,7 +51,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -202,7 +73,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -333,18 +203,17 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_non_object_fields() {
         let schema_str = r#"
             type Query {
-                t: T @provides(fields: "f")
+                t: Int @provides(fields: "f")
             }
 
             type T {
                 f: Int
             }
         "#;
-        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
+        let err = build_for_errors(schema_str);
 
         assert_errors!(
             err,
@@ -356,7 +225,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_non_string_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -379,8 +247,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -412,8 +278,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -446,7 +310,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_key() {
@@ -471,8 +334,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_provides() {
@@ -506,8 +367,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_requires() {
@@ -542,7 +401,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -565,8 +424,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -595,7 +453,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -619,8 +477,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interface_field() {
         let schema_str = r#"
             type Query {
@@ -641,14 +497,12 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_FIELDS_SELECT_INVALID_TYPE",
-                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Interface type which is not allowed in @key"#,
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is an Interface type which is not allowed in @key"#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_union_field() {
         let schema_str = r#"
             type Query {
@@ -673,8 +527,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_key() {
         let schema_str = r#"
             type Query {
@@ -702,8 +554,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_provides() {
         let schema_str = r#"
             type Query {
@@ -732,8 +582,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_requires() {
         let schema_str = r#"
             type Query {
@@ -758,8 +606,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn can_collect_multiple_errors_in_a_single_fields_argument() {
         let schema_str = r#"
             type Query {
@@ -789,8 +635,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_key() {
         let schema_str = r#"
             type Query {
@@ -813,8 +657,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_provides() {
         let schema_str = r#"
             type Query {
@@ -838,8 +680,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_requires() {
         let schema_str = r#"
             type Query {
@@ -870,6 +710,11 @@ mod fieldset_based_directives {
                 (
                     "REQUIRES_INVALID_FIELDS",
                     r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "m" in "m: a": aliases are not currently supported in @requires"#,
+                ),
+                // PORT NOTE: JS didn't include this last message, but we should report the other alias if we're making the effort to collect all the errors
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "n" in "n: b": aliases are not currently supported in @requires"#,
                 ),
             ]
         );

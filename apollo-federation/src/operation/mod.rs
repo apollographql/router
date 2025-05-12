@@ -1009,6 +1009,7 @@ where
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
 pub(crate) enum SelectionMapperReturn {
+    #[allow(unused)] // may be better to keep unused than to add back when necessary
     None,
     Selection(Selection),
     SelectionList(Vec<Selection>),

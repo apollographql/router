@@ -27,9 +27,9 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.1.0
-      - image: cimg/redis:7.4.2
-      - image: openzipkin/zipkin:3.5.0
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.21.1
+      - image: cimg/redis:7.4.3
+      - image: openzipkin/zipkin:3.5.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
@@ -241,8 +241,9 @@ commands:
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  mise trust
-                  mise install --yes
+                  # --raw disables the terminal timer/progress bars, so if mise gets stuck,
+                  # it will not continue to produce output preventing CCI from timing it out
+                  mise install --yes --raw
       - when:
           condition:
             or:
@@ -258,8 +259,9 @@ commands:
                 name: Install mise
                 command: |
                   scoop install mise
-                  mise trust
-                  mise install --yes
+                  # --raw disables the terminal timer/progress bars, so if mise gets stuck,
+                  # it will not continue to produce output preventing CCI from timing it out
+                  mise install --yes --raw
   fetch_dependencies:
     steps:
       - run:

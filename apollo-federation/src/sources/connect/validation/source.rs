@@ -15,6 +15,7 @@ use super::coordinates::SourceDirectiveCoordinate;
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::errors::ErrorsCoordinate;
+use super::http::UrlProperties;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
@@ -74,21 +75,18 @@ impl<'schema> SourceDirective<'schema> {
         let (name, name_errors) = SourceName::from_directive(directive, &schema.sources);
         errors.extend(name_errors);
 
+        let coordinate = SourceDirectiveCoordinate {
+            directive,
+            name: name.unwrap_or_default(),
+        };
+
         errors.extend(
-            Errors::parse(
-                ErrorsCoordinate::Source {
-                    source: SourceDirectiveCoordinate {
-                        directive,
-                        name: name.unwrap_or_default(),
-                    },
-                },
-                schema,
-            )
-            // TODO: Move type checking to a later phase so parsing can be shared with runtime
-            .and_then(|errors| errors.type_check(schema))
-            .err()
-            .into_iter()
-            .flatten(),
+            Errors::parse(ErrorsCoordinate::Source { source: coordinate }, schema)
+                // TODO: Move type checking to a later phase so parsing can be shared with runtime
+                .and_then(|errors| errors.type_check(schema))
+                .err()
+                .into_iter()
+                .flatten(),
         );
 
         if let Some(http_arg) = directive
@@ -112,6 +110,11 @@ impl<'schema> SourceDirective<'schema> {
                     errors.push(url_error);
                 }
             }
+
+            match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
+                Ok(url_properties) => errors.extend(url_properties.type_check(schema)),
+                Err(errs) => errors.extend(errs),
+            };
 
             errors.extend(
                 Headers::parse(

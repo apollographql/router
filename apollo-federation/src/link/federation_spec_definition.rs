@@ -15,6 +15,7 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
+use crate::ContextSpecDefinition;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -878,6 +879,13 @@ impl SpecDefinition for FederationSpecDefinition {
             ));
         }
 
+        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+            let context_spec_definitions =
+                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
+                    .directive_specs();
+            specs.extend(context_spec_definitions);
+        }
+
         // TODO: The remaining directives added in later versions are implemented in separate specs,
         // which still need to be ported over
 
@@ -885,9 +893,18 @@ impl SpecDefinition for FederationSpecDefinition {
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![Box::new(ScalarTypeSpecification {
-            name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
-        })]
+        let mut type_specs: Vec<Box<dyn TypeAndDirectiveSpecification>> =
+            vec![Box::new(ScalarTypeSpecification {
+                name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+            })];
+
+        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+            type_specs.extend(
+                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
+                    .type_specs(),
+            );
+        }
+        type_specs
     }
 
     fn minimum_federation_version(&self) -> &Version {
