@@ -174,7 +174,11 @@ impl Cache {
 
             ..Default::default()
         };
-        let query = format!("@{}:{{$key}}", self.config.invalidation_keys_field_name);
+        dbg!(&options);
+        let query = dbg!(format!(
+            "@{}:{{$key}}",
+            self.config.invalidation_keys_field_name
+        ));
         let mut count = 0;
 
         // https://redis.io/docs/latest/develop/reference/protocol-spec/#resp-versions
@@ -185,8 +189,9 @@ impl Cache {
         loop {
             let search_result = self
                 .client
-                .ft_search(self.index_name(), &query, options.clone())
+                .ft_search(dbg!(self.index_name()), &query, options.clone())
                 .await?;
+            dbg!(&search_result);
             let Value::Array(array) = search_result else {
                 return Err(Error::new(
                     ErrorKind::Parse,
