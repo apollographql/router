@@ -219,6 +219,7 @@ mod test {
     use std::time::Duration;
 
     use http::header::HeaderName;
+    use libc::ledger_t;
     use serde_json::json;
     use serde_json::Value;
     use tokio_stream::StreamExt;
@@ -241,29 +242,22 @@ mod test {
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
-    use crate::plugins::telemetry::apollo::default_buffer_size;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
-        let config = json!({
-            "telemetry":
-                {
-                    "apollo": {
-                        "endpoint": "http://example.com",
-                        "client_name_header": "name_header",
-                        "client_version_header": "version_header",
-                        "buffer_size": 10000,
-                        "schema_id": "schema_sha"
-                    }
-                }
-        });
-
-
-
-        let plugin = create_plugin_with_config(config).await?;
+        let config = r#"
+            telemetry:
+              apollo:
+                endpoint: "http://example.com"
+                client_name_header: "name_header"
+                client_version_header: "version_header"
+                buffer_size: 10000
+                schema_id: "schema_sha"
+            "#;
+        let plugin = create_plugin_from_full_config(config).await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
         Ok(())
     }
@@ -443,35 +437,40 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        let config = json!({
-            "telemetry":
-                {
-                    "apollo": {
-                        "endpoint": ENDPOINT_DEFAULT,
-                        "apollo_key": "key",
-                        "apollo_graph_ref": "ref",
-                        "client_name_header": "name_header",
-                        "client_version_header": "version_header",
-                        "buffer_size": 10000,
-                        "schema_id": "schema_sha"
-                    }
-                }
-        });
+        let config = format!(r#"
+            telemetry:
+              apollo:
+                endpoint: "{endpoint}"
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                client_name_header: "name_header"
+                client_version_header: "version_header"
+                buffer_size: 10000
+                schema_id: "schema_sha"
+            "#,
+            endpoint = ENDPOINT_DEFAULT
+        );
 
-        create_plugin_with_config(config)
+        async move {
+            create_plugin_from_full_config(&config).await
+        }
     }
 
-    async fn create_plugin_with_config(config: Value) -> Result<Telemetry, BoxError> {
-        let yaml = serde_yaml::to_string(&config).expect("json config must be valid");
-        let config = Configuration::from_str(&yaml).expect("json config must be valid");
-        let plugin_config = serde_json::from_value(config.apollo_plugins.plugins["telemetry"].clone()).expect("json config must be valid");
-        Telemetry::new(
-            PluginInit::fake_new(
-                plugin_config,
-                Default::default(),
-                config.validated_yaml
-            )
-        ).await
+    async fn create_plugin_from_full_config(full_config: &str) -> Result<Telemetry, BoxError> {
+        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let init = PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+
+        Telemetry::new(init).await
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
