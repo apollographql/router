@@ -175,8 +175,9 @@ impl Cache {
         };
         dbg!(&options);
         let query = dbg!(format!(
-            "@{}:{{invalidation_key}}",
+            "@{}:{{{}}}",
             self.config.invalidation_keys_field_name,
+            invalidation_key.into()
         ));
         let mut count = 0;
 
