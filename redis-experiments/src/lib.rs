@@ -165,7 +165,8 @@ impl Cache {
             }],
 
             limit: Some((0, INVALIDATION_BATCH_SIZE)),
-            dialect: Some(2),
+            // dialect: Some(2),
+            dialect: None,
             params: vec![SearchParameter {
                 name: Str::from_static("key"),
                 value: invalidation_key.into(),
