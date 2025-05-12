@@ -38,13 +38,13 @@ For options available as both a command-line option and an environment variable,
 </td>
 <td>
 
-The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).<br/><br/>
 
-> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.<br/><br/>
 
-Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.<br/>
 
-To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).<br/><br/>
 
 **Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
@@ -142,11 +142,11 @@ The default value is `info`.
 </td>
 <td>
 
-An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.<br/>
 
-An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).<br/>
 
-When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).<br/>
 
 For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
 
@@ -163,9 +163,9 @@ For information about fetching an offline license and configuring the router, se
 </td>
 <td>
 
-If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.
+If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.<br/>
 
-If you specify multiple URLs, separate them with commas (no whitespace).
+If you specify multiple URLs, separate them with commas (no whitespace).<br/>
 
 For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
 

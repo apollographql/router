@@ -49,17 +49,19 @@ Let's start by downloading and running the router locally.
 
 ## 2. Create a supergraph schema
 
-A router needs a schema for the federated graph, or _supergraph_, that it's orchestrating. This guide uses an example supergraph schema, which you download and provide to the router.
+A router needs a schema for the federated graph, or _supergraph_, that it's orchestrating. This guide uses an example supergraph schema, which you download and provide to the router. 
+
+The example supergraph schema is composed of four subgraphs: `accounts`, `inventory`, `products`, and `reviews`. It outlines the types (`Query`, `Mutation`, `Product`, `Review`, `User`) and their fields, and it specifies which subgraph is responsible for resolving each piece of data using Apollo Federation directives (`@join__*`, `@link`).
 
 1. From your project's root directory, run the following to download and save an example supergraph schema:
 
   ```bash showLineNumbers=false
-  curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
+  curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph.graphql
   ```
 
 <ExpansionPanel title="Example supergraph schema contents">
 
-```graphql title="supergraph-schema.graphql"
+```graphql title="supergraph.graphql"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -217,8 +219,30 @@ Let's run the router in dev mode, using both the supergraph schema and YAML conf
     - `--supergraph` provides the path to your supergraph schema
 
     ```sh showLineNumbers=false
-    ./router --dev --config router.yaml --supergraph supergraph-schema.graphql
+    ./router --dev --config router.yaml --supergraph supergraph.graphql
     ```
+    
+    <ExpansionPanel title="About dev mode">
+
+    Running router with `--dev` is the same as using the following configuration:
+
+    ```yaml title="Same configuration as --dev"
+    sandbox:
+      enabled: true
+    homepage:
+      enabled: false
+    supergraph:
+      introspection: true
+    include_subgraph_errors:
+      all: true
+    plugins:
+      # Enable with the header, Apollo-Expose-Query-Plan: true
+      experimental.expose_query_plan: true
+    ```
+
+    [Learn more](/graphos/routing/configuration/cli#development-mode) about router dev mode.
+
+    </ExpansionPanel>
 
 1. Check that your router is running, with output similar to the example: 
 
