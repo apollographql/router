@@ -2,7 +2,7 @@ mod satisfiability;
 
 use std::vec;
 
-use crate::composition::satisfiability::validate_satisfiability;
+pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::FederationError;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
@@ -10,9 +10,9 @@ use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
-use crate::supergraph::Merged;
-use crate::supergraph::Satisfiable;
-use crate::supergraph::Supergraph;
+pub use crate::supergraph::Merged;
+pub use crate::supergraph::Satisfiable;
+pub use crate::supergraph::Supergraph;
 
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
