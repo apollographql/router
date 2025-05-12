@@ -421,9 +421,10 @@ fn validate_absolute_connect_url(
         });
     }
 
-    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
+    let multiplie_url = first.value.replace(char::is_whitespace, "");
+    let base_url = Uri::from_str(multiplie_url.trim()).map_err(|err| Message {
         code: Code::InvalidUrl,
-        message: format!("In {coordinate}: {err}"),
+        message: format!("In {coordinate}: {err}: {}", first.value.trim()),
         locations: str_value
             .line_col_for_subslice(first.location.clone(), schema)
             .into_iter()
