@@ -505,7 +505,7 @@ mod test {
     use buildstructor::buildstructor;
     use futures::StreamExt;
     use graphql_client::GraphQLQuery;
-    use http_0_2::StatusCode;
+    use http::StatusCode;
     use insta::assert_yaml_snapshot;
     use parking_lot::Mutex;
     use serde_json::json;

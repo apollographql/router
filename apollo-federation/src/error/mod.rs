@@ -126,6 +126,11 @@ pub enum SingleFederationError {
     // This is a known bug that will take time to fix, and does not require reporting.
     #[error("{message}")]
     InternalUnmergeableFields { message: String },
+    #[error("[{subgraph}] {error}")]
+    SubgraphError {
+        subgraph: String,
+        error: Box<SingleFederationError>,
+    },
     // InvalidGraphQL: We need to be able to modify the message text from apollo-compiler. So, we
     //                 format the DiagnosticData into String here. We can add additional data as
     //                 necessary.
@@ -160,23 +165,33 @@ pub enum SingleFederationError {
     #[error("{message}")]
     UnknownLinkVersion { message: String },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+        "On type \"{target_type}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @key)"
     )]
     KeyFieldsHasArgs {
-        type_name: String,
-        field_name: String,
+        target_type: Name,
+        application: String,
+        inner_coordinate: String,
     },
     #[error(
-        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+        "On field \"{coordinate}\", for {application}: field {inner_coordinate} cannot be included because it has arguments (fields with argument are not allowed in @provides)"
     )]
     ProvidesFieldsHasArgs {
-        type_name: String,
-        field_name: String,
+        coordinate: String,
+        application: String,
+        inner_coordinate: String,
     },
-    #[error("{message}")]
-    ProvidesFieldsMissingExternal { message: String },
-    #[error("{message}")]
-    RequiresFieldsMissingExternal { message: String },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    ProvidesFieldsMissingExternal {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    RequiresFieldsMissingExternal {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
     #[error("{message}")]
     KeyUnsupportedOnInterface { message: String },
     #[error("{message}")]
@@ -184,17 +199,29 @@ pub enum SingleFederationError {
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
     #[error(
-        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+        "On type \"{target_type}\", for {application}: cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
     )]
-    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    KeyHasDirectiveInFieldsArg {
+        target_type: Name,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
     )]
-    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    ProvidesHasDirectiveInFieldsArg {
+        coordinate: String,
+        application: String,
+        applied_directives: String,
+    },
     #[error(
-        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+        "On field \"{coordinate}\", for {application}: cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
     )]
-    RequiresHasDirectiveInFieldsArg { applied_directives: String },
+    RequiresHasDirectiveInFieldsArg {
+        coordinate: String,
+        application: String,
+        applied_directives: String,
+    },
     #[error("{message}")]
     ExternalUnused { message: String },
     #[error(
@@ -203,20 +230,51 @@ pub enum SingleFederationError {
     TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
-    #[error("{message}")]
-    KeyInvalidFieldsType { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFieldsType { message: String },
-    #[error("{message}")]
-    RequiresInvalidFieldsType { message: String },
-    #[error("{message}")]
-    KeyInvalidFields { message: String },
-    #[error("{message}")]
-    ProvidesInvalidFields { message: String },
-    #[error("{message}")]
-    RequiresInvalidFields { message: String },
-    #[error("{message}")]
-    KeyFieldsSelectInvalidType { message: String },
+    #[error(
+        "On type \"{target_type}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    KeyInvalidFieldsType {
+        target_type: Name,
+        application: String,
+    },
+    #[error(
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    ProvidesInvalidFieldsType {
+        coordinate: String,
+        application: String,
+    },
+    #[error(
+        "On field \"{coordinate}\", for {application}: Invalid value for argument \"fields\": must be a string."
+    )]
+    RequiresInvalidFieldsType {
+        coordinate: String,
+        application: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyInvalidFields {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    ProvidesInvalidFields {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On field \"{coordinate}\", for {application}: {message}")]
+    RequiresInvalidFields {
+        coordinate: String,
+        application: String,
+        message: String,
+    },
+    #[error("On type \"{target_type}\", for {application}: {message}")]
+    KeyFieldsSelectInvalidType {
+        target_type: Name,
+        application: String,
+        message: String,
+    },
     #[error(
         "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
     )]
@@ -343,6 +401,18 @@ pub enum SingleFederationError {
     PlanningCancelled,
     #[error("No plan was found when subgraphs were disabled")]
     NoPlanFoundWithDisabledSubgraphs,
+    #[error("Context name \"{name}\" may not contain an underscore.")]
+    ContextNameContainsUnderscore { name: String },
+    #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
+    ContextNameInvalid { name: String },
+    #[error("{message}")]
+    ContextNotSet { message: String },
+    #[error("{message}")]
+    NoContextReferenced { message: String },
+    #[error("{message}")]
+    NoSelectionForContext { message: String },
+    #[error("{message}")]
+    ContextNoResolvableKey { message: String },
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
@@ -361,6 +431,7 @@ impl SingleFederationError {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
             SingleFederationError::InternalUnmergeableFields { .. } => ErrorCode::Internal,
+            SingleFederationError::SubgraphError { error, .. } => error.code(),
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
@@ -551,6 +622,16 @@ impl SingleFederationError {
             SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
                 ErrorCode::NoPlanFoundWithDisabledSubgraphs
             }
+            SingleFederationError::ContextNameContainsUnderscore { .. } => {
+                ErrorCode::ContextNameContainsUnderscore
+            }
+            SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
+            SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
+            SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
+            SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
+            SingleFederationError::ContextNoResolvableKey { .. } => {
+                ErrorCode::ContextNoResolvableKey
+            }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
             }
@@ -591,6 +672,43 @@ impl SingleFederationError {
                 expected_name,
                 found_name,
             },
+        }
+    }
+
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
+    pub(crate) fn unwrap_subgraph_error(self, expected_subgraph: &str) -> Self {
+        if let Self::SubgraphError { subgraph, error } = self {
+            debug_assert_eq!(
+                subgraph, expected_subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                subgraph, expected_subgraph, error,
+            );
+            *error
+        } else {
+            self
+        }
+    }
+
+    // TODO: This logic is here to avoid accidentally nesting subgraph name annotations, in the
+    // future we should change the composition error type to make nesting impossible.
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        if let Self::SubgraphError {
+            subgraph: existing_subgraph,
+            error,
+        } = &self
+        {
+            debug_assert_eq!(
+                existing_subgraph, &subgraph,
+                "Unexpectedly found subgraph {} instead of {} for the following error: {}",
+                existing_subgraph, subgraph, error,
+            );
+            self
+        } else {
+            Self::SubgraphError {
+                subgraph,
+                error: Box::new(self),
+            }
         }
     }
 }
@@ -641,6 +759,26 @@ impl MultipleFederationErrors {
             }
         }
     }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl Display for MultipleFederationErrors {
@@ -673,6 +811,32 @@ pub struct AggregateFederationError {
     pub code: String,
     pub message: String,
     pub causes: Vec<SingleFederationError>,
+}
+
+impl AggregateFederationError {
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.unwrap_subgraph_error(expected_subgraph))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            causes: self
+                .causes
+                .into_iter()
+                .map(|e| e.add_subgraph(subgraph.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl Display for AggregateFederationError {
@@ -773,6 +937,30 @@ impl FederationError {
         self.errors()
             .into_iter()
             .any(|e| matches!(e, SingleFederationError::InvalidGraphQL { .. }))
+    }
+
+    pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => {
+                e.unwrap_subgraph_error(expected_subgraph).into()
+            }
+            FederationError::MultipleFederationErrors(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+            FederationError::AggregateFederationError(e) => {
+                e.unwrap_subgraph_errors(expected_subgraph).into()
+            }
+        }
+    }
+
+    // PORT_NOTE: Named `addSubgraphToError` in the JS codebase, but converted into a method here.
+    #[allow(dead_code)]
+    pub(crate) fn add_subgraph(self, subgraph: String) -> Self {
+        match self {
+            FederationError::SingleFederationError(e) => e.add_subgraph(subgraph).into(),
+            FederationError::MultipleFederationErrors(e) => e.add_subgraph(subgraph).into(),
+            FederationError::AggregateFederationError(e) => e.add_subgraph(subgraph).into(),
+        }
     }
 }
 
@@ -1724,6 +1912,73 @@ static LIST_SIZE_INVALID_SIZED_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::
     )
 });
 
+static CONTEXT_NAME_CONTAINS_UNDERSCORE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_CONTAINS_UNDERSCORE".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NAME_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NAME_INVALID".to_owned(),
+        "Context name is invalid.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NOT_SET: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NOT_SET".to_owned(),
+        "Context is never set for context trying to be used".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_CONTEXT_REFERENCED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_CONTEXT_REFERENCED".to_owned(),
+        "Selection in @fromContext field argument does not reference a context".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static NO_SELECTION_FOR_CONTEXT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_SELECTION_FOR_CONTEXT".to_owned(),
+        "field parameter in @fromContext must contain a selection set".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_NO_RESOLVABLE_KEY".to_owned(),
+        "If an ObjectType uses a @fromContext, at least one of its keys must be resolvable"
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1812,6 +2067,12 @@ pub enum ErrorCode {
     ListSizeInvalidAssumedSize,
     ListSizeInvalidSlicingArgument,
     ListSizeInvalidSizedField,
+    ContextNameInvalid,
+    ContextNameContainsUnderscore,
+    ContextNotSet,
+    NoContextReferenced,
+    NoSelectionForContext,
+    ContextNoResolvableKey,
 }
 
 impl ErrorCode {
@@ -1918,6 +2179,12 @@ impl ErrorCode {
             ErrorCode::ListSizeInvalidAssumedSize => &LIST_SIZE_INVALID_ASSUMED_SIZE,
             ErrorCode::ListSizeInvalidSlicingArgument => &LIST_SIZE_INVALID_SLICING_ARGUMENT,
             ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
+            ErrorCode::ContextNameContainsUnderscore => &CONTEXT_NAME_CONTAINS_UNDERSCORE,
+            ErrorCode::ContextNameInvalid => &CONTEXT_NAME_INVALID,
+            ErrorCode::ContextNotSet => &CONTEXT_NOT_SET,
+            ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
+            ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
+            ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
         }
     }
 }
