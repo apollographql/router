@@ -366,7 +366,7 @@ mod test_validate_source {
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }
-                
+
                 assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });
