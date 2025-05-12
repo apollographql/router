@@ -1,26 +1,26 @@
 ---
 title: Apollo Router Quickstart
-subtitle: Run a router binary
+subtitle: Run the router locally
 description: This quickstart tutorial walks you through installing an Apollo Router binary, running it with an example supergraph schema and a YAML configuration file, and making test queries with Apollo Sandbox.
 ---
 
 import ElasticNotice from "../../shared/elastic-notice.mdx";
 
-Hello! Let's run Apollo Router for the first time, using the simple scenario of developing and deploying locally.
+Hello! Let's run Apollo Router for the first time, using the simple scenario of developing locally.
 
 In this guide, you will:
 
-- Download and install a router binary.
-- Download a supergraph schema.
+- Download and run the router as a binary.
+- Create a supergraph schema.
 - Create a router YAML configuration file.
 - Run the router in development mode.
 - Make a query to the running router.
 
-## 1. Install router binary
+## 1. Download the router
 
-Let's start by downloading and installing a router binary locally.
+Let's start by downloading and running the router locally.
 
-1. Download and install the latest version of the router binary with a single command line:
+1. Download the latest version of the router binary with a single command line:
 
     ```bash showLineNumbers=false
     curl -sSL https://router.apollo.dev/download/nix/latest | sh
@@ -40,14 +40,14 @@ Let's start by downloading and installing a router binary locally.
 
     Optionally, go to [router releases](https://github.com/apollographql/router/releases) in GitHub to download and extract a bundle.
 
-1. Check that your router installed successfully by running the `router` binary from your project's root directory:
+1. Check that your router downloaded successfully by running the `router` binary from your project's root directory:
 
     ```bash showLineNumbers=false
     ./router --version
     ```
 
 
-## 2. Download supergraph schema
+## 2. Create a supergraph schema
 
 A router needs a schema for the federated graph, or _supergraph_, that it's orchestrating. This guide uses an example supergraph schema, which you download and provide to the router.
 
@@ -192,7 +192,7 @@ type User
 
 </ExpansionPanel>
 
-## 3. Create and edit YAML configuration file
+## 3. Create a router config
 
 The router's many features are configurable via a YAML configuration file. You set your options declaratively in YAML, then point your router to it at startup.
 
@@ -208,7 +208,6 @@ Let's customize a common setting: the router's _supergraph listen address_. It's
 
 ## 4. Run the router
 
-When you're developing with the router locally, it's useful to run the router in _dev mode_. Dev mode is a collection of settings that make router development and debugging easier.
 
 Let's run the router in dev mode, using both the supergraph schema and YAML configuration files you created: 
 
@@ -250,11 +249,10 @@ Let's run the router in dev mode, using both the supergraph schema and YAML conf
 
 ## 5. Make a query
 
-A router in dev mode runs its own [Apollo Sandbox](/graphos/explorer/sandbox/), a local GraphQL server running a development instance of your graph. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your development graph. 
+When the router runs in dev mode, it hosts an [Apollo Sandbox](/graphos/explorer/sandbox/) automatically. Sandbox has a browser-based IDE, Explorer, that you can use to write and send real GraphQL queries to your graph. 
 
-Let's use Sandbox and its Explorer IDE to write a query and send it to your graph:
 
-1. Go to the URL of the router's Sandbox, [`http://127.0.0.1:5555`](http://127.0.0.1:5555). The Explorer IDE should be running.
+1. Go to the URL your router is running at, [`http://127.0.0.1:5555`](http://127.0.0.1:5555). Sandbox should be running there.
 
 1. Copy and paste the example query into the **Operation** pane of Explorer:
 
