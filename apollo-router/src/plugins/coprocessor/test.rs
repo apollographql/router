@@ -61,16 +61,12 @@ mod tests {
                 "thisFieldDoesntExist": true
             }
         });
-        // TODO this will now fail on the configuration build b/c we do validation... Keep test or kill it?
         // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
+        // it, but in this case it's enough to start building the harness and
+        // ensure building the Configuration fails.
         assert!(
             crate::TestHarness::builder()
                 .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
                 .is_err()
         );
     }
