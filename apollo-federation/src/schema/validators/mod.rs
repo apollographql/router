@@ -22,8 +22,10 @@ pub(crate) mod context;
 pub(crate) mod cost;
 pub(crate) mod external;
 pub(crate) mod from_context;
+pub(crate) mod interface_object;
 pub(crate) mod key;
 pub(crate) mod list_size;
+pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
 
