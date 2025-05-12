@@ -180,12 +180,11 @@ pub(super) fn validate_selection_variables<'a>(
                     namespace = reference.namespace.namespace.as_str(),
                     available = context.namespaces_joined(),
                 ),
-                locations: selection_str
-                    .line_col_for_subslice(
-                        reference.namespace.location.start..reference.namespace.location.end,
-                        schema,
-                    )
-                    .into_iter()
+                locations: reference
+                    .namespace
+                    .location
+                    .iter()
+                    .flat_map(|range| selection_str.line_col_for_subslice(range.clone(), schema))
                     .collect(),
             });
         }

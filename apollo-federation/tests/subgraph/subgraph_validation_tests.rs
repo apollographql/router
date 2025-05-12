@@ -8,7 +8,6 @@ mod fieldset_based_directives {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_key() {
         let schema_str = r#"
             type Query {		
@@ -30,7 +29,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_provides() {
         let schema_str = r#"
             type Query {
@@ -53,7 +51,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -76,7 +73,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -207,18 +203,17 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_non_object_fields() {
         let schema_str = r#"
             type Query {
-                t: T @provides(fields: "f")
+                t: Int @provides(fields: "f")
             }
 
             type T {
                 f: Int
             }
         "#;
-        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
+        let err = build_for_errors(schema_str);
 
         assert_errors!(
             err,
@@ -230,7 +225,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_non_string_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -253,8 +247,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -286,8 +278,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -320,7 +310,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_key() {
@@ -345,8 +334,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_provides() {
@@ -380,8 +367,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_requires() {
@@ -416,7 +401,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -439,8 +424,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -469,7 +453,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -493,8 +477,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interface_field() {
         let schema_str = r#"
             type Query {
@@ -515,14 +497,12 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_FIELDS_SELECT_INVALID_TYPE",
-                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Interface type which is not allowed in @key"#,
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is an Interface type which is not allowed in @key"#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_union_field() {
         let schema_str = r#"
             type Query {
@@ -547,8 +527,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_key() {
         let schema_str = r#"
             type Query {
@@ -576,8 +554,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_provides() {
         let schema_str = r#"
             type Query {
@@ -606,8 +582,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_requires() {
         let schema_str = r#"
             type Query {
@@ -632,8 +606,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn can_collect_multiple_errors_in_a_single_fields_argument() {
         let schema_str = r#"
             type Query {
@@ -663,8 +635,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_key() {
         let schema_str = r#"
             type Query {
@@ -687,8 +657,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_provides() {
         let schema_str = r#"
             type Query {
@@ -712,8 +680,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_requires() {
         let schema_str = r#"
             type Query {
@@ -744,6 +710,11 @@ mod fieldset_based_directives {
                 (
                     "REQUIRES_INVALID_FIELDS",
                     r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "m" in "m: a": aliases are not currently supported in @requires"#,
+                ),
+                // PORT NOTE: JS didn't include this last message, but we should report the other alias if we're making the effort to collect all the errors
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "n" in "n: b": aliases are not currently supported in @requires"#,
                 ),
             ]
         );
