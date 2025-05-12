@@ -167,17 +167,16 @@ impl Cache {
             limit: Some((0, INVALIDATION_BATCH_SIZE)),
             // dialect: Some(2),
             dialect: None,
-            params: vec![SearchParameter {
-                name: Str::from_static("key"),
-                value: invalidation_key.into(),
-            }],
-
+            // params: vec![SearchParameter {
+            //     name: Str::from_static("key"),
+            //     value: invalidation_key.into(),
+            // }],
             ..Default::default()
         };
         dbg!(&options);
         let query = dbg!(format!(
-            "@{}:{{$key}}",
-            self.config.invalidation_keys_field_name
+            "@{}:{{invalidation_key}}",
+            self.config.invalidation_keys_field_name,
         ));
         let mut count = 0;
 
