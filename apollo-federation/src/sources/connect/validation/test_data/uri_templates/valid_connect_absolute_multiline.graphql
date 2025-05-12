@@ -6,7 +6,7 @@ type Query {
     @connect(
       http: { GET: """
         https://ecommerce.demo-api.apollo.dev
-        /products?{$args.paramName}={$args.paramValue}
+        /products?{$args.paramName}={$args.paramValue} eq 'foo'
       """}
       selection: """
       $.products {

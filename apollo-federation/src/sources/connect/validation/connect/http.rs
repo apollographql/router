@@ -227,6 +227,8 @@ struct Transport<'schema> {
 }
 
 impl<'schema> Transport<'schema> {
+    const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
+
     fn parse(
         http_arg: &'schema [(Name, Node<Value>)],
         coordinate: ConnectHTTPCoordinate<'schema>,
@@ -292,7 +294,7 @@ impl<'schema> Transport<'schema> {
             })
             .map_err(|e| vec![e])?;
 
-        let multiplie_url = url_string.as_str().replace(char::is_whitespace, "");
+        let multiplie_url = url_string.as_str().replace(Self::SPECIAL_WHITE_SPACES, "");
         let url = StringTemplate::from_str(&multiplie_url)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
