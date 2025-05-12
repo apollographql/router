@@ -11,6 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use futures::FutureExt as _;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
@@ -151,14 +152,22 @@ fn test(path: &PathBuf, plan: Plan) -> Result<(), Failed> {
     let rt = Runtime::new()?;
 
     // Spawn the root task
-    rt.block_on(async {
+    let caught = rt.block_on(std::panic::AssertUnwindSafe(async {
         let mut execution = TestExecution::new();
         for action in plan.actions {
             execution.execute_action(&action, path, &mut out).await?;
         }
 
         Ok(())
-    })
+    }).catch_unwind());
+
+    match caught {
+        Ok(result) => result,
+        Err(any) => {
+            print!("{out}");
+            std::panic::resume_unwind(any);
+        }
+    }
 }
 
 struct TestExecution {
