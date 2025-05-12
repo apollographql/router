@@ -454,13 +454,9 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
         for (key, sub_selection) in self.trie.iter() {
             // Object should contain all keys in the selection set.
             // If not, then the key is unmapped.
-            if !fields.contains_key(key) {
+            let Some(next_shape) = fields.get(key) else {
                 self.unmapped_fields.insert(key.to_string());
                 continue;
-            }
-
-            let Some(next_shape) = fields.get(key) else {
-                unreachable!("nested shape is expected")
             };
 
             // Check that next shape doesn't come from a non-`$root` field.
