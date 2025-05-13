@@ -388,7 +388,7 @@ enum ShapeVisitorError<'error> {
     NonRootBatch,
 }
 
-impl<'error> From<ShapeVisitorError<'_>> for Message {
+impl From<ShapeVisitorError<'_>> for Message {
     fn from(value: ShapeVisitorError) -> Self {
         match &value {
             ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { .. } => Message {
