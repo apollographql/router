@@ -7,48 +7,13 @@ minVersion: 1.22.0
 
 <PremiumFeature />
 
-GraphOS routers provides support for GraphQL subscription operations:
-
-```graphql
-subscription OnStockPricesChanged {
-  stockPricesChanged {
-    symbol
-    price
-  }
-}
-```
-
-With subscription support enabled, you can add `Subscription` fields to the schema of any subgraph that supports common WebSocket protocols for subscription communication:
-
-```graphql title="stocks.graphql"
-type Subscription {
-  stockPricesChanged: [Stock!]!
-}
-```
-
-## What are subscriptions for?
-
-<WhatSubscriptionsAreFor />
-
-## How subscriptions work
-
-<HowSubscriptionsWork />
-
-<Tip>
-
-[Walk through an example.](#example-execution)
-
-</Tip>
-
-### Special considerations
-
-Whenever your router updates its supergraph schema at runtime, it terminates all active subscriptions. Clients can detect this special-case termination via an error code and execute a new subscription. See [Termination on schema update](#termination-on-schema-update).
+Learn how to configure the router to enable GraphQL subscriptions.
 
 ## Prerequisites
 
 Before you add `Subscription` fields to your subgraphs, do all of the following in the order shown to prevent schema composition errors:
 
-1. Update your router instances to version `1.22.0` or later. [Download the latest version.](/router/quickstart/)
+1. Update your router instances to version `1.22.0` or later. [Download the latest version.](/graphos/routing/get-started)
     - Previous versions of the router don't support subscription operations.
 1. Make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
     - Subscription support is an Enterprise feature of self-hosted routers.
@@ -387,7 +352,7 @@ Disabling deduplication is useful if you need to create a separate connection to
 
 ### Termination on schema update
 
-Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.**
+Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.** Clients can detect this special-case termination via an error code and execute a new subscription.
 
 Your router's supergraph schema is updated in the following cases:
 

@@ -39,7 +39,7 @@ The following headings describe features that have been removed or deprecated in
 
 Multiple metrics have been removed in router v2.x as part of evolving towards OpenTelemetry metrics and conventions. Each of the removed metrics listed below has a replacement metric or a method for deriving its value:
 
-- Removed `apollo_router_http_request_retry_total`. This is replaced by `http.client.request.duration` metric's `http.request.resend_count` attribute. Set [`default_requirement_level`](/docs/graphos/reference/router/telemetry/instrumentation/instruments#default_requirement_level)
+- Removed `apollo_router_http_request_retry_total`. This is replaced by `http.client.request.duration` metric's `http.request.resend_count` attribute. Set [`default_requirement_level`](/graphos/reference/router/telemetry/instrumentation/instruments#default_requirement_level)
   to `recommended` to make the router emit this attribute.
 
 - Removed `apollo_router_timeout`. This metric conflated timed-out requests from client
