@@ -170,7 +170,7 @@ opentelemetry-zipkin = { version = "0.22.0", default-features = false, features 
 opentelemetry-prometheus = "0.17.0"
 paste = "1.0.15"
 pin-project-lite = "0.2.14"
-prometheus = "0.13"
+prometheus = "0.14"
 prost = "0.13.0"
 prost-types = "0.13.0"
 proteus = "0.5.0"
