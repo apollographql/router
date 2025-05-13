@@ -57,7 +57,7 @@ pub(crate) struct SourceDirectiveArguments {
     pub(crate) errors: Option<ErrorsArguments>,
 }
 
-/// Common HTTP options for a connector [SourceSpecDefinition]
+/// Common HTTP options for a connector `@source`
 #[cfg_attr(test, derive(Debug))]
 pub struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
