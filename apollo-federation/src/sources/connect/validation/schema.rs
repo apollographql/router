@@ -30,6 +30,7 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::sources::connect::Connector;
+use crate::sources::connect::EntityResolver::TypeBatch;
 use crate::sources::connect::Namespace::Batch;
 use crate::sources::connect::json_selection::SelectionTrie;
 use crate::sources::connect::validation::Code;
@@ -312,7 +313,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     }
 
     for (_, connector) in &connectors {
-        if connector.entity_resolver == Some(crate::sources::connect::EntityResolver::TypeBatch) {
+        if connector.entity_resolver == Some(TypeBatch) {
             let input_trie = compute_batch_input_trie(connector);
             match SelectionSetWalker::new(&input_trie).walk(&connector.selection.shape(), connector)
             {
