@@ -489,17 +489,10 @@ mod fieldset_based_directives {
 
         assert_errors!(
             err,
-            [
-                (
-                    "REQUIRES_INVALID_FIELDS",
-                    r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T"."#,
-                ),
-                // TODO: See if we can avoid this extra message
-                (
-                    "EXTERNAL_UNUSED",
-                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#
-                )
-            ]
+            [(
+                "REQUIRES_INVALID_FIELDS",
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T"."#,
+            )]
         );
     }
 
