@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use fred::bytes::Bytes;
-use fred::bytes_utils::Str;
 use fred::bytes_utils::string::StrInner;
 use fred::prelude::*;
 use fred::types::MultipleKeys;
@@ -12,7 +11,6 @@ use fred::types::redisearch::FtCreateOptions;
 use fred::types::redisearch::FtSearchOptions;
 use fred::types::redisearch::IndexKind;
 use fred::types::redisearch::SearchField;
-use fred::types::redisearch::SearchParameter;
 use fred::types::redisearch::SearchSchema;
 use fred::types::redisearch::SearchSchemaKind;
 
@@ -151,7 +149,7 @@ impl Cache {
     /// Deletes all documents that have `invalidation_key`.
     ///
     /// Returns the number of deleted documents.
-    pub async fn invalidate(&self, invalidation_key: impl Into<Str>) -> FredResult<u64> {
+    pub async fn invalidate(&self, invalidation_key: &str) -> FredResult<u64> {
         // We want `NOCONTENT` but it’s apparently not supported on AWS:
         // TODO: test this, they also don’t document `DIALECT 2` but give an example with it.
         // https://docs.aws.amazon.com/memorydb/latest/devguide/vector-search-commands-ft.search.html
@@ -169,18 +167,12 @@ impl Cache {
             }],
 
             limit: Some((0, INVALIDATION_BATCH_SIZE)),
-            // dialect: Some(2),
-            dialect: None,
-            // params: vec![SearchParameter {
-            //     name: Str::from_static("key"),
-            //     value: invalidation_key.into(),
-            // }],
             ..Default::default()
         };
         let query = format!(
             "@{}:{{{}}}",
             self.config.invalidation_keys_field_name,
-            invalidation_key.into()
+            escape_redisearch_tag_filter(invalidation_key)
         );
         let mut count = 0;
 
@@ -257,4 +249,22 @@ impl Cache {
 
         Ok(total)
     }
+}
+
+/// https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/query_syntax/#tag-filters
+fn escape_redisearch_tag_filter(searched_tag: &str) -> std::borrow::Cow<'_, str> {
+    // We use Rust raw string syntax to avoid one level of escaping there,
+    // but the backslash is still significant in regex syntax and needs to be escaped
+    // even inside a character class
+    static CHARACTER_TO_ESCAPE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[${}\\| ]").unwrap());
+    CHARACTER_TO_ESCAPE.replace_all(searched_tag, r"\$0")
+}
+
+#[test]
+fn test_tag_escaping() {
+    assert_eq!(
+        escape_redisearch_tag_filter(r#"test{0}test\test$test|test test[0]test"test'test"#),
+        r#"test\{0\}test\\test\$test\|test\ test[0]test"test'test"#
+    )
 }
