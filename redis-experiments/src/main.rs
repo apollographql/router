@@ -46,8 +46,8 @@ async fn cache() -> Cache {
 #[tokio::main]
 async fn main() {
     // env_logger::init();
-    test_create_existing_index().await;
-    test_few().await;
+    // test_create_existing_index().await;
+    // test_few().await;
     test_many().await;
     println!("Done!")
 }
@@ -93,10 +93,10 @@ async fn test_few() {
 
 async fn test_many() {
     let cache = cache().await;
-    cache.create_index().await.unwrap();
+    // cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
     let start = Instant::now();
-    for count in [100, 1_000, 10_000, 100_000] {
+    for count in [/*100,*/ 1_000, 10_000, 100_000] {
         println!("{count} entries…");
         for i in 0..count {
             cache
@@ -112,12 +112,12 @@ async fn test_many() {
         let duration = start.elapsed();
         println!("… inserted (one by one) in {} ms", duration.as_millis());
 
-        let start = Instant::now();
-        let deleted = cache.invalidate("key2").await.unwrap();
-        let duration = start.elapsed();
-        println!("… invalidated (in batch) in {} ms", duration.as_millis());
-        println!();
-        assert_eq!(deleted, count)
+        // let start = Instant::now();
+        // let deleted = cache.invalidate("key2").await.unwrap();
+        // let duration = start.elapsed();
+        // println!("… invalidated (in batch) in {} ms", duration.as_millis());
+        // println!();
+        // assert_eq!(deleted, count)
     }
-    cache.drop_index(true).await.unwrap();
+    // cache.drop_index(true).await.unwrap();
 }
