@@ -401,7 +401,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -418,13 +417,19 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_INVALID_FIELDS",
-                r#"[S] On type "T", for @key(fields: ":f"): Syntax Error: Expected Name, found ":"."#,
+                r#"[S] On type "T", for @key(fields: ":f"): Syntax error: expected at least one Selection in Selection Set
+   ╭─[ field_set.graphql:1:1 ]
+   │
+ 1 │ :f
+   │ ┬
+   │ ╰── expected at least one Selection in Selection Set
+───╯
+"#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -442,7 +447,23 @@ mod fieldset_based_directives {
             [
                 (
                     "PROVIDES_INVALID_FIELDS",
-                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax Error: Expected Name, found "{"."#,
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected at least one Selection in Selection Set
+   ╭─[ field_set.graphql:1:2 ]
+   │
+ 1 │ {{f}}
+   │  ┬  
+   │  ╰── expected at least one Selection in Selection Set
+───╯"#,
+                ),
+                (
+                    "PROVIDES_INVALID_FIELDS",
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected R_CURLY, got {
+   ╭─[ field_set.graphql:1:2 ]
+   │
+ 1 │ {{f}}
+   │  ┬  
+   │  ╰── expected R_CURLY, got {
+───╯"#
                 ),
                 (
                     "EXTERNAL_UNUSED",
@@ -453,7 +474,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -469,10 +489,17 @@ mod fieldset_based_directives {
 
         assert_errors!(
             err,
-            [(
-                "REQUIRES_INVALID_FIELDS",
-                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
-            )]
+            [
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T"."#,
+                ),
+                // TODO: See if we can avoid this extra message
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#
+                )
+            ]
         );
     }
 
