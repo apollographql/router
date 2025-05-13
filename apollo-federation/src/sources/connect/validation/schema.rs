@@ -374,7 +374,7 @@ impl<'walker> SelectionSetWalker<'walker> {
 #[derive(Debug, thiserror::Error)]
 enum ShapeVisitorError<'error> {
     #[error(
-        "The `@connect` directive on `{connector}` specifies a `$batch` entity resolver, but the field `{unset}` could not be found in the output selection"
+        "The `@connect` directive on `{connector}` specifies a `$batch` entity resolver, but the field `{unset}` could not be found in `@connect(selection: ...)`"
     )]
     BatchKeyNotSubsetOfOutputShape {
         connector: String,
@@ -388,7 +388,6 @@ enum ShapeVisitorError<'error> {
     NonRootBatch,
 }
 
-#[allow(clippy::extra_unused_lifetimes)]
 impl<'error> From<ShapeVisitorError<'_>> for Message {
     fn from(value: ShapeVisitorError) -> Self {
         match &value {
