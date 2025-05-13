@@ -93,7 +93,7 @@ async fn test_few() {
 
 async fn test_many() {
     let cache = cache().await;
-    // cache.create_index().await.unwrap();
+    cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
     let start = Instant::now();
     for count in [100, 1_000, 10_000, 100_000] {
