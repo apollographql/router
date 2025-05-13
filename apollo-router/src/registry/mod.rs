@@ -1,4 +1,5 @@
 use std::string::FromUtf8Error;
+
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
 use oci_client::Client as ociClient;
@@ -19,7 +20,7 @@ pub struct OCIConfig {
 }
 
 pub(crate) struct OCIResult {
-    pub schema: String
+    pub schema: String,
 }
 
 #[derive(Debug, Error)]
@@ -93,7 +94,7 @@ async fn pull_oci(
     let supported_types = vec![
         "application/json",
         "text/plain",
-        "application/vnd.oci.empty.v1+json"
+        "application/vnd.oci.empty.v1+json",
     ];
     let image = client
         .pull(reference, auth, supported_types.clone())
@@ -134,7 +135,9 @@ mod tests {
     #[test]
     fn test_build_auth_apollo_registry() {
         // Create a reference for an Apollo registry
-        let reference: Reference = "registry.apollographql.com/my-graph:latest".parse().unwrap();
+        let reference: Reference = "registry.apollographql.com/my-graph:latest"
+            .parse()
+            .unwrap();
         let apollo_key = "test-api-key".to_string();
 
         // Call build_auth

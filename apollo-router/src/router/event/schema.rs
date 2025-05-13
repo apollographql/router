@@ -2,7 +2,14 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
-use crate::registry::{OCIConfig, fetch_oci};
+use derivative::Derivative;
+use derive_more::Display;
+use derive_more::From;
+use futures::prelude::*;
+use url::Url;
+
+use crate::registry::OCIConfig;
+use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -10,11 +17,6 @@ use crate::uplink::UplinkConfig;
 use crate::uplink::schema::SchemaState;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
-use derivative::Derivative;
-use derive_more::Display;
-use derive_more::From;
-use futures::prelude::*;
-use url::Url;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 

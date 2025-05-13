@@ -224,7 +224,7 @@ pub struct Opt {
     #[clap(long, env, action = ArgAction::Append)]
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
-    
+
     /// The endpoint used to fetch the supergraph schema from the OCI registry.
     #[clap(long, env, action = ArgAction::Append)]
     // TODO: Update name to be final public name
@@ -639,12 +639,8 @@ impl Executable {
                         }
                     };
                     match opt.apollo_oci_registry_endpoint {
-                        None => {
-                            SchemaSource::Registry(opt.uplink_config()?)
-                        }
-                        Some(_) => {
-                            SchemaSource::OCI(opt.oci_config()?)
-                        }
+                        None => SchemaSource::Registry(opt.uplink_config()?),
+                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
                     }
                 }
             }
@@ -652,12 +648,8 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.apollo_oci_registry_endpoint {
-                    None => {
-                        SchemaSource::Registry(opt.uplink_config()?)
-                    }
-                    Some(_) => {
-                        SchemaSource::OCI(opt.oci_config()?)
-                    }
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
             }
             _ => {
