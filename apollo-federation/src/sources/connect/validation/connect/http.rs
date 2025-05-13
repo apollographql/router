@@ -294,8 +294,8 @@ impl<'schema> Transport<'schema> {
             })
             .map_err(|e| vec![e])?;
 
-        let multiplie_url = url_string.as_str().replace(Self::SPECIAL_WHITE_SPACES, "");
-        let url = StringTemplate::from_str(&multiplie_url)
+        let multiple_url = url_string.as_str().replace(Self::SPECIAL_WHITE_SPACES, "");
+        let url = StringTemplate::from_str(&multiple_url)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
