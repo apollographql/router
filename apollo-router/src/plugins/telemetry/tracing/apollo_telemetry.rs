@@ -38,6 +38,7 @@ use thiserror::Error;
 use tracing::Level;
 use url::Url;
 
+use crate::json_ext::Path;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
@@ -79,6 +80,7 @@ use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
 use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
@@ -134,6 +136,7 @@ const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
+pub(crate) const GRAPHQL_ERROR_PATH: &str = "graphql.error.path";
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
@@ -183,7 +186,11 @@ const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
 ];
 
 /// Attributes on events to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_EVENT_ATTRS: [Key; 1] = [Key::from_static_str(GRAPHQL_ERROR_EXT_CODE)];
+const OTLP_EXT_INCLUDE_EVENT_ATTRS: [Key; 3] = [
+    Key::from_static_str(GRAPHQL_ERROR_EXT_CODE),
+    Key::from_static_str(FIELD_EXCEPTION_MESSAGE),
+    Key::from_static_str(GRAPHQL_ERROR_PATH),
+];
 
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     PARALLEL_SPAN_NAME,
@@ -204,13 +211,25 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
-pub(crate) fn emit_error_event(error_code: &str, error_description: &str) {
-    tracing::event!(
-        Level::ERROR,
-        { GRAPHQL_ERROR_EXT_CODE } = error_code,
-        { EVENT_ATTRIBUTE_OMIT_LOG } = true,
-        error_description
-    );
+pub(crate) fn emit_error_event(error_code: &str, error_message: &str, error_path: Option<Path>) {
+    if let Some(path) = error_path {
+        tracing::event!(
+            Level::ERROR,
+            { GRAPHQL_ERROR_EXT_CODE } = error_code,
+            { FIELD_EXCEPTION_MESSAGE } = error_message,
+            { GRAPHQL_ERROR_PATH } = path.to_string().as_str(),
+            { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+            error_message
+        );
+    } else {
+        tracing::event!(
+            Level::ERROR,
+            { GRAPHQL_ERROR_EXT_CODE } = error_code,
+            { FIELD_EXCEPTION_MESSAGE } = error_message,
+            { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+            error_message
+        );
+    }
 }
 
 #[derive(Error, Debug)]
