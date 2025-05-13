@@ -6,13 +6,13 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### Fix Redis connection leak ([PR #7319](https://github.com/apollographql/router/pull/7319))
+### Redis connection leak on schema changes ([PR #7319](https://github.com/apollographql/router/pull/7319))
 
 The router performs a 'hot reload' whenever it detects a schema update. During this reload, it effectively instantiates a new internal router, warms it up (optional), redirects all traffic to this new router, and drops the old internal router.
 
-This change fixes a bug in that drop process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections, which eats up memory.
+This change fixes a bug in that "drop" process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections as each new schema comes in and goes out of service, which eats up memory.
 
-It also adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`). 
+The solution adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`).
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7319
 
@@ -24,11 +24,9 @@ This PR moves where the client name and version are bound to the span, so that t
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7369
 
-### fix progressive overrides when using connectors ([PR #7351](https://github.com/apollographql/router/pull/7351))
+### Progressive overrides are not disabled when connectors are used ([PR #7351](https://github.com/apollographql/router/pull/7351))
 
 Prior to this fix, introducing a connector disabled the progressive override plugin.
-
-<!-- https://apollographql.atlassian.net/browse/CNN-749 -->
 
 By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/7351
 
@@ -38,7 +36,7 @@ The deduplication plugin always cloned responses, even if there were not multipl
 
 We now check to see if deduplication will provide a benefit before we clone the subgraph response.
 
-There was also an undiagnosed race condition which mean that a notification could be missed. This would have resulted in additional work being performed as the missed notification would have led to another subgraph request.
+There was also an undiagnosed race condition which meant that a notification could be missed. This would have resulted in additional work being performed as the missed notification would have led to another subgraph request.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7347
 
@@ -52,19 +50,19 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 
 ### Decrease log level for JWT authentication failure ([PR #7396](https://github.com/apollographql/router/pull/7396))
 
-A recent change increased the log level of JWT authentication failures from `info` to `error`. This reverts that change.
+A recent change inadvertently increased the log level of JWT authentication failures from `info` to `error`. This reverts that change returning it to the previous behavior.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7396
 
 ### Avoid fractional decimals when generating `apollo.router.operations.batching.size` metrics for GraphQL request batch sizes ([PR #7306](https://github.com/apollographql/router/pull/7306))
 
-Correct the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
+Corrects the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7306
 
 ## 📃 Configuration
 
-### Log warnings for deprecated coprocessor context configuration ([PR #7349](https://github.com/apollographql/router/pull/7349))
+### Log warnings for deprecated coprocessor `context` configuration usage ([PR #7349](https://github.com/apollographql/router/pull/7349))
 
 `context: true` is an alias for `context: deprecated` but should not be used. The router now logs a runtime warning on startup if you do use it.
 
@@ -92,11 +90,11 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 ## 🛠 Maintenance
 
-### On linux the router is now compatible with GLIBC 2.28 or newer ([PR #7355](https://github.com/apollographql/router/pull/7355))
+### Linux: Compatibility with glibc 2.28 or newer ([PR #7355](https://github.com/apollographql/router/pull/7355))
 
-The default build images provided in our CI environment have a relatively modern version of GLIBC (2.35). This means that on some distributions, notably those based around RedHat, it wasn't possible to use our binaries since the version of GLIBC was older than 2.35.
+The default build images provided in our CI environment have a relatively modern version of `glibc` (2.35). This means that on some distributions, notably those based around RedHat, it wasn't possible to use our binaries since the version of `glibc` was older than 2.35.
 
-We now maintain a build image which is based on a distribution with GLIBC version of 2.28. This is old enough that recent releases of either of the main linux distribution familes (Debian and RedHat) can make use of our binary releases.
+We now maintain a build image which is based on a distribution with `glibc` 2.28. This is old enough that recent releases of either of the main Linux distribution families (Debian and RedHat) can make use of our binary releases.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7355
 
@@ -108,13 +106,11 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 ## 📚 Documentation
 
-### [docs] Add new page for query planning best practices ([PR #7263](https://github.com/apollographql/router/pull/7263))
+### Query planning best practices ([PR #7263](https://github.com/apollographql/router/pull/7263))
 
 Added a new page under Routing docs about [Query Planning Best Practices](https://www.apollographql.com/docs/graphos/routing/query-planning/query-planning-best-practices).
 
 By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/7263
-
-
 
 # [2.2.0] - 2025-04-28
 
