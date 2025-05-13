@@ -101,7 +101,6 @@ where
     pub(crate) fn fake_new(
         config: T,
         supergraph_sdl: Arc<String>,
-        full_config: Option<Value>,
     ) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
             Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
@@ -118,7 +117,6 @@ where
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .license(LicenseState::default())
-            .full_config(full_config)
             .build()
     }
 }
