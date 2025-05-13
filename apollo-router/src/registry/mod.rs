@@ -52,11 +52,17 @@ impl From<FromUtf8Error> for Error {
     }
 }
 
-fn build_auth(reference: &Reference, _apollo_key: &String) -> RegistryAuth {
+fn build_auth(reference: &Reference, apollo_key: &String) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
+
+    // Check if the server registry ends with apollographql.com
+    if server.ends_with("apollographql.com") {
+        tracing::debug!("Using Apollo registry authentication");
+        return RegistryAuth::Basic("apollo_registry".to_string(), apollo_key.clone());
+    }
 
     match docker_credential::get_credential(server) {
         Err(CredentialRetrievalError::ConfigNotFound) => RegistryAuth::Anonymous,
@@ -122,4 +128,45 @@ pub(crate) async fn fetch_oci(oci_config: OCIConfig) -> Result<OCIResult, Error>
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_auth_apollo_registry() {
+        // Create a reference for an Apollo registry
+        let reference: Reference = "registry.apollographql.com/my-graph:latest".parse().unwrap();
+        let apollo_key = "test-api-key".to_string();
+
+        // Call build_auth
+        let auth = build_auth(&reference, &apollo_key);
+
+        // Check that it returns the correct RegistryAuth
+        match auth {
+            RegistryAuth::Basic(username, password) => {
+                assert_eq!(username, "apollo_registry");
+                assert_eq!(password, apollo_key);
+            }
+            _ => panic!("Expected RegistryAuth::Basic, got something else"),
+        }
+    }
+
+    #[test]
+    fn test_build_auth_non_apollo_registry() {
+        // Create a reference for a non-Apollo registry
+        let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
+        let apollo_key = "test-api-key".to_string();
+
+        // Mock the docker_credential::get_credential function
+        // Since we can't easily mock this in Rust without additional libraries,
+        // we'll just verify that it doesn't return the Apollo registry auth
+        let auth = build_auth(&reference, &apollo_key);
+
+        // Check that it doesn't return the Apollo registry auth
+        match auth {
+            RegistryAuth::Basic(username, _) => {
+                assert_ne!(username, "apollo_registry");
+            }
+            _ => {} // Any other type is fine for this test
+        }
+    }
+}
