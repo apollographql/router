@@ -124,6 +124,7 @@ mod test {
                     capacity: 1,
                     interval: Duration::from_millis(150),
                 }),
+                usage_reporting: None,
             }),
         };
 
@@ -180,6 +181,7 @@ mod test {
                         capacity: 1,
                         interval: Duration::from_millis(150),
                     }),
+                    usage_reporting: None,
                 }),
             };
 

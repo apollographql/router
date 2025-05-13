@@ -70,6 +70,8 @@ preview_entity_cache:
 telemetry:
   apollo:
     metrics_reference_mode: extended
+    endpoint: http://localhost:4000
+    experimental_otlp_endpoint: http://localhost:4000
   instrumentation:
     spans:
       router:

@@ -42,7 +42,6 @@ use crate::spec::Schema;
 use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
-use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
@@ -320,27 +319,26 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
-        // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &schema);
+        let license_limits = license.get_limits();
 
-        let license_limits = match license {
-            LicenseState::Licensed { limits } => {
+        // Check the license
+        let report = LicenseEnforcementReport::build(&configuration, &schema, license_limits);
+
+        match license {
+            LicenseState::Licensed { limits: _ } => {
                 tracing::debug!("A valid Apollo license has been detected.");
-                limits
             }
-            LicenseState::LicensedWarn { limits } if report.uses_restricted_features() => {
+            LicenseState::LicensedWarn { limits: _ } if report.uses_restricted_features() => {
                 tracing::error!(
                     "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                     report
                 );
-                limits
             }
-            LicenseState::LicensedHalt { limits } if report.uses_restricted_features() => {
+            LicenseState::LicensedHalt { limits: _ } if report.uses_restricted_features() => {
                 tracing::error!(
                     "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                     report
                 );
-                limits
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
@@ -364,15 +362,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 tracing::debug!(
                     "A valid Apollo license was not detected. However, no restricted features are in use."
                 );
-                // Without restricted features, there's no need to limit the router
-                Option::<LicenseLimits>::None
             }
         };
 
         // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
             LicenseState::Licensed {
-                limits: license_limits,
+                limits: license_limits.copied(),
             }
         } else {
             license
@@ -655,6 +651,7 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
