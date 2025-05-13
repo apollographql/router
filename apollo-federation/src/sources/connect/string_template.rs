@@ -20,6 +20,8 @@ use serde_json_bytes::Value;
 pub(crate) use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
+const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
+
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug, Default)]
 pub struct StringTemplate {
@@ -70,7 +72,7 @@ impl FromStr for StringTemplate {
             } else {
                 let value = chars
                     .by_ref()
-                    .peeking_take_while(|c| *c != '{')
+                    .peeking_take_while(|c| *c != '{' && SPECIAL_WHITE_SPACES.contains(c))
                     .collect::<String>();
                 let len = value.len();
                 parts.push(Part::Constant(Constant {
