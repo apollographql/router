@@ -319,7 +319,8 @@ impl PluginFactory {
         .await
     }
 
-    // TODO not loving the telemetry-specificness of this, but it is test only :shrug:
+    /// Function to create an instance of the telemetry plugin. Only the telemetry plugin should
+    /// be passed the full router config, even in a test.
     #[cfg(test)]
     pub(crate) async fn create_telemetry_instance_without_schema(
         &self,
