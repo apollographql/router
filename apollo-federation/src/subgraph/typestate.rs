@@ -6,7 +6,6 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
@@ -15,23 +14,26 @@ use apollo_compiler::schema::Type;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
+use crate::link::DEFAULT_LINK_NAME;
+use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -169,12 +171,22 @@ impl Subgraph<Initial> {
     /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
     /// - This is mainly for testing and not optimized.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_subgraph(self) -> Result<Self, SubgraphError> {
+    pub fn into_fed2_test_subgraph(self) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
         let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
         add_federation_link_to_schema(&mut schema, federation_spec.version())
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
         Ok(Self::new(&self.name, &self.url, schema))
+    }
+
+    /// Converts the schema to a fed2 schema.
+    /// - It is assumed to have no federation spec link.
+    /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
+    /// - Similar to `into_fed2_test_subgraph`, but more robust.
+    pub fn into_fed2_subgraph(self) -> Result<Self, FederationError> {
+        let schema = new_federation_subgraph_schema(self.state.schema)?;
+        let inner_schema = schema_as_fed2_subgraph(schema, false)?;
+        Ok(Self::new(&self.name, &self.url, inner_schema))
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
@@ -215,7 +227,7 @@ impl Subgraph<Initial> {
             )
         })?;
 
-        tracing::debug!("expand_links finished");
+        tracing::debug!("expand_links: finished");
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -375,7 +387,8 @@ impl<S: HasMetadata> Subgraph<S> {
 }
 
 /// Adds a federation (v2 or above) link directive to the schema.
-/// - Similar to `add_fed1_link_to_schema`, but the link is added before bootstrapping.
+/// - Similar to `add_fed1_link_to_schema` & `schema_as_fed2_subgraph`, but the link can be added
+///   before collecting metadata.
 /// - This is mainly for testing.
 pub(crate) fn add_federation_link_to_schema(
     schema: &mut Schema,
@@ -416,38 +429,184 @@ pub(crate) fn add_federation_link_to_schema(
     Ok(())
 }
 
-/// Expands schema with all imported federation definitions.
-pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, FederationError> {
-    let mut schema = FederationSchema::new_uninitialized(schema)?;
+/// Turns a schema without a federation spec link into a federation 1 subgraph schema.
+/// - Adds a fed 1 spec link directive to the schema.
+pub(crate) fn add_fed1_link_to_schema(
+    schema: &mut FederationSchema,
+    link_spec: &LinkSpecDefinition,
+    link_name_in_schema: Name,
+) -> Result<(), FederationError> {
+    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")` directive (or a `@link`
+    // directive, if applicable) to the schema definition.
+    // We can't use `import` argument here since fed1 @core does not support `import`.
+    // We will add imports later (see `fed1_link_imports`).
+    let directive = Directive {
+        name: link_name_in_schema,
+        arguments: vec![Node::new(ast::Argument {
+            name: link_spec.url_arg_name(),
+            value: FED_1.url().to_string().into(),
+        })],
+    };
+    let origin = schema.schema().schema_definition.origin_to_use();
+    crate::schema::position::SchemaDefinitionPosition.insert_directive(
+        schema,
+        Component {
+            origin,
+            node: directive.into(),
+        },
+    )
+}
+
+/// Turns a schema without a federation spec link into a federation 2 subgraph schema.
+/// - It may have a link spec, but it must not have a federation spec.
+/// - This is related to `add_federation_link_to_schema` but for real subgraphs.
+// PORT_NOTE: This corresponds to the `setSchemaAsFed2Subgraph` function in JS.
+//            The inner Schema is not exposed as mutable at the moment. So, this function consumes
+//            the input and returns the updated inner Schema.
+fn schema_as_fed2_subgraph(
+    mut schema: FederationSchema,
+    use_latest: bool,
+) -> Result<Schema, FederationError> {
+    let (link_spec, metadata) = if let Some(metadata) = schema.metadata() {
+        let spec = metadata.link_spec_definition()?;
+        // We don't accept pre-1.0 @core: this avoid having to care about what the name
+        // of the argument below is, and why would be bother?
+        ensure!(
+            spec.url()
+                .version
+                .satisfies(LinkSpecDefinition::latest().version()),
+            "Fed2 schema must use @link with version >= 1.0, but schema uses {spec_url}",
+            spec_url = spec.url()
+        );
+        (spec, metadata)
+    } else {
+        let default_link_name = &LinkSpecDefinition::latest().identity().name;
+        let alias = find_unused_name_for_directive(&schema, default_link_name)?;
+        LinkSpecDefinition::latest().add_to_schema(&mut schema, alias)?;
+        schema.collect_links_metadata()?;
+        let Some(metadata) = schema.metadata() else {
+            bail!("Schema should now be a core schema")
+        };
+        (LinkSpecDefinition::latest(), metadata)
+    };
+
+    let Some(link) = link_spec.link_in_schema(&schema)? else {
+        bail!("Core schema is missing @link directive");
+    };
+
+    let fed_spec = if use_latest {
+        FederationSpecDefinition::latest()
+    } else {
+        FederationSpecDefinition::auto_expanded_federation_spec()
+    };
+    ensure!(
+        metadata.for_identity(fed_spec.identity()).is_none(),
+        "Schema already set as a federation subgraph"
+    );
+
+    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
+    // - auto import certain directives.
+    // Note that there is a mismatch between url and directives that are imported. This is because
+    // we want to maintain backward compatibility for those who have already upgraded and we had
+    // been upgrading the url to latest, but we never automatically import directives that exist
+    // past 2.4
+    let imports: Vec<_> = FederationSpecDefinition::auto_expanded_federation_spec()
+        .directive_specs()
+        .iter()
+        .map(|d| format!("@{}", d.name()).into())
+        .collect();
+
+    // PORT_NOTE: We are adding the fed spec link to the schema definition unconditionally, not
+    //            considering extensions. This seems consistent with the JS version. But, it's
+    //            not consistent with the `add_to_schema`'s behavior. We may change to use the
+    //            `schema_definition.origin_to_use()` method in the future.
+    let mut inner_schema = schema.into_inner();
+    inner_schema
+        .schema_definition
+        .make_mut()
+        .directives
+        .push(Component::new(Directive {
+            name: link.spec_name_in_schema().clone(),
+            arguments: vec![
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: fed_spec.url().to_string().into(),
+                }),
+                Node::new(ast::Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(ast::Value::List(imports)),
+                }),
+            ],
+        }));
+    Ok(inner_schema)
+}
+
+/// Returns a suitable alias for a named directive.
+/// - Returns Some with an unused directive name.
+/// - Returns None, if aliasing is unnecessary.
+// PORT_NOTE: This corresponds to the `findUnusedNamedForLinkDirective` function in JS.
+fn find_unused_name_for_directive(
+    schema: &FederationSchema,
+    directive_name: &Name,
+) -> Result<Option<Name>, FederationError> {
+    if schema.get_directive_definition(directive_name).is_none() {
+        return Ok(None);
+    }
+
+    // The schema already defines a directive named `@link` so we need to use an alias. To keep it
+    // simple, we add a number in the end (so we try `@link1`, and if that's taken `@link2`, ...)
+    for i in 1..=1000 {
+        let candidate = Name::try_from(format!("{}{}", directive_name, i))?;
+        if schema.get_directive_definition(&candidate).is_none() {
+            return Ok(Some(candidate));
+        }
+    }
+    // We couldn't find one that is not used.
+    Err(internal_error!(
+        "Unable to find a name for the link directive",
+    ))
+}
+
+// PORT_NOTE: This corresponds to the Schema's constructor in JS.
+fn new_federation_subgraph_schema(
+    inner_schema: Schema,
+) -> Result<FederationSchema, FederationError> {
+    let mut schema = FederationSchema::new_uninitialized(inner_schema)?;
+
     // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
-    tracing::debug!("expand_links: collect_shallow_references");
+    tracing::debug!("new_federation_subgraph_schema: collect_shallow_references");
     schema.collect_shallow_references();
 
     // Backfill missing directive definitions. This is primarily making sure we have a definition for `@link`.
-    tracing::debug!("expand_links: missing directive definitions");
+    // Note: Unlike `@core`, `@link` doesn't have to be defined in the schema.
+    tracing::debug!("new_federation_subgraph_schema: missing directive definitions");
     for directive in &schema.schema().schema_definition.directives.clone() {
         if schema.get_directive_definition(&directive.name).is_none() {
             FederationBlueprint::on_missing_directive_definition(&mut schema, directive)?;
         }
     }
 
-    // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-    if schema.get_directive_definition(&name!("link")).is_some() {
-        tracing::debug!("expand_links: add @link spec definition to schema");
-        LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
-    } else {
-        tracing::debug!("expand_links: add fed1 @link and its spec definition to schema");
-        // This must be a Fed 1 schema.
-        LinkSpecDefinition::fed1_latest().add_to_schema(&mut schema, /*alias*/ None)?;
-
-        // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
-        //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
-        add_fed1_link_to_schema(&mut schema)?;
-    };
-
-    // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
-    tracing::debug!("expand_links: collect_links_metadata");
+    // Now that we have the definition for `@link`, the bootstrap directive detection should work.
+    tracing::debug!("new_federation_subgraph_schema: collect_links_metadata");
     schema.collect_links_metadata()?;
+
+    Ok(schema)
+}
+
+// PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
+#[allow(unused)]
+pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<Schema, FederationError> {
+    let mut schema = new_federation_subgraph_schema(Schema::new())?;
+    schema_as_fed2_subgraph(schema, true)
+}
+
+/// Expands schema with all imported federation definitions.
+pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, FederationError> {
+    let mut schema = new_federation_subgraph_schema(schema)?;
+
+    // If there's a use of `@link` and we successfully added its definition, add the bootstrap directive
+    tracing::debug!("expand_links: bootstrap_spec_links");
+    bootstrap_spec_links(&mut schema)?;
 
     tracing::debug!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
@@ -469,6 +628,84 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     tracing::debug!("expand_links: add_federation_operations");
     schema.add_federation_operations()?;
     Ok(schema)
+}
+
+/// Bootstrap link spec and federation spec links.
+/// - Make sure the schema has a link spec definition & link.
+/// - Make sure the schema has a federation spec link.
+// PORT_NOTE: This partially corresponds to the `completeSubgraphSchema` function in JS.
+fn bootstrap_spec_links(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    // PORT_NOTE: JS version calls `completeFed1SubgraphSchema` and `completeFed2SubgraphSchema`
+    //            here. In Rust, we don't have them, since
+    //            `on_directive_definition_and_schema_parsed` method handles it. Also, while JS
+    //            version doesn't actually add implicit fed1 spec links to the schema, Rust version
+    //            add it, so that fed 1 and fed 2 can be processed the same way in the method.
+
+    #[allow(clippy::collapsible_else_if)]
+    if let Some(metadata) = schema.metadata() {
+        // The schema has a @core or @link spec directive.
+        if schema.is_fed_2() {
+            tracing::debug!("bootstrap_spec_links: metadata indicates fed2");
+        } else {
+            // This must be a Fed 1 schema.
+            tracing::debug!("bootstrap_spec_links: metadata indicates fed1");
+            if metadata
+                .for_identity(&Identity::federation_identity())
+                .is_none()
+            {
+                // Federation spec is not present. Implicitly add the fed 1 spec.
+                let link_spec = metadata.link_spec_definition()?;
+                let link_name_in_schema = metadata
+                    .for_identity(link_spec.identity())
+                    .map(|link| link.spec_name_in_schema().clone())
+                    .unwrap_or_else(|| link_spec.identity().name.clone());
+                add_fed1_link_to_schema(schema, link_spec, link_name_in_schema)?;
+            }
+        }
+    } else {
+        // The schemas has no link metadata.
+        if has_federation_spec_link(schema.schema()) {
+            // Has a federation spec link, but no link spec itself. Add the latest link spec.
+            // Since `@link` directive is present, this must be a fed 2 schema.
+            tracing::debug!(
+                "bootstrap_spec_links: has a federation spec without a link spec itself"
+            );
+            LinkSpecDefinition::latest().add_to_schema(schema, /*alias*/ None)?;
+        } else {
+            // This must be a Fed 1 schema with no link/federation spec.
+            // Implicitly add the link spec and federation spec to the schema.
+            tracing::debug!("bootstrap_spec_links: has no link/federation spec");
+            let link_spec = LinkSpecDefinition::fed1_latest();
+            // PORT_NOTE: JS version doesn't add link specs here, (maybe) due to a potential name
+            //            conflict. We generate an alias to avoid conflicts, if necessary.
+            let link_spec_name = &link_spec.identity().name;
+            let alias = find_unused_name_for_directive(schema, link_spec_name)?;
+            let link_name_in_schema = alias.clone().unwrap_or_else(|| link_spec_name.clone());
+            link_spec.add_to_schema(schema, alias)?;
+            add_fed1_link_to_schema(schema, link_spec, link_name_in_schema)?;
+        }
+    }
+    Ok(())
+}
+
+fn has_federation_spec_link(schema: &Schema) -> bool {
+    schema
+        .schema_definition
+        .directives
+        .iter()
+        .any(|d| is_fed_spec_link_directive(schema, d))
+}
+
+fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
+    if directive.name != DEFAULT_LINK_NAME {
+        return false;
+    }
+    let Ok(url_arg) = directive.argument_by_name(&LINK_DIRECTIVE_URL_ARGUMENT_NAME, schema) else {
+        return false;
+    };
+    url_arg
+        .as_str()
+        .is_some_and(|url| url.starts_with(&Identity::federation_identity().domain))
 }
 
 impl FederationSchema {

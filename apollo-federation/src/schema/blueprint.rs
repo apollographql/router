@@ -73,8 +73,6 @@ impl FederationBlueprint {
         }
         federation_spec.add_elements_to_schema(schema)?;
         Self::expand_known_features(schema)
-
-        // TODO (FED-428): Port `processUnappliedDirectives`.
     }
 
     pub(crate) fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
