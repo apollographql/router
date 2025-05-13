@@ -98,10 +98,7 @@ where
     T: for<'de> Deserialize<'de>,
 {
     #[cfg(test)]
-    pub(crate) fn fake_new(
-        config: T,
-        supergraph_sdl: Arc<String>,
-    ) -> Self {
+    pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
             Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                 .expect("failed to parse supergraph schema")
