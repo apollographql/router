@@ -14,7 +14,7 @@ use fred::types::redisearch::SearchField;
 use fred::types::redisearch::SearchSchema;
 use fred::types::redisearch::SearchSchemaKind;
 
-const INVALIDATION_KEY_SEPARATOR: char = '\t';
+const INVALIDATION_KEY_SEPARATOR: char = ' ';
 const INVALIDATION_BATCH_SIZE: i64 = 1_000;
 
 pub struct Cache {
@@ -35,6 +35,9 @@ pub enum Expire {
     In { seconds: i64 },
     At { timestamp: i64 },
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct AsciiWhitespaceSeparated<'a>(pub &'a str);
 
 impl CacheConfig {
     pub fn random_namespace() -> String {
@@ -75,7 +78,7 @@ impl Cache {
                         sortable: false,
                         unf: false,
                         separator: Some(INVALIDATION_KEY_SEPARATOR),
-                        casesensitive: false,
+                        casesensitive: true,
                         withsuffixtrie: false,
                         noindex: false,
                     },
@@ -95,24 +98,23 @@ impl Cache {
     ///
     /// If `document_id` already exists and is a hash document, new values are "merged" with it
     /// (existing fields not specified here are not removed).
-    pub async fn insert_hash_document<InvalidationKey, MapKey, MapValue>(
+    pub async fn insert_hash_document<MapKey, MapValue>(
         &self,
         document_id: &str,
         expire: Expire,
-        invalidation_keys: impl IntoIterator<Item = InvalidationKey>,
+        invalidation_keys: AsciiWhitespaceSeparated<'_>,
         values: impl IntoIterator<Item = (MapKey, MapValue)>,
     ) -> FredResult<()>
     where
-        InvalidationKey: AsRef<str>,
         MapKey: Into<Key>,
         MapValue: Into<Value>,
     {
-        let mut invalidation_keys = invalidation_keys.into_iter();
+        let mut invalidation_keys = invalidation_keys.0.split_ascii_whitespace();
         let invalidation_keys: Option<String> = invalidation_keys.next().map(|first| {
-            let mut separated = first.as_ref().to_owned();
+            let mut separated = first.to_owned();
             for next in invalidation_keys {
                 separated.push(INVALIDATION_KEY_SEPARATOR);
-                separated.push_str(next.as_ref());
+                separated.push_str(next);
             }
             // Looks like "{key1}{INVALIDATION_KEY_SEPARATOR}{key2}"
             separated
@@ -146,10 +148,30 @@ impl Cache {
             .await
     }
 
-    /// Deletes all documents that have `invalidation_key`.
+    /// Deletes all documents that have one (or more) of the keys
+    /// in `ascii_whitespace_separated_invalidation_keys`.
     ///
     /// Returns the number of deleted documents.
-    pub async fn invalidate(&self, invalidation_key: &str) -> FredResult<u64> {
+    pub async fn invalidate(
+        &self,
+        invalidation_keys: AsciiWhitespaceSeparated<'_>,
+    ) -> FredResult<u64> {
+        let mut count = 0;
+        let mut invalidation_keys = invalidation_keys.0.split_ascii_whitespace();
+        let Some(first) = invalidation_keys.next() else {
+            return Ok(count);
+        };
+        let mut query = String::new();
+        query.push('@');
+        query.push_str(&self.config.invalidation_keys_field_name);
+        query.push_str(":{");
+        query.push_str(&escape_redisearch_tag_filter(first));
+        for key in invalidation_keys {
+            query.push('|');
+            query.push_str(&escape_redisearch_tag_filter(key));
+        }
+        query.push('}');
+
         // We want `NOCONTENT` but it’s apparently not supported on AWS:
         // TODO: test this, they also don’t document `DIALECT 2` but give an example with it.
         // https://docs.aws.amazon.com/memorydb/latest/devguide/vector-search-commands-ft.search.html
@@ -169,12 +191,6 @@ impl Cache {
             limit: Some((0, INVALIDATION_BATCH_SIZE)),
             ..Default::default()
         };
-        let query = format!(
-            "@{}:{{{}}}",
-            self.config.invalidation_keys_field_name,
-            escape_redisearch_tag_filter(invalidation_key)
-        );
-        let mut count = 0;
 
         // https://redis.io/docs/latest/develop/reference/protocol-spec/#resp-versions
         // > Future versions of Redis may change the default protocol version
@@ -251,20 +267,18 @@ impl Cache {
     }
 }
 
+/// Unfortunately docs are woefully misleading:
+///
 /// https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/query_syntax/#tag-filters
-fn escape_redisearch_tag_filter(searched_tag: &str) -> std::borrow::Cow<'_, str> {
+/// > The following characters in tags should be escaped with a backslash (\): $, {, }, \, and |.
+///
+/// In testing with Redis 8.0.0, all ASCII punctuation except `_`
+/// cause either a syntax error or a search mismatch.
+pub fn escape_redisearch_tag_filter(searched_tag: &str) -> std::borrow::Cow<'_, str> {
     // We use Rust raw string syntax to avoid one level of escaping there,
-    // but the backslash is still significant in regex syntax and needs to be escaped
-    // even inside a character class
-    static CHARACTER_TO_ESCAPE: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"[${}\\| ]").unwrap());
-    CHARACTER_TO_ESCAPE.replace_all(searched_tag, r"\$0")
-}
-
-#[test]
-fn test_tag_escaping() {
-    assert_eq!(
-        escape_redisearch_tag_filter(r#"test{0}test\test$test|test test[0]test"test'test"#),
-        r#"test\{0\}test\\test\$test\|test\ test[0]test"test'test"#
-    )
+    // but the '\', '-', '[', and ']' are still significant in regex syntax and need to be escaped
+    static TO_ESCAPE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r##"[!"#$%&'()*+,\-./:;<=>?@\[\\\]^`{|}~]"##).unwrap()
+    });
+    TO_ESCAPE.replace_all(searched_tag, r"\$0")
 }

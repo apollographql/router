@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use fred::prelude::*;
+use redis_experiments::AsciiWhitespaceSeparated;
 use redis_experiments::Cache;
 use redis_experiments::CacheConfig;
 use redis_experiments::Expire;
@@ -30,10 +31,21 @@ async fn cache() -> Cache {
 #[tokio::main]
 async fn main() {
     // env_logger::init();
+    test_tag_escaping();
     test_create_existing_index().await;
     test_few().await;
+    test_weird_keys().await;
     test_many().await;
     println!("Done!")
+}
+
+fn test_tag_escaping() {
+    assert_eq!(
+        redis_experiments::escape_redisearch_tag_filter(
+            r##"!"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~"##
+        ),
+        r##"\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/09\:\;\<\=\>\?\@AZ\[\\\]\^_\`az\{\|\}\~"##
+    )
 }
 
 async fn test_create_existing_index() {
@@ -48,15 +60,30 @@ async fn test_few() {
     cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
     cache
-        .insert_hash_document("docA", expire, ["key1", "key2"], [("data", "A")])
+        .insert_hash_document(
+            "docA",
+            expire,
+            AsciiWhitespaceSeparated("key1 key2"),
+            [("data", "A")],
+        )
         .await
         .unwrap();
     cache
-        .insert_hash_document("docB", expire, ["key1"], [("data", "B")])
+        .insert_hash_document(
+            "docB",
+            expire,
+            AsciiWhitespaceSeparated("key1"),
+            [("data", "B")],
+        )
         .await
         .unwrap();
     cache
-        .insert_hash_document("docC", expire, ["key2"], [("data", "C")])
+        .insert_hash_document(
+            "docC",
+            expire,
+            AsciiWhitespaceSeparated("key2"),
+            [("data", "C")],
+        )
         .await
         .unwrap();
     let get = async |id: &str| {
@@ -68,10 +95,39 @@ async fn test_few() {
     assert_eq!(get("docA").await.as_deref(), Some("A"));
     assert_eq!(get("docB").await.as_deref(), Some("B"));
     assert_eq!(get("docC").await.as_deref(), Some("C"));
-    assert_eq!(cache.invalidate("key1").await.unwrap(), 2);
+    assert_eq!(
+        cache
+            .invalidate(AsciiWhitespaceSeparated("key1 unused"))
+            .await
+            .unwrap(),
+        2
+    );
     assert_eq!(get("docA").await.as_deref(), None);
     assert_eq!(get("docB").await.as_deref(), None);
     assert_eq!(get("docC").await.as_deref(), Some("C"));
+    cache.drop_index(true).await.unwrap();
+}
+
+async fn test_weird_keys() {
+    let cache = cache().await;
+    cache.create_index().await.unwrap();
+    let expire = Expire::In { seconds: 600 };
+    let key1 = AsciiWhitespaceSeparated(r##"k1|🔑"##);
+    let key2 = AsciiWhitespaceSeparated(r##"k2,!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##);
+    let not_key1 = AsciiWhitespaceSeparated("k1");
+    let not_key2 = AsciiWhitespaceSeparated("k2");
+    cache
+        .insert_hash_document("x", expire, key1, [("data", "X")])
+        .await
+        .unwrap();
+    cache
+        .insert_hash_document("y", expire, key2, [("data", "Y")])
+        .await
+        .unwrap();
+    assert_eq!(cache.invalidate(not_key1).await.unwrap(), 0);
+    assert_eq!(cache.invalidate(not_key2).await.unwrap(), 0);
+    assert_eq!(cache.invalidate(key1).await.unwrap(), 1);
+    assert_eq!(cache.invalidate(key2).await.unwrap(), 1);
     cache.drop_index(true).await.unwrap();
 }
 
@@ -80,14 +136,14 @@ async fn test_many() {
     cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
     let start = Instant::now();
-    for count in [100, 1_000, 10_000, 100_000] {
+    for count in [100, 1_000, 10_000] {
         println!("{count} entries…");
         for i in 0..count {
             cache
                 .insert_hash_document(
                     &format!("doc{i}"),
                     expire,
-                    ["key1", "key2"],
+                    AsciiWhitespaceSeparated("key1 key2"),
                     [("data", "A")],
                 )
                 .await
@@ -97,7 +153,10 @@ async fn test_many() {
         println!("… inserted (one by one) in {} ms", duration.as_millis());
 
         let start = Instant::now();
-        let deleted = cache.invalidate("key2").await.unwrap();
+        let deleted = cache
+            .invalidate(AsciiWhitespaceSeparated("key2"))
+            .await
+            .unwrap();
         let duration = start.elapsed();
         println!("… invalidated (in batch) in {} ms", duration.as_millis());
         println!();
