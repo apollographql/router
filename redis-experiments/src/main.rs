@@ -1,17 +1,34 @@
 use std::time::Instant;
 
 use fred::prelude::*;
+use fred::types::config::TlsConnector;
 use redis_experiments::Cache;
 use redis_experiments::CacheConfig;
 use redis_experiments::Expire;
 
 const TEMPORARY: bool = true;
 
+fn create_tls_config() -> TlsConnector {
+    TlsConnector::default_rustls().unwrap()
+}
+
 async fn cache() -> Cache {
-    let config = std::env::var("REDIS_URL")
-        .map(|url| Config::from_url(&url).unwrap())
-        .unwrap_or_default();
+    let config = Config {
+        server: ServerConfig::Centralized {
+            server: Server {
+                host: std::env::var("REDIS_HOST").unwrap().into(),
+                port: 6379,
+                tls_server_name: None,
+            },
+        },
+        tls: Some(TlsConfig {
+            connector: create_tls_config(),
+            hostnames: fred::types::config::TlsHostMapping::None,
+        }),
+        ..Config::default()
+    };
     let client = Builder::from_config(config).build().unwrap();
+    // let client = Client::default();
 
     client.init().await.unwrap();
     Cache {
@@ -29,8 +46,8 @@ async fn cache() -> Cache {
 #[tokio::main]
 async fn main() {
     // env_logger::init();
-    // test_create_existing_index().await;
-    // test_few().await;
+    test_create_existing_index().await;
+    test_few().await;
     test_many().await;
     println!("Done!")
 }
@@ -79,7 +96,7 @@ async fn test_many() {
     // cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
     let start = Instant::now();
-    for count in [/*100,*/ 1_000, 10_000, 100_000] {
+    for count in [100, 1_000, 10_000, 100_000] {
         println!("{count} entries…");
         for i in 0..count {
             cache
@@ -95,12 +112,12 @@ async fn test_many() {
         let duration = start.elapsed();
         println!("… inserted (one by one) in {} ms", duration.as_millis());
 
-        // let start = Instant::now();
-        // let deleted = cache.invalidate("key2").await.unwrap();
-        // let duration = start.elapsed();
-        // println!("… invalidated (in batch) in {} ms", duration.as_millis());
-        // println!();
-        // assert_eq!(deleted, count)
+        let start = Instant::now();
+        let deleted = cache.invalidate("key2").await.unwrap();
+        let duration = start.elapsed();
+        println!("… invalidated (in batch) in {} ms", duration.as_millis());
+        println!();
+        assert_eq!(deleted, count)
     }
     // cache.drop_index(true).await.unwrap();
 }
