@@ -41,6 +41,19 @@ type Query {
       response: $response.headers.value->first
       """
     )
+  complexInputType(filters: I): String
+    @connect(
+      source: "v1"
+      http: { GET: "/complexInputType?inSpace={$args.filters.inSpace}&search={$args.filters.search}" }
+      selection: """
+      $
+      """
+    )
+}
+
+input I {
+  inSpace: Boolean
+  search: String
 }
 
 type T {
