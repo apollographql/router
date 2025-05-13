@@ -15,7 +15,7 @@ pub struct OCIConfig {
     /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
     pub apollo_key: String,
 
-    // Should this be a reference instead?
+    /// OCI Compliant URL pointing to the release bundle
     pub url: String,
 }
 
@@ -25,7 +25,7 @@ pub(crate) struct OCIResult {
 
 #[derive(Debug, Error)]
 pub(crate) enum Error {
-    #[error("OCI layer has not title")]
+    #[error("OCI layer does not have a title")]
     OCILayerMissingTitle,
     #[error("Oci Distribution error: {0}")]
     OCIDistributionError(OciDistributionError),
@@ -34,6 +34,10 @@ pub(crate) enum Error {
     #[error("Unable to parse layer: {0}")]
     OCILayerParseError(FromUtf8Error),
 }
+
+const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
+const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
+const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 
 impl From<oci_client::ParseError> for Error {
     fn from(value: oci_client::ParseError) -> Self {
@@ -53,16 +57,16 @@ impl From<FromUtf8Error> for Error {
     }
 }
 
-fn build_auth(reference: &Reference, apollo_key: &String) -> RegistryAuth {
+fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
 
     // Check if the server registry ends with apollographql.com
-    if server.ends_with("apollographql.com") {
+    if server.ends_with(APOLLO_REGISTRY_ENDING) {
         tracing::debug!("Using Apollo registry authentication");
-        return RegistryAuth::Basic("apollo_registry".to_string(), apollo_key.clone());
+        return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
 
     match docker_credential::get_credential(server) {
@@ -90,15 +94,13 @@ async fn pull_oci(
     auth: &RegistryAuth,
     reference: &Reference,
 ) -> Result<OCIResult, Error> {
-    tracing::info!(?reference, "pulling oci bundle");
+    tracing::debug!(?reference, "pulling oci bundle");
     let supported_types = vec![
         "application/json",
         "text/plain",
         "application/vnd.oci.empty.v1+json",
     ];
-    let image = client
-        .pull(reference, auth, supported_types.clone())
-        .await?;
+    let image = client.pull(reference, auth, supported_types).await?;
 
     let schema = image
         .layers
@@ -124,7 +126,6 @@ pub(crate) async fn fetch_oci(oci_config: OCIConfig) -> Result<OCIResult, Error>
 
     let auth = build_auth(&reference, &oci_config.apollo_key);
 
-    // let output = cli.output.unwrap_or("/tmp".to_string());
     pull_oci(&mut client, &auth, &reference).await
 }
 

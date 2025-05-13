@@ -161,7 +161,6 @@ impl SchemaSource {
             }
             SchemaSource::OCI(oci_config) => {
                 futures::stream::once(async move {
-                    // TODO: Fix error handling
                     match fetch_oci(oci_config).await {
                         Ok(oci_result) => {
                             Some(SchemaState {
