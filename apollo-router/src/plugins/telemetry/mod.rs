@@ -322,12 +322,7 @@ impl PluginPrivate for Telemetry {
             .full_config
             .as_ref()
             .expect("Required full router configuration not found in telemetry plugin");
-        let enabled_features = EnabledFeatures {
-            apq: full_config["apq"]["enabled"].as_bool().unwrap_or(false),
-            entity_cache: full_config["preview_entity_cache"]["enabled"]
-                .as_bool()
-                .unwrap_or(false),
-        };
+        let enabled_features = Self::extract_enabled_features(full_config);
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
@@ -1720,6 +1715,15 @@ impl Telemetry {
             Err(_err) => {
                 task();
             }
+        }
+    }
+
+    fn extract_enabled_features(full_config: &serde_json::Value) -> EnabledFeatures {
+        EnabledFeatures {
+            apq: full_config["apq"]["enabled"].as_bool().unwrap_or(false),
+            entity_cache: full_config["preview_entity_cache"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
         }
     }
 }
