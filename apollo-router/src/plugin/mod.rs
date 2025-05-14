@@ -319,23 +319,6 @@ impl PluginFactory {
         .await
     }
 
-    /// Function to create an instance of the telemetry plugin. Only the telemetry plugin should
-    /// be passed the full router config, even in a test.
-    #[cfg(test)]
-    pub(crate) async fn create_telemetry_instance_without_schema(
-        &self,
-        telemetry_config: &Value,
-        full_config: Value,
-    ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(
-            PluginInit::fake_builder()
-                .config(telemetry_config.clone())
-                .full_config(full_config)
-                .build(),
-        )
-        .await
-    }
-
     pub(crate) fn create_schema(
         &self,
         generator: &mut SchemaGenerator,
@@ -758,6 +741,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// Support downcasting
     #[cfg(test)]
+    #[allow(dead_code)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
     /// The point of no return, this plugin is about to go live
