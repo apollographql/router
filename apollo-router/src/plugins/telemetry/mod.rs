@@ -2111,7 +2111,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
-        let full_config = serde_json::json!({ "telemetry": {"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}});
+        let full_config = serde_json::json!({
+            "telemetry": {
+                "apollo": {
+                    "schema_id": "abc"
+                },
+                "exporters": {
+                    "tracing": {},
+                },
+            },
+        });
         let telemetry_config = full_config["telemetry"].clone();
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
