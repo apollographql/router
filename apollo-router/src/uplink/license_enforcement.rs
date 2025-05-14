@@ -76,6 +76,8 @@ pub(crate) struct Claims {
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
+    /// Enforce license violations.  If true, requires that there are no violations.
+    pub(crate) restricted: Option<bool>,
     /// TPS limits. These may not exist in a License; if not, no limits apply
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
@@ -552,6 +554,9 @@ pub(crate) struct TpsLimit {
 /// as an example
 #[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
 pub struct LicenseLimits {
+    /// Controls whether license violations are enforced.  If true, prevents Router startup
+    /// if there are any license violations.
+    pub(crate) restricted: Option<bool>,
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
@@ -806,6 +811,7 @@ mod test {
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
             Some(&LicenseLimits {
+                restricted: Some(true),
                 tps: Default::default(),
                 usage_reporting: Some(true),
             }),
@@ -875,6 +881,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                restricted: Default::default(),
                 tps: Default::default(),
                 usage_reporting: Default::default(),
             }),
@@ -892,6 +899,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                restricted: Default::default(),
                 tps: Default::default(),
                 usage_reporting: Default::default(),
             }),

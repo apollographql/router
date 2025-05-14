@@ -120,6 +120,7 @@ mod test {
         // * the router limits plugin
         let license = LicenseState::Licensed {
             limits: Some(LicenseLimits {
+                restricted: Some(true),
                 tps: Some(TpsLimit {
                     capacity: 1,
                     interval: Duration::from_millis(150),
@@ -177,6 +178,7 @@ mod test {
             // * the router limits plugin
             let license = LicenseState::Licensed {
                 limits: Some(LicenseLimits {
+                    restricted: Some(true),
                     tps: Some(TpsLimit {
                         capacity: 1,
                         interval: Duration::from_millis(150),

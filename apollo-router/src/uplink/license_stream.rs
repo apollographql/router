@@ -181,6 +181,7 @@ fn reset_checks_for_licenses(
     // Router limitations based on claims
     let limits = if claims.tps.is_some() || claims.usage_reporting.is_some() {
         let license_limits = LicenseLimits::builder()
+            .and_restricted(claims.restricted)
             .and_tps(claims.tps.map(|tps_limit| {
                 TpsLimit::builder()
                     .capacity(tps_limit.capacity)
@@ -498,6 +499,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
+                restricted: Some(true),
                 tps: Default::default(),
                 usage_reporting: Default::default(),
             }),
@@ -553,6 +555,7 @@ mod test {
                     aud: OneOrMany::One(Audience::Offline),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    restricted: Some(true),
                     tps: Default::default(),
                     usage_reporting: Default::default(),
                 }),
@@ -575,6 +578,7 @@ mod test {
                     aud: OneOrMany::One(Audience::SelfHosted),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    restricted: Some(true),
                     tps: Default::default(),
                     usage_reporting: Default::default(),
                 }),
@@ -597,6 +601,7 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::Offline]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    restricted: Some(true),
                     tps: Default::default(),
                     usage_reporting: Default::default(),
                 }),
@@ -619,6 +624,7 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::SelfHosted]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    restricted: Some(true),
                     tps: Default::default(),
                     usage_reporting: Default::default(),
                 }),

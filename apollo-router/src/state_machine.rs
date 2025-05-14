@@ -325,8 +325,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         let report = LicenseEnforcementReport::build(&configuration, &schema, license_limits);
 
         match license {
-            LicenseState::Licensed { limits: _ } => {
-                tracing::debug!("A valid Apollo license has been detected.");
+            LicenseState::Licensed { limits } => {
+                let license_is_restricted = limits
+                    .map(|limits| limits.restricted.unwrap_or(false))
+                    .unwrap_or(false);
+                if report.uses_restricted_features() && license_is_restricted {
+                    tracing::error!(
+                        "Insufficient license. An upgraded license is required enable the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        report
+                    );
+                    return Err(ApolloRouterError::LicenseViolation);
+                } else {
+                    tracing::debug!("A valid Apollo license has been detected.");
+                }
             }
             LicenseState::LicensedWarn { limits: _ } if report.uses_restricted_features() => {
                 tracing::error!(
@@ -737,7 +748,10 @@ mod tests {
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Licensed {
-                        limits: Some(LicenseLimits::default())
+                        limits: Some(LicenseLimits {
+                            restricted: Some(false),
+                            ..Default::default()
+                        })
                     }),
                     Shutdown
                 ])
@@ -810,7 +824,10 @@ mod tests {
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Licensed {
-                        limits: Some(LicenseLimits::default())
+                        limits: Some(LicenseLimits {
+                            restricted: Some(false),
+                            ..Default::default()
+                        })
                     }),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
@@ -846,6 +863,33 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn restricted_features_restricted_license() {
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            restricted: Some(true),
+                            ..Default::default()
+                        })
+                    }),
+                    Shutdown
+                ])
+            )
+            .await,
+            Err(ApolloRouterError::LicenseViolation)
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
+    }
+
+    #[test(tokio::test)]
     async fn unrestricted_unlicensed_restricted_licensed() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
@@ -860,7 +904,10 @@ mod tests {
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
                     UpdateLicense(LicenseState::Licensed {
-                        limits: Some(LicenseLimits::default())
+                        limits: Some(LicenseLimits {
+                            restricted: Some(false),
+                            ..Default::default()
+                        })
                     }),
                     Shutdown
                 ])
