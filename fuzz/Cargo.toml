@@ -1,4 +1,3 @@
-
 [package]
 name = "router-fuzz"
 version = "0.0.0"
@@ -50,12 +49,6 @@ doc = false
 [[bin]]
 name = "router_errors"
 path = "fuzz_targets/router_errors.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "federation"
-path = "fuzz_targets/federation.rs"
 test = false
 doc = false
 
