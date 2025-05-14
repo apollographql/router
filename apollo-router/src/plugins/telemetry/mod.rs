@@ -205,6 +205,8 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<TelemetryActivation>,
+    #[allow(dead_code)]
+    enabled_features: EnabledFeatures,
 }
 
 struct TelemetryActivation {
@@ -281,6 +283,13 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
     }
 }
 
+#[derive(Debug)]
+#[allow(dead_code)]
+struct EnabledFeatures {
+    apq: bool,
+    entity_cache: bool,
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;
@@ -309,6 +318,14 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        // Set up feature usage list
+        let full_config = init
+            .full_config
+            .as_ref()
+            .expect("Required full router configuration not found in telemetry plugin");
+        let enabled_features = Self::extract_enabled_features(full_config);
+        ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -335,6 +352,7 @@ impl PluginPrivate for Telemetry {
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
+            enabled_features,
             config: Arc::new(config),
         })
     }
@@ -1701,6 +1719,15 @@ impl Telemetry {
             }
         }
     }
+
+    fn extract_enabled_features(full_config: &serde_json::Value) -> EnabledFeatures {
+        EnabledFeatures {
+            apq: full_config["apq"]["enabled"].as_bool().unwrap_or(false),
+            entity_cache: full_config["preview_entity_cache"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
+        }
+    }
 }
 
 impl TelemetryActivation {
@@ -1967,6 +1994,7 @@ mod tests {
     use tower::util::BoxService;
 
     use super::CustomTraceIdPropagator;
+    use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
@@ -1978,6 +2006,7 @@ mod tests {
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
+    use crate::plugin::PluginInit;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
@@ -1996,29 +2025,33 @@ mod tests {
     use crate::services::SupergraphResponse;
     use crate::services::router;
 
-    async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
-        let prometheus_support = config.contains("prometheus");
-        let config: Value = serde_yaml::from_str(config).expect("yaml must be valid");
-        let telemetry_config = config
+    async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
+        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        let telemetry_config = full_config
             .as_object()
             .expect("must be an object")
             .get("telemetry")
-            .expect("root key must be telemetry");
-        let mut plugin = crate::plugin::plugins()
+            .expect("telemetry must be a root key");
+        let init = PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+
+        let plugin = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance_without_schema(telemetry_config)
+            .create_instance(init)
             .await
-            .unwrap();
+            .expect("unable to create telemetry plugin");
 
-        if prometheus_support {
-            plugin
-                .as_any_mut()
-                .downcast_mut::<Telemetry>()
-                .unwrap()
-                .activation
-                .lock()
-                .reload_metrics();
+        let downcast = plugin
+            .as_any()
+            .downcast_ref::<Telemetry>()
+            .expect("Telemetry plugin expected");
+        if downcast.config.exporters.metrics.prometheus.enabled {
+            downcast.activation.lock().reload_metrics();
         }
         plugin
     }
@@ -2078,11 +2111,25 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
+        let full_config = serde_json::json!({
+            "telemetry": {
+                "apollo": {
+                    "schema_id": "abc"
+                },
+                "exporters": {
+                    "tracing": {},
+                },
+            },
+        });
+        let telemetry_config = full_config["telemetry"].clone();
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance_without_schema(
-                &serde_json::json!({"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}),
+            .create_instance(
+                PluginInit::fake_builder()
+                    .config(telemetry_config)
+                    .full_config(full_config)
+                    .build(),
             )
             .await
             .unwrap();
@@ -2091,6 +2138,62 @@ mod tests {
     #[tokio::test]
     async fn config_serialization() {
         create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_features() {
+        // Explicitly enabled
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_all_features_enabled.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            features.apq,
+            "Telemetry plugin should properly parse apq feature when explicitly enabled"
+        );
+        assert!(
+            features.entity_cache,
+            "Telemetry plugin should properly parse entity cache feature when explicitly enabled"
+        );
+
+        // Explicitly disabled
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_all_features_explicitly_disabled.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            !features.apq,
+            "Telemetry plugin should properly parse apq feature when explicitly disabled"
+        );
+        assert!(
+            !features.entity_cache,
+            "Telemetry plugin should properly parse entity cache feature when explicitly disabled"
+        );
+
+        // Implicitly disabled (not defined in yaml)
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_all_features_implicitly_disabled.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            !features.apq,
+            "Telemetry plugin should properly parse apq feature when explicitly disabled"
+        );
+        assert!(
+            !features.entity_cache,
+            "Telemetry plugin should properly parse entity cache feature when explicitly disabled"
+        );
+    }
+
+    fn enabled_features(plugin: &dyn DynPlugin) -> &EnabledFeatures {
+        &plugin
+            .as_any()
+            .downcast_ref::<Telemetry>()
+            .expect("telemetry plugin")
+            .enabled_features
     }
 
     #[tokio::test]
@@ -2539,9 +2642,10 @@ mod tests {
     #[tokio::test]
     async fn test_custom_subgraph_instruments() {
         async {
-            let plugin =
+            let plugin = Box::new(
                 create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await;
+                    .await,
+            );
 
             let mut mock_bad_request_service = MockSubgraphService::new();
             mock_bad_request_service.expect_call().times(2).returning(
