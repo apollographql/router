@@ -731,14 +731,6 @@ async fn test_override_headers_with_config() {
                 .method("GET")
                 .header(
                     HeaderName::from_str("x-forward").unwrap(),
-                    HeaderValue::from_str("forwarded").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-forward").unwrap(),
-                    HeaderValue::from_str("forwarded-again").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-forward").unwrap(),
                     HeaderValue::from_str("forwarded-by-config").unwrap(),
                 )
                 .header(
@@ -748,6 +740,150 @@ async fn test_override_headers_with_config() {
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
                     HeaderValue::from_str("third,fourth").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_only_send_named_header_once_when_both_config_and_schema_propagate_header() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  {
+                    "propagate": {
+                      "named": "x-forward",
+                    }
+                  },
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.append("x-forward", "forwarded".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_only_send_matching_header_once_when_both_config_and_schema_propagate_header() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  {
+                    "propagate": {
+                      "matching": ".+?forward",
+                    }
+                  },
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.append("x-forward", "forwarded".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
                 )
                 .path("/users"),
         ],

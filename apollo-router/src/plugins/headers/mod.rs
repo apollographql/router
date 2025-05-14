@@ -539,20 +539,18 @@ impl Propagate {
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
-                            headers_mut.append(target_header, default.clone());
+                            headers_mut.insert(target_header, default.clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     } else {
                         for value in values {
-                            headers_mut.append(target_header, value.clone());
+                            headers_mut.insert(target_header, value.clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     }
                 }
             }
             Propagate::Matching { matching } => {
-                let mut previous_name = None;
-
                 supergraph_headers
                     .iter()
                     .filter(|(name, _)| {
@@ -560,25 +558,10 @@ impl Propagate {
                     })
                     .for_each(|(name, value)| {
                         if !already_propagated.contains(name.as_str()) {
-                            headers_mut.append(name, value.clone());
-
-                            // we have to this because don't want to propagate headers that are accounted for in the
-                            // `already_propagated` set, but in the iteration here we might go through the same header
-                            // multiple times
-                            match previous_name {
-                                None => previous_name = Some(name),
-                                Some(previous) => {
-                                    if previous != name {
-                                        already_propagated.insert(previous.to_string());
-                                        previous_name = Some(name);
-                                    }
-                                }
-                            }
+                            headers_mut.insert(name, value.clone());
+                            already_propagated.insert(name.to_string());
                         }
                     });
-                if let Some(name) = previous_name {
-                    already_propagated.insert(name.to_string());
-                }
             }
         }
     }
@@ -1049,7 +1032,6 @@ mod test {
                     ("ac", "vac"),
                     ("da", "vda"),
                     ("db", "vdb"),
-                    ("db", "vdb2"),
                 ])
             })
             .returning(example_response);
@@ -1076,7 +1058,6 @@ mod test {
                     ("ac", "vac"),
                     ("da", "vda"),
                     ("db", "vdb"),
-                    ("db", "vdb2"),
                 ])
             })
             .returning(example_connector_response);
@@ -1420,8 +1401,6 @@ mod test {
                 ("content-type", "graphql"),
                 ("da", "vda"),
                 ("db", "vdb"),
-                ("db", "vdb"),
-                ("db", "vdb2"),
             ]
         );
 
