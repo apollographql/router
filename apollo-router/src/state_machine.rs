@@ -327,8 +327,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         match license {
             LicenseState::Licensed { limits } => {
                 let license_is_restricted = limits
-                    .map(|limits| limits.restricted.unwrap_or(false))
-                    .unwrap_or(false);
+                    .map(|limits| limits.restricted.unwrap_or(true))
+                    .unwrap_or(true); // TODO: Revert me.  Unless we were to update all the licenses first, this should default to false.  Useful for testing though.
                 if report.uses_restricted_features() && license_is_restricted {
                     tracing::error!(
                         "Insufficient license. An upgraded license is required enable the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
