@@ -217,13 +217,11 @@ mod test {
     use std::future::Future;
     use std::time::Duration;
 
-    use http::header::HeaderName;
+    use serde_json::Value;
     use tokio_stream::StreamExt;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
-    use url::Url;
 
-    use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
     use crate::Context;
@@ -237,31 +235,29 @@ mod test {
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
-    use crate::plugins::telemetry::apollo::default_buffer_size;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
-        let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
-            endpoint: Url::parse("http://example.com")?,
-            apollo_key: None,
-            apollo_graph_ref: None,
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: default_buffer_size(),
-            schema_id: "schema_sha".to_string(),
-            ..Default::default()
-        })
-        .await?;
+        let config = r#"
+            telemetry:
+              apollo:
+                endpoint: "http://example.com"
+                client_name_header: "name_header"
+                client_version_header: "version_header"
+                buffer_size: 10000
+                schema_id: "schema_sha"
+            "#;
+        let plugin = create_telemetry_plugin(config).await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_enabled() -> Result<(), BoxError> {
-        let plugin = create_plugin().await?;
+        let plugin = create_default_telemetry_plugin().await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Apollo(_)));
         Ok(())
     }
@@ -388,7 +384,7 @@ mod test {
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut plugin = create_plugin().await?;
+        let mut plugin = create_default_telemetry_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
@@ -433,30 +429,40 @@ mod test {
         Ok(results)
     }
 
-    fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        create_plugin_with_apollo_config(apollo::Config {
-            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
-            apollo_key: Some("key".to_string()),
-            apollo_graph_ref: Some("ref".to_string()),
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: default_buffer_size(),
-            schema_id: "schema_sha".to_string(),
-            ..Default::default()
-        })
+    fn create_default_telemetry_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
+        let config = format!(
+            r#"
+            telemetry:
+              apollo:
+                endpoint: "{endpoint}"
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                client_name_header: "name_header"
+                client_version_header: "version_header"
+                buffer_size: 10000
+                schema_id: "schema_sha"
+            "#,
+            endpoint = ENDPOINT_DEFAULT
+        );
+
+        async move { create_telemetry_plugin(&config).await }
     }
 
-    async fn create_plugin_with_apollo_config(
-        apollo_config: apollo::Config,
-    ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInit::fake_new(
-            config::Conf {
-                apollo: apollo_config,
-                ..Default::default()
-            },
-            Default::default(),
-        ))
-        .await
+    async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
+        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let init = PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+
+        Telemetry::new(init).await
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
