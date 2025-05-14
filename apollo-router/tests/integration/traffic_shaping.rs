@@ -14,7 +14,7 @@ use crate::integration::common::graph_os_enabled;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_timeout() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -26,8 +26,8 @@ async fn test_router_timeout() -> Result<(), BoxError> {
             traffic_shaping:
                 router:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -50,7 +50,7 @@ async fn test_router_timeout() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_timeout() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -64,8 +64,8 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
             traffic_shaping:
                 all:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -89,7 +89,7 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_connector_timeout() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -103,8 +103,8 @@ async fn test_connector_timeout() -> Result<(), BoxError> {
                     sources:
                         connectors.jsonPlaceholder:
                             timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .supergraph(PathBuf::from_iter([
             "..",
             "apollo-router",
@@ -186,7 +186,7 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -207,8 +207,8 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
             traffic_shaping:
                 router:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -230,7 +230,7 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -244,8 +244,8 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
                     global_rate_limit:
                         capacity: 1
                         interval: 10min
-            "#
-        ))
+            "#,
+        )
         .build()
         .await;
 
@@ -273,7 +273,7 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -290,7 +290,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
                         capacity: 1
                         interval: 10min
             "#,
-        ))
+        )
         .build()
         .await;
 
@@ -318,7 +318,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_connector_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             telemetry:
                 exporters:
@@ -342,7 +342,7 @@ async fn test_connector_rate_limit() -> Result<(), BoxError> {
                         $config:
                             my.config.value: true
             "#,
-        ))
+        )
         .supergraph(PathBuf::from_iter([
             "..",
             "apollo-router",
