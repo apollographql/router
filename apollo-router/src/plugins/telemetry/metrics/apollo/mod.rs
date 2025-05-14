@@ -250,14 +250,14 @@ mod test {
                 buffer_size: 10000
                 schema_id: "schema_sha"
             "#;
-        let plugin = create_telemetry_plugin_from_full_config(config).await?;
+        let plugin = create_telemetry_plugin(config).await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_enabled() -> Result<(), BoxError> {
-        let plugin = create_telemetry_plugin().await?;
+        let plugin = create_default_telemetry_plugin().await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Apollo(_)));
         Ok(())
     }
@@ -384,7 +384,7 @@ mod test {
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut plugin = create_telemetry_plugin().await?;
+        let mut plugin = create_default_telemetry_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
@@ -429,7 +429,7 @@ mod test {
         Ok(results)
     }
 
-    fn create_telemetry_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
+    fn create_default_telemetry_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
         let config = format!(
             r#"
             telemetry:
@@ -445,12 +445,10 @@ mod test {
             endpoint = ENDPOINT_DEFAULT
         );
 
-        async move { create_telemetry_plugin_from_full_config(&config).await }
+        async move { create_telemetry_plugin(&config).await }
     }
 
-    async fn create_telemetry_plugin_from_full_config(
-        full_config: &str,
-    ) -> Result<Telemetry, BoxError> {
+    async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
         let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
         let telemetry_config = full_config
             .as_object()
