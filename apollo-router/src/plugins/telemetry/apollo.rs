@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use http::header::HeaderName;
 use itertools::Itertools;
+use libc::stat;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -336,6 +337,7 @@ pub(crate) struct Report {
     #[serde(serialize_with = "serialize_licensed_operation_count_by_type")]
     pub(crate) licensed_operation_count_by_type:
         HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
+    pub(crate) router_features_enabled: Vec<String>
 }
 
 #[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
@@ -431,6 +433,7 @@ impl Report {
                 .collect(),
             traces_pre_aggregated: true,
             extended_references_enabled,
+            router_features_enabled: self.router_features_enabled.clone(),
             ..Default::default()
         };
 
@@ -484,6 +487,7 @@ impl AddAssign<SingleStatsReport> for Report {
                 })
                 .or_insert(licensed_operation_count_by_type);
         }
+        self.router_features_enabled = report.router_features_enabled.clone(); // TODO this should probably actually add these?
     }
 }
 

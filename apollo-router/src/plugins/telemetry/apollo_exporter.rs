@@ -186,7 +186,8 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        // We may be sending traces but with no operation count
+        // We may be sending traces but with no operation count\
+        // TODO check features enabled?
         if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
         {
             return Ok(());

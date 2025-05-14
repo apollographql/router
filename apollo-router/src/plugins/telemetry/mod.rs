@@ -283,11 +283,25 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct EnabledFeatures {
     apq: bool,
     entity_cache: bool,
+}
+
+impl EnabledFeatures{
+    fn list(&self) -> Vec<String> {
+        // Map enabled features to their names for usage reports
+        [
+            ("apq", self.apq),
+            ("entity_cache", self.entity_cache),
+        ]
+        .iter()
+        .filter(|&&(_, enabled)| enabled)
+        .map(&|(name, _): &(&str, _)| name.to_string())
+        .collect()
+    }
 }
 
 #[async_trait::async_trait]
@@ -365,6 +379,7 @@ impl PluginPrivate for Telemetry {
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
+        let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
         let static_router_instruments = self
@@ -490,6 +505,7 @@ impl PluginPrivate for Telemetry {
                     let start = Instant::now();
                     let config = config_later.clone();
                     let sender = metrics_sender.clone();
+                    let enabled_features = enabled_features.clone();
 
                     Self::plugin_metrics(&config);
 
@@ -566,6 +582,7 @@ impl PluginPrivate for Telemetry {
                                     OperationKind::Query,
                                     None,
                                     Default::default(),
+                                    enabled_features.clone(),
                                 );
                             }
 
@@ -603,6 +620,7 @@ impl PluginPrivate for Telemetry {
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
+        let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let static_supergraph_instruments = self
             .builtin_instruments
@@ -719,6 +737,7 @@ impl PluginPrivate for Telemetry {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
+                    let enabled_features = enabled_features.clone();
 
                     async move {
                         let span = Span::current();
@@ -770,6 +789,7 @@ impl PluginPrivate for Telemetry {
                             sender,
                             start,
                             result,
+                            enabled_features,
                         )
                     }
                 },
@@ -1243,6 +1263,7 @@ impl Telemetry {
         sender: Sender,
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
+        enabled_features: EnabledFeatures
     ) -> Result<supergraph::Response, BoxError> {
         let operation_kind: OperationKind =
             ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
@@ -1261,6 +1282,7 @@ impl Telemetry {
                         operation_kind,
                         operation_subtype,
                         Default::default(),
+                        enabled_features.clone(),
                     );
                 }
 
@@ -1280,6 +1302,7 @@ impl Telemetry {
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
                         Default::default(),
+                        enabled_features.clone(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
@@ -1329,6 +1352,7 @@ impl Telemetry {
                                                     .local_type_stats
                                                     .drain()
                                                     .collect(),
+                                                enabled_features.clone(),
                                             );
                                         }
                                     } else {
@@ -1345,6 +1369,7 @@ impl Telemetry {
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
                                             local_stat_recorder.local_type_stats.drain().collect(),
+                                            enabled_features.clone(),
                                         );
                                     }
                                 } else {
@@ -1359,6 +1384,7 @@ impl Telemetry {
                                             operation_kind,
                                             None,
                                             local_stat_recorder.local_type_stats.drain().collect(),
+                                            enabled_features.clone(),
                                         );
                                     }
                                 }
@@ -1382,6 +1408,7 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
         local_per_type_stat: HashMap<String, LocalTypeStat>,
+        enabled_features: EnabledFeatures,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1405,6 +1432,7 @@ impl Telemetry {
                             licensed_operation_count,
                         },
                     ),
+                    router_features_enabled: enabled_features.list(),
                     ..Default::default()
                 }
             } else {
@@ -1515,6 +1543,7 @@ impl Telemetry {
                             query_metadata: usage_reporting.get_query_metadata(),
                         },
                     )]),
+                    router_features_enabled: enabled_features.list(),
                 }
             }
         } else {
@@ -1526,6 +1555,7 @@ impl Telemetry {
                     licensed_operation_count: 1,
                 }
                 .into(),
+                router_features_enabled: enabled_features.list(),
                 ..Default::default()
             }
         };

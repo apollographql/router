@@ -24,6 +24,7 @@ pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
     pub(crate) licensed_operation_count_by_type: Option<LicensedOperationCountByType>,
+    pub(crate) router_features_enabled: Vec<String>
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -666,6 +667,7 @@ mod test {
                     query_metadata: None,
                 },
             )]),
+            router_features_enabled: vec!["apq".to_string(), "entity_cache".to_string()],
         }
     }
 
