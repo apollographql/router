@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.3.0-alpha.0"
+version = "2.3.0-preview.0"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.3.0-alpha.0"
+version = "2.3.0-preview.0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -429,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.3.0-alpha.0"
+version = "2.3.0-preview.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
