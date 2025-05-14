@@ -665,6 +665,42 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_span_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .span_attribute("router", vec![("client.name", "foobar")])
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foobar")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct OtlpTraceSpec<'a> {
     trace_spec: TraceSpec,
     mock_server: &'a MockServer,
@@ -678,10 +714,6 @@ impl Deref for OtlpTraceSpec<'_> {
 }
 
 impl Verifier for OtlpTraceSpec<'_> {
-    fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
-        // TODO
-        Ok(())
-    }
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
     }
@@ -870,6 +902,29 @@ impl Verifier for OtlpTraceSpec<'_> {
             }
         } else {
             assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.intValue")?.is_empty())
+        }
+        Ok(())
+    }
+
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (span, attributes) in self.span_attributes.iter() {
+            for (key, value) in attributes {
+                // extracts a list of span attribute values with the provided key
+                let binding = trace.select_path(&format!(
+                    "$..resourceSpans[?(@.resource.attributes[?(@.key == 'service.name' && @.value.stringValue == '{span}')])]..spans..attributes..[?(@.key == '{key}')].value.*"
+                ))?;
+                let matches_value = binding.iter().any(|v| match v {
+                    Value::Bool(v) => (*v).to_string() == *value,
+                    Value::Number(n) => (*n).to_string() == *value,
+                    Value::String(s) => s == value,
+                    _ => false,
+                });
+                if !matches_value {
+                    return Err(BoxError::from(format!(
+                        "unexpected attribute values for span `{span}` and key `{key}`, expected value `{value}` but got {binding:?}"
+                    )));
+                }
+            }
         }
         Ok(())
     }
