@@ -283,6 +283,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
     }
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 struct EnabledFeatures {
     apq: bool,
@@ -323,6 +324,7 @@ impl PluginPrivate for Telemetry {
             .as_ref()
             .expect("Required full router configuration not found in telemetry plugin");
         let enabled_features = Self::extract_enabled_features(full_config);
+        ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
