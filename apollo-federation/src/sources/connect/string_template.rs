@@ -20,7 +20,7 @@ use serde_json_bytes::Value;
 pub(crate) use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
-const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
+pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
 
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug, Default)]
@@ -36,7 +36,11 @@ impl FromStr for StringTemplate {
         let mut chars = input.chars().peekable();
         let mut parts = Vec::new();
         while let Some(next) = chars.peek() {
-            if *next == '{' {
+            if SPECIAL_WHITE_SPACES.contains(next) {
+                chars.next();
+                offset +=1;
+                continue;
+            } else if *next == '{' {
                 let mut braces_count = 0; // Ignore braces within JSONSelection
                 let expression = chars
                     .by_ref()
@@ -72,7 +76,7 @@ impl FromStr for StringTemplate {
             } else {
                 let value = chars
                     .by_ref()
-                    .peeking_take_while(|c| *c != '{' && SPECIAL_WHITE_SPACES.contains(c))
+                    .peeking_take_while(|c| *c != '{' && !SPECIAL_WHITE_SPACES.contains(c))
                     .collect::<String>();
                 let len = value.len();
                 parts.push(Part::Constant(Constant {
@@ -252,7 +256,7 @@ pub(crate) fn write_value<Output: Write>(
 }
 
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Constant {
     pub(crate) value: String,
     pub(crate) location: Range<usize>,

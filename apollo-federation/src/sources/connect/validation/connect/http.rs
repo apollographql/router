@@ -10,6 +10,8 @@ use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use crate::sources::connect::string_template::Constant;
+use crate::sources::connect::string_template::SPECIAL_WHITE_SPACES;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
@@ -292,6 +294,7 @@ impl<'schema> Transport<'schema> {
             })
             .map_err(|e| vec![e])?;
 
+        // let multiple_url = url_string.as_str().replace(Self::SPECIAL_WHITE_SPACES, "");
         let url = StringTemplate::from_str(url_string.as_str())
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
@@ -397,7 +400,18 @@ fn validate_absolute_connect_url(
             .collect(),
     };
 
-    let Some(Part::Constant(first)) = url.parts.first() else {
+    let Part::Constant(first) = url.parts.iter().take_while(|part| matches!(part, Part::Constant(_)))
+        .fold(Part::Constant(Constant::default()),|acc, part| {
+            match (acc, part) {
+                (Part::Constant(acc), Part::Constant(extra)) => {
+                    Part::Constant(Constant { 
+                        value: acc.value + &extra.value, 
+                        location: acc.location.start..extra.location.end 
+                    })
+                },
+                _ => unreachable!("All parts are constant for sure")
+            }
+        }) else {
         return Err(relative_url_error());
     };
 
@@ -405,10 +419,11 @@ fn validate_absolute_connect_url(
         return Err(relative_url_error());
     };
 
-    if url.parts.len() > 1
+    if url.parts.iter().skip_while(|part| matches!(part, Part::Constant(_))).count() > 0
         && !without_scheme.contains('/')
         && !without_scheme.contains('?')
         && !without_scheme.contains('#')
+        && SPECIAL_WHITE_SPACES.iter().any(|c| !without_scheme.contains(*c))
     {
         return Err(Message {
             code: Code::InvalidUrl,
