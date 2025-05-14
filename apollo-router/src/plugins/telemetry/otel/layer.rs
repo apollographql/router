@@ -1100,7 +1100,7 @@ fn thread_id_integer(id: thread::ThreadId) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::borrow::Cow;
     use std::collections::HashMap;
     use std::error::Error;
@@ -1119,8 +1119,8 @@ mod tests {
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
-    #[derive(Debug, Clone)]
-    struct TestTracer(Arc<Mutex<Option<OtelData>>>);
+    #[derive(Debug, Clone, Default)]
+    pub(crate) struct TestTracer(Arc<Mutex<Option<OtelData>>>);
     impl otel::Tracer for TestTracer {
         type Span = noop::NoopSpan;
         fn start_with_context<T>(&self, _name: T, _context: &OtelContext) -> Self::Span
@@ -1164,7 +1164,7 @@ mod tests {
     }
 
     impl TestTracer {
-        fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
+        pub(crate) fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
             let lock = self.0.lock().unwrap();
             let data = lock.as_ref().expect("no span data has been recorded yet");
             f(data)
