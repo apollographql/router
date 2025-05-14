@@ -1735,6 +1735,93 @@ async fn test_variables() {
     );
 }
 
+#[tokio::test]
+async fn should_support_using_variable_in_nested_input_argument() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/complexInputType"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("Hello world!")))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+    let mut variables: JsonMap = serde_json_bytes::Map::new();
+    variables.insert(
+        serde_json_bytes::ByteString::from("query"),
+        serde_json_bytes::Value::from("kim"),
+    );
+
+    let response = execute(
+        &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        "query Query ($query: String){ complexInputType(filters: { inSpace: true, search: $query })  }",
+        variables,
+        None,
+        |_|{},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "complexInputType": "Hello world!"
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/complexInputType")
+                .query("inSpace=true&search=kim"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_error_when_using_arguments_that_has_not_been_defined() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/complexInputType"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("Hello world!")))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+    let mut variables: JsonMap = serde_json_bytes::Map::new();
+    variables.insert(
+        serde_json_bytes::ByteString::from("query_not_named_right"),
+        serde_json_bytes::Value::from("kim"),
+    );
+
+    let response = execute(
+        &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        "query Query ($query: String){ complexInputType(filters: { inSpace: true, search: $query })  }",
+        variables,
+        None,
+        |_|{},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'connectors': Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables",
+          "path": [],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors",
+            "reason": "Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables"
+          }
+        }
+      ]
+    }
+    "#);
+}
+
 mod quickstart_tests {
     use http::Uri;
 

@@ -1,12 +1,12 @@
 ---
-title: Run in Docker
-subtitle: Run the router container image in Docker
-description: Run the Apollo Router Core container image in Docker with examples covering basic setup, configuration overrides, debugging, and building custom Docker images.
+title: Deploying GraphOS Router in Docker
+subtitle: Deploy router container image
+description: Run an Apollo Router container image in Docker with examples covering basic setup, configuration overrides, debugging, and building custom Docker images.
 ---
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 
-This guide provides the following examples of running an Apollo Router Core container image in Docker:
+This guide provides the following examples of running an Apollo Router container image in Docker:
 
 * Running a basic example with default configuration.
 * Customizing your configuration to override the default configuration.
@@ -49,7 +49,7 @@ services:
       APOLLO_KEY: "<your-graph-api-key>"
 ```
 
-Whether you use `docker run` or `docker compose`, make sure to replace `<router-image-version>` with whichever version you want to use, such as `v1.58.0`, and `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key, respectively.
+Whether you use `docker run` or `docker compose`, make sure to replace `<router-image-version>` with whichever version you want to use, and `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key, respectively.
 
 For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/router/configuration/overview/).
 

@@ -8,7 +8,6 @@ mod fieldset_based_directives {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_key() {
         let schema_str = r#"
             type Query {		
@@ -30,7 +29,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_field_defined_with_arguments_in_provides() {
         let schema_str = r#"
             type Query {
@@ -53,7 +51,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_provides_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -76,7 +73,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_requires_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -207,18 +203,17 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_non_object_fields() {
         let schema_str = r#"
             type Query {
-                t: T @provides(fields: "f")
+                t: Int @provides(fields: "f")
             }
 
             type T {
                 f: Int
             }
         "#;
-        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
+        let err = build_for_errors(schema_str);
 
         assert_errors!(
             err,
@@ -230,7 +225,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn rejects_non_string_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -253,8 +247,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -286,8 +278,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_non_string_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -320,7 +310,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_key() {
@@ -345,8 +334,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_provides() {
@@ -380,8 +367,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     // Special case of non-string argument, specialized because it hits a different
     // code-path due to enum values being parsed as string and requiring special care.
     fn rejects_enum_like_argument_to_requires() {
@@ -416,7 +401,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -439,8 +424,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -469,7 +453,7 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
+    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -493,8 +477,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interface_field() {
         let schema_str = r#"
             type Query {
@@ -515,14 +497,12 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_FIELDS_SELECT_INVALID_TYPE",
-                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is a Interface type which is not allowed in @key"#,
+                r#"[S] On type "T", for @key(fields: "f"): field "T.f" is an Interface type which is not allowed in @key"#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_union_field() {
         let schema_str = r#"
             type Query {
@@ -547,8 +527,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_key() {
         let schema_str = r#"
             type Query {
@@ -576,8 +554,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_provides() {
         let schema_str = r#"
             type Query {
@@ -606,8 +582,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_directive_applications_in_requires() {
         let schema_str = r#"
             type Query {
@@ -632,8 +606,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn can_collect_multiple_errors_in_a_single_fields_argument() {
         let schema_str = r#"
             type Query {
@@ -663,8 +635,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_key() {
         let schema_str = r#"
             type Query {
@@ -687,8 +657,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_provides() {
         let schema_str = r#"
             type Query {
@@ -712,8 +680,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_aliases_in_requires() {
         let schema_str = r#"
             type Query {
@@ -744,6 +710,11 @@ mod fieldset_based_directives {
                 (
                     "REQUIRES_INVALID_FIELDS",
                     r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "m" in "m: a": aliases are not currently supported in @requires"#,
+                ),
+                // PORT NOTE: JS didn't include this last message, but we should report the other alias if we're making the effort to collect all the errors
+                (
+                    "REQUIRES_INVALID_FIELDS",
+                    r#"[S] On field "T.h", for @requires(fields: "x { m: a n: b }"): Cannot use alias "n" in "n: b": aliases are not currently supported in @requires"#,
                 ),
             ]
         );
@@ -1050,11 +1021,11 @@ mod link_handling_tests {
         //                `insta::assert_snapshot` for now.
         // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
         insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+        schema {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"]) @link(url: "https://specs.apollo.dev/link/v1.0")
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1106,11 +1077,7 @@ mod link_handling_tests {
         "###);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_definitions_if_both_the_federation_spec_and_link_spec_are_linked() {
         let subgraph = build_and_validate(
             r#"
@@ -1124,24 +1091,78 @@ mod link_handling_tests {
             "#,
         );
 
-        assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
+        //                it's failing due to missing directive definitions. So, we use
+        //                `insta::assert_snapshot` for now.
+        // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        insta::assert_snapshot!(subgraph.schema_string(), @r###"
+        schema {
+          query: Query
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+        directive @federation__override(from: String!) on FIELD_DEFINITION
+
+        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        type T @key(fields: "k") {
+          k: ID!
+        }
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        union _Entity = T
+
+        type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
+        }
+        "###);
     }
 
-    // TODO: FED-428
+    // TODO: issue with `@tag` directive validation
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@federation__tag\": unknown/unsupported argument \"name\"" }"#
     )]
     fn is_valid_if_a_schema_is_complete_from_the_get_go() {
         let subgraph = build_and_validate(EXPECTED_FULL_SCHEMA);
         assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_missing_definitions_when_some_are_partially_provided() {
         let docs = [
             r#"
@@ -1231,10 +1252,10 @@ mod link_handling_tests {
         });
     }
 
-    // TODO: FED-428
+    // TODO: an issue with `@key` directive definition check.
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"expanded subgraph to be valid: SubgraphError { subgraph: "S", error: DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@key\": argument \"resolvable\" should have default value true but found no default value" } }"#
     )]
     fn allows_known_directives_with_incomplete_but_compatible_definitions() {
         let docs = [

@@ -63,11 +63,12 @@ type Post
   body: String
   title: String
   status: String
+  forceError: String
 }
 
 type Query
   @join__type(graph: POSTS)
 {
   posts: [Post] @join__directive(graphs: [POSTS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/posts"}, selection: "id\ntitle\nbody"})
-  post(id: ID!): Post @join__directive(graphs: [POSTS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/posts/{$args.id}"}, selection: "id\ntitle\nbody"}) @join__directive(graphs: [POSTS], name: "connect", args: {source: "routerHealth", http: {GET: "/health?_={$args.id}"}, selection: "id: $args.id\nstatus", entity: true})
+  post(id: ID!): Post @join__directive(graphs: [POSTS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/posts/{$args.id}"}, selection: "id\ntitle\nbody"}) @join__directive(graphs: [POSTS], name: "connect", args: {source: "routerHealth", http: {GET: "/health?_={$args.id}"}, selection: "id: $args.id\nstatus", entity: true}) @join__directive(graphs: [POSTS], name: "connect", args: {source: "jsonPlaceholder", http: {GET: "/missing?_={$args.id}"}, selection: "forceError", entity: true})
 }

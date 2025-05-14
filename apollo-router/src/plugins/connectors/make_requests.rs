@@ -437,8 +437,8 @@ fn root_fields(
                     .to_string();
 
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
-                    .map_err(|_| {
-                        InvalidArguments("cannot get inputs from field arguments".into())
+                    .map_err(|err| {
+                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
                 let request_inputs = RequestInputs {
@@ -684,8 +684,8 @@ fn entities_with_fields_from_request(
 
             representations.iter().map(move |(i, representation)| {
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
-                    .map_err(|_| {
-                        InvalidArguments("cannot build inputs from field arguments".into())
+                    .map_err(|err| {
+                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
                 let response_name = field

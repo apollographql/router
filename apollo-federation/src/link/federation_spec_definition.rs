@@ -7,7 +7,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
@@ -23,14 +22,12 @@ use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
-use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -982,25 +979,6 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
         // No federation link found in schema. The default is v1.0.
         Ok(&FED_1)
     }
-}
-
-/// Adds a bootstrap fed 1 link directive to the schema.
-pub(crate) fn add_fed1_link_to_schema(
-    schema: &mut FederationSchema,
-) -> Result<(), FederationError> {
-    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
-    // We can't use `import` argument here since fed1 @core does not support `import`.
-    // We will add imports later (see `fed1_link_imports`).
-    SchemaDefinitionPosition.insert_directive(
-        schema,
-        Component::new(Directive {
-            name: Identity::core_identity().name,
-            arguments: vec![Node::new(Argument {
-                name: LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME,
-                value: FED_1.url.to_string().into(),
-            })],
-        }),
-    )
 }
 
 /// Creates a fake imports for fed 1 link directive.
