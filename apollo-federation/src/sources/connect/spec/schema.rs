@@ -57,9 +57,9 @@ pub(crate) struct SourceDirectiveArguments {
     pub(crate) errors: Option<ErrorsArguments>,
 }
 
-/// Common HTTP options for a connector [SourceSpecDefinition]
+/// Common HTTP options for a connector `@source`
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct SourceHTTPArguments {
+pub struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
     pub(crate) base_url: Uri,
 
@@ -120,7 +120,7 @@ pub(crate) struct ConnectDirectiveArguments {
 
 /// The HTTP arguments needed for a connect request
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectHTTPArguments {
+pub struct ConnectHTTPArguments {
     pub(crate) get: Option<String>,
     pub(crate) post: Option<String>,
     pub(crate) patch: Option<String>,

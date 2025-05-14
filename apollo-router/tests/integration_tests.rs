@@ -735,10 +735,8 @@ async fn defer_path_with_disabled_config() {
         "supergraph": {
             "defer_support": false,
         },
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -772,10 +770,8 @@ async fn defer_path_with_disabled_config() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -810,10 +806,8 @@ async fn defer_path() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_in_array() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -853,10 +847,8 @@ async fn defer_path_in_array() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -889,10 +881,8 @@ async fn defer_query_without_accept() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_empty_primary_response() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()

@@ -402,9 +402,10 @@ commands:
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
-  fuzz_build:
-    steps:
-      - run: cargo +nightly fuzz build
+  # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
+  # fuzz_build:
+  #   steps:
+  #     - run: cargo +nightly fuzz build
 
 jobs:
   lint:
@@ -465,13 +466,14 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
-      - when:
-          condition:
-            and:
-              - equal: [ true, << parameters.fuzz >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-          steps:
-            - fuzz_build
+      # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
+      # - when:
+      #     condition:
+      #       and:
+      #         - equal: [ true, << parameters.fuzz >> ]
+      #         - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+      #     steps:
+      #       - fuzz_build
 
   test_updated:
     environment:

@@ -28,8 +28,8 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
-pub(crate) use schema::ConnectHTTPArguments;
-pub(crate) use schema::SourceHTTPArguments;
+pub use schema::ConnectHTTPArguments;
+pub use schema::SourceHTTPArguments;
 use strum_macros::EnumIter;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
