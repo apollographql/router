@@ -397,7 +397,7 @@ impl LicenseEnforcementReport {
                 .build(),
         ];
         if let Some(limits) = license_limits {
-            let restrict_usage_reporting = limits.usage_reporting.unwrap_or(true); // TODO: revert me, should default to false.
+            let restrict_usage_reporting = limits.usage_reporting.unwrap_or(false);
             if restrict_usage_reporting {
                 restrictions.push(
                     ConfigurationRestriction::builder()
