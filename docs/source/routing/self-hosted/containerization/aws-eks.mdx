@@ -1,0 +1,96 @@
+---
+title: Deploying GraphOS Router on AWS EKS
+subtitle: Deploy router with Amazon Elastic Kubernetes Service (EKS)
+description: Build and deploy Apollo Router on Amazon Web Services (AWS) with Amazon Elastic Kubernetes Service (EKS)
+---
+
+Amazon Elastic Kubernetes Service (EKS) offers a fully managed service to run your Kubernetes clusters.
+The benefits of Kubernetes allow us to use more vendor-agnostic tooling, like `kubectl`, however there are some things that can be streamlined if you are using AWS tools.
+
+## Requirements
+
+* [AWS CLI](https://aws.amazon.com/cli/) for setup and configuring local tokens
+* [kubectl](https://kubernetes.io/docs/reference/kubectl/)
+* [eksctl](https://eksctl.io/) (optional)
+
+## Setup AWS account
+If you haven't already configured your AWS CLI with credentials, run:
+
+```
+aws configure
+
+# OR
+
+aws configure sso
+```
+
+This command will prompt you for the following information:
+* AWS Access Key ID
+* AWS Secret Access Key
+* Default region name (choose the region where your EKS cluster is located, e.g., us-west-2)
+* Default output format (e.g., json)
+
+## Get EKS Cluster Credentials
+To authenticate your local `kubectl` with your EKS cluster, you need to update the kubeconfig file with the EKS cluster details.
+This allows `kubectl` to communicate with the EKS API server.
+
+Run the following command to update the kubeconfig:
+```
+aws eks --region <region> update-kubeconfig --name <cluster-name>
+```
+This command will:
+* Fetch the credentials for the specified EKS cluster.
+* Update or create a kubeconfig file (usually located at ~/.kube/config) to use the credentials.
+
+
+## Verify Authentication
+After updating the kubeconfig file, you can verify that `kubectl` is properly configured and able to communicate with the EKS cluster.
+
+Run the following command:
+
+```
+kubectl get nodes
+```
+
+This should return a list of nodes in your EKS cluster if authentication was successful.
+
+```
+NAME                                              STATUS   ROLES    AGE     VERSION
+ip-192-168-XX-XX.us-west-2.compute.internal        Ready    <none>   3d14h   v1.18.9-eks-4b2f6e
+```
+
+If you see the nodes listed, you have successfully logged into the AWS EKS cluster and can now run commands against it using `kubectl`.
+
+
+## Use `kubectl` to Run Commands Against the Cluster
+
+Now that you are authenticated and connected to your EKS cluster, you can use kubectl to manage Kubernetes resources, such as:
+
+* Get the cluster's pods:
+```
+kubectl get pods
+```
+* Get deployments:
+```
+kubectl get deployments
+```
+* Get services:
+```
+kubectl get services
+```
+
+## Switch Between Multiple EKS Clusters (if needed)
+If you manage multiple EKS clusters, you can switch between them by updating your `kubeconfig` or by specifying a context with `kubectl`, or by using `kubectx`.
+
+### Using kubectl
+To list available contexts (clusters):
+```
+kubectl config get-contexts
+```
+
+To switch to a different cluster context:
+```
+kubectl config use-context <context-name>
+```
+### Using kubectx
+See the README in `kubectx`’s [GitHub repository](https://github.com/ahmetb/kubectx), including instructions to install.
