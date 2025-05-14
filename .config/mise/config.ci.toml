@@ -1,3 +1,4 @@
 [tools]
-"cargo:cargo-fuzz" = "0.12.0"
+# Temporarily disable cargo-fuzz.
+# "cargo:cargo-fuzz" = "0.12.0"
 kubeconform = "0.6.7"
