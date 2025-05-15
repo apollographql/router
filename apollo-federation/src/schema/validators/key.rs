@@ -2,6 +2,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Field;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
@@ -23,6 +24,7 @@ use crate::schema::validators::DenyFieldsWithArguments;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::SchemaFieldSetValidator;
 use crate::schema::validators::deny_unsupported_directive_on_interface_type;
+use crate::schema::validators::normalize_diagnostic_message;
 
 pub(crate) fn validate_key_directives(
     schema: &FederationSchema,
@@ -69,17 +71,35 @@ pub(crate) fn validate_key_directives(
                             if let Err(validation_error) =
                                 fields.validate(Valid::assume_valid_ref(schema.schema()))
                             {
-                                errors.push(validation_error.into());
+                                errors.push(invalid_fields_error_from_diagnostics(
+                                    &key,
+                                    validation_error,
+                                ));
                             }
                         }
                     }
-                    Err(e) => errors.push(e.into()),
+                    Err(e) => errors.push(invalid_fields_error_from_diagnostics(&key, e.errors)),
                 }
             }
             Err(e) => errors.push(e),
         }
     }
     Ok(())
+}
+
+fn invalid_fields_error_from_diagnostics(
+    key: &KeyDirective,
+    diagnostics: DiagnosticList,
+) -> FederationError {
+    let mut errors = MultipleFederationErrors::new();
+    for diagnostic in diagnostics.iter() {
+        errors.errors.push(SingleFederationError::KeyInvalidFields {
+            target_type: key.target.type_name().clone(),
+            application: key.schema_directive.to_string(),
+            message: normalize_diagnostic_message(diagnostic),
+        })
+    }
+    errors.into()
 }
 
 /// Instances of `@key(fields:)` cannot select interface or union fields
