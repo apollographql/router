@@ -12,6 +12,7 @@ use http::header::CONNECTION;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
+use http::header::Entry;
 use http::header::HOST;
 use http::header::HeaderName;
 use http::header::PROXY_AUTHENTICATE;
@@ -20,6 +21,7 @@ use http::header::TE;
 use http::header::TRAILER;
 use http::header::TRANSFER_ENCODING;
 use http::header::UPGRADE;
+use itertools::Itertools;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -389,6 +391,7 @@ impl<S> HeadersService<S> {
                 &body_to_value,
                 context,
                 headers_mut,
+                None,
             );
         }
     }
@@ -400,6 +403,8 @@ impl<S> HeadersService<S> {
         let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
+        // We need to know what headers were added prior to this processing to that we can properly override as needed
+        let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
         for operation in &*self.operations {
@@ -409,6 +414,7 @@ impl<S> HeadersService<S> {
                 &body_to_value,
                 context,
                 headers_mut,
+                Some(&existing_headers),
             );
         }
     }
@@ -422,15 +428,19 @@ impl Operation {
         body_to_value: &Option<Value>,
         context: &crate::Context,
         headers_mut: &mut HeaderMap,
+        existing_headers: Option<&HeaderMap>,
     ) {
         match self {
             Operation::Insert(insert) => {
                 insert.process_header_rules(body_to_value, context, headers_mut)
             }
             Operation::Remove(remove) => remove.process_header_rules(headers_mut),
-            Operation::Propagate(propagate) => {
-                propagate.process_header_rules(already_propagated, supergraph_headers, headers_mut)
-            }
+            Operation::Propagate(propagate) => propagate.process_header_rules(
+                already_propagated,
+                supergraph_headers,
+                headers_mut,
+                existing_headers,
+            ),
         }
     }
 }
@@ -502,7 +512,10 @@ impl Remove {
     fn process_header_rules(&self, headers_mut: &mut HeaderMap) {
         match self {
             Remove::Named(name) => {
-                headers_mut.remove(name);
+                // Use `remove_entry_mult` since `remove` only removes the first instance of a header
+                if let Entry::Occupied(entry) = headers_mut.entry(name) {
+                    entry.remove_entry_mult();
+                }
             }
             Remove::Matching(matching) => {
                 let new_headers = headers_mut
@@ -527,7 +540,10 @@ impl Propagate {
         already_propagated: &mut HashSet<String>,
         supergraph_headers: &HeaderMap,
         headers_mut: &mut HeaderMap,
+        existing_headers: Option<&HeaderMap>,
     ) {
+        let default_headers = Default::default();
+        let existing_headers = existing_headers.unwrap_or(&default_headers);
         match self {
             Propagate::Named {
                 named,
@@ -536,15 +552,22 @@ impl Propagate {
             } => {
                 let target_header = rename.as_ref().unwrap_or(named);
                 if !already_propagated.contains(target_header.as_str()) {
+                    // If the header was already added previously by some other method (E.g Connectors), remove it since we're going to override it
+                    if existing_headers.contains_key(target_header) {
+                        // Use `remove_entry_mult` since `remove` only removes the first instance of a header
+                        if let Entry::Occupied(entry) = headers_mut.entry(target_header) {
+                            entry.remove_entry_mult();
+                        }
+                    }
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
-                            headers_mut.insert(target_header, default.clone());
+                            headers_mut.append(target_header, default.clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     } else {
                         for value in values {
-                            headers_mut.insert(target_header, value.clone());
+                            headers_mut.append(target_header, value.clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     }
@@ -556,12 +579,34 @@ impl Propagate {
                     .filter(|(name, _)| {
                         !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
                     })
-                    .for_each(|(name, value)| {
+                    .chunk_by(|(name, ..)| name.to_owned())
+                    .into_iter()
+                    .for_each(|(name, headers)| {
                         if !already_propagated.contains(name.as_str()) {
-                            headers_mut.insert(name, value.clone());
-                            already_propagated.insert(name.to_string());
+                            // If the header was already added previously by some other method (E.g Connectors), remove it since we're going to override it
+                            if existing_headers.contains_key(name) {
+                                // Use `remove_entry_mult` since `remove` only removes the first instance of a header
+                                if let Entry::Occupied(entry) = headers_mut.entry(name) {
+                                    entry.remove_entry_mult();
+                                }
+                            }
+                            headers.for_each(|(_, value)| {
+                                headers_mut.append(name, value.clone());
+                                already_propagated.insert(name.to_string());
+                            });
                         }
                     });
+                /*supergraph_headers
+                .iter()
+                .filter(|(name, _)| {
+                    !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
+                })
+                .for_each(|(name, value)| {
+                    if !already_propagated.contains(name.as_str()) {
+                        headers_mut.insert(name, value.clone());
+                        already_propagated.insert(name.to_string());
+                    }
+                });*/
             }
         }
     }
@@ -1032,6 +1077,7 @@ mod test {
                     ("ac", "vac"),
                     ("da", "vda"),
                     ("db", "vdb"),
+                    ("db", "vdb2"),
                 ])
             })
             .returning(example_response);
@@ -1058,6 +1104,7 @@ mod test {
                     ("ac", "vac"),
                     ("da", "vda"),
                     ("db", "vdb"),
+                    ("db", "vdb2"),
                 ])
             })
             .returning(example_connector_response);
@@ -1401,6 +1448,8 @@ mod test {
                 ("content-type", "graphql"),
                 ("da", "vda"),
                 ("db", "vdb"),
+                ("db", "vdb"),
+                ("db", "vdb2"),
             ]
         );
 
