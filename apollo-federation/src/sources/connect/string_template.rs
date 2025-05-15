@@ -267,6 +267,12 @@ pub(crate) struct Expression {
     pub(crate) location: Range<usize>,
 }
 
+impl From<(String, Range<usize>)> for Constant {
+    fn from((value, location): (String, Range<usize>)) -> Self {
+        Self { value, location }
+    }
+}
+
 /// All the percent encoding rules we use for building URIs.
 ///
 /// The [`AsciiSet`] type is an efficient type used by [`percent_encoding`],

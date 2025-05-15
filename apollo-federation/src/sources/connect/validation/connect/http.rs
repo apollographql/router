@@ -16,7 +16,6 @@ use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
-use crate::sources::connect::string_template::Constant;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -397,20 +396,26 @@ fn validate_absolute_connect_url(
             .collect(),
     };
 
-    let Part::Constant(first) = url
+    let first_range = url
         .parts
-        .iter()
-        .take_while(|part| matches!(part, Part::Constant(_)))
-        .fold(Part::Constant(Constant::default()), |acc, part| {
-            match (acc, part) {
-                (Part::Constant(acc), Part::Constant(extra)) => Part::Constant(Constant {
-                    value: acc.value + &extra.value,
-                    location: acc.location.start..extra.location.end,
-                }),
-                _ => unreachable!("All parts are constant for sure"),
-            }
-        })
-    else {
+        .first()
+        .map(|part| part.location().start)
+        .unwrap_or_default();
+    let Part::Constant(first) = Part::Constant(
+        url.parts
+            .iter()
+            .map_while(|part| match part {
+                Part::Constant(constant) => Some((
+                    constant.value.as_str(),
+                    constant.location.start..constant.location.end,
+                )),
+                _ => None,
+            })
+            .fold((String::new(), first_range..first_range), |acc, part| {
+                (acc.0 + part.0, acc.1.start..part.1.end)
+            })
+            .into(),
+    ) else {
         return Err(relative_url_error());
     };
 
@@ -422,9 +427,7 @@ fn validate_absolute_connect_url(
         url.parts
             .iter()
             .find(|part| matches!(part, Part::Expression(_))),
-        !without_scheme.contains('/')
-            && !without_scheme.contains('?')
-            && !without_scheme.contains('#'), // && SPECIAL_WHITE_SPACES.iter().any(|c| !without_scheme.contains(*c))
+        !without_scheme.contains('/') && !without_scheme.contains('?'),
     ) {
         return Err(Message {
             code: Code::InvalidUrl,
