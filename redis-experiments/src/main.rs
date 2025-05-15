@@ -112,10 +112,13 @@ async fn test_weird_keys() {
     let cache = cache().await;
     cache.create_index().await.unwrap();
     let expire = Expire::In { seconds: 600 };
+    // Non-ASCII, all ASCII punctiation, leading digit
     let key1 = AsciiWhitespaceSeparated(r##"k1|🔑"##);
     let key2 = AsciiWhitespaceSeparated(r##"k2,!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##);
+    let key3 = AsciiWhitespaceSeparated(r##"0k"##);
     let not_key1 = AsciiWhitespaceSeparated("k1");
     let not_key2 = AsciiWhitespaceSeparated("k2");
+    let not_key3 = AsciiWhitespaceSeparated("k");
     cache
         .insert_hash_document("x", expire, key1, [("data", "X")])
         .await
@@ -124,10 +127,16 @@ async fn test_weird_keys() {
         .insert_hash_document("y", expire, key2, [("data", "Y")])
         .await
         .unwrap();
+    cache
+        .insert_hash_document("z", expire, key3, [("data", "Z")])
+        .await
+        .unwrap();
     assert_eq!(cache.invalidate(not_key1).await.unwrap(), 0);
     assert_eq!(cache.invalidate(not_key2).await.unwrap(), 0);
+    assert_eq!(cache.invalidate(not_key3).await.unwrap(), 0);
     assert_eq!(cache.invalidate(key1).await.unwrap(), 1);
     assert_eq!(cache.invalidate(key2).await.unwrap(), 1);
+    assert_eq!(cache.invalidate(key3).await.unwrap(), 1);
     cache.drop_index(true).await.unwrap();
 }
 
