@@ -206,9 +206,7 @@ impl Part {
             Self::Expression(e) => e.location.clone(),
         }
     }
-}
 
-impl Part {
     /// Evaluate the expression of the part (if any) and write the result to `output`.
     ///
     /// # Errors
