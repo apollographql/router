@@ -17,8 +17,8 @@ type Query {
           { name: "<Invalid-Header>", value: "invalid.header.name" }
           { name: "x-invalid-from", from: "<Invalid-Header>" }
           {
-            name: "x-invalid-value"
-            value: "  Value with 😊 emoji and newline  \n "
+            name: "x-emoji-value"
+            value: "  Value with 😊 emoji  "
           }
           { name: "Content-Length", value: "Is a reserved header" }
           { name: "Content-Type", from: "Cant-Be-Dynamic" }

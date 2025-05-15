@@ -10,14 +10,13 @@ use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
-use crate::sources::connect::string_template::Constant;
-use crate::sources::connect::string_template::SPECIAL_WHITE_SPACES;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Constant;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -398,18 +397,20 @@ fn validate_absolute_connect_url(
             .collect(),
     };
 
-    let Part::Constant(first) = url.parts.iter().take_while(|part| matches!(part, Part::Constant(_)))
-        .fold(Part::Constant(Constant::default()),|acc, part| {
+    let Part::Constant(first) = url
+        .parts
+        .iter()
+        .take_while(|part| matches!(part, Part::Constant(_)))
+        .fold(Part::Constant(Constant::default()), |acc, part| {
             match (acc, part) {
-                (Part::Constant(acc), Part::Constant(extra)) => {
-                    Part::Constant(Constant { 
-                        value: acc.value + &extra.value, 
-                        location: acc.location.start..extra.location.end 
-                    })
-                },
-                _ => unreachable!("All parts are constant for sure")
+                (Part::Constant(acc), Part::Constant(extra)) => Part::Constant(Constant {
+                    value: acc.value + &extra.value,
+                    location: acc.location.start..extra.location.end,
+                }),
+                _ => unreachable!("All parts are constant for sure"),
             }
-        }) else {
+        })
+    else {
         return Err(relative_url_error());
     };
 
@@ -417,19 +418,21 @@ fn validate_absolute_connect_url(
         return Err(relative_url_error());
     };
 
-    if url.parts.iter().skip_while(|part| matches!(part, Part::Constant(_))).count() > 0
-        && !without_scheme.contains('/')
-        && !without_scheme.contains('?')
-        && !without_scheme.contains('#')
-        && SPECIAL_WHITE_SPACES.iter().any(|c| !without_scheme.contains(*c))
-    {
+    if let (Some(dynamic), true) = (
+        url.parts
+            .iter()
+            .find(|part| matches!(part, Part::Expression(_))),
+        !without_scheme.contains('/')
+            && !without_scheme.contains('?')
+            && !without_scheme.contains('#'), // && SPECIAL_WHITE_SPACES.iter().any(|c| !without_scheme.contains(*c))
+    ) {
         return Err(Message {
             code: Code::InvalidUrl,
             message: format!(
                 "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
             locations: str_value
-                .line_col_for_subslice(first.location.clone(), schema)
+                .line_col_for_subslice(dynamic.location(), schema)
                 .into_iter()
                 .collect(),
         });

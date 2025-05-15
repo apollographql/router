@@ -38,7 +38,7 @@ impl FromStr for StringTemplate {
         while let Some(next) = chars.peek() {
             if SPECIAL_WHITE_SPACES.contains(next) {
                 chars.next();
-                offset +=1;
+                offset += 1;
                 continue;
             } else if *next == '{' {
                 let mut braces_count = 0; // Ignore braces within JSONSelection
@@ -200,7 +200,7 @@ pub(crate) enum Part {
 impl Part {
     /// Get the original location of the part from the string which was parsed to form the
     /// [`StringTemplate`].
-    fn location(&self) -> Range<usize> {
+    pub(crate) fn location(&self) -> Range<usize> {
         match self {
             Self::Constant(c) => c.location.clone(),
             Self::Expression(e) => e.location.clone(),

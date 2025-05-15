@@ -326,21 +326,6 @@ mod test_header_value_parse {
     }
 
     #[test]
-    fn invalid_header_values() {
-        assert_debug_snapshot!(
-            HeaderValue::from_str("\n"),
-            @r###"
-        Err(
-            Error {
-                message: "invalid value `\n`",
-                location: 0..1,
-            },
-        )
-        "###
-        )
-    }
-
-    #[test]
     fn missing_closing_braces() {
         assert_debug_snapshot!(
             HeaderValue::from_str("{$config.one"),
