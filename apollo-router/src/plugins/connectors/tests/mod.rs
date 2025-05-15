@@ -798,11 +798,10 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
 
     let received_requests = &mock_server.received_requests().await.unwrap();
 
-    assert_eq!(
-        received_requests
+    assert!(
+        !received_requests
             .iter()
             .any(|r| r.headers.get_all("x-forward").iter().count() > 1),
-        false,
         "There should only be one instance of x-forward since the yaml config is overriding the sdl"
     );
     req_asserts::matches(
@@ -880,11 +879,10 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
 
     let received_requests = &mock_server.received_requests().await.unwrap();
 
-    assert_eq!(
-        received_requests
+    assert!(
+        !received_requests
             .iter()
             .any(|r| r.headers.get_all("x-forward").iter().count() > 1),
-        false,
         "There should only be one instance of x-forward since the yaml config is overriding the sdl"
     );
     req_asserts::matches(
