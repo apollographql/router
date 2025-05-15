@@ -936,73 +936,67 @@ Did you mean "@shareable"?{}"#,
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
 #[cfg(test)]
 mod link_handling_tests {
+    use similar::TextDiff;
+
     use super::*;
 
-    // TODO(FED-543): Remaining directive definitions should be added to the schema
     #[allow(dead_code)]
-    const EXPECTED_FULL_SCHEMA: &str = r#"
-    schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-    {
-      query: Query
-    }
+    const EXPECTED_FULL_SCHEMA: &str = r#"schema {
+  query: Query
+}
 
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
-    directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-    directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
-    directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-    directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-    directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
 
-    directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
 
-    directive @federation__shareable on OBJECT | FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
 
-    directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-    directive @federation__override(from: String!) on FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-    type T
-      @key(fields: "k")
-    {
-      k: ID!
-    }
+type T @key(fields: "k") {
+  k: ID!
+}
 
-    enum link__Purpose {
-      """
-      \`SECURITY\` features provide metadata necessary to securely resolve fields.
-      """
-      SECURITY
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
 
-      """
-      \`EXECUTION\` features provide metadata necessary for operation execution.
-      """
-      EXECUTION
-    }
+scalar link__Import
 
-    scalar link__Import
+scalar federation__FieldSet
 
-    scalar federation__FieldSet
+scalar _Any
 
-    scalar _Any
+type _Service {
+  sdl: String
+}
 
-    type _Service {
-      sdl: String
-    }
+union _Entity = T
 
-    union _Entity = T
-
-    type Query {
-      _entities(representations: [_Any!]!): [_Entity]!
-      _service: _Service!
-    }
-    "#;
+type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+}
+"#;
 
     #[test]
     fn expands_everything_if_only_the_federation_spec_is_linked() {
@@ -1017,65 +1011,13 @@ mod link_handling_tests {
             "#,
         );
 
-        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
-        //                it's failing due to missing directive definitions. So, we use
-        //                `insta::assert_snapshot` for now.
-        // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
-        insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema {
-          query: Query
-        }
-
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"]) @link(url: "https://specs.apollo.dev/link/v1.0")
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-        directive @federation__override(from: String!) on FIELD_DEFINITION
-
-        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        type T @key(fields: "k") {
-          k: ID!
-        }
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service {
-          sdl: String
-        }
-
-        union _Entity = T
-
-        type Query {
-          _entities(representations: [_Any!]!): [_Entity]!
-          _service: _Service!
-        }
-        "###);
+        assert_eq!(
+            subgraph.schema_string(),
+            EXPECTED_FULL_SCHEMA,
+            "{}",
+            TextDiff::from_lines(EXPECTED_FULL_SCHEMA, subgraph.schema_string().as_str())
+                .unified_diff()
+        );
     }
 
     #[test]
@@ -1092,75 +1034,25 @@ mod link_handling_tests {
             "#,
         );
 
-        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
-        //                it's failing due to missing directive definitions. So, we use
-        //                `insta::assert_snapshot` for now.
-        // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
-        insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema {
-          query: Query
-        }
-
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-        directive @federation__override(from: String!) on FIELD_DEFINITION
-
-        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        type T @key(fields: "k") {
-          k: ID!
-        }
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service {
-          sdl: String
-        }
-
-        union _Entity = T
-
-        type Query {
-          _entities(representations: [_Any!]!): [_Entity]!
-          _service: _Service!
-        }
-        "###);
+        assert_eq!(
+            subgraph.schema_string(),
+            EXPECTED_FULL_SCHEMA,
+            "{}",
+            TextDiff::from_lines(EXPECTED_FULL_SCHEMA, subgraph.schema_string().as_str())
+                .unified_diff()
+        );
     }
 
-    // TODO: issue with `@tag` directive validation
     #[test]
-    #[should_panic(
-        expected = r#"DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@federation__tag\": unknown/unsupported argument \"name\"" }"#
-    )]
     fn is_valid_if_a_schema_is_complete_from_the_get_go() {
         let subgraph = build_and_validate(EXPECTED_FULL_SCHEMA);
-        assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        assert_eq!(
+            subgraph.schema_string(),
+            EXPECTED_FULL_SCHEMA,
+            "{}",
+            TextDiff::from_lines(EXPECTED_FULL_SCHEMA, subgraph.schema_string().as_str())
+                .unified_diff()
+        );
     }
 
     #[test]
