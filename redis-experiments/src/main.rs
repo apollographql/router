@@ -1,6 +1,8 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use fred::prelude::*;
+use fred::socket2::TcpKeepalive;
 use redis_experiments::AsciiWhitespaceSeparated;
 use redis_experiments::Cache;
 use redis_experiments::CacheConfig;
@@ -12,7 +14,16 @@ async fn cache() -> Cache {
     let config = std::env::var("REDIS_URL")
         .map(|url| Config::from_url(&url).unwrap())
         .unwrap_or_default();
-    let client = Builder::from_config(config).build().unwrap();
+    let client = Builder::from_config(config)
+        .with_connection_config(|config| {
+            config.tcp = TcpConfig {
+                nodelay: Some(true),
+                keepalive: Some(TcpKeepalive::new().with_time(Duration::from_secs(600))),
+                ..Default::default()
+            }
+        })
+        .build()
+        .unwrap();
     // let client = Client::default();
 
     client.init().await.unwrap();
