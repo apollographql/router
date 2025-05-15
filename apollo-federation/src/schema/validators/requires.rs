@@ -87,12 +87,18 @@ fn invalid_fields_error_from_diagnostics(
 ) -> FederationError {
     let mut errors = MultipleFederationErrors::new();
     for diagnostic in diagnostics.iter() {
+        let mut message = normalize_diagnostic_message(diagnostic);
+        if message.starts_with("Cannot query field") {
+            message = format!(
+                "{message} If the field is defined in another subgraph, you need to add it to this subgraph with @external."
+            )
+        }
         errors
             .errors
             .push(SingleFederationError::RequiresInvalidFields {
                 coordinate: requires.target.coordinate(),
                 application: requires.schema_directive.to_string(),
-                message: normalize_diagnostic_message(diagnostic),
+                message,
             })
     }
     errors.into()

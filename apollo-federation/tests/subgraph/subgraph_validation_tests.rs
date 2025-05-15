@@ -417,14 +417,7 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_INVALID_FIELDS",
-                r#"[S] On type "T", for @key(fields: ":f"): Syntax error: expected at least one Selection in Selection Set
-   ╭─[ field_set.graphql:1:1 ]
-   │
- 1 │ :f
-   │ ┬
-   │ ╰── expected at least one Selection in Selection Set
-───╯
-"#,
+                r#"[S] On type "T", for @key(fields: ":f"): Syntax error: expected at least one Selection in Selection Set"#,
             )]
         );
     }
@@ -447,23 +440,11 @@ mod fieldset_based_directives {
             [
                 (
                     "PROVIDES_INVALID_FIELDS",
-                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected at least one Selection in Selection Set
-   ╭─[ field_set.graphql:1:2 ]
-   │
- 1 │ {{f}}
-   │  ┬  
-   │  ╰── expected at least one Selection in Selection Set
-───╯"#,
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected at least one Selection in Selection Set"#,
                 ),
                 (
                     "PROVIDES_INVALID_FIELDS",
-                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected R_CURLY, got {
-   ╭─[ field_set.graphql:1:2 ]
-   │
- 1 │ {{f}}
-   │  ┬  
-   │  ╰── expected R_CURLY, got {
-───╯"#
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected R_CURLY, got {"#
                 ),
                 (
                     "EXTERNAL_UNUSED",
@@ -491,7 +472,7 @@ mod fieldset_based_directives {
             err,
             [(
                 "REQUIRES_INVALID_FIELDS",
-                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T"."#,
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T". If the field is defined in another subgraph, you need to add it to this subgraph with @external."#,
             )]
         );
     }

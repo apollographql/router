@@ -358,6 +358,6 @@ pub(crate) fn normalize_diagnostic_message(diagnostic: Diagnostic<'_, Diagnostic
     diagnostic
         .error
         .unstable_compat_message() // Attempt to convert to something closer to the original JS error messages
-        .unwrap_or_else(|| diagnostic.to_string())
-        .replace("Error: syntax error:", "Syntax error:")
+        .unwrap_or_else(|| diagnostic.error.to_string()) // Using `diagnostic.error` strips the potentially misleading location info from the message
+        .replace("syntax error:", "Syntax error:")
 }
