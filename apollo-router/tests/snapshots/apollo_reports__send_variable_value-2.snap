@@ -10,6 +10,7 @@ header:
   runtime_version: rust
   uname: "[uname]"
   executable_schema_id: "[executable_schema_id]"
+  agent_id: ""
 traces_per_query:
   "# -\nquery($dontSendValue:Boolean!,$sendValue:Boolean!){topProducts{name reviews@include(if:$sendValue){author{name}}reviews@include(if:$dontSendValue){author{name}}}}":
     trace:
@@ -618,3 +619,4 @@ operation_count: 0
 operation_count_by_type: []
 traces_pre_aggregated: true
 extended_references_enabled: true
+router_features_enabled: []

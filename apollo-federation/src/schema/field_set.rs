@@ -126,20 +126,25 @@ pub(crate) fn collect_target_fields_from_field_set(
         // This case exists for when a directive's field set uses an interface I with implementer O, and conditions
         // I on O, but the actual phrase "type O implements I" only exists in another subgraph. Ideally, this wouldn't
         // be allowed, but it would be a breaking change to remove it, thus it's supported for legacy reasons.
-        Valid::assume_valid(FieldSet::parse(
-            schema,
-            parent_type_name,
-            field_set,
-            "field_set.graphql",
-        )?)
+        Valid::assume_valid(
+            FieldSet::parse(schema, parent_type_name, field_set, "field_set.graphql")
+                // If we failed to parse, we want to continue collecting leaf fields from the partial result. This is
+                // useful for when we are collecting used fields, for example, so we can avoid extra error messages
+                // about fields that are used in otherwise invalid field sets.
+                .unwrap_or_else(|e| e.partial),
+        )
     };
     let mut stack = vec![&field_set.selection_set];
     let mut fields = vec![];
     while let Some(selection_set) = stack.pop() {
         let Some(parent_type) = schema.types.get(&selection_set.ty) else {
-            return Err(FederationError::internal(
-                "Unexpectedly missing selection set type from schema.",
-            ));
+            if validate {
+                return Err(FederationError::internal(
+                    "Unexpectedly missing selection set type from schema.",
+                ));
+            } else {
+                continue;
+            }
         };
         let parent_type_position: CompositeTypeDefinitionPosition = match parent_type {
             ExtendedType::Object(_) => ObjectTypeDefinitionPosition {
@@ -155,9 +160,13 @@ pub(crate) fn collect_target_fields_from_field_set(
             }
             .into(),
             _ => {
-                return Err(FederationError::internal(
-                    "Unexpectedly encountered non-composite type for selection set.",
-                ));
+                if validate {
+                    return Err(FederationError::internal(
+                        "Unexpectedly encountered non-composite type for selection set.",
+                    ));
+                } else {
+                    continue;
+                }
             }
         };
         // The stack iterates through what we push in reverse order, so we iterate through
@@ -171,9 +180,13 @@ pub(crate) fn collect_target_fields_from_field_set(
                     }
                 }
                 executable::Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "Unexpectedly encountered fragment spread in FieldSet.",
-                    ));
+                    if validate {
+                        return Err(FederationError::internal(
+                            "Unexpectedly encountered fragment spread in FieldSet.",
+                        ));
+                    } else {
+                        continue;
+                    }
                 }
                 executable::Selection::InlineFragment(inline_fragment) => {
                     stack.push(&inline_fragment.selection_set);

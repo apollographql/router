@@ -53,8 +53,7 @@ impl SubgraphMetadata {
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
         let shareable_fields = if federation_spec_definition.is_fed1() {
-            // TODO (FED-428): Currently, `@shareable` is not used in Fed 1 schemas. But, the
-            // comments in the `collect_shareable_fields` function suggests that it may be used.
+            // `@shareable` is not used in Fed 1 schemas.
             Default::default()
         } else {
             Self::collect_shareable_fields(schema, federation_spec_definition)?
@@ -135,16 +134,12 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for key_directive in applications.into_iter().filter_map(|res| res.ok()) {
-            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
-            // which can report it with a better error message.
-            if let Ok(fields) = collect_target_fields_from_field_set(
+            key_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 key_directive.target.type_name().clone(),
                 key_directive.arguments.fields,
                 false,
-            ) {
-                key_fields.extend(fields);
-            }
+            )?);
         }
         Ok(key_fields)
     }
@@ -157,16 +152,12 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for provides_directive in applications.into_iter().filter_map(|res| res.ok()) {
-            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
-            // which can report it with a better error message.
-            if let Ok(fields) = collect_target_fields_from_field_set(
+            provided_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 provides_directive.target_return_type.clone(),
                 provides_directive.arguments.fields,
                 false,
-            ) {
-                provided_fields.extend(fields);
-            }
+            )?);
         }
         Ok(provided_fields)
     }
@@ -179,16 +170,12 @@ impl SubgraphMetadata {
             return Ok(Default::default());
         };
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
-            // If we fail to parse the FieldSet here, we ignore it so it gets caught later on by the validation pass,
-            // which can report it with a better error message.
-            if let Ok(fields) = collect_target_fields_from_field_set(
+            required_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 requires_directive.target.type_name().clone(),
                 requires_directive.arguments.fields,
                 false,
-            ) {
-                required_fields.extend(fields);
-            }
+            )?);
         }
         Ok(required_fields)
     }
@@ -198,6 +185,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut shareable_fields = IndexSet::default();
+        // PORT_NOTE: The comment below is from the JS code. It doesn't seem to apply to the Rust code.
         // @shareable is only available on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).

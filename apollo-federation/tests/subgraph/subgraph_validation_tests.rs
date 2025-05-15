@@ -401,7 +401,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_key() {
         let schema_str = r#"
             type Query {
@@ -418,13 +417,12 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_INVALID_FIELDS",
-                r#"[S] On type "T", for @key(fields: ":f"): Syntax Error: Expected Name, found ":"."#,
+                r#"[S] On type "T", for @key(fields: ":f"): Syntax error: expected at least one Selection in Selection Set"#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_provides() {
         let schema_str = r#"
             type Query {
@@ -442,7 +440,11 @@ mod fieldset_based_directives {
             [
                 (
                     "PROVIDES_INVALID_FIELDS",
-                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax Error: Expected Name, found "{"."#,
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected at least one Selection in Selection Set"#,
+                ),
+                (
+                    "PROVIDES_INVALID_FIELDS",
+                    r#"[S] On field "Query.t", for @provides(fields: "{{f}}"): Syntax error: expected R_CURLY, got {"#
                 ),
                 (
                     "EXTERNAL_UNUSED",
@@ -453,7 +455,6 @@ mod fieldset_based_directives {
     }
 
     #[test]
-    #[ignore = "Error message currently outputs apollo-compiler message instead of federation message"]
     fn rejects_invalid_fields_argument_to_requires() {
         let schema_str = r#"
             type Query {
@@ -471,7 +472,7 @@ mod fieldset_based_directives {
             err,
             [(
                 "REQUIRES_INVALID_FIELDS",
-                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T". If the field is defined in another subgraph, you need to add it to this subgraph with @external."#,
             )]
         );
     }
@@ -878,8 +879,6 @@ Did you mean "@shareable"?{}"#,
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched errors:"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_in_fed1() {
         let schema_str = r#"
             type T @key(fields: "id") {
@@ -887,20 +886,25 @@ Did you mean "@shareable"?{}"#,
                 foo: String @shareable
             }
         "#;
-        let err = build_for_errors(schema_str);
+        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
 
         assert_errors!(
             err,
             [(
                 "INVALID_GRAPHQL",
-                r#"[S] Unknown directive "@shareable". If you meant the \"@shareable\" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#,
+                r#"[S] Error: cannot find directive `@shareable` in this document
+   ╭─[ S:4:29 ]
+   │
+ 4 │                 foo: String @shareable
+   │                             ─────┬────
+   │                                  ╰────── directive not defined
+───╯
+ If you meant the "@shareable" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#,
             )]
         );
     }
 
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 2"#)]
     fn has_suggestions_if_a_fed2_directive_is_used_under_wrong_name_for_the_schema() {
         let schema_str = r#"
             extend schema
@@ -914,18 +918,32 @@ Did you mean "@shareable"?{}"#,
                 foo: String @shareable
             }
         "#;
-        let err = build_for_errors(schema_str);
+        let err = build_for_errors_with_option(schema_str, BuildOption::AsIs);
 
         assert_errors!(
             err,
             [
                 (
                     "INVALID_GRAPHQL",
-                    r#"[S] Unknown directive "@shareable". If you meant the \"@shareable\" federation directive, you should use fully-qualified name "@federation__shareable" or add "@shareable" to the \`import\` argument of the @link to the federation specification."#,
+                    r#"[S] Error: cannot find directive `@key` in this document
+   ╭─[ S:8:20 ]
+   │
+ 8 │             type T @key(fields: "id") {
+   │                    ─────────┬────────
+   │                             ╰────────── directive not defined
+───╯
+ If you meant the "@key" federation directive, you should use "@myKey" as it is imported under that name in the @link to the federation specification of this schema."#,
                 ),
                 (
                     "INVALID_GRAPHQL",
-                    r#"[S] Unknown directive "@key". If you meant the "@key" federation directive, you should use "@myKey" as it is imported under that name in the @link to the federation specification of this schema."#,
+                    r#"[S] Error: cannot find directive `@shareable` in this document
+    ╭─[ S:10:29 ]
+    │
+ 10 │                 foo: String @shareable
+    │                             ─────┬────
+    │                                  ╰────── directive not defined
+────╯
+ If you meant the "@shareable" federation directive, you should use fully-qualified name "@federation__shareable" or add "@shareable" to the \`import\` argument of the @link to the federation specification."#,
                 ),
             ]
         );
@@ -1021,11 +1039,11 @@ mod link_handling_tests {
         //                `insta::assert_snapshot` for now.
         // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
         insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+        schema {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"]) @link(url: "https://specs.apollo.dev/link/v1.0")
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1077,11 +1095,7 @@ mod link_handling_tests {
         "###);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_definitions_if_both_the_federation_spec_and_link_spec_are_linked() {
         let subgraph = build_and_validate(
             r#"
@@ -1095,24 +1109,78 @@ mod link_handling_tests {
             "#,
         );
 
-        assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
+        //                it's failing due to missing directive definitions. So, we use
+        //                `insta::assert_snapshot` for now.
+        // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        insta::assert_snapshot!(subgraph.schema_string(), @r###"
+        schema {
+          query: Query
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+        directive @federation__override(from: String!) on FIELD_DEFINITION
+
+        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        type T @key(fields: "k") {
+          k: ID!
+        }
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        union _Entity = T
+
+        type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
+        }
+        "###);
     }
 
-    // TODO: FED-428
+    // TODO: issue with `@tag` directive validation
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@federation__tag\": unknown/unsupported argument \"name\"" }"#
     )]
     fn is_valid_if_a_schema_is_complete_from_the_get_go() {
         let subgraph = build_and_validate(EXPECTED_FULL_SCHEMA);
         assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_missing_definitions_when_some_are_partially_provided() {
         let docs = [
             r#"
@@ -1202,10 +1270,10 @@ mod link_handling_tests {
         });
     }
 
-    // TODO: FED-428
+    // TODO: an issue with `@key` directive definition check.
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"expanded subgraph to be valid: SubgraphError { subgraph: "S", error: DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@key\": argument \"resolvable\" should have default value true but found no default value" } }"#
     )]
     fn allows_known_directives_with_incomplete_but_compatible_definitions() {
         let docs = [
@@ -1688,9 +1756,9 @@ mod shareable_tests {
 mod interface_object_and_key_on_interfaces_validation_tests {
     use super::*;
 
+    // TODO: INTERFACE_KEY_NOT_ON_IMPLEMENTATION error messages are currently redundant.
     #[test]
-    #[ignore = "temporary ignore for build break"]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
+    #[should_panic(expected = r#"Mismatched error counts: 1 != 3"#)]
     fn key_on_interfaces_require_key_on_all_implementations() {
         let doc = r#"
             interface I @key(fields: "id1") @key(fields: "id2") {
