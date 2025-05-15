@@ -107,11 +107,38 @@ async fn get_router_service(
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(use_legacy_request_span, false, reports).await;
+
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
         .schema(include_str!("fixtures/supergraph.graphql"));
+    let builder = if mocked {
+        builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
+    } else {
+        builder.with_subgraph_network_requests()
+    };
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
+async fn get_connector_router_service(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    use_legacy_request_span: bool,
+    mocked: bool,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config(use_legacy_request_span, false, reports).await;
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph_connect.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
     } else {
@@ -172,6 +199,7 @@ macro_rules! assert_report {
                                 "apollo_private.http.response_headers",
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
+                                "graphql.error.path",
                             ];
                             if $batch {
                                 redacted_attributes.append(&mut vec![
@@ -196,6 +224,7 @@ macro_rules! assert_report {
                         ".**.parentSpanId" => "[span_id]",
                         ".**.startTimeUnixNano" => "[start_time]",
                         ".**.endTimeUnixNano" => "[end_time]",
+                        ".**.timeUnixNano" => "[time]",
                     });
                 });
         }
@@ -248,6 +277,31 @@ async fn get_trace_report(
 ) -> ExportTraceServiceRequest {
     get_traces(
         get_router_service,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
+async fn get_connector_trace_report(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        get_connector_router_service,
         reports,
         use_legacy_request_span,
         false,
@@ -350,6 +404,34 @@ where
     found_report
         .expect("failed to get report")
         .expect("failed to find report")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector_error() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title forceError}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

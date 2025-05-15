@@ -27,14 +27,13 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
-use crate::schema::field_set::parse_field_set;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::external::validate_external_directives;
 use crate::schema::validators::from_context::validate_from_context_directives;
+use crate::schema::validators::interface_object::validate_interface_object_directives;
 use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
@@ -42,9 +41,6 @@ use crate::schema::validators::requires::validate_requires_directives;
 use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
-use crate::utils::human_readable::HumanReadableListOptions;
-use crate::utils::human_readable::HumanReadableListPrefix;
-use crate::utils::human_readable::human_readable_list;
 
 pub(crate) struct FederationBlueprint {}
 
@@ -77,8 +73,6 @@ impl FederationBlueprint {
         }
         federation_spec.add_elements_to_schema(schema)?;
         Self::expand_known_features(schema)
-
-        // TODO (FED-428): Port `processUnappliedDirectives`.
     }
 
     pub(crate) fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
@@ -140,15 +134,7 @@ impl FederationBlueprint {
         validate_provides_directives(schema, meta, &mut error_collector)?;
         validate_requires_directives(schema, meta, &mut error_collector)?;
         validate_external_directives(schema, meta, &mut error_collector)?;
-
-        // TODO: Remaining validations
-        Self::validate_keys_on_interfaces_are_also_on_all_implementations(
-            schema,
-            meta,
-            &mut error_collector,
-        )?;
-        Self::validate_interface_objects_are_on_entities(schema, meta, &mut error_collector)?;
-
+        validate_interface_object_directives(schema, meta, &mut error_collector)?;
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
 
@@ -366,154 +352,6 @@ impl FederationBlueprint {
                         message: format!("Detected unsupported cost specification version {}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.", link.url.version, COST_VERSIONS.versions().join(", "))
                     })?;
                 spec.add_elements_to_schema(schema)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_keys_on_interfaces_are_also_on_all_implementations(
-        schema: &ValidFederationSchema,
-        metadata: &SubgraphMetadata,
-        error_collector: &mut MultipleFederationErrors,
-    ) -> Result<(), FederationError> {
-        let key_directive_definition_name = &metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?
-            .name;
-        for type_pos in schema.get_types() {
-            let Ok(type_pos): Result<InterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-            else {
-                continue;
-            };
-            let implementation_types = schema.possible_runtime_types(type_pos.clone().into())?;
-            let type_ = type_pos.get(schema.schema())?;
-            for application in type_.directives.get_all(key_directive_definition_name) {
-                let arguments = metadata
-                    .federation_spec_definition()
-                    .key_directive_arguments(application)?;
-                // Note that we will have validated all @key field sets by this point, so we skip
-                // re-validating here.
-                let fields = parse_field_set(schema, type_.name.clone(), arguments.fields, false)?;
-                let mut implementations_with_non_resolvable_keys = vec![];
-                let mut implementations_with_missing_keys = vec![];
-                for implementation_type_pos in &implementation_types {
-                    let implementation_type = implementation_type_pos.get(schema.schema())?;
-                    let mut matching_application_arguments = None;
-                    for implementation_application in implementation_type
-                        .directives
-                        .get_all(key_directive_definition_name)
-                    {
-                        let implementation_arguments = metadata
-                            .federation_spec_definition()
-                            .key_directive_arguments(implementation_application)?;
-                        let implementation_fields = parse_field_set(
-                            schema,
-                            implementation_type.name.clone(),
-                            implementation_arguments.fields,
-                            false,
-                        )?;
-                        if implementation_fields == fields {
-                            matching_application_arguments = Some(implementation_arguments);
-                            break;
-                        }
-                    }
-                    if let Some(matching_application_arguments) = matching_application_arguments {
-                        // TODO: This code assumes there's at most one matching application for a
-                        // given fieldset, but I'm not sure whether other validation code guarantees
-                        // this.
-                        if arguments.resolvable && !matching_application_arguments.resolvable {
-                            implementations_with_non_resolvable_keys.push(implementation_type_pos);
-                        }
-                    } else {
-                        implementations_with_missing_keys.push(implementation_type_pos);
-                    }
-
-                    if !implementations_with_missing_keys.is_empty() {
-                        let types_list = human_readable_list(
-                            implementations_with_missing_keys
-                                .iter()
-                                .map(|pos| format!("\"{}\"", pos)),
-                            HumanReadableListOptions {
-                                prefix: Some(HumanReadableListPrefix {
-                                    singular: "type",
-                                    plural: "types",
-                                }),
-                                ..Default::default()
-                            },
-                        );
-                        error_collector.errors.push(
-                            SingleFederationError::InterfaceKeyNotOnImplementation {
-                                message: format!(
-                                    "Key {} on interface type \"{}\" is missing on implementation {}",
-                                    application.serialize(),
-                                    type_pos,
-                                    types_list,
-                                )
-                            }
-                        )
-                    } else if !implementations_with_non_resolvable_keys.is_empty() {
-                        let types_list = human_readable_list(
-                            implementations_with_non_resolvable_keys
-                                .iter()
-                                .map(|pos| format!("\"{}\"", pos)),
-                            HumanReadableListOptions {
-                                prefix: Some(HumanReadableListPrefix {
-                                    singular: "type",
-                                    plural: "types",
-                                }),
-                                ..Default::default()
-                            },
-                        );
-                        error_collector.errors.push(
-                            SingleFederationError::InterfaceKeyNotOnImplementation {
-                                message: format!(
-                                    "Key {} on interface type \"{}\" should be resolvable on all implementation types, but is declared with argument \"@key(resolvable:)\" set to false in {}",
-                                    application.serialize(),
-                                    type_pos,
-                                    types_list,
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_interface_objects_are_on_entities(
-        schema: &ValidFederationSchema,
-        metadata: &SubgraphMetadata,
-        error_collector: &mut MultipleFederationErrors,
-    ) -> Result<(), FederationError> {
-        let Some(interface_object_directive_definition) = &metadata
-            .federation_spec_definition()
-            .interface_object_directive_definition(schema)?
-        else {
-            return Ok(());
-        };
-        let key_directive_definition_name = &metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?
-            .name;
-        for type_pos in &schema
-            .referencers
-            .get_directive(&interface_object_directive_definition.name)?
-            .object_types
-        {
-            if !type_pos
-                .get(schema.schema())?
-                .directives
-                .has(key_directive_definition_name)
-            {
-                error_collector.errors.push(
-                    SingleFederationError::InterfaceObjectUsageError {
-                        message: format!(
-                            "The @interfaceObject directive can only be applied to entity types but type \"{}\" has no @key in this subgraph.",
-                            type_pos
-                        )
-                    }
-                )
             }
         }
         Ok(())

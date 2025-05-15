@@ -1022,11 +1022,11 @@ mod link_handling_tests {
         //                `insta::assert_snapshot` for now.
         // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
         insta::assert_snapshot!(subgraph.schema_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+        schema {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"]) @link(url: "https://specs.apollo.dev/link/v1.0")
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1078,11 +1078,7 @@ mod link_handling_tests {
         "###);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_definitions_if_both_the_federation_spec_and_link_spec_are_linked() {
         let subgraph = build_and_validate(
             r#"
@@ -1096,24 +1092,78 @@ mod link_handling_tests {
             "#,
         );
 
-        assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        // TODO(FED-543): `subgraph` is supposed to be compared against `EXPECTED_FULL_SCHEMA`, but
+        //                it's failing due to missing directive definitions. So, we use
+        //                `insta::assert_snapshot` for now.
+        // assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
+        insta::assert_snapshot!(subgraph.schema_string(), @r###"
+        schema {
+          query: Query
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+        directive @federation__override(from: String!) on FIELD_DEFINITION
+
+        directive @federation__tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        type T @key(fields: "k") {
+          k: ID!
+        }
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        union _Entity = T
+
+        type Query {
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
+        }
+        "###);
     }
 
-    // TODO: FED-428
+    // TODO: issue with `@tag` directive validation
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@federation__tag\": unknown/unsupported argument \"name\"" }"#
     )]
     fn is_valid_if_a_schema_is_complete_from_the_get_go() {
         let subgraph = build_and_validate(EXPECTED_FULL_SCHEMA);
         assert_eq!(subgraph.schema_string(), EXPECTED_FULL_SCHEMA);
     }
 
-    // TODO: FED-428
     #[test]
-    #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
-    )]
     fn expands_missing_definitions_when_some_are_partially_provided() {
         let docs = [
             r#"
@@ -1203,10 +1253,10 @@ mod link_handling_tests {
         });
     }
 
-    // TODO: FED-428
+    // TODO: an issue with `@key` directive definition check.
     #[test]
     #[should_panic(
-        expected = r#"InvalidLinkDirectiveUsage { message: "Invalid use of @link in schema: the @link specification itself (\"https://specs.apollo.dev/link/v1.0\") is applied multiple times" }"#
+        expected = r#"expanded subgraph to be valid: SubgraphError { subgraph: "S", error: DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@key\": argument \"resolvable\" should have default value true but found no default value" } }"#
     )]
     fn allows_known_directives_with_incomplete_but_compatible_definitions() {
         let docs = [

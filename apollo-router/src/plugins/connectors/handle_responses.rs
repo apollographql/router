@@ -280,7 +280,11 @@ impl RawResponse {
         } = mapped_response
         {
             if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
-                emit_error_event(error_code.as_str(), &mapped_error.message);
+                emit_error_event(
+                    error_code.as_str(),
+                    &mapped_error.message,
+                    mapped_error.path.clone(),
+                );
             }
         }
 

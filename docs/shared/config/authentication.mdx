@@ -1,0 +1,44 @@
+### `authentication`
+
+<ExpansionPanel title="authentication YAML snippet">
+
+```yaml title="authentication"
+authentication:
+  connector:
+    sources: {}
+  router:
+    jwt:
+      header_name: authorization
+      header_value_prefix: Bearer
+      ignore_other_prefixes: false
+      jwks:
+      - algorithms: null
+        headers:
+        - name: example_name
+          value: example_value
+        issuer: example_issuer
+        poll_interval:
+          nanos: 0
+          secs: 60
+        url: http://service.example.com/url
+      on_error: Continue
+      sources:
+      - name: authorization
+        type: header
+        value_prefix: Bearer
+  subgraph:
+    all:
+      aws_sig_v4:
+        hardcoded:
+          access_key_id: example_access_key_id
+          assume_role:
+            external_id: example_external_id
+            role_arn: example_role_arn
+            session_name: example_session_name
+          region: example_region
+          secret_access_key: example_secret_access_key
+          service_name: example_service_name
+    subgraphs: {}
+```
+
+</ExpansionPanel>

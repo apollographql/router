@@ -29,6 +29,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
@@ -170,9 +171,10 @@ impl LinkSpecDefinition {
         //
         // So instead, we put the directive on the schema definition unless some extensions exists
         // but no definition does (that is, no non-extension elements are populated).
+        //
+        // Side-note: this test must be done _before_ we call `insert_directive`, otherwise it
+        // would take it into account.
 
-        // TODO: complete porting - used by `onDirectiveDefinitionAndSchemaParsed` in JS (FED-428)
-        // - need to port`SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
         let name = alias.as_ref().unwrap_or(&self.url.identity.name).clone();
         let mut arguments = vec![Node::new(ast::Argument {
             name: self.url_arg_name(),
@@ -184,8 +186,15 @@ impl LinkSpecDefinition {
                 value: alias.to_string().into(),
             }));
         }
-        SchemaDefinitionPosition
-            .insert_directive(schema, Component::new(Directive { name, arguments }))?;
+
+        let schema_definition = SchemaDefinitionPosition.get(schema.schema());
+        SchemaDefinitionPosition.insert_directive(
+            schema,
+            Component {
+                origin: schema_definition.origin_to_use(),
+                node: Node::new(Directive { name, arguments }),
+            },
+        )?;
         Ok(())
     }
 

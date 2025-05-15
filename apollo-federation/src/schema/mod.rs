@@ -9,9 +9,12 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use position::FieldArgumentDefinitionPosition;
@@ -940,5 +943,55 @@ impl Hash for ValidFederationSchema {
 impl std::fmt::Debug for ValidFederationSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ValidFederationSchema @ {:?}", Arc::as_ptr(&self.schema))
+    }
+}
+
+pub(crate) trait SchemaElement {
+    fn origins(&self) -> HashSet<&ComponentOrigin>;
+
+    #[allow(unused)]
+    fn has_non_extension_elements(&self) -> bool {
+        self.origins()
+            .iter()
+            .any(|origin| matches!(origin, ComponentOrigin::Definition))
+    }
+
+    #[allow(unused)]
+    fn has_extension_elements(&self) -> bool {
+        self.origins()
+            .iter()
+            .any(|origin| matches!(origin, ComponentOrigin::Extension(_)))
+    }
+
+    fn origin_to_use(&self) -> ComponentOrigin {
+        let origins = self.origins();
+        let has_definition = origins.contains(&ComponentOrigin::Definition);
+        // Find an arbitrary extension origin if the schema definition has any extension elements.
+        // TODO: No ordering between origins.
+        let first_extension = origins
+            .into_iter()
+            .find(|origin| matches!(origin, ComponentOrigin::Extension(_)));
+        if has_definition {
+            // Use the existing definition if exists
+            ComponentOrigin::Definition
+        } else if let Some(first_extension) = first_extension {
+            // If there is an extension, use the first extension.
+            first_extension.clone()
+        } else {
+            // Otherwise, use a new definition
+            ComponentOrigin::Definition
+        }
+    }
+}
+
+impl SchemaElement for SchemaDefinition {
+    fn origins(&self) -> HashSet<&ComponentOrigin> {
+        self.directives
+            .iter()
+            .map(|component| &component.origin)
+            .chain(self.query.iter().map(|name| &name.origin))
+            .chain(self.mutation.iter().map(|name| &name.origin))
+            .chain(self.subscription.iter().map(|name| &name.origin))
+            .collect()
     }
 }

@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1391,8 +1392,8 @@ expression: "&schema"
         },
         "subgraphs": {
           "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConfig",
-            "description": "#/definitions/SubgraphConfig"
+            "$ref": "#/definitions/SubgraphConfig2",
+            "description": "#/definitions/SubgraphConfig2"
           },
           "default": {},
           "description": "Overrides global configuration on a per-subgraph basis",
@@ -6359,6 +6360,41 @@ expression: "&schema"
       "type": "object"
     },
     "SubgraphConfig": {
+      "description": "Configuration for one subgraph for the `mock_subgraphs` plugin",
+      "properties": {
+        "entities": {
+          "default": [],
+          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers for the subgraph response",
+          "type": "object"
+        },
+        "mutation": {
+          "additionalProperties": true,
+          "default": null,
+          "description": "Data for `mutation` operations",
+          "nullable": true,
+          "type": "object"
+        },
+        "query": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConfig2": {
       "anyOf": [
         {
           "description": "Enable or disable error redaction for a subgraph",
@@ -9098,6 +9134,15 @@ expression: "&schema"
     }
   },
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
+  "patternProperties": {
+    "^experimental_mock_subgraphs$": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SubgraphConfig",
+        "description": "#/definitions/SubgraphConfig"
+      },
+      "type": "object"
+    }
+  },
   "properties": {
     "apq": {
       "$ref": "#/definitions/Apq",

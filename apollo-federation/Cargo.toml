@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.2.0"
+version = "2.2.1"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -47,7 +47,7 @@ url = "2"
 either = "1.13.0"
 tracing = "0.1.40"
 ron = { version = "0.10.0", optional = true }
-shape = "0.5.1"
+shape = "0.5.2"
 
 [dev-dependencies]
 diff = "0.1.13"

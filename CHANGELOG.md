@@ -2,6 +2,116 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.2.1] - 2025-05-13
+
+## 🐛 Fixes
+
+### Redis connection leak on schema changes ([PR #7319](https://github.com/apollographql/router/pull/7319))
+
+The router performs a 'hot reload' whenever it detects a schema update. During this reload, it effectively instantiates a new internal router, warms it up (optional), redirects all traffic to this new router, and drops the old internal router.
+
+This change fixes a bug in that "drop" process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections as each new schema comes in and goes out of service, which eats up memory.
+
+The solution adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7319
+
+### Propagate client name and version modifications through telemetry ([PR #7369](https://github.com/apollographql/router/pull/7369))
+
+The router accepts modifications to the client name and version (`apollo::telemetry::client_name` and `apollo::telemetry::client_version`), but those modifications are not currently propagated through the telemetry layers to update spans and traces.
+
+This PR moves where the client name and version are bound to the span, so that the modifications from plugins **on the `router` service** are propagated.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7369
+
+### Progressive overrides are not disabled when connectors are used ([PR #7351](https://github.com/apollographql/router/pull/7351))
+
+Prior to this fix, introducing a connector disabled the progressive override plugin.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/7351
+
+### Avoid unnecessary cloning in the deduplication plugin ([PR #7347](https://github.com/apollographql/router/pull/7347))
+
+The deduplication plugin always cloned responses, even if there were not multiple simultaneous requests that would benefit from the cloned response.
+
+We now check to see if deduplication will provide a benefit before we clone the subgraph response.
+
+There was also an undiagnosed race condition which meant that a notification could be missed. This would have resulted in additional work being performed as the missed notification would have led to another subgraph request.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7347
+
+### Spans should only include path in `http.route` ([PR #7390](https://github.com/apollographql/router/pull/7390))
+
+Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
+
+The router currently sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). After this change, the router will only include the path (`/graphql`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7390
+
+### Decrease log level for JWT authentication failure ([PR #7396](https://github.com/apollographql/router/pull/7396))
+
+A recent change inadvertently increased the log level of JWT authentication failures from `info` to `error`. This reverts that change returning it to the previous behavior.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7396
+
+### Avoid fractional decimals when generating `apollo.router.operations.batching.size` metrics for GraphQL request batch sizes ([PR #7306](https://github.com/apollographql/router/pull/7306))
+
+Corrects the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7306
+
+## 📃 Configuration
+
+### Log warnings for deprecated coprocessor `context` configuration usage ([PR #7349](https://github.com/apollographql/router/pull/7349))
+
+`context: true` is an alias for `context: deprecated` but should not be used. The router now logs a runtime warning on startup if you do use it.
+
+Instead of:
+
+```yaml
+coprocessor:
+  supergraph:
+    request:
+      context: true # ❌
+```
+
+Explicitly use `deprecated` or `all`:
+
+```yaml
+coprocessor:
+  supergraph:
+    request:
+      context: deprecated # ✅
+```
+
+See [the 2.x upgrade guide](https://www.apollographql.com/docs/graphos/routing/upgrade/from-router-v1#context-keys-for-coprocessors) for more detailed upgrade steps.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7349
+
+## 🛠 Maintenance
+
+### Linux: Compatibility with glibc 2.28 or newer ([PR #7355](https://github.com/apollographql/router/pull/7355))
+
+The default build images provided in our CI environment have a relatively modern version of `glibc` (2.35). This means that on some distributions, notably those based around RedHat, it wasn't possible to use our binaries since the version of `glibc` was older than 2.35.
+
+We now maintain a build image which is based on a distribution with `glibc` 2.28. This is old enough that recent releases of either of the main Linux distribution families (Debian and RedHat) can make use of our binary releases.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7355
+
+### Reject `@skip`/`@include` on subscription root fields in validation ([PR #7338](https://github.com/apollographql/router/pull/7338))
+
+This implements a [GraphQL spec RFC](https://github.com/graphql/graphql-spec/pull/860), rejecting subscriptions in validation that can be invalid during execution.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7338
+
+## 📚 Documentation
+
+### Query planning best practices ([PR #7263](https://github.com/apollographql/router/pull/7263))
+
+Added a new page under Routing docs about [Query Planning Best Practices](https://www.apollographql.com/docs/graphos/routing/query-planning/query-planning-best-practices).
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/7263
+
 # [2.2.0] - 2025-04-28
 
 ## 🚀 Features
