@@ -433,9 +433,6 @@ pub(crate) struct DirectiveSpecification {
     locations: Vec<DirectiveLocation>,
 }
 
-// TODO: revisit DirectiveSpecification::new() API once we start porting
-// composition.
-// https://apollographql.atlassian.net/browse/FED-172
 impl DirectiveSpecification {
     pub(crate) fn new(
         name: Name,
