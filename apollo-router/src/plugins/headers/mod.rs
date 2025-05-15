@@ -596,17 +596,6 @@ impl Propagate {
                             already_propagated.insert(name.to_string());
                         }
                     });
-                /*supergraph_headers
-                .iter()
-                .filter(|(name, _)| {
-                    !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
-                })
-                .for_each(|(name, value)| {
-                    if !already_propagated.contains(name.as_str()) {
-                        headers_mut.insert(name, value.clone());
-                        already_propagated.insert(name.to_string());
-                    }
-                });*/
             }
         }
     }
