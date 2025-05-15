@@ -22,6 +22,7 @@ use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -865,6 +866,12 @@ impl SpecDefinition for FederationSpecDefinition {
         specs.push(Box::new(self.shareable_directive_specification()));
         specs.push(Box::new(self.override_directive_specification()));
         specs.push(Box::new(self.tag_directive_specification()));
+
+        if let Some(inaccessible_spec) =
+            INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
+        {
+            specs.extend(inaccessible_spec.directive_specs());
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
