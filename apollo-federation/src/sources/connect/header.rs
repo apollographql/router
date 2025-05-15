@@ -214,6 +214,21 @@ mod test_header_value_parse {
     }
 
     #[test]
+    fn invalid_header_values() {
+        assert_debug_snapshot!(
+            HeaderValue::from_str("\x7f"),
+            @r###"
+        Err(
+            Error {
+                message: "invalid value `\u{7f}`",
+                location: 0..1,
+            },
+        )
+        "###
+        )
+    }
+
+    #[test]
     fn expressions_with_nested_braces() {
         assert_debug_snapshot!(
             HeaderValue::from_str("const{$config.one { two { three } }}another-const"),
