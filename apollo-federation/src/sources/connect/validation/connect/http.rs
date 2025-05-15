@@ -427,7 +427,9 @@ fn validate_absolute_connect_url(
         url.parts
             .iter()
             .find(|part| matches!(part, Part::Expression(_))),
-        !without_scheme.contains('/') && !without_scheme.contains('?'),
+        !without_scheme.contains('/')
+            && !without_scheme.contains('?')
+            && !without_scheme.contains('#'),
     ) {
         return Err(Message {
             code: Code::InvalidUrl,
