@@ -293,8 +293,6 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             })
             .map_err(|e| vec![e])?;
-
-        // let multiple_url = url_string.as_str().replace(Self::SPECIAL_WHITE_SPACES, "");
         let url = StringTemplate::from_str(url_string.as_str())
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
