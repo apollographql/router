@@ -592,8 +592,8 @@ impl Propagate {
                             }
                             headers.for_each(|(_, value)| {
                                 headers_mut.append(name, value.clone());
-                                already_propagated.insert(name.to_string());
                             });
+                            already_propagated.insert(name.to_string());
                         }
                     });
                 /*supergraph_headers
