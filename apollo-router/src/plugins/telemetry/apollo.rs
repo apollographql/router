@@ -8,7 +8,6 @@ use std::time::SystemTime;
 
 use http::header::HeaderName;
 use itertools::Itertools;
-use libc::stat;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
