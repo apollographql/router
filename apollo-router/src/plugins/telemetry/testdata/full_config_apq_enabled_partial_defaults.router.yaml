@@ -5,6 +5,9 @@ apq:
       redis:
         urls:
           - https://example.com
+  subgraph:
+    all:
+      enabled: true
 
 # Telemetry plugin config
 telemetry:

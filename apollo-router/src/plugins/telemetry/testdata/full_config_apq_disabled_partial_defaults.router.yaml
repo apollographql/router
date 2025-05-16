@@ -1,9 +1,12 @@
 # Disable apq b/c redis not configured
 apq:
-  enabled: true
   router:
-    in-memory:
-      limit: 2000
+    cache:
+      in_memory:
+        limit: 2000
+  subgraph:
+    all:
+      enabled: true
 
 # Telemetry plugin config
 telemetry:

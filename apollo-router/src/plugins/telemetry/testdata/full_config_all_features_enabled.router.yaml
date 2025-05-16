@@ -6,6 +6,9 @@ apq:
       redis:
         urls:
           - https://example.com
+  subgraph:
+    all:
+      enabled: true
 
 # Enable entity cache
 preview_entity_cache:
