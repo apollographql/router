@@ -736,8 +736,8 @@ impl PluginPrivate for Telemetry {
                       fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
-                    let start = Instant::now();
                     let enabled_features = enabled_features.clone();
+                    let start = Instant::now();
 
                     async move {
                         let span = Span::current();
@@ -1755,7 +1755,6 @@ impl Telemetry {
             // The APQ cache enabled config defaults to true.
             // The distributed APQ cache is only considered enabled if the redis config is also set.
             distributed_apq_cache: {
-                let _val = full_config["apq"]["router"]["cache"]["redis"].clone(); // TODO TEMP DEBUG
                 let enabled = full_config["apq"]["enabled"].as_bool().unwrap_or(true);
                 let redis_cache_config_set =
                     full_config["apq"]["router"]["cache"]["redis"].is_object();

@@ -486,7 +486,9 @@ impl AddAssign<SingleStatsReport> for Report {
                 })
                 .or_insert(licensed_operation_count_by_type);
         }
-        self.router_features_enabled = report.router_features_enabled.clone(); // TODO this should probably actually add these?
+
+        // Router features enabled is ignored as it should be the same on any report from the same
+        // request
     }
 }
 
