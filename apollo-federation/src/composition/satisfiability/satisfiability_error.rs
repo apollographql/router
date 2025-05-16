@@ -1,0 +1,291 @@
+use apollo_compiler::Node;
+use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
+use multimap::MultiMap;
+use petgraph::graph::EdgeIndex;
+
+use crate::bail;
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::operation::FieldSelection;
+use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentSelection;
+use crate::operation::Operation;
+use crate::operation::SelectionId;
+use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_graph::graph_path::TransitionGraphPath;
+use crate::query_graph::graph_path::Unadvanceables;
+use crate::schema::ValidFederationSchema;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+
+/// Returns a satisfiability error in Ok case; Otherwise, returns another error in Err case.
+#[allow(unused)]
+fn satisfiability_error(
+    unsatisfiable_path: &TransitionGraphPath,
+    _subgraphs_paths: &[TransitionGraphPath],
+    subgraphs_paths_unadvanceables: &[Unadvanceables],
+) -> Result<SingleFederationError, FederationError> {
+    let witness = build_witness_operation(unsatisfiable_path)?;
+    let operation = witness.to_string();
+    let message = format!(
+        r#"The following supergraph API query:
+           {operation}
+           cannot be satisfied by the subgraphs because:
+           {reasons}
+           "#,
+        reasons = display_reasons(subgraphs_paths_unadvanceables),
+    );
+    // PORT_NOTE: We're not using `_subgraphs_paths` parameter, since we didn't port
+    //            the `ValidationError` class, yet.
+    Ok(SingleFederationError::SatisfiabilityError { message })
+}
+
+fn build_witness_operation(witness: &TransitionGraphPath) -> Result<Operation, FederationError> {
+    let root = witness.head_node()?;
+    let Some(root_kind) = root.root_kind else {
+        bail!("build_witness_operation: root kind is not set");
+    };
+    let schema = witness.schema_by_source(&root.source)?;
+    let edges: Vec<_> = witness.iter().map(|item| item.0).collect();
+    let Some(selection_set) = build_witness_next_step(schema, witness, &edges)? else {
+        bail!("build_witness_operation: root selection set failed to build");
+    };
+    Ok(Operation {
+        schema: schema.clone(),
+        root_kind,
+        name: None,
+        selection_set,
+        variables: Default::default(),
+        directives: Default::default(),
+    })
+}
+
+// Recursively build a selection set bottom-up.
+fn build_witness_next_step(
+    schema: &ValidFederationSchema,
+    witness: &TransitionGraphPath,
+    edges: &[EdgeIndex],
+) -> Result<Option<SelectionSet>, FederationError> {
+    match edges.split_first() {
+        // Base case
+        None => {
+            // We're at the end of our counter-example, meaning that we're at a point of traversing the
+            // supergraph where we know there is no valid equivalent subgraph traversals. That said, we
+            // may well not be on a terminal vertex (the type may not be a leaf), meaning that
+            // returning `None` may be invalid. In that case, we instead return an empty SelectionSet.
+            // This is, strictly speaking, equally invalid, but we use this as a convention to means
+            // "there is supposed to be a selection but we don't have it" and the code in
+            // `SelectionSet.toSelectionNode` (FED-577) handles this an prints an ellipsis (a '...').
+            //
+            // Note that, as an alternative, we _could_ generate a random valid witness: while the
+            // current type is not terminal we would randomly pick a valid choice (if it's an abstract
+            // type, we'd "cast" to any implementation; if it's an object, we'd pick the first field
+            // and recurse on its type). However, while this would make sure our "witness" is always a
+            // fully valid query, this is probably less user friendly in practice because you'd have to
+            // follow the query manually to figure out at which point the query stop being satisfied by
+            // subgraphs. Putting the ellipsis instead make it immediately clear after which part of
+            // the query there is an issue.
+            let QueryGraphNodeType::SchemaType(type_pos) = &witness.tail_node()?.type_ else {
+                bail!("build_witness_next_step: tail type is not a schema type");
+            };
+            // Note that vertex types are named output types, so if it's not a leaf it is guaranteed to
+            // be selectable.
+            Ok(
+                match CompositeTypeDefinitionPosition::try_from(type_pos.clone()) {
+                    Ok(composite_type_pos) => {
+                        Some(SelectionSet::empty(schema.clone(), composite_type_pos))
+                    }
+                    _ => None,
+                },
+            )
+        }
+
+        // Recursive case
+        Some((edge_index, rest)) => {
+            let sub_selection = build_witness_next_step(schema, witness, rest)?;
+            let edge = witness.edge_weight(*edge_index)?;
+            let (parent_type, selection) = match &edge.transition {
+                QueryGraphEdgeTransition::Downcast {
+                    source: _,
+                    from_type_position,
+                    to_type_position,
+                } => {
+                    let inline_fragment = InlineFragment {
+                        schema: schema.clone(),
+                        parent_type_position: from_type_position.clone(),
+                        type_condition_position: Some(to_type_position.clone()),
+                        directives: Default::default(),
+                        selection_id: SelectionId::new(),
+                    };
+                    let Some(sub_selection) = sub_selection else {
+                        bail!("build_witness_next_step: sub_selection is None");
+                    };
+                    // let sub_selection = sub_selection.rebase_on(to_type_position, schema)?;
+                    (
+                        from_type_position.clone(),
+                        InlineFragmentSelection::new(inline_fragment, sub_selection).into(),
+                    )
+                }
+                QueryGraphEdgeTransition::FieldCollection {
+                    source: _,
+                    field_definition_position,
+                    is_part_of_provides: _,
+                } => {
+                    let parent_type_pos = field_definition_position.parent();
+                    let Some(field) = FieldSelection::from_field(
+                        &build_witness_field(schema, field_definition_position)?,
+                        &parent_type_pos,
+                        &Default::default(),
+                        schema,
+                        &|| Ok(()), // never cancels
+                    )?
+                    else {
+                        bail!("build_witness_next_step: field is None");
+                    };
+                    let field = field.with_updated_selection_set(sub_selection);
+                    (parent_type_pos.clone(), field.into())
+                }
+                _ => {
+                    // Witnesses are build from a path on the supergraph, so we shouldn't have any of those edges.
+                    bail!("Invalid edge {edge} found in supergraph path");
+                }
+            };
+            Ok(Some(SelectionSet::from_selection(parent_type, selection)))
+        }
+    }
+}
+
+fn build_witness_field(
+    schema: &ValidFederationSchema,
+    field_definition_position: &FieldDefinitionPosition,
+) -> Result<executable::Field, FederationError> {
+    // let parent_type_pos = field_definition_position.parent();
+    let field_def = field_definition_position.get(schema.schema())?;
+    let result = executable::Field::new(field_def.name.clone(), field_def.node.clone());
+    let args = field_def
+        .arguments
+        .iter()
+        .filter_map(|arg_def| {
+            if !arg_def.is_required() {
+                return None;
+            }
+            let arg_value = match generate_witness_value(schema, arg_def) {
+                Ok(value) => value,
+                Err(e) => {
+                    return Some(Err(e));
+                }
+            };
+            Some(Ok(Node::new(ast::Argument {
+                name: arg_def.name.clone(),
+                value: arg_value,
+            })))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if args.is_empty() {
+        Ok(result)
+    } else {
+        Ok(result.with_arguments(args))
+    }
+}
+
+fn generate_witness_value(
+    schema: &ValidFederationSchema,
+    value_def: &ast::InputValueDefinition,
+) -> Result<Node<ast::Value>, FederationError> {
+    // Note: We always generate a non-null value, even if the argument is nullable.
+    let value = match value_def.ty.as_ref() {
+        executable::Type::Named(type_name) | executable::Type::NonNullNamed(type_name) => {
+            let type_pos = schema.get_type(type_name.clone())?;
+            match type_pos {
+                TypeDefinitionPosition::Scalar(scalar_type_pos) => {
+                    match scalar_type_pos.type_name.as_str() {
+                        "Int" => ast::Value::Int(0.into()),
+                        "Float" => ast::Value::Float((3.1).into()),
+                        "Boolean" => ast::Value::Boolean(true),
+                        "String" => ast::Value::String("A string value".to_string()),
+                        // Users probably expect a particular format of ID at any particular place,
+                        // but we have zero info on the context, so we just throw a string that
+                        // hopefully make things clear.
+                        "ID" => ast::Value::String("<any id>".to_string()),
+                        // It's a custom scalar, but we don't know anything about that scalar so
+                        // providing some random string. This will technically probably not be a
+                        // valid value for that scalar, but hopefully that won't be enough to throw
+                        // users off.
+                        _ => ast::Value::String("<some value>".to_string()),
+                    }
+                }
+                TypeDefinitionPosition::Enum(enum_type_pos) => {
+                    let enum_type = enum_type_pos.get(schema.schema())?;
+                    let Some((first_value, _)) = enum_type.values.first() else {
+                        bail!("generate_witness_value: enum type has no values");
+                    };
+                    ast::Value::Enum(first_value.clone())
+                }
+                TypeDefinitionPosition::InputObject(input_object_type_pos) => {
+                    let object_type = input_object_type_pos.get(schema.schema())?;
+                    let fields = object_type
+                        .fields
+                        .iter()
+                        .filter_map(|(field_name, field_def)| {
+                            // We don't bother with non-mandatory fields.
+                            if !field_def.is_required() {
+                                return None;
+                            }
+
+                            let field_value = match generate_witness_value(schema, field_def) {
+                                Ok(value) => value,
+                                Err(e) => {
+                                    return Some(Err(e));
+                                }
+                            };
+                            Some(Ok((field_name.clone(), field_value)))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    ast::Value::Object(fields)
+                }
+                _ => bail!("generate_witness_value: unexpected value type"),
+            }
+        }
+        executable::Type::List(_item_type) | executable::Type::NonNullList(_item_type) => {
+            ast::Value::List(vec![])
+        }
+    };
+    Ok(Node::new(value))
+}
+
+fn display_reasons(reasons: &[Unadvanceables]) -> String {
+    let mut by_subgraph = MultiMap::new();
+    for reason in reasons {
+        for unadvanceable in reason.iter() {
+            by_subgraph.insert(unadvanceable.source_subgraph(), unadvanceable)
+        }
+    }
+    by_subgraph
+        .iter_all()
+        .filter_map(|(subgraph, reasons)| {
+            let (first, rest) = reasons.split_first()?;
+            let details = if rest.is_empty() {
+                format!(r#" {}."#, first.details())
+            } else {
+                // We put all the reasons into a set because it's possible multiple paths of the
+                // algorithm had the same "dead end". Typically, without this, there is cases where we
+                // end up with multiple "cannot find field x" messages (for the same "x").
+                let all_details = reasons
+                    .iter()
+                    .map(|reason| reason.details())
+                    .collect::<IndexSet<_>>();
+                let mut formatted_details = vec!["".to_string()]; // to add a newline
+                formatted_details
+                    .extend(all_details.iter().map(|details| format!(" - {details}.")));
+                formatted_details.join("\n")
+            };
+            Some(format!(r#"- from subgraph "{subgraph}": {details}"#))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}

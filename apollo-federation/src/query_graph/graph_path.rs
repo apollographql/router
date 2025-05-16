@@ -1,3 +1,5 @@
+pub(crate) mod transition_graph_path;
+
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -856,6 +858,17 @@ impl Display for Unadvanceables {
     }
 }
 
+impl Unadvanceables {
+    #[allow(unused)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Unadvanceable> {
+        self.0.iter()
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct Unadvanceable {
     reason: UnadvanceableReason,
@@ -871,6 +884,30 @@ impl Display for Unadvanceable {
             "[{}]({}->{}) {}",
             self.reason, self.from_subgraph, self.to_subgraph, self.details
         )
+    }
+}
+
+impl Unadvanceable {
+    #[allow(unused)]
+    pub(crate) fn reason(&self) -> &UnadvanceableReason {
+        &self.reason
+    }
+
+    /// Returns `self.from_subgraph`. It's named `source_subgraph`, since `fn from_subgraph()` may
+    /// be ambiguous with the Rust `from_*` convention.
+    pub(crate) fn source_subgraph(&self) -> &str {
+        &self.from_subgraph
+    }
+
+    /// Returns `self.to_subgraph`. It's named `dest_subgraph`, since `fn to_subgraph()` may
+    /// be ambiguous with the Rust `to_*` convention.
+    #[allow(unused)]
+    pub(crate) fn dest_subgraph(&self) -> &str {
+        &self.to_subgraph
+    }
+
+    pub(crate) fn details(&self) -> &str {
+        &self.details
     }
 }
 
@@ -994,8 +1031,7 @@ pub(crate) enum GraphPathTriggerRef<'a> {
 #[derive(derive_more::From)]
 pub(crate) enum GraphPathTriggerRefMut<'a> {
     Op(&'a mut OpGraphPathTrigger),
-    // Unused:
-    // Transition(&'a mut QueryGraphEdgeTransition),
+    Transition(&'a mut QueryGraphEdgeTransition),
 }
 
 impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
