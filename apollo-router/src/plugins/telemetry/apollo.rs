@@ -486,9 +486,12 @@ impl AddAssign<SingleStatsReport> for Report {
                 })
                 .or_insert(licensed_operation_count_by_type);
         }
-
-        // Router features enabled is ignored as it should be the same on any report from the same
-        // request
+        self.router_features_enabled = self.router_features_enabled
+            .clone()
+            .into_iter()
+            .chain(report.router_features_enabled.into_iter())
+            .unique()
+            .collect();
     }
 }
 

@@ -205,7 +205,6 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<TelemetryActivation>,
-    #[allow(dead_code)]
     enabled_features: EnabledFeatures,
 }
 
@@ -284,7 +283,6 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 struct EnabledFeatures {
     distributed_apq_cache: bool,
     entity_cache: bool,
