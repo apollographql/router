@@ -11,7 +11,11 @@ use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 
-const PROMETHEUS_CONFIG: &str = r#"
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_timeout() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
             telemetry:
                 exporters:
                     metrics:
@@ -19,19 +23,11 @@ const PROMETHEUS_CONFIG: &str = r#"
                             listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
-"#;
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_router_timeout() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(format!(
-            r#"
-            {PROMETHEUS_CONFIG}
             traffic_shaping:
                 router:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -54,16 +50,22 @@ async fn test_router_timeout() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_timeout() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
             include_subgraph_errors:
                 all: true
             traffic_shaping:
                 all:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -87,16 +89,22 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_connector_timeout() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
             traffic_shaping:
                 connector:
                     sources:
                         connectors.jsonPlaceholder:
                             timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .supergraph(PathBuf::from_iter([
             "..",
             "apollo-router",
@@ -178,9 +186,15 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
                 instrumentation:
                     instruments:
                         router:
@@ -193,8 +207,8 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
             traffic_shaping:
                 router:
                     timeout: 1ns
-            "#
-        ))
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -216,16 +230,22 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
             traffic_shaping:
                 router:
                     global_rate_limit:
                         capacity: 1
                         interval: 10min
-            "#
-        ))
+            "#,
+        )
         .build()
         .await;
 
@@ -253,9 +273,15 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
             include_subgraph_errors:
                 all: true
             traffic_shaping:
@@ -264,7 +290,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
                         capacity: 1
                         interval: 10min
             "#,
-        ))
+        )
         .build()
         .await;
 
@@ -292,9 +318,15 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_connector_rate_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
-            {PROMETHEUS_CONFIG}
+            telemetry:
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
             include_subgraph_errors:
                 all: true
             traffic_shaping:
@@ -310,7 +342,7 @@ async fn test_connector_rate_limit() -> Result<(), BoxError> {
                         $config:
                             my.config.value: true
             "#,
-        ))
+        )
         .supergraph(PathBuf::from_iter([
             "..",
             "apollo-router",
