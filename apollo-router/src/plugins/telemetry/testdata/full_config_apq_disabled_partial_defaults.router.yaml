@@ -1,6 +1,9 @@
-# Disable apq by omission
-
-# Disable entity cache by omission
+# Disable apq b/c redis not configured
+apq:
+  enabled: true
+  router:
+    in-memory:
+      limit: 2000
 
 # Telemetry plugin config
 telemetry:

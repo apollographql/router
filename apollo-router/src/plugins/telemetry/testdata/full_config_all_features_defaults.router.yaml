@@ -1,20 +1,6 @@
-# Enable distributed apq cache
-apq:
-  enabled: true
-  router:
-    cache:
-      redis:
-        urls:
-          - https://example.com
+# Disable apq distributed cache by omission
 
-# Enable entity cache
-preview_entity_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: [ "redis://..." ]
+# Disable entity cache by omission
 
 # Telemetry plugin config
 telemetry:

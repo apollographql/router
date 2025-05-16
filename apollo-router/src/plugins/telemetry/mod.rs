@@ -286,7 +286,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct EnabledFeatures {
-    apq: bool,
+    distributed_apq_cache: bool,
     entity_cache: bool,
 }
 
@@ -294,7 +294,7 @@ impl EnabledFeatures{
     fn list(&self) -> Vec<String> {
         // Map enabled features to their names for usage reports
         [
-            ("apq", self.apq),
+            ("distributed_apq_cache", self.distributed_apq_cache),
             ("entity_cache", self.entity_cache),
         ]
         .iter()
@@ -1752,7 +1752,18 @@ impl Telemetry {
 
     fn extract_enabled_features(full_config: &serde_json::Value) -> EnabledFeatures {
         EnabledFeatures {
-            apq: full_config["apq"]["enabled"].as_bool().unwrap_or(false),
+            // The APQ cache enabled config defaults to true.
+            // The distributed APQ cache is only considered enabled if the redis config is also set.
+            distributed_apq_cache: {
+                let _val = full_config["apq"]["router"]["cache"]["redis"].clone(); // TODO TEMP DEBUG
+                let enabled = full_config["apq"]["enabled"].as_bool().unwrap_or(true);
+                let redis_cache_config_set = full_config["apq"]["router"]["cache"]["redis"]
+                    .is_object();
+                enabled && redis_cache_config_set
+            },
+            // Entity cache's top-level enabled flag defaults to false. If the top-level flag is
+            // enabled, the feature is considered enabled regardless of the subgraph-level enabled
+            // settings.
             entity_cache: full_config["preview_entity_cache"]["enabled"]
                 .as_bool()
                 .unwrap_or(false),
@@ -2179,12 +2190,12 @@ mod tests {
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
-            features.apq,
-            "Telemetry plugin should properly parse apq feature when explicitly enabled"
+            features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
         assert!(
             features.entity_cache,
-            "Telemetry plugin should properly parse entity cache feature when explicitly enabled"
+            "Telemetry plugin should consider entity cache feature enabled when explicitly enabled"
         );
 
         // Explicitly disabled
@@ -2194,27 +2205,49 @@ mod tests {
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
-            !features.apq,
-            "Telemetry plugin should properly parse apq feature when explicitly disabled"
+            !features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature disabled when explicitly disabled"
         );
         assert!(
             !features.entity_cache,
-            "Telemetry plugin should properly parse entity cache feature when explicitly disabled"
+            "Telemetry plugin should consider entity cache feature disabled when explicitly disabled"
         );
 
-        // Implicitly disabled (not defined in yaml)
+        // Default Values
         let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_implicitly_disabled.router.yaml"
+            "testdata/full_config_all_features_defaults.router.yaml"
         ))
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
-            !features.apq,
-            "Telemetry plugin should properly parse apq feature when explicitly disabled"
+            !features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature disabled when all values are defaulted"
         );
         assert!(
             !features.entity_cache,
-            "Telemetry plugin should properly parse entity cache feature when explicitly disabled"
+            "Telemetry plugin should consider entity cache feature disabled when all values are defaulted"
+        );
+
+        // APQ enabled when default enabled with redis config defined
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
+        ))
+            .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature enabled when top-level enabled flag is defaulted and redis config is defined"
+        );
+
+        // APQ disabled when default enabled with redis config NOT defined
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            !features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature disabled when redis cache is not enabled"
         );
     }
 

@@ -78,8 +78,7 @@ snapshot_kind: text
       "licensed_operation_count": 1
     },
     "router_features_enabled": [
-      "distributed_apq_cache",
-      "entity_cache"
+      "distributed_apq_cache"
     ]
   }
 ]

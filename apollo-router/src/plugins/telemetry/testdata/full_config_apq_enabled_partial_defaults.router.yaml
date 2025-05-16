@@ -1,20 +1,10 @@
-# Enable distributed apq cache
+# Enable distributed apq cache even when top-level flag omitted
 apq:
-  enabled: true
   router:
     cache:
       redis:
         urls:
           - https://example.com
-
-# Enable entity cache
-preview_entity_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: [ "redis://..." ]
 
 # Telemetry plugin config
 telemetry:

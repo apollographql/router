@@ -407,9 +407,39 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn apollo_metrics_features_implicitly_disabled() -> Result<(), BoxError> {
+    async fn apollo_metrics_features_disabled_when_defaulted() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let plugin = create_telemetry_plugin(include_str!("../../testdata/full_config_all_features_implicitly_disabled.router.yaml")).await?;
+        let plugin = create_telemetry_plugin(include_str!("../../testdata/full_config_all_features_defaults.router.yaml")).await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_distributed_apq_cache_feature_enabled_with_partial_defaults() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!("../../testdata/full_config_apq_enabled_partial_defaults.router.yaml")).await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_distributed_apq_cache_feature_disabled_with_partial_defaults() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!("../../testdata/full_config_apq_disabled_partial_defaults.router.yaml")).await?;
         let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
