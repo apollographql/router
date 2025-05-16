@@ -6,7 +6,6 @@ use std::str::FromStr;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
-use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
@@ -16,7 +15,6 @@ use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
-use crate::sources::connect::string_template::Constant;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -383,65 +381,69 @@ fn validate_absolute_connect_url(
     str_value: GraphQLString,
     schema: &SchemaInfo,
 ) -> Result<(), Message> {
-    let relative_url_error = || Message {
-        code: Code::RelativeConnectUrlWithoutSource,
-        message: format!(
-            "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-            raw_value = coordinate.node,
-            source_directive_name = schema.source_directive_name(),
-        ),
-        locations: coordinate
-            .node
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    };
+    let mut is_relative = true;
+    let mut dynamic_in_domain = None;
 
-    let first = url
-        .parts
-        .iter()
-        .map_while(|part| match part {
-            Part::Constant(constant) => Some(constant),
-            _ => None,
-        })
-        .fold(Constant::default(), |acc, part| acc + part);
-    if first.value.is_empty() {
-        return Err(relative_url_error());
-    };
+    for part in &url.parts {
+        match part {
+            Part::Constant(constant) => {
+                let value = match constant.value.split_once("://") {
+                    Some((_scheme, rest)) => {
+                        is_relative = false;
+                        rest
+                    }
+                    None => &constant.value,
+                };
+                if value.contains('/') || value.contains('?') || value.contains('#') {
+                    break;
+                }
+            }
+            Part::Expression(dynamic) => {
+                dynamic_in_domain = Some(dynamic);
+            }
+        }
+    }
 
-    let Some((_scheme, without_scheme)) = first.value.split_once("://") else {
-        return Err(relative_url_error());
-    };
-
-    if let (Some(dynamic), true) = (
-        url.parts
-            .iter()
-            .find(|part| matches!(part, Part::Expression(_))),
-        !without_scheme.contains('/')
-            && !without_scheme.contains('?')
-            && !without_scheme.contains('#'),
-    ) {
+    if is_relative {
+        return Err(Message {
+            code: Code::RelativeConnectUrlWithoutSource,
+            message: format!(
+                "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
+                raw_value = coordinate.node,
+                source_directive_name = schema.source_directive_name(),
+            ),
+            locations: coordinate
+                .node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+    if let Some(dynamic) = dynamic_in_domain {
         return Err(Message {
             code: Code::InvalidUrl,
             message: format!(
                 "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
             locations: str_value
-                .line_col_for_subslice(dynamic.location(), schema)
+                .line_col_for_subslice(dynamic.location.clone(), schema)
                 .into_iter()
                 .collect(),
         });
     }
 
-    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
-        code: Code::InvalidUrl,
-        message: format!("In {coordinate}: {err}: {}", first.value.trim()),
-        locations: str_value
-            .line_col_for_subslice(first.location.clone(), schema)
-            .into_iter()
-            .collect(),
-    })?;
-    validate_url_scheme(&base_url, coordinate, value, str_value, schema)?;
+    let url = url
+        .interpolate_uri(&Default::default())
+        .map_err(|err| Message {
+            message: format!("In {coordinate}: {err}"),
+            code: Code::InvalidUrl,
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })?;
+
+    validate_url_scheme(&url, coordinate, value, str_value, schema)?;
 
     Ok(())
 }
