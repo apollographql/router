@@ -1080,7 +1080,16 @@ async fn test_selection_set() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/repos/foo/bar/commits")],
+        vec![
+            Matcher::new()
+                // Testing multiline headers
+                .header(
+                    HeaderName::from_static("x-multiline"),
+                    HeaderValue::from_static("multi line header"),
+                )
+                .method("GET")
+                .path("/repos/foo/bar/commits"),
+        ],
     );
 }
 
