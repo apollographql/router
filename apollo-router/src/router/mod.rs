@@ -233,7 +233,7 @@ fn generate_event_stream(
 ) -> impl Stream<Item = Event> {
     let reload_source = ReloadSource::default();
 
-    let stream = stream::select_all(vec![
+    stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
@@ -255,8 +255,7 @@ fn generate_event_stream(
     .take_while(|msg| future::ready(!matches!(msg, Event::Shutdown)))
     // Chain is required so that the final shutdown message is sent.
     .chain(stream::iter(vec![Event::Shutdown]))
-    .boxed();
-    stream
+    .boxed()
 }
 
 #[cfg(test)]
