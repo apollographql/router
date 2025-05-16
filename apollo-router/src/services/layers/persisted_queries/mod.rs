@@ -114,7 +114,7 @@ impl PersistedQueryLayer {
                         // Note: it's kind of inconsistent that if we require
                         // IDs and skip_enforcement is set, we don't call
                         // log_unknown_operation on freeform GraphQL, but if we
-                        // *don't* reuqire IDs and skip_enforcement is set, we
+                        // *don't* require IDs and skip_enforcement is set, we
                         // *do* call log_unknown_operation on unknown
                         // operations.
                         log_unknown_operation(operation_body, false);
