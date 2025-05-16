@@ -208,7 +208,7 @@ thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
-tonic = { version = "0.12.3", features = [
+tonic = { version = "0.13.0", features = [
     "transport",
     "tls",
     "tls-roots",
@@ -343,7 +343,7 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [build-dependencies]
-tonic-build = "0.12.3"
+tonic-build = "0.13.0"
 basic-toml = "0.1.9"
 serde_json.workspace = true
 
