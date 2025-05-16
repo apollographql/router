@@ -254,21 +254,24 @@ pub(crate) fn validate(
     expected_shape: &Shape,
 ) -> Result<(), Message> {
     // TODO: this check should be done in the shape checking, but currently
-    // shape resolution can drop references to inputs the expressions ends with
-    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
+    // shape resolution can drop references to inputs if the expressions ends with
+    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
     // `Unknown`, so variables are dropped and cannot be checked.
     for variable_ref in expression.expression.variable_references() {
-        if !context
-            .var_lookup
-            .contains_key(&variable_ref.namespace.namespace)
-        {
+        let namespace = variable_ref.namespace.namespace;
+        if !context.var_lookup.contains_key(&namespace) {
+            let message = if namespace == Namespace::Batch {
+                "`$batch` may only be used when `@connect` is applied to a type.".to_string()
+            } else {
+                format!(
+                    "{} is not valid here, must be one of {}",
+                    namespace,
+                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                )
+            };
             return Err(Message {
                 code: context.code,
-                message: format!(
-                    "{} is not valid here, must be one of {}",
-                    variable_ref.namespace.namespace,
-                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-                ),
+                message,
                 locations: variable_ref
                     .location
                     .iter()

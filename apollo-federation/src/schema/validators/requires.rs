@@ -1,6 +1,7 @@
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Field;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
@@ -21,6 +22,7 @@ use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::DenyNonExternalLeafFields;
 use crate::schema::validators::SchemaFieldSetValidator;
 use crate::schema::validators::deny_unsupported_directive_on_interface_field;
+use crate::schema::validators::normalize_diagnostic_message;
 
 pub(crate) fn validate_requires_directives(
     schema: &FederationSchema,
@@ -61,17 +63,45 @@ pub(crate) fn validate_requires_directives(
                             if let Err(validation_error) =
                                 fields.validate(Valid::assume_valid_ref(schema.schema()))
                             {
-                                errors.push(validation_error.into());
+                                errors.push(invalid_fields_error_from_diagnostics(
+                                    &requires,
+                                    validation_error,
+                                ));
                             }
                         }
                     }
-                    Err(e) => errors.push(e.into()),
+                    Err(e) => {
+                        errors.push(invalid_fields_error_from_diagnostics(&requires, e.errors))
+                    }
                 }
             }
             Err(e) => errors.push(e),
         }
     }
     Ok(())
+}
+
+fn invalid_fields_error_from_diagnostics(
+    requires: &RequiresDirective,
+    diagnostics: DiagnosticList,
+) -> FederationError {
+    let mut errors = MultipleFederationErrors::new();
+    for diagnostic in diagnostics.iter() {
+        let mut message = normalize_diagnostic_message(diagnostic);
+        if message.starts_with("Cannot query field") {
+            message = format!(
+                "{message} If the field is defined in another subgraph, you need to add it to this subgraph with @external."
+            )
+        }
+        errors
+            .errors
+            .push(SingleFederationError::RequiresInvalidFields {
+                coordinate: requires.target.coordinate(),
+                application: requires.schema_directive.to_string(),
+                message,
+            })
+    }
+    errors.into()
 }
 
 impl DeniesAliases for RequiresDirective<'_> {
