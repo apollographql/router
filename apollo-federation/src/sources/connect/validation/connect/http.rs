@@ -396,26 +396,19 @@ fn validate_absolute_connect_url(
             .collect(),
     };
 
-    let first_range = url
+    let first = url
         .parts
-        .first()
-        .map(|part| part.location().start)
-        .unwrap_or_default();
-    let Part::Constant(first) = Part::Constant(
-        url.parts
-            .iter()
-            .map_while(|part| match part {
-                Part::Constant(constant) => Some((
-                    constant.value.as_str(),
-                    constant.location.start..constant.location.end,
-                )),
-                _ => None,
-            })
-            .fold((String::new(), first_range..first_range), |acc, part| {
-                (acc.0 + part.0, acc.1.start..part.1.end)
-            })
-            .into(),
-    ) else {
+        .iter()
+        .map_while(|part| match part {
+            Part::Constant(constant) => Some(constant),
+            _ => None,
+        })
+        .fold(Constant::default(), |mut acc, part| {
+            acc.value += &part.value;
+            acc.location.end = part.location.end;
+            acc
+        });
+    if first.value.is_empty() {
         return Err(relative_url_error());
     };
 
