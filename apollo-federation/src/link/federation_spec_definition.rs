@@ -839,22 +839,31 @@ impl SpecDefinition for FederationSpecDefinition {
             Box::new(Self::provides_directive_specification()),
             Box::new(Self::external_directive_specification()),
         ];
-        if self.is_fed1() {
-            specs.push(Box::new(Self::extends_directive_specification()));
-            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
+        // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
+        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
                 specs.extend(tag_spec.directive_specs());
             }
+        } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
+            specs.extend(tag_spec.directive_specs());
+        }
+        specs.push(Box::new(Self::extends_directive_specification()));
+
+        if self.is_fed1() {
+            // PORT_NOTE: Fed 1 has `@key`, `@requires`, `@provides`, `@external`, `@tag` (v0.2) and `@extends`.
+            // The specs we return at this point correspond to `legacyFederationDirectives` in JS.
             return specs;
         }
 
         specs.push(Box::new(self.shareable_directive_specification()));
-        specs.push(Box::new(self.override_directive_specification()));
 
         if let Some(inaccessible_spec) =
             INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
         {
             specs.extend(inaccessible_spec.directive_specs());
         }
+
+        specs.push(Box::new(self.override_directive_specification()));
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
@@ -864,15 +873,6 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.push(Box::new(
                 Self::interface_object_directive_directive_specification(),
             ));
-        }
-
-        // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
-        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
-            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
-                specs.extend(tag_spec.directive_specs());
-            }
-        } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
-            specs.extend(tag_spec.directive_specs());
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {

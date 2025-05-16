@@ -1097,7 +1097,7 @@ mod tests {
 
         insta::assert_snapshot!(
             s1.schema().schema().to_string(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@inaccessible", "@composeDirective", "@interfaceObject", "@tag"]) {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
         }
 
@@ -1111,17 +1111,19 @@ mod tests {
 
         directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+        directive @extends on OBJECT | INTERFACE
+
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
-        directive @override(from: String!) on FIELD_DEFINITION
-
         directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+        
+        directive @override(from: String!) on FIELD_DEFINITION
 
         directive @composeDirective(name: String!) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
         type Query {
           products: [Product!]! @provides(fields: "description")
@@ -1444,7 +1446,7 @@ mod tests {
         insta::assert_snapshot!(
             subgraph.schema().schema().to_string(),
             @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@inaccessible", "@composeDirective", "@interfaceObject", "@tag"]) {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
         }
 
@@ -1458,17 +1460,19 @@ mod tests {
 
         directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+        directive @extends on OBJECT | INTERFACE
+
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
-        directive @override(from: String!) on FIELD_DEFINITION
-
         directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        directive @override(from: String!) on FIELD_DEFINITION
 
         directive @composeDirective(name: String!) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
         type Query {
           hello: String

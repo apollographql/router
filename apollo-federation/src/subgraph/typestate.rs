@@ -926,6 +926,7 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("deprecated"),
+                name!("federation__extends"),
                 name!("federation__external"),
                 name!("federation__inaccessible"),
                 name!("federation__key"),
@@ -972,6 +973,7 @@ mod tests {
             vec![
                 name!("deprecated"),
                 name!("federation__composeDirective"),
+                name!("federation__extends"),
                 name!("federation__external"),
                 name!("federation__inaccessible"),
                 name!("federation__key"),

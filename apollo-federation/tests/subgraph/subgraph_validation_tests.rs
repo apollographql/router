@@ -957,7 +957,9 @@ mod link_handling_tests {
 
     use super::*;
 
-    #[allow(dead_code)]
+    // There are a few whitespace differences between this and the JS version, but the more important difference is that
+    // the links are added as a new extension instead of being attached to the top-level schema definition. We may need
+    // to revisit that later if we're doing strict comparisons of SDLs between versions.
     const EXPECTED_FULL_SCHEMA: &str = r#"schema {
   query: Query
 }
@@ -974,13 +976,15 @@ directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITI
 
 directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
 
-directive @federation__shareable on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-directive @federation__override(from: String!) on FIELD_DEFINITION
+directive @federation__extends on OBJECT | INTERFACE
+
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
 
 directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
 
 type T @key(fields: "k") {
   k: ID!
