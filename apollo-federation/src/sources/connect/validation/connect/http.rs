@@ -16,6 +16,7 @@ use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Constant;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -396,7 +397,15 @@ fn validate_absolute_connect_url(
             .collect(),
     };
 
-    let Some(Part::Constant(first)) = url.parts.first() else {
+    let first = url
+        .parts
+        .iter()
+        .map_while(|part| match part {
+            Part::Constant(constant) => Some(constant),
+            _ => None,
+        })
+        .fold(Constant::default(), |acc, part| acc + part);
+    if first.value.is_empty() {
         return Err(relative_url_error());
     };
 
@@ -404,18 +413,21 @@ fn validate_absolute_connect_url(
         return Err(relative_url_error());
     };
 
-    if url.parts.len() > 1
-        && !without_scheme.contains('/')
-        && !without_scheme.contains('?')
-        && !without_scheme.contains('#')
-    {
+    if let (Some(dynamic), true) = (
+        url.parts
+            .iter()
+            .find(|part| matches!(part, Part::Expression(_))),
+        !without_scheme.contains('/')
+            && !without_scheme.contains('?')
+            && !without_scheme.contains('#'),
+    ) {
         return Err(Message {
             code: Code::InvalidUrl,
             message: format!(
                 "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
             locations: str_value
-                .line_col_for_subslice(first.location.clone(), schema)
+                .line_col_for_subslice(dynamic.location(), schema)
                 .into_iter()
                 .collect(),
         });
@@ -423,7 +435,7 @@ fn validate_absolute_connect_url(
 
     let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
         code: Code::InvalidUrl,
-        message: format!("In {coordinate}: {err}"),
+        message: format!("In {coordinate}: {err}: {}", first.value.trim()),
         locations: str_value
             .line_col_for_subslice(first.location.clone(), schema)
             .into_iter()

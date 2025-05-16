@@ -20,6 +20,8 @@ use serde_json_bytes::Value;
 pub(crate) use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
+pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
+
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug, Default)]
 pub struct StringTemplate {
@@ -34,7 +36,11 @@ impl FromStr for StringTemplate {
         let mut chars = input.chars().peekable();
         let mut parts = Vec::new();
         while let Some(next) = chars.peek() {
-            if *next == '{' {
+            if SPECIAL_WHITE_SPACES.contains(next) {
+                chars.next();
+                offset += 1;
+                continue;
+            } else if *next == '{' {
                 let mut braces_count = 0; // Ignore braces within JSONSelection
                 let expression = chars
                     .by_ref()
@@ -70,7 +76,7 @@ impl FromStr for StringTemplate {
             } else {
                 let value = chars
                     .by_ref()
-                    .peeking_take_while(|c| *c != '{')
+                    .peeking_take_while(|c| *c != '{' && !SPECIAL_WHITE_SPACES.contains(c))
                     .collect::<String>();
                 let len = value.len();
                 parts.push(Part::Constant(Constant {
@@ -194,15 +200,13 @@ pub(crate) enum Part {
 impl Part {
     /// Get the original location of the part from the string which was parsed to form the
     /// [`StringTemplate`].
-    fn location(&self) -> Range<usize> {
+    pub(crate) fn location(&self) -> Range<usize> {
         match self {
             Self::Constant(c) => c.location.clone(),
             Self::Expression(e) => e.location.clone(),
         }
     }
-}
 
-impl Part {
     /// Evaluate the expression of the part (if any) and write the result to `output`.
     ///
     /// # Errors
@@ -250,7 +254,7 @@ pub(crate) fn write_value<Output: Write>(
 }
 
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Constant {
     pub(crate) value: String,
     pub(crate) location: Range<usize>,
@@ -261,6 +265,17 @@ pub(crate) struct Constant {
 pub(crate) struct Expression {
     pub(crate) expression: JSONSelection,
     pub(crate) location: Range<usize>,
+}
+
+impl std::ops::Add<&Constant> for Constant {
+    type Output = Self;
+
+    fn add(self, rhs: &Self) -> Self::Output {
+        Self {
+            value: self.value + &rhs.value,
+            location: self.location.start..rhs.location.end,
+        }
+    }
 }
 
 /// All the percent encoding rules we use for building URIs.
