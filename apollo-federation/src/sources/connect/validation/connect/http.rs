@@ -384,6 +384,10 @@ fn validate_absolute_connect_url(
     let mut is_relative = true;
     let mut dynamic_in_domain = None;
 
+    // Consume each part of the string template that *should* result in a static, valid base URI (scheme+host+port).
+    // - if we don't encounter a scheme, it's not a valid base URL
+    // - once we encounter a character not allowed in scheme+host+port, stop consuming
+    // - if we encounter a dynamic part before we break, we have an illegal dynamic component
     for part in &url.parts {
         match part {
             Part::Constant(constant) => {
@@ -432,6 +436,8 @@ fn validate_absolute_connect_url(
         });
     }
 
+    // Evaluate the template, replacing all dynamic expressions with empty strings. This should result in a valid
+    // URL because of the URL building logic in `interpolate_uri`, even if the result is illogical with missing values.
     let url = url
         .interpolate_uri(&Default::default())
         .map_err(|err| Message {
