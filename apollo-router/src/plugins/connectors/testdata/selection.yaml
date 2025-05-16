@@ -38,7 +38,7 @@ subgraphs:
                 http: { 
                   GET: "/repos/{$$args.owner}/{$$args.repo}/commits" 
                   headers: [
-                    { name: "x-multiline", value: "multi\n line\n header" }
+                    { name: "x-multiline", value: "multi-line-header" }
                   ]
                 }
                 selection: """
