@@ -57,7 +57,7 @@ async fn config(
     reports: Arc<Mutex<Vec<Report>>>,
     demand_control: bool,
     experimental_field_stats: bool,
-    config_str: &str
+    config_str: &str,
 ) -> (JoinHandle<()>, serde_json::Value) {
     *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
     *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
@@ -106,14 +106,14 @@ async fn get_router_service(
     mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
-    config_str: Option<&str>
+    config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(
         use_legacy_request_span,
         reports,
         demand_control,
         experimental_local_field_metrics,
-        config_str.unwrap_or_else(|| include_str!("fixtures/reports/apollo_reports.router.yaml")),
+        config_str.unwrap_or(include_str!("fixtures/reports/apollo_reports.router.yaml")),
     )
     .await;
     let builder = TestHarness::builder()
@@ -148,7 +148,9 @@ async fn get_batch_router_service(
         reports,
         demand_control,
         experimental_local_field_metrics,
-        config_str.unwrap_or_else(|| { include_str!("fixtures/reports/apollo_reports_batch.router.yaml") })
+        config_str.unwrap_or(include_str!(
+            "fixtures/reports/apollo_reports_batch.router.yaml"
+        )),
     )
     .await;
     let builder = TestHarness::builder()
@@ -318,7 +320,7 @@ async fn get_metrics_report(
         demand_control,
         experimental_local_field_metrics,
         has_metrics,
-        config_str
+        config_str,
     )
     .await
 }
@@ -344,14 +346,21 @@ async fn get_metrics_report_mocked(
         false,
         false,
         has_metrics,
-        config_str
+        config_str,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
-    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool, bool, Option<&'static str>) -> Fut,
+    service_fn: impl FnOnce(
+        Arc<Mutex<Vec<Report>>>,
+        bool,
+        bool,
+        bool,
+        bool,
+        Option<&'static str>,
+    ) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
@@ -471,7 +480,8 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -487,7 +497,8 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -503,7 +514,8 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -517,7 +529,8 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -541,7 +554,7 @@ async fn test_batch_trace_id() {
             use_legacy_request_span,
             false,
             false,
-            None
+            None,
         )
         .await;
         assert_report!(report);
@@ -558,7 +571,8 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -573,7 +587,8 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -589,7 +604,8 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -633,7 +649,8 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -721,7 +738,8 @@ async fn test_demand_control_trace() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
         assert_report!(report);
     }
 }
@@ -754,10 +772,18 @@ async fn test_features_enabled() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, Some(include_str!("fixtures/reports/all_features_enabled.router.yaml"))).await;
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!(
+            "fixtures/reports/all_features_enabled.router.yaml"
+        )),
+    )
+    .await;
     assert_report!(report);
 }
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_features_disabled() {
@@ -767,6 +793,15 @@ async fn test_features_disabled() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, Some(include_str!("fixtures/reports/all_features_disabled.router.yaml"))).await;
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!(
+            "fixtures/reports/all_features_disabled.router.yaml"
+        )),
+    )
+    .await;
     assert_report!(report);
 }

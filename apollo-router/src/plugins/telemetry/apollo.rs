@@ -336,7 +336,7 @@ pub(crate) struct Report {
     #[serde(serialize_with = "serialize_licensed_operation_count_by_type")]
     pub(crate) licensed_operation_count_by_type:
         HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
-    pub(crate) router_features_enabled: Vec<String>
+    pub(crate) router_features_enabled: Vec<String>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]

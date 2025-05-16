@@ -290,7 +290,7 @@ struct EnabledFeatures {
     entity_cache: bool,
 }
 
-impl EnabledFeatures{
+impl EnabledFeatures {
     fn list(&self) -> Vec<String> {
         // Map enabled features to their names for usage reports
         [
@@ -1263,7 +1263,7 @@ impl Telemetry {
         sender: Sender,
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
-        enabled_features: EnabledFeatures
+        enabled_features: EnabledFeatures,
     ) -> Result<supergraph::Response, BoxError> {
         let operation_kind: OperationKind =
             ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
@@ -1757,8 +1757,8 @@ impl Telemetry {
             distributed_apq_cache: {
                 let _val = full_config["apq"]["router"]["cache"]["redis"].clone(); // TODO TEMP DEBUG
                 let enabled = full_config["apq"]["enabled"].as_bool().unwrap_or(true);
-                let redis_cache_config_set = full_config["apq"]["router"]["cache"]["redis"]
-                    .is_object();
+                let redis_cache_config_set =
+                    full_config["apq"]["router"]["cache"]["redis"].is_object();
                 enabled && redis_cache_config_set
             },
             // Entity cache's top-level enabled flag defaults to false. If the top-level flag is
@@ -2232,7 +2232,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
         ))
-            .await;
+        .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
             features.distributed_apq_cache,
