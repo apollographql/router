@@ -391,11 +391,7 @@ impl Query {
             executable::Type::List(inner_type) => match input {
                 Value::Array(input_array) => {
                     if output.is_null() {
-                        *output = Value::Array(
-                            std::iter::repeat(Value::Null)
-                                .take(input_array.len())
-                                .collect(),
-                        );
+                        *output = Value::Array(vec![Value::Null; input_array.len()]);
                     }
                     let output_array = output.as_array_mut().ok_or(InvalidValue)?;
                     match input_array

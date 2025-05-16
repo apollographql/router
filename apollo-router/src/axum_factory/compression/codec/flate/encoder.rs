@@ -1,7 +1,6 @@
 // All code from this module is extracted from https://github.com/Nemo157/async-compression and is under MIT or Apache-2 licence
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 use std::io::Error;
-use std::io::ErrorKind;
 use std::io::Result;
 
 use flate2::Compress;
@@ -56,7 +55,7 @@ impl Encode for FlateEncoder {
         match self.encode(input, output, FlushCompress::None)? {
             Status::Ok => Ok(()),
             Status::StreamEnd => unreachable!(),
-            Status::BufError => Err(Error::new(ErrorKind::Other, "unexpected BufError")),
+            Status::BufError => Err(Error::other("unexpected BufError")),
         }
     }
 
@@ -104,7 +103,7 @@ impl Encode for FlateEncoder {
         )? {
             Status::Ok => Ok(false),
             Status::StreamEnd => Ok(true),
-            Status::BufError => Err(Error::new(ErrorKind::Other, "unexpected BufError")),
+            Status::BufError => Err(Error::other("unexpected BufError")),
         }
     }
 }

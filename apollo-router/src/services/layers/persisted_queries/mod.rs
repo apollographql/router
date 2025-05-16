@@ -44,9 +44,9 @@ pub(crate) struct UsedQueryIdFromManifest {
 /// This type actually consists of two conceptual layers that must both be applied at the supergraph
 /// service stage, at different points:
 /// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
-///    and validated.
+///   and validated.
 /// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
-///    GraphQL request is parsed and validated.
+///   GraphQL request is parsed and validated.
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current

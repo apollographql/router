@@ -57,7 +57,7 @@ pub(crate) fn make_request(
                     let encoded = encode_json_as_form(json_body)
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
-                    let len = encoded.bytes().len();
+                    let len = encoded.len();
                     (encoded, len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
