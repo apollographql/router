@@ -204,6 +204,7 @@ impl Config {
             key,
             reference,
             schema_id,
+            router_id(),
             metrics_reference_mode,
         )?;
 
