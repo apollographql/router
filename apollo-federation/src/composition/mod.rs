@@ -77,7 +77,7 @@ pub fn merge_subgraphs(
 }
 
 pub fn post_merge_validations(
-    _supergraph: &Supergraph<Merged>
+    _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<FederationError>> {
     panic!("post_merge_validations is not implemented yet")
 }

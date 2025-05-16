@@ -96,15 +96,11 @@ pub struct Supergraph<S> {
 impl Supergraph<Merged> {
     pub fn new(schema: Valid<Schema>) -> Self {
         Self {
-            state: Merged {
-                schema
-            }
+            state: Merged { schema },
         }
     }
 
-    pub fn parse(
-        schema_str: &str,
-    ) -> Result<Self, FederationError> {
+    pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
         Ok(Self::new(schema))
     }
