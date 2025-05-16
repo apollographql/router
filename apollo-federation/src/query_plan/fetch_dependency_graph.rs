@@ -2922,7 +2922,8 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        if !self.context_inputs.iter().any(|c| *c == renamer) {
+        // XXX(@goto-bus-stop): this looks like it should be an IndexSet!
+        if !self.context_inputs.contains(&renamer) {
             self.context_inputs.push(renamer);
         }
     }
