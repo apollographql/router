@@ -8,21 +8,24 @@ use std::time::Duration;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
+use fred::prelude::Client as RedisClient;
 use fred::prelude::ClientLike;
+use fred::prelude::Error as RedisError;
+use fred::prelude::ErrorKind as RedisErrorKind;
+use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
-use fred::prelude::RedisClient;
-use fred::prelude::RedisError;
-use fred::prelude::RedisErrorKind;
-use fred::prelude::RedisPool;
-use fred::types::ClusterRouting;
+use fred::prelude::Pool as RedisPool;
+use fred::prelude::TcpConfig;
+use fred::types::Builder;
 use fred::types::Expiration;
-use fred::types::FromRedis;
-use fred::types::PerformanceConfig;
-use fred::types::ReconnectPolicy;
-use fred::types::RedisConfig;
-use fred::types::ScanResult;
-use fred::types::TlsConfig;
-use fred::types::TlsHostMapping;
+use fred::types::FromValue;
+use fred::types::cluster::ClusterRouting;
+use fred::types::config::Config as RedisConfig;
+use fred::types::config::ReconnectPolicy;
+use fred::types::config::TlsConfig;
+use fred::types::config::TlsHostMapping;
+use fred::types::config::UnresponsiveConfig;
+use fred::types::scan::ScanResult;
 use futures::FutureExt;
 use futures::Stream;
 use tower::BoxError;
@@ -41,6 +44,11 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis-sentinel",
     "rediss-sentinel",
 ];
+
+/// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
+const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+/// Interval on which we send PING commands to the Redis servers.
+const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -104,7 +112,7 @@ where
     }
 }
 
-impl<K> From<RedisKey<K>> for fred::types::RedisKey
+impl<K> From<RedisKey<K>> for fred::types::Key
 where
     K: KeyType,
 {
@@ -122,13 +130,13 @@ where
     }
 }
 
-impl<V> FromRedis for RedisValue<V>
+impl<V> FromValue for RedisValue<V>
 where
     V: ValueType,
 {
-    fn from_value(value: fred::types::RedisValue) -> Result<Self, RedisError> {
+    fn from_value(value: fred::types::Value) -> Result<Self, RedisError> {
         match value {
-            fred::types::RedisValue::Bytes(data) => {
+            fred::types::Value::Bytes(data) => {
                 serde_json::from_slice(&data).map(RedisValue).map_err(|e| {
                     RedisError::new(
                         RedisErrorKind::Parse,
@@ -136,7 +144,7 @@ where
                     )
                 })
             }
-            fred::types::RedisValue::String(s) => {
+            fred::types::Value::String(s) => {
                 serde_json::from_str(&s).map(RedisValue).map_err(|e| {
                     RedisError::new(
                         RedisErrorKind::Parse,
@@ -144,9 +152,7 @@ where
                     )
                 })
             }
-            fred::types::RedisValue::Null => {
-                Err(RedisError::new(RedisErrorKind::NotFound, "not found"))
-            }
+            fred::types::Value::Null => Err(RedisError::new(RedisErrorKind::NotFound, "not found")),
             _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",
@@ -155,13 +161,13 @@ where
     }
 }
 
-impl<V> TryInto<fred::types::RedisValue> for RedisValue<V>
+impl<V> TryInto<fred::types::Value> for RedisValue<V>
 where
     V: ValueType,
 {
     type Error = RedisError;
 
-    fn try_into(self) -> Result<fred::types::RedisValue, Self::Error> {
+    fn try_into(self) -> Result<fred::types::Value, Self::Error> {
         let v = serde_json::to_vec(&self.0).map_err(|e| {
             tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
             RedisError::new(
@@ -170,7 +176,7 @@ where
             )
         })?;
 
-        Ok(fred::types::RedisValue::Bytes(v.into()))
+        Ok(fred::types::Value::Bytes(v.into()))
     }
 }
 
@@ -198,7 +204,7 @@ impl RedisCacheStorage {
             let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
 
             client_config.tls = Some(TlsConfig {
-                connector: fred::types::TlsConnector::Rustls(connector),
+                connector: fred::types::config::TlsConnector::Rustls(connector),
                 hostnames: TlsHostMapping::None,
             });
         }
@@ -247,17 +253,25 @@ impl RedisCacheStorage {
         is_cluster: bool,
         caller: &'static str,
     ) -> Result<Self, BoxError> {
-        let pooled_client = RedisPool::new(
-            client_config,
-            Some(PerformanceConfig {
-                default_command_timeout: timeout,
-                ..Default::default()
-            }),
-            None,
-            Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
-            pool_size,
-        )?;
-        let _handle = pooled_client.connect();
+        let pooled_client = Builder::from_config(client_config)
+            .with_connection_config(|config| {
+                config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
+                config.reconnect_on_auth_error = true;
+                config.tcp = TcpConfig {
+                    #[cfg(target_os = "linux")]
+                    user_timeout: Some(timeout),
+                    ..Default::default()
+                };
+                config.unresponsive = UnresponsiveConfig {
+                    max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
+                    interval: Duration::from_secs(3),
+                };
+            })
+            .with_performance_config(|config| {
+                config.default_command_timeout = timeout;
+            })
+            .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
+            .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
             // spawn tasks that listen for connection close or reconnect events
@@ -273,8 +287,12 @@ impl RedisCacheStorage {
             );
 
             tokio::spawn(async move {
-                while let Ok(error) = error_rx.recv().await {
-                    tracing::error!("Client disconnected with error: {:?}", error);
+                while let Ok((error, server)) = error_rx.recv().await {
+                    tracing::error!(
+                        "Client disconnected from {:?} with error: {:?}",
+                        server,
+                        error
+                    );
                 }
             });
             tokio::spawn(async move {
@@ -291,12 +309,13 @@ impl RedisCacheStorage {
             });
         }
 
-        // a TLS connection to a TCP Redis could hang, so we add a timeout
-        tokio::time::timeout(Duration::from_secs(5), pooled_client.wait_for_connect())
-            .await
-            .map_err(|_| {
-                RedisError::new(RedisErrorKind::Timeout, "timeout connecting to Redis")
-            })??;
+        let _handle = pooled_client.init().await?;
+        let heartbeat_clients = pooled_client.clone();
+        let _heartbeat_handle = tokio::spawn(async move {
+            heartbeat_clients
+                .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, true)
+                .await
+        });
 
         tracing::trace!("redis connection established");
         Ok(Self {
@@ -421,7 +440,7 @@ impl RedisCacheStorage {
                 let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
                 let key = self.make_key(key);
                 let res = pipeline
-                    .get::<fred::types::RedisValue, _>(&key)
+                    .get::<fred::types::Value, _>(&key)
                     .await
                     .map_err(|e| {
                         if !e.is_not_found() {
@@ -434,8 +453,8 @@ impl RedisCacheStorage {
                     tracing::error!("could not queue GET command");
                     return None;
                 }
-                let res: fred::types::RedisValue = pipeline
-                    .expire(&key, ttl.as_secs() as i64)
+                let res: fred::types::Value = pipeline
+                    .expire(&key, ttl.as_secs() as i64, None)
                     .await
                     .map_err(|e| {
                         if !e.is_not_found() {
@@ -607,11 +626,8 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result(
-        &self,
-        keys: Vec<fred::types::RedisKey>,
-    ) -> Option<u32> {
-        let mut h: HashMap<u16, Vec<fred::types::RedisKey>> = HashMap::new();
+    pub(crate) async fn delete_from_scan_result(&self, keys: Vec<fred::types::Key>) -> Option<u32> {
+        let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
             let hash = ClusterRouting::hash_key(key.as_bytes());
             let entry = h.entry(hash).or_default();
@@ -675,7 +691,7 @@ mod test {
             time: std::time::UNIX_EPOCH - std::time::Duration::new(1, 0),
         });
 
-        let as_value: Result<fred::types::RedisValue, _> = invalid_json_payload.try_into();
+        let as_value: Result<fred::types::Value, _> = invalid_json_payload.try_into();
 
         assert!(as_value.is_err());
     }
