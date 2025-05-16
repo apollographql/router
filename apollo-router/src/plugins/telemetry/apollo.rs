@@ -486,10 +486,11 @@ impl AddAssign<SingleStatsReport> for Report {
                 })
                 .or_insert(licensed_operation_count_by_type);
         }
-        self.router_features_enabled = self.router_features_enabled
+        self.router_features_enabled = self
+            .router_features_enabled
             .clone()
             .into_iter()
-            .chain(report.router_features_enabled.into_iter())
+            .chain(report.router_features_enabled)
             .unique()
             .collect();
     }
