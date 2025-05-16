@@ -178,6 +178,7 @@ macro_rules! assert_report {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.agent_version" => "[agent_version]",
                         ".**.executable_schema_id" => "[executable_schema_id]",
+                        ".**.agent_id" => "[agent_id]",
                         ".header.hostname" => "[hostname]",
                         ".header.uname" => "[uname]",
                         ".**.seconds" => "[seconds]",

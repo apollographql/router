@@ -4,7 +4,8 @@ use opentelemetry_sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::apollo::{router_id, Config};
+use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
