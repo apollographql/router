@@ -21,10 +21,14 @@ pub fn compose(
     let upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
+    pre_merge_validations(&validated_subgraphs)?;
     let supergraph = merge_subgraphs(validated_subgraphs)?;
+    post_merge_validations(&supergraph)?;
     validate_satisfiability(supergraph)
 }
 
+/// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through
+/// `@link`). This function will update subgraph schemas with all missing federation definitions.
 pub fn expand_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Vec<Subgraph<Expanded>>, Vec<FederationError>> {
@@ -41,6 +45,8 @@ pub fn expand_subgraphs(
     }
 }
 
+/// Validate subgraph schemas to ensure they satisfy Apollo Federation requirements (e.g. whether
+/// `@key` specifies valid `FieldSet`s etc).
 pub fn validate_subgraphs(
     subgraphs: Vec<Subgraph<Upgraded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<FederationError>> {
@@ -57,8 +63,21 @@ pub fn validate_subgraphs(
     }
 }
 
+/// Perform validations that require information about all available subgraphs.
+pub fn pre_merge_validations(
+    _subgraphs: &Vec<Subgraph<Validated>>,
+) -> Result<(), Vec<FederationError>> {
+    panic!("pre_merge_validations is not implemented yet")
+}
+
 pub fn merge_subgraphs(
     _subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<FederationError>> {
     panic!("merge_subgraphs is not implemented yet")
+}
+
+pub fn post_merge_validations(
+    _supergraph: &Supergraph<Merged>
+) -> Result<(), Vec<FederationError>> {
+    panic!("post_merge_validations is not implemented yet")
 }
