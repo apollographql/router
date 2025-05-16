@@ -789,7 +789,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.1.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.8.0
     resource_class: small
     environment:
       <<: *common_job_environment
