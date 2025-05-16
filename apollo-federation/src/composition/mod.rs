@@ -65,7 +65,7 @@ pub fn validate_subgraphs(
 
 /// Perform validations that require information about all available subgraphs.
 pub fn pre_merge_validations(
-    _subgraphs: &Vec<Subgraph<Validated>>,
+    _subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<FederationError>> {
     panic!("pre_merge_validations is not implemented yet")
 }
