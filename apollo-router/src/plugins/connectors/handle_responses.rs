@@ -96,15 +96,16 @@ impl RawResponse {
                 parts,
                 debug_request,
             } => {
-                let inputs = key.inputs().merge(
-                    &connector.response_variables,
-                    &connector.response_headers,
-                    connector.config.as_ref(),
-                    context,
-                    Some(parts.status.as_u16()),
-                    supergraph_request,
-                    Some(&parts),
-                );
+                let inputs = key
+                    .inputs()
+                    .clone()
+                    .merger(&connector.response_variables)
+                    .config(connector.config.as_ref())
+                    .context(context)
+                    .status(Some(parts.status.as_u16()))
+                    .request(&connector.response_headers, &supergraph_request)
+                    .response(&connector.response_headers, Some(&parts))
+                    .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
@@ -162,15 +163,15 @@ impl RawResponse {
                 data,
             } => {
                 let inputs = LazyCell::new(|| {
-                    key.inputs().merge(
-                        &connector.response_variables,
-                        &connector.response_headers,
-                        connector.config.as_ref(),
-                        context,
-                        Some(parts.status.as_u16()),
-                        supergraph_request,
-                        Some(&parts),
-                    )
+                    key.inputs()
+                        .clone()
+                        .merger(&connector.response_variables)
+                        .config(connector.config.as_ref())
+                        .context(context)
+                        .status(Some(parts.status.as_u16()))
+                        .request(&connector.response_headers, &supergraph_request)
+                        .response(&connector.response_headers, Some(&parts))
+                        .merge()
                 });
 
                 // Do we have a error message mapping set for this connector?
