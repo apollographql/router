@@ -448,12 +448,13 @@ pub(crate) fn add_fed1_link_to_schema(
         })],
     };
     let origin = schema.schema().schema_definition.origin_to_use();
-    crate::schema::position::SchemaDefinitionPosition.insert_directive(
+    crate::schema::position::SchemaDefinitionPosition.insert_directive_at(
         schema,
         Component {
             origin,
             node: directive.into(),
         },
+        0, // @link to link spec should be first
     )
 }
 
@@ -925,7 +926,9 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("deprecated"),
+                name!("federation__extends"),
                 name!("federation__external"),
+                name!("federation__inaccessible"),
                 name!("federation__key"),
                 name!("federation__override"),
                 name!("federation__provides"),
@@ -970,7 +973,9 @@ mod tests {
             vec![
                 name!("deprecated"),
                 name!("federation__composeDirective"),
+                name!("federation__extends"),
                 name!("federation__external"),
+                name!("federation__inaccessible"),
                 name!("federation__key"),
                 name!("federation__override"),
                 name!("federation__provides"),
