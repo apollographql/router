@@ -16,6 +16,7 @@ use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Constant;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
@@ -403,11 +404,7 @@ fn validate_absolute_connect_url(
             Part::Constant(constant) => Some(constant),
             _ => None,
         })
-        .fold(Constant::default(), |mut acc, part| {
-            acc.value += &part.value;
-            acc.location.end = part.location.end;
-            acc
-        });
+        .fold(Constant::default(), |acc, part| acc + part);
     if first.value.is_empty() {
         return Err(relative_url_error());
     };

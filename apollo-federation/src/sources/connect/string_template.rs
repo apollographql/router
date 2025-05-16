@@ -267,9 +267,14 @@ pub(crate) struct Expression {
     pub(crate) location: Range<usize>,
 }
 
-impl From<(String, Range<usize>)> for Constant {
-    fn from((value, location): (String, Range<usize>)) -> Self {
-        Self { value, location }
+impl std::ops::Add<&Constant> for Constant {
+    type Output = Self;
+
+    fn add(self, rhs: &Self) -> Self::Output {
+        Self {
+            value: self.value + &rhs.value,
+            location: self.location.start..rhs.location.end,
+        }
     }
 }
 
