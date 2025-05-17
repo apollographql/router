@@ -1022,75 +1022,52 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
     }
 }
 
-#[derive(derive_more::From)]
-pub(crate) enum GraphPathTriggerRef<'a> {
-    Op(&'a OpGraphPathTrigger),
-    Transition(&'a QueryGraphEdgeTransition),
-}
-
-#[derive(derive_more::From)]
-pub(crate) enum GraphPathTriggerRefMut<'a> {
-    Op(&'a mut OpGraphPathTrigger),
-    Transition(&'a mut QueryGraphEdgeTransition),
-}
-
-impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
-    fn from(value: &'a GraphPathTrigger) -> Self {
-        match value {
-            GraphPathTrigger::Op(value) => value.as_ref().into(),
-            GraphPathTrigger::Transition(value) => value.as_ref().into(),
-        }
-    }
-}
-
 /// `GraphPath` is generic over two types, `TTrigger` and `TEdge`. This trait helps abstract over
 /// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
 /// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
 /// potentially raise errors), this trait provides ways to access the data needed within.
 pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
-    fn get_field_mut<'a>(&'a mut self) -> Option<&'a mut Field>
-    where
-        &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
-    {
-        match self.into() {
-            GraphPathTriggerRefMut::Op(OpGraphPathTrigger::OpPathElement(
-                OpPathElement::Field(field),
-            )) => Some(field),
+    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition>;
+    fn get_field_mut(&mut self) -> Option<&mut Field>;
+}
+
+impl GraphPathTriggerVariant for OpGraphPathTrigger {
+    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
+                Some(field.field_position.parent())
+            }
             _ => None,
         }
     }
 
-    fn get_field_parent_type<'a>(&'a self) -> Option<CompositeTypeDefinitionPosition>
-    where
-        &'a Self: Into<GraphPathTriggerRef<'a>>,
-    {
-        match self.into() {
-            GraphPathTriggerRef::Op(trigger) => match trigger {
-                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
-                    Some(field.field_position.parent())
-                }
-                _ => None,
-            },
-            GraphPathTriggerRef::Transition(trigger) => match trigger {
-                QueryGraphEdgeTransition::FieldCollection {
-                    field_definition_position,
-                    ..
-                } => Some(field_definition_position.parent()),
-                _ => None,
-            },
+    fn get_field_mut(&mut self) -> Option<&mut Field> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => Some(field),
+            _ => None,
         }
     }
 }
 
-impl GraphPathTriggerVariant for OpGraphPathTrigger {}
+impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
+    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition> {
+        match self {
+            QueryGraphEdgeTransition::FieldCollection {
+                field_definition_position,
+                ..
+            } => Some(field_definition_position.parent()),
+            _ => None,
+        }
+    }
 
-impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
+    fn get_field_mut(&mut self) -> Option<&mut Field> {
+        None
+    }
+}
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: GraphPathTriggerVariant + Display,
-    for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
-    for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
     Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
