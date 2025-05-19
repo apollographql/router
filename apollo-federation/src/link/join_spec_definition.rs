@@ -896,7 +896,7 @@ impl SpecDefinition for JoinSpecDefinition {
         // Enum Graph
         specs.push(Box::new(EnumTypeSpecification {
             name: JOIN_GRAPH_ENUM_NAME_IN_SPEC,
-            values: vec![], // TODO: Check this
+            values: vec![], // Initialized with no values, but graphs will be added later as they get merged in
         }));
 
         // Scalar FieldSet
@@ -911,15 +911,13 @@ impl SpecDefinition for JoinSpecDefinition {
             }));
         }
 
-        // Scalar FieldValue (v0.5+)
         if *self.version() >= (Version { major: 0, minor: 5 }) {
+            // Scalar FieldValue (v0.5+)
             specs.push(Box::new(ScalarTypeSpecification {
                 name: name!("FieldValue"),
             }));
-        }
 
-        // InputObject join__ContextArgument (v0.5+)
-        if *self.version() >= (Version { major: 0, minor: 5 }) {
+            // InputObject join__ContextArgument (v0.5+)
             specs.push(Box::new(InputObjectTypeSpecification {
                 name: name!("ContextArgument"),
                 fields: |_| {
@@ -998,16 +996,16 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
 
 #[cfg(test)]
 mod test {
+    use apollo_compiler::ast::Argument;
+    use apollo_compiler::name;
+
+    use super::*;
     use crate::link::DEFAULT_LINK_NAME;
     use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
     use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
     use crate::schema::position::SchemaDefinitionPosition;
     use crate::subgraph::test_utils::BuildOption;
     use crate::subgraph::test_utils::build_inner_expanded;
-
-    use super::*;
-    use apollo_compiler::ast::Argument;
-    use apollo_compiler::name;
 
     impl JoinSpecDefinition {
         fn link(&self) -> Directive {
@@ -1044,391 +1042,124 @@ mod test {
         schema
     }
 
+    fn join_spec_directives_snapshot(schema: &FederationSchema) -> String {
+        schema
+            .schema()
+            .directive_definitions
+            .iter()
+            .filter_map(|(name, def)| {
+                if name.as_str().starts_with("join__") {
+                    Some(def.to_string())
+                } else {
+                    None
+                }
+            })
+            .join("\n")
+    }
+
+    fn join_spec_types_snapshot(schema: &FederationSchema) -> String {
+        schema
+            .schema()
+            .types
+            .iter()
+            .filter_map(|(name, ty)| {
+                if name.as_str().starts_with("join__") {
+                    Some(ty.to_string())
+                } else {
+                    None
+                }
+            })
+            .join("")
+    }
+
     #[test]
-    fn join_spec_v0_1_schema_has_expected_types_and_directives() {
+    fn join_spec_v0_1_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 1 });
 
-        // Types
-        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldSet"))
-                .is_some()
-        );
-
-        // Directives
-        let join_graph = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__graph"))
-            .unwrap();
-        assert_eq!(
-            join_graph.to_string(),
-            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
-        );
-
-        let join_type = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__type"))
-            .unwrap();
-        assert_eq!(
-            join_type.to_string(),
-            "directive @join__type(graph: join__Graph!, key: join__FieldSet) on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
-        );
-
-        let join_field = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__field"))
-            .unwrap();
-        assert_eq!(
-            join_field.to_string(),
-            "directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
-        );
-
-        let join_owner = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__owner"))
-            .unwrap();
-        assert_eq!(
-            join_owner.to_string(),
-            "directive @join__owner(graph: join__Graph!) on OBJECT"
-        );
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+"#);
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet) on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__owner(graph: join__Graph!) on OBJECT
+"#);
     }
 
     #[test]
-    fn join_spec_v0_2_schema_has_expected_types_and_directives() {
+    fn join_spec_v0_2_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 2 });
 
-        // Types
-        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldSet"))
-                .is_some()
-        );
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+"#);
 
-        // Directives
-        let join_graph = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__graph"))
-            .unwrap();
-        assert_eq!(
-            join_graph.to_string(),
-            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
-        );
-
-        let join_type = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__type"))
-            .unwrap();
-        assert_eq!(
-            join_type.to_string(),
-            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
-        );
-
-        let join_field = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__field"))
-            .unwrap();
-        assert_eq!(
-            join_field.to_string(),
-            "directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
-        );
-
-        let join_implements = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__implements"))
-            .unwrap();
-        assert_eq!(
-            join_implements.to_string(),
-            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
-        );
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+"#);
     }
 
     #[test]
-    fn join_spec_v0_3_schema_has_expected_types_and_directives() {
+    fn join_spec_v0_3_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 3 });
 
-        // Types
-        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldSet"))
-                .is_some()
-        );
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+"#);
 
-        // Directives
-        let join_graph = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__graph"))
-            .unwrap();
-        assert_eq!(
-            join_graph.to_string(),
-            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
-        );
-
-        let join_type = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__type"))
-            .unwrap();
-        assert_eq!(
-            join_type.to_string(),
-            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
-        );
-
-        let join_field = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__field"))
-            .unwrap();
-        assert_eq!(
-            join_field.to_string(),
-            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
-        );
-
-        let join_implements = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__implements"))
-            .unwrap();
-        assert_eq!(
-            join_implements.to_string(),
-            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
-        );
-
-        let join_union_member = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__unionMember"))
-            .unwrap();
-        assert_eq!(
-            join_union_member.to_string(),
-            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
-        );
-
-        let join_enum_value = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__enumValue"))
-            .unwrap();
-        assert_eq!(
-            join_enum_value.to_string(),
-            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
-        );
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+"#);
     }
 
     #[test]
-    fn join_spec_v0_4_schema_has_expected_types_and_directives() {
+    fn join_spec_v0_4_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 4 });
 
-        // Types
-        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldSet"))
-                .is_some()
-        );
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__DirectiveArguments"))
-                .is_some()
-        );
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+scalar join__DirectiveArguments
+"#);
 
-        // Directives
-        let join_graph = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__graph"))
-            .unwrap();
-        assert_eq!(
-            join_graph.to_string(),
-            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
-        );
-
-        let join_type = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__type"))
-            .unwrap();
-        assert_eq!(
-            join_type.to_string(),
-            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
-        );
-
-        let join_field = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__field"))
-            .unwrap();
-        assert_eq!(
-            join_field.to_string(),
-            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
-        );
-
-        let join_implements = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__implements"))
-            .unwrap();
-        assert_eq!(
-            join_implements.to_string(),
-            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
-        );
-
-        let join_union_member = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__unionMember"))
-            .unwrap();
-        assert_eq!(
-            join_union_member.to_string(),
-            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
-        );
-
-        let join_enum_value = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__enumValue"))
-            .unwrap();
-        assert_eq!(
-            join_enum_value.to_string(),
-            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
-        );
-
-        let join_directive = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__directive"))
-            .unwrap();
-        assert_eq!(
-            join_directive.to_string(),
-            "directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION"
-        );
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+"#);
     }
 
     #[test]
-    fn join_spec_v0_5_schema_has_expected_types_and_directives() {
+    fn join_spec_v0_5_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 5 });
 
-        // Types
-        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldSet"))
-                .is_some()
-        );
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__DirectiveArguments"))
-                .is_some()
-        );
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__FieldValue"))
-                .is_some()
-        );
-        assert!(
-            schema
-                .schema()
-                .types
-                .get(&name!("join__ContextArgument"))
-                .is_some()
-        );
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+scalar join__DirectiveArguments
+scalar join__FieldValue
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue
+}
+"#);
 
-        // Directives
-        let join_graph = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__graph"))
-            .unwrap();
-        assert_eq!(
-            join_graph.to_string(),
-            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
-        );
-
-        let join_type = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__type"))
-            .unwrap();
-        assert_eq!(
-            join_type.to_string(),
-            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
-        );
-
-        let join_field = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__field"))
-            .unwrap();
-        assert_eq!(
-            join_field.to_string(),
-            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
-        );
-
-        let join_implements = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__implements"))
-            .unwrap();
-        assert_eq!(
-            join_implements.to_string(),
-            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
-        );
-
-        let join_union_member = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__unionMember"))
-            .unwrap();
-        assert_eq!(
-            join_union_member.to_string(),
-            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
-        );
-
-        let join_enum_value = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__enumValue"))
-            .unwrap();
-        assert_eq!(
-            join_enum_value.to_string(),
-            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
-        );
-
-        let join_directive = schema
-            .schema()
-            .directive_definitions
-            .get(&name!("join__directive"))
-            .unwrap();
-        assert_eq!(
-            join_directive.to_string(),
-            "directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION"
-        );
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+"#);
     }
 }
