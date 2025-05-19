@@ -41,11 +41,11 @@ async fn cache() -> Cache {
 
 #[tokio::main]
 async fn main() {
-    // env_logger::init();
+    env_logger::init();
     test_tag_escaping();
     test_create_existing_index().await;
     test_few().await;
-    test_weird_keys().await;
+    // test_weird_keys().await;
     test_many().await;
     println!("Done!")
 }

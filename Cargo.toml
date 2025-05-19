@@ -28,6 +28,7 @@ members = [
     "fuzz",
     "fuzz/subgraph",
     "redis-experiments",
+    "pg-experiments",
     # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
 

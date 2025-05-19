@@ -180,7 +180,7 @@ impl Cache {
         // https://github.com/aembke/fred.rs/issues/345
         //
         // As a work-around for a the work-around, we request a single field that we know exists
-        let options = FtSearchOptions {
+        let mut options = FtSearchOptions {
             // nocontent: true,
             // r#return: vec![],
             r#return: vec![SearchField {
