@@ -19,6 +19,7 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
@@ -36,6 +37,7 @@ use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -62,16 +64,13 @@ pub(crate) struct ResolvedArgumentSpecification {
     pub(crate) default_value: Option<Value>,
 }
 
-impl From<&ResolvedArgumentSpecification> for InputValueDefinition {
-    fn from(arg_spec: &ResolvedArgumentSpecification) -> Self {
+impl From<ResolvedArgumentSpecification> for InputValueDefinition {
+    fn from(arg_spec: ResolvedArgumentSpecification) -> Self {
         InputValueDefinition {
             description: None,
-            name: arg_spec.name.clone(),
-            ty: Node::new(arg_spec.ty.clone()),
-            default_value: arg_spec
-                .default_value
-                .as_ref()
-                .map(|v| Node::new(v.clone())),
+            name: arg_spec.name,
+            ty: Node::new(arg_spec.ty),
+            default_value: arg_spec.default_value.map(|v| Node::new(v)),
             directives: Default::default(),
         }
     }
@@ -90,7 +89,7 @@ impl From<FieldSpecification> for FieldDefinition {
             name: field_spec.name.clone(),
             arguments: field_spec
                 .arguments
-                .iter()
+                .into_iter()
                 .map(|arg| Node::new(arg.into()))
                 .collect(),
             ty: field_spec.ty.clone(),
@@ -392,6 +391,62 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
     }
 }
 
+pub(crate) struct InputObjectTypeSpecification {
+    pub(crate) name: Name,
+    pub(crate) fields: fn(&FederationSchema) -> Vec<ResolvedArgumentSpecification>,
+}
+
+impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let field_specs = (self.fields)(schema);
+        let existing = schema.try_get_type(actual_name.clone());
+        if let Some(existing) = existing {
+            // ensure existing definition is InputObject
+            ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
+            let existing_type = existing.get(schema.schema())?;
+            let ExtendedType::InputObject(_existing_obj_type) = existing_type else {
+                return Err(FederationError::internal(format!(
+                    "Expected ExtendedType::InputObject but got {}",
+                    TypeKind::from(existing_type)
+                )));
+            };
+
+            // ensure all expected fields are present in the existing object type
+            let errors = vec![]; // TODO: input object equivalent of: ensure_same_fields(existing_obj_type, &field_specs, schema);
+            return MultipleFederationErrors::from_iter(errors).into_result();
+        }
+
+        let mut field_map = IndexMap::default();
+        for field_spec in field_specs {
+            let field_def: InputValueDefinition = field_spec.into();
+            field_map.insert(field_def.name.clone(), Component::new(field_def));
+        }
+
+        let type_pos = InputObjectTypeDefinitionPosition {
+            type_name: actual_name,
+        };
+        type_pos.pre_insert(schema)?;
+        type_pos.insert(
+            schema,
+            Node::new(InputObjectType {
+                description: None,
+                name: type_pos.type_name.clone(),
+                directives: Default::default(),
+                fields: field_map,
+            }),
+        )
+    }
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // DirectiveSpecification
 
@@ -583,7 +638,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
                 description: None,
                 name: actual_name,
                 arguments: resolved_args
-                    .iter()
+                    .into_iter()
                     .map(|arg| Node::new(arg.into()))
                     .collect(),
                 repeatable: self.repeatable,
