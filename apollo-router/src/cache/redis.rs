@@ -323,6 +323,10 @@ impl RedisCacheStorage {
         let _handle = pooled_client.init().await?;
         let heartbeat_clients = pooled_client.clone();
         let _heartbeat_handle = tokio::spawn(async move {
+            // NB(@carodewig): per #7354, it would be better to set `break_on_error` to false, but that
+            //  would likely conflict with the custom `Drop` impl on `DropSafeRedisPool`.
+            //  If `fred` is changed to automatically close connections when the last `Pool` is dropped,
+            //  we should change `break_on_error` to `false` and remove `DropSafeRedisPool`.
             heartbeat_clients
                 .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, true)
                 .await
