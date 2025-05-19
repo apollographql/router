@@ -102,6 +102,13 @@ impl Identity {
             name: name!("context"),
         }
     }
+
+    pub fn tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("tag"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

@@ -174,8 +174,8 @@ impl SpecDefinition for ContextSpecDefinition {
                 DirectiveLocation::Interface,
                 DirectiveLocation::Union,
             ],
-            false, // TODO: Set this to true in the future so @context can go to the supergraph schema
-            None,
+            true,
+            Some(&|v| CONTEXT_VERSIONS.get_minimum_required_version(v)),
             None, // TODO: Add transform
         );
         let from_context_spec = DirectiveSpecification::new(

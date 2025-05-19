@@ -32,6 +32,7 @@ pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
+pub(crate) mod tag_spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
