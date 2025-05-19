@@ -1468,7 +1468,7 @@ snapshot_kind: text
     }
   },
   "router_features_enabled": [
-    "apq",
+    "distributed_apq_cache",
     "entity_cache"
   ]
 }
