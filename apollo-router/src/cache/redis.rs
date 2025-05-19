@@ -28,6 +28,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::FutureExt;
 use futures::Stream;
+use tokio::sync::broadcast::error::RecvError;
 use tower::BoxError;
 use url::Url;
 
@@ -287,18 +288,28 @@ impl RedisCacheStorage {
             );
 
             tokio::spawn(async move {
-                while let Ok((error, server)) = error_rx.recv().await {
-                    tracing::error!(
-                        "Client disconnected from {:?} with error: {:?}",
-                        server,
-                        error
-                    );
+                while let recv = error_rx.recv().await {
+                    match recv {
+                        Ok((error, server)) => tracing::error!(
+                            "Client disconnected from {server:?} with error: {error:?}",
+                        ),
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
                 }
             });
             tokio::spawn(async move {
-                while reconnect_rx.recv().await.is_ok() {
-                    tracing::info!("Redis client reconnected.");
+                while let recv = reconnect_rx.recv().await {
+                    match recv {
+                        Ok(server) => tracing::info!("Redis client reconnected to {server:?}"),
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
                 }
+
+                // NB: closing the Redis client connection will also close the error, pubsub, and
+                // reconnection event streams, so the above while loop will only terminate when the
+                // connection closes.
                 i64_up_down_counter_with_unit!(
                     "apollo.router.cache.redis.connections",
                     "Number of Redis connections",
