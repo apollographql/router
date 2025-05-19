@@ -57,6 +57,21 @@ pub(crate) struct ArgumentSpecification {
     pub(crate) default_value: Option<Value>,
 }
 
+impl ArgumentSpecification {
+    pub(crate) fn resolve(
+        &self,
+        schema: &FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<ResolvedArgumentSpecification, FederationError> {
+        let ty = (self.get_type)(schema, link)?;
+        Ok(ResolvedArgumentSpecification {
+            name: self.name.clone(),
+            ty,
+            default_value: self.default_value.clone(),
+        })
+    }
+}
+
 /// The resolved version of `ArgumentSpecification`
 pub(crate) struct ResolvedArgumentSpecification {
     pub(crate) name: Name,
@@ -95,6 +110,62 @@ impl From<FieldSpecification> for FieldDefinition {
             ty: field_spec.ty.clone(),
             directives: Default::default(),
         }
+    }
+}
+
+pub(crate) struct InputObjectTypeSpecification {
+    pub(crate) name: Name,
+    pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
+}
+
+impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let field_specs = (self.fields)(schema);
+        let existing = schema.try_get_type(actual_name.clone());
+        if let Some(existing) = existing {
+            // ensure existing definition is InputObject
+            ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
+            let existing_type = existing.get(schema.schema())?;
+            let ExtendedType::InputObject(_existing_obj_type) = existing_type else {
+                return Err(FederationError::internal(format!(
+                    "Expected ExtendedType::InputObject but got {}",
+                    TypeKind::from(existing_type)
+                )));
+            };
+
+            // ensure all expected fields are present in the existing object type
+            let errors = vec![]; // TODO: input object equivalent of: ensure_same_fields(existing_obj_type, &field_specs, schema);
+            return MultipleFederationErrors::from_iter(errors).into_result();
+        }
+
+        let mut field_map = IndexMap::default();
+        for field_spec in field_specs {
+            let field_def: InputValueDefinition = field_spec.resolve(schema, link)?.into();
+            field_map.insert(field_def.name.clone(), Component::new(field_def));
+        }
+
+        let type_pos = InputObjectTypeDefinitionPosition {
+            type_name: actual_name,
+        };
+        type_pos.pre_insert(schema)?;
+        type_pos.insert(
+            schema,
+            Node::new(InputObjectType {
+                description: None,
+                name: type_pos.type_name.clone(),
+                directives: Default::default(),
+                fields: field_map,
+            }),
+        )
     }
 }
 
@@ -386,62 +457,6 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                         )
                     })
                     .collect(),
-            }),
-        )
-    }
-}
-
-pub(crate) struct InputObjectTypeSpecification {
-    pub(crate) name: Name,
-    pub(crate) fields: fn(&FederationSchema) -> Vec<ResolvedArgumentSpecification>,
-}
-
-impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
-    fn name(&self) -> &Name {
-        &self.name
-    }
-
-    fn check_or_add(
-        &self,
-        schema: &mut FederationSchema,
-        link: Option<&Arc<Link>>,
-    ) -> Result<(), FederationError> {
-        let actual_name = actual_type_name(&self.name, link);
-        let field_specs = (self.fields)(schema);
-        let existing = schema.try_get_type(actual_name.clone());
-        if let Some(existing) = existing {
-            // ensure existing definition is InputObject
-            ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
-            let existing_type = existing.get(schema.schema())?;
-            let ExtendedType::InputObject(_existing_obj_type) = existing_type else {
-                return Err(FederationError::internal(format!(
-                    "Expected ExtendedType::InputObject but got {}",
-                    TypeKind::from(existing_type)
-                )));
-            };
-
-            // ensure all expected fields are present in the existing object type
-            let errors = vec![]; // TODO: input object equivalent of: ensure_same_fields(existing_obj_type, &field_specs, schema);
-            return MultipleFederationErrors::from_iter(errors).into_result();
-        }
-
-        let mut field_map = IndexMap::default();
-        for field_spec in field_specs {
-            let field_def: InputValueDefinition = field_spec.into();
-            field_map.insert(field_def.name.clone(), Component::new(field_def));
-        }
-
-        let type_pos = InputObjectTypeDefinitionPosition {
-            type_name: actual_name,
-        };
-        type_pos.pre_insert(schema)?;
-        type_pos.insert(
-            schema,
-            Node::new(InputObjectType {
-                description: None,
-                name: type_pos.type_name.clone(),
-                directives: Default::default(),
-                fields: field_map,
             }),
         )
     }

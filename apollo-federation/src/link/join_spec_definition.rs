@@ -33,7 +33,6 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::EnumTypeSpecification;
 use crate::schema::type_and_directive_specification::InputObjectTypeSpecification;
-use crate::schema::type_and_directive_specification::ResolvedArgumentSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -45,6 +44,10 @@ pub(crate) const JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC: Name = name!("implement
 pub(crate) const JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC: Name = name!("unionMember");
 pub(crate) const JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC: Name = name!("enumValue");
 pub(crate) const JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name = name!("directive");
+
+pub(crate) const JOIN_FIELD_SET_NAME_IN_SPEC: Name = name!("FieldSet");
+pub(crate) const JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC: Name = name!("DirectiveArguments");
+pub(crate) const JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC: Name = name!("ContextArgument");
 
 pub(crate) const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const JOIN_URL_ARGUMENT_NAME: Name = name!("url");
@@ -454,10 +457,11 @@ impl JoinSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_GRAPH_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                            .map(Type::NonNullNamed)
+                    get_type: |_schema, link| {
+                        let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                        });
+                        Ok(Type::NonNullNamed(graph_name))
                     },
                     default_value: None,
                 },
@@ -466,10 +470,11 @@ impl JoinSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_KEY_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .field_set_type()
-                            .map(|field_set| Type::Named(field_set.type_name))
+                    get_type: |_schema, link| {
+                        let field_set_name = link.map_or(JOIN_FIELD_SET_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_FIELD_SET_NAME_IN_SPEC)
+                        });
+                        Ok(Type::Named(field_set_name))
                     },
                     default_value: None,
                 },
@@ -529,10 +534,11 @@ impl JoinSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_REQUIRES_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .field_set_type()
-                            .map(|field_set| Type::Named(field_set.type_name))
+                    get_type: |_schema, link| {
+                        let field_set_name = link.map_or(JOIN_FIELD_SET_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_FIELD_SET_NAME_IN_SPEC)
+                        });
+                        Ok(Type::Named(field_set_name))
                     },
                     default_value: None,
                 },
@@ -541,10 +547,11 @@ impl JoinSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_PROVIDES_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .field_set_type()
-                            .map(|field_set| Type::Named(field_set.type_name))
+                    get_type: |_schema, link| {
+                        let field_set_name = link.map_or(JOIN_FIELD_SET_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_FIELD_SET_NAME_IN_SPEC)
+                        });
+                        Ok(Type::Named(field_set_name))
                     },
                     default_value: None,
                 },
@@ -560,10 +567,11 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: JOIN_GRAPH_ARGUMENT_NAME,
-                        get_type: |schema, _| {
-                            schema
-                                .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                                .map(Type::Named)
+                        get_type: |_schema, link| {
+                            let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                            });
+                            Ok(Type::Named(graph_name))
                         },
                         default_value: None,
                     },
@@ -576,10 +584,11 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: JOIN_GRAPH_ARGUMENT_NAME,
-                        get_type: |schema, _| {
-                            schema
-                                .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                                .map(|graph| Type::NonNullNamed(graph))
+                        get_type: |_schema, link| {
+                            let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                            });
+                            Ok(Type::NonNullNamed(graph_name))
                         },
                         default_value: None,
                     },
@@ -636,10 +645,12 @@ impl JoinSpecDefinition {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .federation_type_name_in_schema(name!("ContextArgument")) // TODO: use constant from other spec
-                            .map(|context_arg| Type::List(Box::new(Type::Named(context_arg))))
+                    get_type: |_schema, link| {
+                        let context_arg_name = link
+                            .map_or(JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC)
+                            });
+                        Ok(Type::List(Box::new(Type::NonNullNamed(context_arg_name))))
                     },
                     default_value: None,
                 },
@@ -672,10 +683,11 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: JOIN_GRAPH_ARGUMENT_NAME,
-                        get_type: |schema, _| {
-                            schema
-                                .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                                .map(Type::NonNullNamed)
+                        get_type: |_schema, link| {
+                            let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                            });
+                            Ok(Type::NonNullNamed(graph_name))
                         },
                         default_value: None,
                     },
@@ -709,10 +721,11 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: JOIN_GRAPH_ARGUMENT_NAME,
-                        get_type: |schema, _| {
-                            schema
-                                .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                                .map(Type::NonNullNamed)
+                        get_type: |_schema, link| {
+                            let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                            });
+                            Ok(Type::NonNullNamed(graph_name))
                         },
                         default_value: None,
                     },
@@ -745,10 +758,11 @@ impl JoinSpecDefinition {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_GRAPH_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                            .map(Type::NonNullNamed)
+                    get_type: |_schema, link| {
+                        let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                        });
+                        Ok(Type::NonNullNamed(graph_name))
                     },
                     default_value: None,
                 },
@@ -772,10 +786,11 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("graphs"),
-                        get_type: |schema, _| {
-                            schema
-                                .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                                .map(|graph| Type::List(Box::new(Type::NonNullNamed(graph))))
+                        get_type: |_schema, link| {
+                            let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                                link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                            });
+                            Ok(Type::List(Box::new(Type::NonNullNamed(graph_name))))
                         },
                         default_value: None,
                     },
@@ -792,7 +807,13 @@ impl JoinSpecDefinition {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("args"),
-                        get_type: |_, _| Ok(ty!(DirectiveArguments)), // TODO: get name from schema
+                        get_type: |_schema, link| {
+                            let directive_args_name =
+                                link.map_or(JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC, |link| {
+                                    link.type_name_in_schema(&JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC)
+                                });
+                            Ok(Type::Named(directive_args_name))
+                        },
                         default_value: None,
                     },
                     composition_strategy: None,
@@ -820,10 +841,11 @@ impl JoinSpecDefinition {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_GRAPH_ARGUMENT_NAME,
-                    get_type: |schema, _| {
-                        schema
-                            .federation_type_name_in_schema(JOIN_GRAPH_ENUM_NAME_IN_SPEC)
-                            .map(Type::NonNullNamed)
+                    get_type: |_schema, link| {
+                        let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
+                        });
+                        Ok(Type::NonNullNamed(graph_name))
                     },
                     default_value: None,
                 },
@@ -879,13 +901,13 @@ impl SpecDefinition for JoinSpecDefinition {
 
         // Scalar FieldSet
         specs.push(Box::new(ScalarTypeSpecification {
-            name: name!("FieldSet"),
+            name: JOIN_FIELD_SET_NAME_IN_SPEC,
         }));
 
         // Scalar DirectiveArguments (v0.4+)
         if *self.version() >= (Version { major: 0, minor: 4 }) {
             specs.push(Box::new(ScalarTypeSpecification {
-                name: name!("DirectiveArguments"),
+                name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
             }));
         }
 
@@ -899,27 +921,32 @@ impl SpecDefinition for JoinSpecDefinition {
         // InputObject join__ContextArgument (v0.5+)
         if *self.version() >= (Version { major: 0, minor: 5 }) {
             specs.push(Box::new(InputObjectTypeSpecification {
-                name: name!("join__ContextArgument"),
+                name: name!("ContextArgument"),
                 fields: |_| {
                     vec![
-                        ResolvedArgumentSpecification {
+                        ArgumentSpecification {
                             name: name!("name"),
-                            ty: ty!(String!),
+                            get_type: |_, _| Ok(ty!(String!)),
                             default_value: None,
                         },
-                        ResolvedArgumentSpecification {
+                        ArgumentSpecification {
                             name: name!("type"),
-                            ty: ty!(String!),
+                            get_type: |_, _| Ok(ty!(String!)),
                             default_value: None,
                         },
-                        ResolvedArgumentSpecification {
+                        ArgumentSpecification {
                             name: name!("context"),
-                            ty: ty!(String!),
+                            get_type: |_, _| Ok(ty!(String!)),
                             default_value: None,
                         },
-                        ResolvedArgumentSpecification {
+                        ArgumentSpecification {
                             name: name!("selection"),
-                            ty: Type::NonNullNamed(name!("FieldValue")), // TODO: This should be FieldValue from schema
+                            get_type: |_schema, link| {
+                                let field_value_name = link.map_or(name!("FieldValue"), |link| {
+                                    link.type_name_in_schema(&name!("FieldValue"))
+                                });
+                                Ok(Type::Named(field_value_name))
+                            },
                             default_value: None,
                         },
                     ]
@@ -968,3 +995,440 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         ));
         definitions
     });
+
+#[cfg(test)]
+mod test {
+    use crate::link::DEFAULT_LINK_NAME;
+    use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
+    use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
+    use crate::schema::position::SchemaDefinitionPosition;
+    use crate::subgraph::test_utils::BuildOption;
+    use crate::subgraph::test_utils::build_inner_expanded;
+
+    use super::*;
+    use apollo_compiler::ast::Argument;
+    use apollo_compiler::name;
+
+    impl JoinSpecDefinition {
+        fn link(&self) -> Directive {
+            Directive {
+                name: DEFAULT_LINK_NAME,
+                arguments: vec![
+                    Node::new(Argument {
+                        name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                        value: self.url.to_string().into(),
+                    }),
+                    Node::new(Argument {
+                        name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
+                        value: Node::new(Value::Enum(name!("EXECUTION"))),
+                    }),
+                ],
+            }
+        }
+    }
+
+    fn trivial_schema() -> FederationSchema {
+        build_inner_expanded("type Query { hello: String }", BuildOption::AsFed2)
+            .unwrap()
+            .schema()
+            .to_owned()
+    }
+
+    fn get_schema_with_join(version: Version) -> FederationSchema {
+        let mut schema = trivial_schema();
+        let join_spec = JOIN_VERSIONS.find(&version).unwrap();
+        SchemaDefinitionPosition
+            .insert_directive(&mut schema, join_spec.link().into())
+            .unwrap();
+        join_spec.add_elements_to_schema(&mut schema).unwrap();
+        schema
+    }
+
+    #[test]
+    fn join_spec_v0_1_schema_has_expected_types_and_directives() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 1 });
+
+        // Types
+        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldSet"))
+                .is_some()
+        );
+
+        // Directives
+        let join_graph = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__graph"))
+            .unwrap();
+        assert_eq!(
+            join_graph.to_string(),
+            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
+        );
+
+        let join_type = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__type"))
+            .unwrap();
+        assert_eq!(
+            join_type.to_string(),
+            "directive @join__type(graph: join__Graph!, key: join__FieldSet) on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
+        );
+
+        let join_field = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__field"))
+            .unwrap();
+        assert_eq!(
+            join_field.to_string(),
+            "directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
+        );
+
+        let join_owner = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__owner"))
+            .unwrap();
+        assert_eq!(
+            join_owner.to_string(),
+            "directive @join__owner(graph: join__Graph!) on OBJECT"
+        );
+    }
+
+    #[test]
+    fn join_spec_v0_2_schema_has_expected_types_and_directives() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 2 });
+
+        // Types
+        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldSet"))
+                .is_some()
+        );
+
+        // Directives
+        let join_graph = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__graph"))
+            .unwrap();
+        assert_eq!(
+            join_graph.to_string(),
+            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
+        );
+
+        let join_type = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__type"))
+            .unwrap();
+        assert_eq!(
+            join_type.to_string(),
+            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
+        );
+
+        let join_field = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__field"))
+            .unwrap();
+        assert_eq!(
+            join_field.to_string(),
+            "directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
+        );
+
+        let join_implements = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__implements"))
+            .unwrap();
+        assert_eq!(
+            join_implements.to_string(),
+            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
+        );
+    }
+
+    #[test]
+    fn join_spec_v0_3_schema_has_expected_types_and_directives() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 3 });
+
+        // Types
+        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldSet"))
+                .is_some()
+        );
+
+        // Directives
+        let join_graph = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__graph"))
+            .unwrap();
+        assert_eq!(
+            join_graph.to_string(),
+            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
+        );
+
+        let join_type = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__type"))
+            .unwrap();
+        assert_eq!(
+            join_type.to_string(),
+            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
+        );
+
+        let join_field = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__field"))
+            .unwrap();
+        assert_eq!(
+            join_field.to_string(),
+            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
+        );
+
+        let join_implements = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__implements"))
+            .unwrap();
+        assert_eq!(
+            join_implements.to_string(),
+            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
+        );
+
+        let join_union_member = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__unionMember"))
+            .unwrap();
+        assert_eq!(
+            join_union_member.to_string(),
+            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
+        );
+
+        let join_enum_value = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__enumValue"))
+            .unwrap();
+        assert_eq!(
+            join_enum_value.to_string(),
+            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
+        );
+    }
+
+    #[test]
+    fn join_spec_v0_4_schema_has_expected_types_and_directives() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 4 });
+
+        // Types
+        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldSet"))
+                .is_some()
+        );
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__DirectiveArguments"))
+                .is_some()
+        );
+
+        // Directives
+        let join_graph = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__graph"))
+            .unwrap();
+        assert_eq!(
+            join_graph.to_string(),
+            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
+        );
+
+        let join_type = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__type"))
+            .unwrap();
+        assert_eq!(
+            join_type.to_string(),
+            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
+        );
+
+        let join_field = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__field"))
+            .unwrap();
+        assert_eq!(
+            join_field.to_string(),
+            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
+        );
+
+        let join_implements = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__implements"))
+            .unwrap();
+        assert_eq!(
+            join_implements.to_string(),
+            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
+        );
+
+        let join_union_member = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__unionMember"))
+            .unwrap();
+        assert_eq!(
+            join_union_member.to_string(),
+            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
+        );
+
+        let join_enum_value = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__enumValue"))
+            .unwrap();
+        assert_eq!(
+            join_enum_value.to_string(),
+            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
+        );
+
+        let join_directive = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__directive"))
+            .unwrap();
+        assert_eq!(
+            join_directive.to_string(),
+            "directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION"
+        );
+    }
+
+    #[test]
+    fn join_spec_v0_5_schema_has_expected_types_and_directives() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 5 });
+
+        // Types
+        assert!(schema.schema().types.get(&name!("join__Graph")).is_some());
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldSet"))
+                .is_some()
+        );
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__DirectiveArguments"))
+                .is_some()
+        );
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__FieldValue"))
+                .is_some()
+        );
+        assert!(
+            schema
+                .schema()
+                .types
+                .get(&name!("join__ContextArgument"))
+                .is_some()
+        );
+
+        // Directives
+        let join_graph = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__graph"))
+            .unwrap();
+        assert_eq!(
+            join_graph.to_string(),
+            "directive @join__graph(name: String!, url: String!) on ENUM_VALUE"
+        );
+
+        let join_type = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__type"))
+            .unwrap();
+        assert_eq!(
+            join_type.to_string(),
+            "directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR"
+        );
+
+        let join_field = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__field"))
+            .unwrap();
+        assert_eq!(
+            join_field.to_string(),
+            "directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"
+        );
+
+        let join_implements = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__implements"))
+            .unwrap();
+        assert_eq!(
+            join_implements.to_string(),
+            "directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE"
+        );
+
+        let join_union_member = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__unionMember"))
+            .unwrap();
+        assert_eq!(
+            join_union_member.to_string(),
+            "directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION"
+        );
+
+        let join_enum_value = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__enumValue"))
+            .unwrap();
+        assert_eq!(
+            join_enum_value.to_string(),
+            "directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE"
+        );
+
+        let join_directive = schema
+            .schema()
+            .directive_definitions
+            .get(&name!("join__directive"))
+            .unwrap();
+        assert_eq!(
+            join_directive.to_string(),
+            "directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION"
+        );
+    }
+}
