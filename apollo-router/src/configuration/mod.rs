@@ -874,6 +874,14 @@ pub(crate) struct QueryPlanning {
     /// the in memory cache
     pub(crate) warmed_up_queries: Option<usize>,
 
+    /// Enable cooperative cancellation of query plans.
+    /// 
+    /// This experimental feature cancels query plans that the original client
+    /// has abandoned.
+    /// 
+    /// This feature is experimental and may change or be removed in the future.
+    pub(crate) experimental_enable_cooperative_cancellation: bool,
+
     /// Sets a limit to the number of generated query plans.
     /// The planning process generates many different query plans as it
     /// explores the graph, and the list can grow large. By using this
