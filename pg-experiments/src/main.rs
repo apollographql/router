@@ -1,4 +1,3 @@
-use std::time::Duration;
 use std::time::Instant;
 
 use pg_experiments::Cache;
@@ -30,9 +29,9 @@ async fn cache() -> Cache {
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    cache().await.migrate().await.unwrap();
+    let cache = cache().await;
+    cache.migrate().await.unwrap();
     test_few().await;
-    // test_weird_keys().await;
     test_many().await;
     println!("Done!");
 }

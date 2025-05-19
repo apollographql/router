@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO cache ( cache_key, data, expire_at )\n        VALUES ( $1, $2, $3 )\n        RETURNING id\n                ",
+  "query": "\n        INSERT INTO cache ( cache_key, data, expires_at )\n        VALUES ( $1, $2, $3 )\n        RETURNING id\n                ",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       false
     ]
   },
-  "hash": "2ac8ad9431ea3bba32176fa1f519fc2d0b50e53143f85b33f0bc55f423208e76"
+  "hash": "3e07fde4ef0477ff3d7253f893cd632d42b57d05589a90c364f37f05e18202a5"
 }

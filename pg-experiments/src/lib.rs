@@ -38,7 +38,7 @@ pub struct CacheEntry {
     pub id: i64,
     pub cache_key: String,
     pub data: sqlx::types::JsonValue,
-    pub expire_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 impl Cache {
@@ -81,7 +81,7 @@ impl Cache {
         };
         let rec = sqlx::query!(
             r#"
-        INSERT INTO cache ( cache_key, data, expire_at )
+        INSERT INTO cache ( cache_key, data, expires_at )
         VALUES ( $1, $2, $3 )
         RETURNING id
                 "#,
@@ -111,7 +111,7 @@ impl Cache {
         // let conn = self.client.acquire().await?;
         let resp = sqlx::query_as!(
             CacheEntry,
-            "SELECT * FROM cache WHERE cache.cache_key = $1",
+            "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
             &self.document_id(document_id)
         )
         .fetch_one(&self.client)
@@ -147,14 +147,6 @@ impl Cache {
             format!("{ns}:{id}").into()
         } else {
             id.into()
-        }
-    }
-
-    fn index_name(&self) -> Cow<'_, str> {
-        if let Some(ns) = &self.config.namespace {
-            format!("{ns}:{}", self.config.index_name).into()
-        } else {
-            self.config.index_name.as_str().into()
         }
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM cache WHERE cache.cache_key = $1",
+  "query": "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "expire_at",
+        "name": "expires_at",
         "type_info": "Timestamptz"
       }
     ],
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "ec6882716b6154f72517f411edfea9ac8b036ec4a8081f506a4325a84cee065c"
+  "hash": "92256ab4f44ce1b6a034cbb1bfac848ed7767b3aa0e1b3eaeb612f4840f4765e"
 }
