@@ -7,13 +7,13 @@ snapshot_kind: text
   {
     "request_id": "[REDACTED]",
     "stats": {
-      "# -\nsubscription{userWasCreated{name}}": {
+      "# -\n{topProducts{name}}": {
         "stats_with_context": {
           "context": {
-            "client_name": "test_client",
-            "client_version": "1.0-test",
-            "operation_type": "subscription",
-            "operation_subtype": "subscription-request",
+            "client_name": "",
+            "client_version": "",
+            "operation_type": "query",
+            "operation_subtype": "",
             "result": "",
             "client_library_name": "",
             "client_library_version": ""
@@ -56,15 +56,15 @@ snapshot_kind: text
           "local_per_type_stat": {}
         },
         "referenced_fields_by_type": {
-          "Subscription": {
+          "Product": {
             "field_names": [
-              "userWasCreated"
+              "name"
             ],
             "is_interface": false
           },
-          "User": {
+          "Query": {
             "field_names": [
-              "name"
+              "topProducts"
             ],
             "is_interface": false
           }
@@ -73,10 +73,12 @@ snapshot_kind: text
       }
     },
     "licensed_operation_count_by_type": {
-      "type": "subscription",
-      "subtype": "subscription-request",
+      "type": "query",
+      "subtype": null,
       "licensed_operation_count": 1
     },
-    "router_features_enabled": []
+    "router_features_enabled": [
+      "distributed_apq_cache"
+    ]
   }
 ]
