@@ -204,6 +204,7 @@ impl Config {
             key,
             reference,
             schema_id,
+            router_id(),
             metrics_reference_mode,
         )?;
 
@@ -265,7 +266,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None, None, false).await?;
+        let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -282,7 +283,7 @@ mod test {
         let _ = context
             .insert(OPERATION_KIND, OperationKind::Subscription)
             .unwrap();
-        let results = get_metrics_for_request(query, None, Some(context), true).await?;
+        let results = get_metrics_for_request(query, None, Some(context), true, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -299,7 +300,7 @@ mod test {
         let _ = context
             .insert(OPERATION_KIND, OperationKind::Subscription)
             .unwrap();
-        let results = get_metrics_for_request(query, None, Some(context), true).await?;
+        let results = get_metrics_for_request(query, None, Some(context), true, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -312,7 +313,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
         let query = "query {topProducts{name}} query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None, None, false).await?;
+        let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -325,7 +326,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
-        let results = get_metrics_for_request(query, None, None, false).await?;
+        let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -338,7 +339,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, Some("UNKNOWN"), None, false).await?;
+        let results = get_metrics_for_request(query, Some("UNKNOWN"), None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -349,7 +350,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
         let query = "query {topProducts(minStarRating: 4.7){name}}";
-        let results = get_metrics_for_request(query, None, None, false).await?;
+        let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -365,7 +366,99 @@ mod test {
         let query = "query {topProducts{name}}";
         let context = Context::new();
         context.insert(STUDIO_EXCLUDE, true)?;
-        let results = get_metrics_for_request(query, None, Some(context), false).await?;
+        let results = get_metrics_for_request(query, None, Some(context), false, None).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_features_explicitly_enabled() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_all_features_enabled.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_features_explicitly_disabled() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_all_features_explicitly_disabled.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_features_disabled_when_defaulted() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_all_features_defaults.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_distributed_apq_cache_feature_enabled_with_partial_defaults()
+    -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_apq_enabled_partial_defaults.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_distributed_apq_cache_feature_disabled_with_partial_defaults()
+    -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_apq_disabled_partial_defaults.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -381,10 +474,15 @@ mod test {
         operation_name: Option<&str>,
         context: Option<Context>,
         is_subscription: bool,
+        telemetry_plugin: Option<Telemetry>,
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut plugin = create_default_telemetry_plugin().await?;
+        let mut plugin = if let Some(p) = telemetry_plugin {
+            p
+        } else {
+            create_default_telemetry_plugin().await?
+        };
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
