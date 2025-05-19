@@ -59,10 +59,10 @@ log_trace("trace-level log message");
 
 Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from either the router service or supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
 
-When choosing between terminating the request from the router service versus the supergraph service, consider that:
+When choosing between router service versus supergraph service termination:
 
-* The request/response body is not available in the router service. If you need to examine the body when determining whether or not to terminate the request, you will need to do so in the supergraph service.
-* The router service request stage happens before the supergraph service request stage and before the request body is parsed and the operation is validated. So it may be best to perform some actions, like enforcing a required header, in the router service request stage so they can be consistently applied even when an invalid operation is provided by the client.
+- **Router service**: Cannot access request/response body and executes before parsing and validation; ideal for checks that should be consistently applied, like checking required headers, even when invalid operations are provided by the client.
+- **Supergraph service**: Use whenever you need to examine request bodies to enforce termination.
 
 For example:
 ```rhai
