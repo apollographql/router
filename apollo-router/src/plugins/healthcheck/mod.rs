@@ -173,6 +173,9 @@ impl PluginPrivate for HealthCheck {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        // We always do the work to track readiness and liveness because we
+        // need that data to implement our `router_service`. We only log out
+        // our health tracing message if our health check is enabled.
         if init.config.enabled {
             tracing::info!(
                 "Health check exposed at {}{}",
@@ -221,6 +224,7 @@ impl PluginPrivate for HealthCheck {
     }
 
     // Track rejected requests due to traffic shaping.
+    // We always do this; even if the health check is disabled.
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let my_rejected = self.rejected.clone();
 

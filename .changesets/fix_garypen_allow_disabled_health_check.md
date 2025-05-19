@@ -4,6 +4,4 @@ During the development of Router 2.0, the health check endpoint support was conv
 
 This is now fixed and a new unit test ensures that disabling the health check does not result in the creation of a health check endpoint.
 
-<!-- https://apollographql.atlassian.net/browse/ROUTER-1297 -->
-
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7519
