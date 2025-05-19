@@ -59,8 +59,9 @@ cors:
   allow_headers: [ Content-Type, MyClientHeaderName, MyClientHeaderVersion]
 ```
 
-### Changing the context values
-The client awareness headers are parsed out of the HTTP request immediately in the router request lifecycle. If you need to dynamically set the values, you should instead mutate the values in the [GraphQL context](https://www.apollographql.com/docs/graphos/routing/customization/overview#request-context) after they have been parsed, but before they are sent. You can do so by using Rhai scripts or Coprocessors and hooking into the `RouterRequest` lifecycle stage.
+### Via router customization
+
+The client awareness headers are parsed out of the HTTP request immediately in the router request lifecycle. If you need to dynamically set the values, you should instead mutate the values in the [GraphQL context](/graphos/routing/customization/overview#request-context) after they have been parsed, but before they are sent. You can do so by using Rhai scripts or coprocessors and hooking into the `RouterRequest` lifecycle stage.
 
 ```rhai title="client-name-version.rhai"
 fn router_service(service) {
@@ -73,9 +74,6 @@ fn process_request(request) {
     request.context["apollo::telemetry::client_name"] = "custom name";
     request.context["apollo::telemetry::client_version"] = "custom version";
 }
-```
-
-## Enforcing headers in GraphOS Router
 
 ### Enforcing via Rhai script
 
