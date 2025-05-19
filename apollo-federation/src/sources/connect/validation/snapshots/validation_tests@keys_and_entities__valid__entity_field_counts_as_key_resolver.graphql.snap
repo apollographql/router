@@ -3,10 +3,4 @@ source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_entities/valid/entity_field_counts_as_key_resolver.graphql
 ---
-[
-    Message {
-        code: GraphQLError,
-        message: "Variables used in connector (`$this`) for `Product.price@connect[0]` cannot be used to create a valid `@key` directive.",
-        locations: [],
-    },
-]
+[]

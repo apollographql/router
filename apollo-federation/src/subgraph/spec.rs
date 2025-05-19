@@ -85,7 +85,8 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     TAG_DIRECTIVE_NAME,
 ];
 
-pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 1] = [FIELDSET_SCALAR_NAME];
+pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
+    [FIELDSET_SCALAR_NAME, CONTEXTFIELDVALUE_SCALAR_NAME];
 
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.

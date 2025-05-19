@@ -19,6 +19,7 @@ use nom::sequence::tuple;
 
 use super::ExternalVarPaths;
 use super::ParseResult;
+use super::PathList;
 use super::helpers::spaces_or_comments;
 use super::location::Ranged;
 use super::location::Span;
@@ -39,21 +40,66 @@ pub(crate) enum LitExpr {
     Object(IndexMap<WithRange<Key>, WithRange<LitExpr>>),
     Array(Vec<WithRange<LitExpr>>),
     Path(PathSelection),
+
+    // Whereas the LitExpr::Path variant wraps a PathSelection that obeys the
+    // parsing rules of the outer selection syntax (i.e. default JSONSelection
+    // syntax, not LitExpr syntax), this LitExpr::LitPath variant can be parsed
+    // only as part of a LitExpr, and allows the value at the root of the path
+    // to be any LitExpr literal expression, without needing a $(...) wrapper,
+    // allowing you to write "asdf"->slice(0, 2) when you're already in an
+    // expression parsing context, rather than $(asdf)->slice(0, 2).
+    //
+    // The WithRange<LitExpr> argument is the root expression (never a
+    // LitExpr::Path), and the WithRange<PathList> argument represents the rest
+    // of the path, which is never PathList::Empty, because that would mean the
+    // LitExpr could stand on its own, using one of the other variants.
+    LitPath(WithRange<LitExpr>, WithRange<PathList>),
 }
 
 impl LitExpr {
-    // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
+    // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
-        alt((
-            Self::parse_primitive,
-            Self::parse_object,
-            Self::parse_array,
-            map(PathSelection::parse, |p| {
-                let range = p.range();
-                WithRange::new(Self::Path(p), range)
+
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input) {
+            Ok((suffix, initial_literal)) => {
+                // If we parsed an initial literal expression, it may be the
+                // entire result, but we also want to greedily parse one or more
+                // PathStep items that follow it, according to the rule
+                //
+                //    LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+
+                //
+                // This allows paths beginning with literal values without the
+                // initial $(...) expression wrapper, so you can write
+                // $(123->add(111)) instead of $($(123)->add(111)) when you're
+                // already in a LitExpr parsing context.
+                //
+                // We begin parsing the path at depth 1 rather than 0 because
+                // we've already parsed the initial literal at depth 0, so the
+                // subpath should obey the parsing rules for for depth > 0.
+                match PathList::parse_with_depth(suffix, 1) {
+                    Ok((remainder, subpath)) => {
+                        if matches!(subpath.as_ref(), PathList::Empty) {
+                            return Ok((remainder, initial_literal));
+                        }
+                        let full_range = merge_ranges(initial_literal.range(), subpath.range());
+                        Ok((
+                            remainder,
+                            WithRange::new(Self::LitPath(initial_literal, subpath), full_range),
+                        ))
+                    }
+                    // If we failed to parse a path, return initial_literal as-is.
+                    Err(_) => Ok((suffix, initial_literal)),
+                }
+            }
+
+            // If we failed to parse a primitive, object, or array, try parsing
+            // a PathSelection (which cannot be a LitPath).
+            Err(_) => PathSelection::parse(input).map(|(remainder, path)| {
+                let range = path.range();
+                (remainder, WithRange::new(Self::Path(path), range))
             }),
-        ))(input)
+        }
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -158,17 +204,26 @@ impl LitExpr {
         }
         number.push_str(num.as_str());
 
-        if let Ok(lit_number) = number.parse().map(Self::Number) {
-            let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
-            Ok((suffix, WithRange::new(lit_number, range)))
-        } else {
-            Err(nom_error_message(
-                input,
-                // We could include the faulty number in the error message, but
-                // it will also appear at the beginning of the input span.
-                "Failed to parse numeric literal",
-            ))
-        }
+        number.parse().map(Self::Number).map_or_else(
+            |_| {
+                // CONSIDER USING THIS ERROR? now that we have access to them?
+                Err(nom_error_message(
+                    input,
+                    // We could include the faulty number in the error message, but
+                    // it will also appear at the beginning of the input span.
+                    "Failed to parse numeric literal",
+                ))
+            },
+            |lit_number| {
+                Ok((
+                    suffix,
+                    WithRange::new(
+                        lit_number,
+                        merge_ranges(neg.and_then(|n| n.range()), num.range()),
+                    ),
+                ))
+            },
+        )
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
@@ -272,6 +327,10 @@ impl ExternalVarPaths for LitExpr {
             Self::Path(path) => {
                 paths.extend(path.external_var_paths());
             }
+            Self::LitPath(literal, subpath) => {
+                paths.extend(literal.external_var_paths());
+                paths.extend(subpath.external_var_paths());
+            }
         }
         paths
     }
@@ -282,7 +341,9 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::MethodArgs;
     use crate::sources::connect::json_selection::PathList;
+    use crate::sources::connect::json_selection::PrettyPrintable;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
@@ -487,7 +548,7 @@ mod tests {
             });
 
             check_parse("a.b.c", expected.clone());
-            check_parse(" a . b . c ", expected.clone());
+            check_parse(" a . b . c ", expected);
         }
 
         {
@@ -503,7 +564,7 @@ mod tests {
                 .into_with_range(),
             });
             check_parse("$.data", expected.clone());
-            check_parse(" $ . data ", expected.clone());
+            check_parse(" $ . data ", expected);
         }
 
         {
@@ -568,7 +629,7 @@ mod tests {
                 b . c ,
                 d . e . f ,
             ]"#,
-                expected.clone(),
+                expected,
             );
         }
 
@@ -629,8 +690,295 @@ mod tests {
                 a : $args . a ,
                 b : $this . b
             ,} "#,
-                expected.clone(),
+                expected,
             );
         }
+    }
+
+    #[test]
+    fn test_literal_methods() {
+        #[track_caller]
+        fn check_parse_and_print(input: &str, expected: LitExpr) {
+            let expected_inline = expected.pretty_print_with_indentation(true, 0);
+            match LitExpr::parse(new_span(input)) {
+                Ok((remainder, parsed)) => {
+                    assert!(span_is_all_spaces_or_comments(remainder));
+                    assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
+                    assert_eq!(parsed.pretty_print_with_indentation(true, 0), input);
+                    assert_eq!(expected_inline, input);
+                }
+                Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            };
+        }
+
+        check_parse_and_print(
+            "$(\"a\")->first",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::String("a".to_string()).into_with_range(),
+                    PathList::Method(
+                        WithRange::new("first".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(\"a\"->first)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::LitPath(
+                        LitExpr::String("a".to_string()).into_with_range(),
+                        PathList::Method(
+                            WithRange::new("first".to_string(), None),
+                            None,
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(1234)->add(1111)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
+                    PathList::Method(
+                        WithRange::new("add".to_string(), None),
+                        Some(MethodArgs {
+                            args: vec![
+                                LitExpr::Number(serde_json::Number::from(1111)).into_with_range(),
+                            ],
+                            range: None,
+                        }),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(1234->add(1111))",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::LitPath(
+                        LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
+                        PathList::Method(
+                            WithRange::new("add".to_string(), None),
+                            Some(MethodArgs {
+                                args: vec![
+                                    LitExpr::Number(serde_json::Number::from(1111))
+                                        .into_with_range(),
+                                ],
+                                range: None,
+                            }),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(value->mul(10))",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Method(
+                                WithRange::new("mul".to_string(), None),
+                                Some(MethodArgs {
+                                    args: vec![
+                                        LitExpr::Number(serde_json::Number::from(10))
+                                            .into_with_range(),
+                                    ],
+                                    range: None,
+                                }),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(value.key->typeof)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Key(
+                                Key::field("key").into_with_range(),
+                                PathList::Method(
+                                    WithRange::new("typeof".to_string(), None),
+                                    None,
+                                    PathList::Empty.into_with_range(),
+                                )
+                                .into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$(value.key)->typeof",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Key(
+                                Key::field("key").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Method(
+                        WithRange::new("typeof".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$([1, 2, 3])->last",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Array(vec![
+                        LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                        LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                        LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
+                    ])
+                    .into_with_range(),
+                    PathList::Method(
+                        WithRange::new("last".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$([1, 2, 3]->last)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::LitPath(
+                        LitExpr::Array(vec![
+                            LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
+                        ])
+                        .into_with_range(),
+                        PathList::Method(
+                            WithRange::new("last".to_string(), None),
+                            None,
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$({ a: \"ay\", b: 1 }).a",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Object({
+                        let mut map = IndexMap::default();
+                        map.insert(
+                            Key::field("a").into_with_range(),
+                            LitExpr::String("ay".to_string()).into_with_range(),
+                        );
+                        map.insert(
+                            Key::field("b").into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                        );
+                        map
+                    })
+                    .into_with_range(),
+                    PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse_and_print(
+            "$({ a: \"ay\", b: 2 }.a)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::LitPath(
+                        LitExpr::Object({
+                            let mut map = IndexMap::default();
+                            map.insert(
+                                Key::field("a").into_with_range(),
+                                LitExpr::String("ay".to_string()).into_with_range(),
+                            );
+                            map.insert(
+                                Key::field("b").into_with_range(),
+                                LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                            );
+                            map
+                        })
+                        .into_with_range(),
+                        PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
     }
 }

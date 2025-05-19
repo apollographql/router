@@ -47,9 +47,9 @@ impl ConnectorPosition {
                             None
                         }
                     })
-                    .ok_or(FederationError::internal(
-                        "Parent type for connector not found",
-                    ))?,
+                    .ok_or_else(|| {
+                        FederationError::internal("Parent type for connector not found")
+                    })?,
                 field_def: pos.field.get(schema).map_err(|_| {
                     FederationError::internal("Field definition for connector not found")
                 })?,
@@ -72,7 +72,7 @@ impl ConnectorPosition {
                             None
                         }
                     })
-                    .ok_or(FederationError::internal("Type for connector not found"))?,
+                    .ok_or_else(|| FederationError::internal("Type for connector not found"))?,
             }),
         }
     }
@@ -132,6 +132,17 @@ impl ConnectorPosition {
                 pos.directive_index,
             ),
             ConnectorPosition::Type(pos) => format!("{}_{}", pos.type_name, pos.directive_index),
+        }
+    }
+
+    /// The "simple" name of a Connector position without directive index included.
+    /// This is useful for error messages where the index could be confusing to users.
+    pub(crate) fn simple_name(&self) -> String {
+        match self {
+            ConnectorPosition::Field(pos) => {
+                format!("{}.{}", pos.field.type_name(), pos.field.field_name(),)
+            }
+            ConnectorPosition::Type(pos) => format!("{}", pos.type_name),
         }
     }
 

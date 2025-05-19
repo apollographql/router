@@ -29,13 +29,13 @@ pub struct QueryPlan {
 #[derive(Debug, PartialEq, derive_more::From, Serialize, Deserialize)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
-    #[from(types(FetchNode))]
+    #[from(FetchNode, Box<FetchNode>)]
     Fetch(Box<FetchNode>),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
     Flatten(FlattenNode),
     Defer(DeferNode),
-    #[from(types(ConditionNode))]
+    #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
 }
 
@@ -48,13 +48,13 @@ pub struct SubscriptionNode {
 
 #[derive(Debug, Clone, PartialEq, derive_more::From, Serialize, Deserialize)]
 pub enum PlanNode {
-    #[from(types(FetchNode))]
+    #[from(FetchNode, Box<FetchNode>)]
     Fetch(Box<FetchNode>),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
     Flatten(FlattenNode),
     Defer(DeferNode),
-    #[from(types(ConditionNode))]
+    #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
 }
 

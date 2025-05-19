@@ -62,41 +62,11 @@ mod tests {
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
+        // it, but in this case it's enough to start building the harness and
+        // ensure building the Configuration fails.
         assert!(
             crate::TestHarness::builder()
                 .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_with_stages_wont_load_without_graph_ref() {
-        let config = serde_json::json!({
-            "coprocessor": {
-                "url": "http://127.0.0.1:8081",
-                "stages": {
-                    "subgraph": {
-                        "request": {
-                            "uri": true
-                        }
-                    }
-                },
-            }
-        });
-        // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
-        assert!(
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
                 .is_err()
         );
     }
@@ -820,8 +790,7 @@ mod tests {
                         default: None,
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
-                ])
-                .into(),
+                ]),
                 body: true,
                 ..Default::default()
             },
@@ -1451,8 +1420,7 @@ mod tests {
                     response_context: String::from("context_value"),
                     redact: None,
                     default: None,
-                })
-                .into(),
+                }),
                 body: true,
                 ..Default::default()
             },

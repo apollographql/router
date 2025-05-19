@@ -183,9 +183,6 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let tls_builder = rustls::ClientConfig::builder();
     Ok(match (tls_cert_store, client_cert_config) {
         (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
@@ -235,8 +232,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     });
                 }
             };
-            if subscription_config.enable_deduplication {
-                request.to_sha256()
+            if subscription_config.deduplication.enabled {
+                request.to_sha256(&subscription_config.deduplication.ignored_headers)
             } else {
                 Uuid::new_v4().to_string()
             }
@@ -1685,6 +1682,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
+    use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -1707,7 +1705,6 @@ mod tests {
 
         // Not sure this is the *right* place to do it, because it's actually clients that
         // use crypto, not the server.
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         loop {
             let (stream, _) = listener.accept().await?;
@@ -2352,7 +2349,7 @@ mod tests {
                     .into(),
                 }),
             },
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }

@@ -39,7 +39,7 @@ impl<'schema> Headers<'schema> {
 
         #[allow(clippy::mutable_key_type)]
         let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
-        for header in Header::from_headers_arg(headers_arg, &schema.version_info.allowed_headers) {
+        for header in Header::from_headers_arg(headers_arg) {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {

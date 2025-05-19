@@ -48,15 +48,19 @@ type Config = HashMap<String, Arc<SubgraphConfig>>;
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 struct SubgraphConfig {
     // If changing this struct, also update `dev-docs/mock_subgraphs_plugin.md`
+    /// HTTP headers for the subgraph response
     #[serde(default)]
     #[schemars(with = "HashMap<String, String>")]
     headers: HeaderMap,
+    /// Data for `query` operations (excluding the special `_entities` field)
     #[serde(default)]
     #[schemars(with = "OtherJsonMap")]
     query: JsonMap,
+    /// Data for `mutation` operations
     #[serde(default)]
     #[schemars(with = "Option<OtherJsonMap>")]
     mutation: Option<JsonMap>,
+    /// Entities that can be queried through Federation’s special `_entities` field
     #[serde(default)]
     #[schemars(with = "Vec<OtherJsonMap>")]
     entities: Vec<JsonMap>,

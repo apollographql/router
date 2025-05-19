@@ -595,7 +595,7 @@ impl Merger {
         let existing_type = types
             .entry(object_name.clone())
             .or_insert(copy_object_type_stub(
-                object_name.clone(),
+                object_name,
                 object,
                 is_interface_object,
             ));
@@ -822,10 +822,9 @@ impl Merger {
         union_name: NamedType,
         union: &Node<UnionType>,
     ) {
-        let existing_type = types.entry(union_name.clone()).or_insert(copy_union_type(
-            union_name.clone(),
-            union.description.clone(),
-        ));
+        let existing_type = types
+            .entry(union_name.clone())
+            .or_insert(copy_union_type(union_name, union.description.clone()));
 
         if let ExtendedType::Union(u) = existing_type {
             let join_type_directives =
@@ -1955,7 +1954,10 @@ mod test_enum_value {
 
 fn add_core_feature_inaccessible(supergraph: &mut Schema) {
     // @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
-    let spec = InaccessibleSpecDefinition::new(Version { major: 0, minor: 2 });
+    let spec = InaccessibleSpecDefinition::new(
+        Version { major: 0, minor: 2 },
+        Version { major: 2, minor: 0 },
+    );
 
     supergraph
         .schema_definition

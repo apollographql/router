@@ -260,7 +260,7 @@ impl TypeDefinitionPosition {
         }
 
         if let Some(existing_type) = schema.schema.types.swap_remove(self.type_name()) {
-            schema.schema.types.insert(new_name.clone(), existing_type);
+            schema.schema.types.insert(new_name, existing_type);
         }
 
         Ok(())
@@ -893,6 +893,10 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             }
         }
     }
+
+    pub(crate) fn coordinate(&self) -> String {
+        format!("{}.{}", self.type_name(), self.field_name())
+    }
 }
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
@@ -917,6 +921,15 @@ impl SchemaDefinitionPosition {
         schema: &mut FederationSchema,
         directive: Component<Directive>,
     ) -> Result<(), FederationError> {
+        self.insert_directive_at(schema, directive, self.get(&schema.schema).directives.len())
+    }
+
+    pub(crate) fn insert_directive_at(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+        index: usize,
+    ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         if schema_definition
             .directives
@@ -932,7 +945,10 @@ impl SchemaDefinitionPosition {
             .into());
         }
         let name = directive.name.clone();
-        schema_definition.make_mut().directives.push(directive);
+        schema_definition
+            .make_mut()
+            .directives
+            .insert(index, directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)?;
         schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         Ok(())
@@ -3767,8 +3783,8 @@ impl InterfaceFieldDefinitionPosition {
     ) -> Result<(), FederationError> {
         let field = self.make_mut(&mut schema.schema)?.make_mut();
         match field.ty.clone() {
-            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name.clone()),
-            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name.clone()),
+            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name),
+            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name),
             ast::Type::List(_) => todo!(),
             ast::Type::NonNullList(_) => todo!(),
         }
@@ -4034,9 +4050,9 @@ impl InterfaceFieldArgumentDefinitionPosition {
     ) -> Result<(), FederationError> {
         let argument = self.make_mut(&mut schema.schema)?.make_mut();
         match argument.ty.as_ref() {
-            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name.clone()),
+            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name),
             ast::Type::NonNullNamed(_) => {
-                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name.clone())
+                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name)
             }
             ast::Type::List(_) => todo!(),
             ast::Type::NonNullList(_) => todo!(),
@@ -5729,7 +5745,7 @@ impl InputObjectFieldDefinitionPosition {
         schema: &mut FederationSchema,
         new_name: Name,
     ) -> Result<(), FederationError> {
-        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name;
         Ok(())
     }
 }
