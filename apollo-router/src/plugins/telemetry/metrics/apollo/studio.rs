@@ -667,7 +667,10 @@ mod test {
                     query_metadata: None,
                 },
             )]),
-            router_features_enabled: vec!["distributed_apq_cache".to_string(), "entity_cache".to_string()],
+            router_features_enabled: vec![
+                "distributed_apq_cache".to_string(),
+                "entity_cache".to_string(),
+            ],
         }
     }
 
