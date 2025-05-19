@@ -776,6 +776,7 @@ impl JoinSpecDefinition {
         ))
     }
 
+    /// @join__directive
     fn directive_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() < (Version { major: 0, minor: 4 }) {
             return None;
@@ -832,6 +833,7 @@ impl JoinSpecDefinition {
         ))
     }
 
+    /// @join__owner
     fn owner_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() != (Version { major: 0, minor: 1 }) {
             return None;
