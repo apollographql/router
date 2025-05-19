@@ -29,6 +29,7 @@ use fred::types::scan::ScanResult;
 use futures::FutureExt;
 use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::task::AbortHandle;
 use tower::BoxError;
 use url::Url;
 
@@ -70,24 +71,29 @@ where
 // * why not just implement this within `Drop` for `RedisCacheStorage`? Because `RedisCacheStorage`
 //   is cloned frequently throughout the router, and we don't want to close the connections
 //   when each clone is dropped, only when the last instance is dropped.
-struct DropSafeRedisPool(Arc<RedisPool>);
+struct DropSafeRedisPool {
+    pool: Arc<RedisPool>,
+    heartbeat_abort_handle: AbortHandle,
+}
+
 impl Deref for DropSafeRedisPool {
     type Target = RedisPool;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.pool
     }
 }
 
 impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
-        let inner = self.0.clone();
+        let inner = self.pool.clone();
         tokio::spawn(async move {
             let result = inner.quit().await;
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
             }
         });
+        self.heartbeat_abort_handle.abort();
     }
 }
 
@@ -288,20 +294,25 @@ impl RedisCacheStorage {
             );
 
             tokio::spawn(async move {
-                while let recv = error_rx.recv().await {
-                    match recv {
-                        Ok((error, server)) => tracing::error!(
-                            "Client disconnected from {server:?} with error: {error:?}",
-                        ),
+                loop {
+                    match error_rx.recv().await {
+                        Ok((error, Some(server))) => {
+                            tracing::error!(
+                                "Redis client disconnected from {server:?} with error: {error:?}",
+                            )
+                        }
+                        Ok((error, None)) => {
+                            tracing::error!("Redis client disconnected with error: {error:?}",)
+                        }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
                 }
             });
             tokio::spawn(async move {
-                while let recv = reconnect_rx.recv().await {
-                    match recv {
-                        Ok(server) => tracing::info!("Redis client reconnected to {server:?}"),
+                loop {
+                    match reconnect_rx.recv().await {
+                        Ok(server) => tracing::info!("Redis client connected to {server:?}"),
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
@@ -322,19 +333,18 @@ impl RedisCacheStorage {
 
         let _handle = pooled_client.init().await?;
         let heartbeat_clients = pooled_client.clone();
-        let _heartbeat_handle = tokio::spawn(async move {
-            // NB(@carodewig): per #7354, it would be better to set `break_on_error` to false, but that
-            //  would likely conflict with the custom `Drop` impl on `DropSafeRedisPool`.
-            //  If `fred` is changed to automatically close connections when the last `Pool` is dropped,
-            //  we should change `break_on_error` to `false` and remove `DropSafeRedisPool`.
+        let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
-                .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, true)
+                .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, false)
                 .await
         });
 
         tracing::trace!("redis connection established");
         Ok(Self {
-            inner: Arc::new(DropSafeRedisPool(Arc::new(pooled_client))),
+            inner: Arc::new(DropSafeRedisPool {
+                pool: Arc::new(pooled_client),
+                heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+            }),
             namespace: namespace.map(Arc::new),
             ttl,
             is_cluster,
