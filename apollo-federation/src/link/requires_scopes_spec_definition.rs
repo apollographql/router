@@ -45,16 +45,14 @@ impl RequiresScopesSpecDefinition {
                 base_spec: ArgumentSpecification {
                     name: REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME,
                     get_type: |_schema, link| {
-                        // The type is [[ [Scope!]! ]!]
                         let scope_type_name = link
                             .map(|l| {
                                 l.type_name_in_schema(&REQUIRES_SCOPES_SCOPE_TYPE_NAME_IN_SPEC)
                             })
                             .unwrap_or(REQUIRES_SCOPES_SCOPE_TYPE_NAME_IN_SPEC);
-                        Ok(Type::NonNullList(Box::new(Type::List(Box::new(
-                            Type::NonNullList(Box::new(Type::List(Box::new(Type::NonNullNamed(
-                                scope_type_name,
-                            ))))),
+                        // The type is [[Scope!]!]!
+                        Ok(Type::NonNullList(Box::new(Type::NonNullList(Box::new(
+                            Type::NonNullNamed(scope_type_name),
                         )))))
                     },
                     default_value: None,
@@ -110,3 +108,94 @@ pub(crate) static REQUIRES_SCOPES_VERSIONS: LazyLock<
     ));
     definitions
 });
+
+#[cfg(test)]
+mod test {
+    use apollo_compiler::Node;
+    use apollo_compiler::ast::Argument;
+    use apollo_compiler::ast::Directive;
+    use apollo_compiler::ast::Value;
+    use apollo_compiler::name;
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::link::DEFAULT_LINK_NAME;
+    use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
+    use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
+    use crate::schema::FederationSchema;
+    use crate::schema::position::SchemaDefinitionPosition;
+    use crate::subgraph::test_utils::BuildOption;
+    use crate::subgraph::test_utils::build_inner_expanded;
+
+    fn trivial_schema() -> FederationSchema {
+        build_inner_expanded("type Query { hello: String }", BuildOption::AsFed2)
+            .unwrap()
+            .schema()
+            .to_owned()
+    }
+
+    fn get_schema_with_requires_scopes(version: Version) -> FederationSchema {
+        let mut schema = trivial_schema();
+        let spec = REQUIRES_SCOPES_VERSIONS.find(&version).unwrap();
+        let link = Directive {
+            name: DEFAULT_LINK_NAME,
+            arguments: vec![
+                Node::new(Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: spec.url().to_string().into(),
+                }),
+                Node::new(Argument {
+                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
+                    value: Node::new(Value::Enum(name!("SECURITY"))),
+                }),
+            ],
+        };
+        SchemaDefinitionPosition
+            .insert_directive(&mut schema, link.into())
+            .unwrap();
+        spec.add_elements_to_schema(&mut schema).unwrap();
+        schema
+    }
+
+    fn requires_scopes_spec_directives_snapshot(schema: &FederationSchema) -> String {
+        schema
+            .schema()
+            .directive_definitions
+            .iter()
+            .filter_map(|(name, def)| {
+                if name.as_str().starts_with("requiresScopes") {
+                    Some(def.to_string())
+                } else {
+                    None
+                }
+            })
+            .join("\n")
+    }
+
+    fn requires_scopes_spec_types_snapshot(schema: &FederationSchema) -> String {
+        schema
+            .schema()
+            .types
+            .iter()
+            .filter_map(|(name, ty)| {
+                if name.as_str().starts_with("requiresScopes__") {
+                    Some(ty.to_string())
+                } else {
+                    None
+                }
+            })
+            .join("\n")
+    }
+
+    #[test]
+    fn requires_scopes_spec_v0_1_definitions() {
+        let schema = get_schema_with_requires_scopes(Version { major: 0, minor: 1 });
+        let types_snapshot = requires_scopes_spec_types_snapshot(&schema);
+        let expected_types = r#"scalar requiresScopes__Scope"#;
+        assert_eq!(types_snapshot.trim(), expected_types.trim());
+
+        let directives_snapshot: String = requires_scopes_spec_directives_snapshot(&schema);
+        let expected_directives = r#"directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;
+        assert_eq!(directives_snapshot.trim(), expected_directives.trim());
+    }
+}
