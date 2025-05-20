@@ -4,8 +4,6 @@ subtitle: Learn how to use a self-hosted router (GraphOS Router or Apollo Router
 description: Use the Apollo GraphOS Router or Apollo Router Core in Kubernetes with metrics endpoints and considerations when doing so.
 ---
 
-import ElasticNotice from '../../../../shared/elastic-notice.mdx';
-
 <ElasticNotice />
 
 The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](/router/configuration/telemetry/exporters/metrics/overview). The default deployment doesn't enable metrics endpoints because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
