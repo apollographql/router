@@ -54,13 +54,8 @@ pub(super) fn copy_input_types(
         }
         match ty {
             ExtendedType::Scalar(node) => {
-                let references = from.referencers().scalar_types.get(name).ok_or_else(|| {
-                    FederationError::internal(format!(
-                        "Cannot find enum type referencers for {name}"
-                    ))
-                })?;
-
-                if references.len() == 0 {
+                let references = from.referencers().scalar_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
                     continue;
                 }
 
@@ -73,13 +68,8 @@ pub(super) fn copy_input_types(
                 pos.insert(to, node).ok();
             }
             ExtendedType::Enum(node) => {
-                let references = from.referencers().enum_types.get(name).ok_or_else(|| {
-                    FederationError::internal(format!(
-                        "Cannot find enum type referencers for {name}"
-                    ))
-                })?;
-
-                if references.len() == 0 {
+                let references = from.referencers().enum_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
                     continue;
                 }
 
@@ -92,17 +82,8 @@ pub(super) fn copy_input_types(
                 pos.insert(to, node).ok();
             }
             ExtendedType::InputObject(node) => {
-                let references =
-                    from.referencers()
-                        .input_object_types
-                        .get(name)
-                        .ok_or_else(|| {
-                            FederationError::internal(format!(
-                                "Cannot find input object type referencers for {name}"
-                            ))
-                        })?;
-
-                if references.len() == 0 {
+                let references = from.referencers().input_object_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
                     continue;
                 }
 
