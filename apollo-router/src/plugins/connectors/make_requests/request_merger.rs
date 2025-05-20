@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::plugins::connectors::make_requests::RequestInputs;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::Namespace;
@@ -13,6 +12,7 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 
 use crate::Context;
+use crate::plugins::connectors::make_requests::RequestInputs;
 use crate::services::external::externalize_header_map;
 
 pub(crate) struct RequestMerger<'merger> {
