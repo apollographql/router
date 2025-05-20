@@ -8,7 +8,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
@@ -52,7 +51,7 @@ pub(crate) struct RequestMerger<'merger> {
 }
 
 impl RequestMerger<'_> {
-    pub fn merge(self) -> IndexMap<String, Value> {
+    pub(crate) fn merge(self) -> IndexMap<String, Value> {
         let mut map =
             IndexMap::with_capacity_and_hasher(self.variables_used.len(), Default::default());
         // Not all connectors reference $args
@@ -102,7 +101,7 @@ impl RequestMerger<'_> {
         map
     }
 
-    pub fn context(mut self, context: &Context) -> Self {
+    pub(crate) fn context(mut self, context: &Context) -> Self {
         // $context could be a large object, so we only convert it to JSON
         // if it's used. It can also be mutated between requests, so we have
         // to convert it each time.
@@ -116,7 +115,7 @@ impl RequestMerger<'_> {
         self
     }
 
-    pub fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
+    pub(crate) fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
         if let (true, Some(config)) = (self.variables_used.contains(&Namespace::Config), config) {
@@ -125,7 +124,7 @@ impl RequestMerger<'_> {
         self
     }
 
-    pub fn status(mut self, status: Option<u16>) -> Self {
+    pub(crate) fn status(mut self, status: Option<u16>) -> Self {
         // $status is available only for response mapping
         if let (true, Some(status)) = (self.variables_used.contains(&Namespace::Status), status) {
             self.status = Some(Value::Number(status.into()));
@@ -133,7 +132,7 @@ impl RequestMerger<'_> {
         self
     }
 
-    pub fn request(
+    pub(crate) fn request(
         mut self,
         headers_used: &HashSet<String>,
         supergraph_request: &Arc<http::Request<crate::graphql::Request>>,
@@ -162,7 +161,7 @@ impl RequestMerger<'_> {
         self
     }
 
-    pub fn response(
+    pub(crate) fn response(
         mut self,
         headers_used: &HashSet<String>,
         response_parts: Option<&Parts>,
@@ -200,7 +199,7 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub fn merger(self, variables_used: &HashSet<Namespace>) -> RequestMerger {
+    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> RequestMerger {
         RequestMerger {
             inputs: self,
             variables_used,
@@ -210,125 +209,6 @@ impl RequestInputs {
             request: None,
             response: None,
         }
-    }
-
-    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
-    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
-    /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn merge(
-        &self,
-        variables_used: &HashSet<Namespace>,
-        headers_used: &HashSet<String>,
-        config: Option<&CustomConfiguration>,
-        context: &Context,
-        status: Option<u16>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-        response_parts: Option<&Parts>,
-    ) -> IndexMap<String, Value> {
-        let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
-
-        // Not all connectors reference $args
-        if variables_used.contains(&Namespace::Args) {
-            map.insert(
-                Namespace::Args.as_str().into(),
-                Value::Object(self.args.clone()),
-            );
-        }
-
-        // $this only applies to fields on entity types (not Query or Mutation)
-        if variables_used.contains(&Namespace::This) {
-            map.insert(
-                Namespace::This.as_str().into(),
-                Value::Object(self.this.clone()),
-            );
-        }
-
-        // $batch only applies to entity resolvers on types
-        if variables_used.contains(&Namespace::Batch) {
-            map.insert(
-                Namespace::Batch.as_str().into(),
-                Value::Array(self.batch.clone().into_iter().map(Value::Object).collect()),
-            );
-        }
-
-        // $context could be a large object, so we only convert it to JSON
-        // if it's used. It can also be mutated between requests, so we have
-        // to convert it each time.
-        if variables_used.contains(&Namespace::Context) {
-            let context: Map<ByteString, Value> = context
-                .iter()
-                .map(|r| (r.key().as_str().into(), r.value().clone()))
-                .collect();
-            map.insert(Namespace::Context.as_str().into(), Value::Object(context));
-        }
-
-        // $config doesn't change unless the schema reloads, but we can avoid
-        // the allocation if it's unused.
-        if variables_used.contains(&Namespace::Config) {
-            if let Some(config) = config {
-                map.insert(Namespace::Config.as_str().into(), json!(config));
-            }
-        }
-
-        // $status is available only for response mapping
-        if variables_used.contains(&Namespace::Status) {
-            if let Some(status) = status {
-                map.insert(
-                    Namespace::Status.as_str().into(),
-                    Value::Number(status.into()),
-                );
-            }
-        }
-
-        // Add headers from the original router request.
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|(key, value)| {
-                    headers_used.contains(key.as_str()).then_some((
-                        key.as_str().into(),
-                        value
-                            .iter()
-                            .map(|s| Value::String(s.as_str().into()))
-                            .collect(),
-                    ))
-                })
-                .collect();
-            let request_object = json!({
-                "headers": Value::Object(new_headers)
-            });
-            map.insert(Namespace::Request.as_str().into(), request_object);
-        }
-
-        // Add headers from the connectors response
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Response) {
-            if let Some(response_parts) = response_parts {
-                let new_headers: Map<ByteString, Value> =
-                    externalize_header_map(&response_parts.headers)
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            headers_used.contains(key.as_str()).then_some((
-                                key.as_str().into(),
-                                value
-                                    .iter()
-                                    .map(|s| Value::String(s.as_str().into()))
-                                    .collect(),
-                            ))
-                        })
-                        .collect();
-                let response_object = json!({
-                    "headers": Value::Object(new_headers)
-                });
-                map.insert(Namespace::Response.as_str().into(), response_object);
-            }
-        }
-
-        map
     }
 }
 
