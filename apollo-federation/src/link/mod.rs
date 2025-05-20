@@ -22,6 +22,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod authenticated_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;
 pub mod database;
@@ -30,6 +31,8 @@ pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
+pub(crate) mod policy_spec_definition;
+pub(crate) mod requires_scopes_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
 pub(crate) mod tag_spec_definition;
