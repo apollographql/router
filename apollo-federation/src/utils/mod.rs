@@ -1,6 +1,7 @@
 //! This module contains various tools that help the ergonomics of this crate.
 
 mod fallible_iterator;
+mod federation_directive_definitions;  // TODO: ask if this is necessary
 pub(crate) mod human_readable;
 pub(crate) mod logging;
 pub(crate) mod serde_bridge;
