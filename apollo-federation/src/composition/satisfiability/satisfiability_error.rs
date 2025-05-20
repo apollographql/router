@@ -289,3 +289,178 @@ fn display_reasons(reasons: &[Unadvanceables]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_compiler::parser::Parser;
+    use insta::assert_snapshot;
+    use petgraph::graph::NodeIndex;
+    use petgraph::visit::EdgeRef;
+
+    use super::*;
+    use crate::query_graph::QueryGraph;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
+    // A helper function that enumerates transition paths.
+    fn build_graph_paths(
+        query_graph: &Arc<QueryGraph>,
+        op_kind: SchemaRootDefinitionKind,
+        depth_limit: usize,
+    ) -> Result<Vec<TransitionGraphPath>, FederationError> {
+        let nodes_by_kind = query_graph.root_kinds_to_nodes()?;
+        let root_node_idx = nodes_by_kind[&op_kind];
+        let curr_graph_path = TransitionGraphPath::new(query_graph.clone(), root_node_idx)?;
+        build_graph_paths_recursive(query_graph, curr_graph_path, root_node_idx, depth_limit)
+    }
+
+    fn build_graph_paths_recursive(
+        query_graph: &Arc<QueryGraph>,
+        curr_path: TransitionGraphPath,
+        curr_node_idx: NodeIndex,
+        depth_limit: usize,
+    ) -> Result<Vec<TransitionGraphPath>, FederationError> {
+        if depth_limit == 0 {
+            return Ok(vec![]);
+        }
+
+        let mut paths = vec![curr_path.clone()];
+        for edge_ref in query_graph.out_edges(curr_node_idx) {
+            let edge = edge_ref.weight();
+            match &edge.transition {
+                QueryGraphEdgeTransition::FieldCollection { .. }
+                | QueryGraphEdgeTransition::Downcast { .. } => {
+                    let new_path = curr_path
+                        .add(
+                            edge.transition.clone(),
+                            edge_ref.id(),
+                            trivial_condition(),
+                            None,
+                        )
+                        .expect("adding edge to path");
+
+                    // Recursively build paths from the new node
+                    let new_paths = build_graph_paths_recursive(
+                        query_graph,
+                        new_path,
+                        edge_ref.target(),
+                        depth_limit - 1,
+                    )?;
+                    paths.extend(new_paths);
+                }
+                _ => {}
+            }
+        }
+        Ok(paths)
+    }
+
+    fn trivial_condition() -> ConditionResolution {
+        ConditionResolution::Satisfied {
+            cost: 0.0,
+            path_tree: None,
+            context_map: None,
+        }
+    }
+
+    fn parse_schema(schema_and_operation: &str) -> ValidFederationSchema {
+        let schema = Parser::new()
+            .parse_schema(schema_and_operation, "test.graphql")
+            .expect("parsing schema")
+            .validate()
+            .expect("validating schema");
+        ValidFederationSchema::new(schema).expect("creating valid federation schema")
+    }
+
+    #[test]
+    fn test_build_witness_operation() {
+        let schema_str = r#"
+            type Query
+            {
+                t: T
+                i: I
+            }
+
+            interface I
+            {
+                id: ID!
+            }
+
+            enum E { A B C }
+
+            input MyInput {
+                intInput: Int!
+                enumInput: E!
+                optionalInput: String
+            }
+
+            type T implements I
+            {
+                id: ID!
+                someField(
+                    numArg: Int!, floatArg: Float!, strArg: String!, boolArg: Boolean!,
+                    listArg: [Int!]!, enumArg: E!, myInputArg: MyInput!, optionalArg: String
+                ): String
+            }
+        "#;
+
+        let schema = parse_schema(schema_str);
+        let query_graph = Arc::new(
+            build_query_graph("test".into(), schema.clone()).expect("building query graph"),
+        );
+        let result: Vec<_> = build_graph_paths(&query_graph, SchemaRootDefinitionKind::Query, 3)
+            .expect("building graph paths")
+            .iter()
+            .filter(|path| path.iter().count() > 0)
+            .map(|path| {
+                let witness = build_witness_operation(path).expect("building witness operation");
+                format!("{path}: {witness}")
+            })
+            .collect();
+        assert_snapshot!(result.join("\n\n"), @r###"
+        Query(test) --[t]--> T(test) (types: [T]): {
+          t {
+            ...
+          }
+        }
+
+        Query(test) --[t]--> T(test) --[id]--> ID(test): {
+          t {
+            id
+          }
+        }
+
+        Query(test) --[t]--> T(test) --[someField]--> String(test): {
+          t {
+            someField(boolArg: true, enumArg: A, floatArg: 3.1, listArg: [], myInputArg: {enumInput: A, intInput: 0}, numArg: 0, strArg: "A string value")
+          }
+        }
+
+        Query(test) --[t]--> T(test) --[__typename]--> String(test): {
+          t {
+            __typename
+          }
+        }
+
+        Query(test) --[i]--> I(test) (types: [T]): {
+          i {
+            ...
+          }
+        }
+
+        Query(test) --[i]--> I(test) --[... on T]--> T(test) (types: [T]): {
+          i {
+            ... on T {
+              ...
+            }
+          }
+        }
+
+        Query(test) --[__typename]--> String(test): {
+          __typename
+        }
+        "###);
+    }
+}

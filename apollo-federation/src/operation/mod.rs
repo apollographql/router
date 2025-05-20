@@ -24,6 +24,7 @@ use std::sync::atomic;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -31,6 +32,7 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
@@ -2903,11 +2905,45 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
             }
             flattened.push(selection);
         }
+        if flattened.is_empty() {
+            // In theory, for valid operations, we shouldn't have empty selection sets (field
+            // selections whose type is a leaf will have an undefined selection set, not an empty
+            // one). We do "abuse" this a bit however when create query "witness" during
+            // composition validation where, to make it easier for users to locate the issue, we
+            // want the created witness query to stop where the validation problem lies, even if
+            // we're not on a leaf type. To make this look nice and explicit, we handle that case
+            // by create a fake selection set that just contains an ellipsis, indicate there is
+            // supposed to be more but we elided it for clarity. And yes, the whole thing is a bit
+            // of a hack, albeit a convenient one.
+            flattened.push(ellipsis_field(&val.type_position)?);
+        }
         Ok(Self {
             ty: val.type_position.type_name().clone(),
             selections: flattened,
         })
     }
+}
+
+/// Create a synthetic field named "...".
+fn ellipsis_field(
+    parent_type: &CompositeTypeDefinitionPosition,
+) -> Result<executable::Selection, FederationError> {
+    let field_name = Name::new_unchecked("...");
+    let field_def = ast::FieldDefinition {
+        description: None,
+        ty: ty!(String),
+        name: field_name.clone(),
+        arguments: vec![],
+        directives: Default::default(),
+    };
+    Ok(executable::Selection::Field(Node::new(executable::Field {
+        definition: Node::new(field_def),
+        alias: None,
+        name: field_name,
+        arguments: vec![],
+        directives: Default::default(),
+        selection_set: executable::SelectionSet::new(parent_type.type_name().clone()),
+    })))
 }
 
 impl TryFrom<&Selection> for executable::Selection {
