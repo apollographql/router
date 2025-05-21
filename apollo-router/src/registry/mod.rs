@@ -2,7 +2,7 @@ use std::string::FromUtf8Error;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
-use oci_client::Client as ociClient;
+use oci_client::{Client as ociClient, Client};
 use oci_client::Reference;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
@@ -19,6 +19,7 @@ pub struct OCIConfig {
     pub url: String,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct OCIResult {
     pub schema: String,
 }
@@ -93,42 +94,46 @@ async fn pull_oci(
     reference: &Reference,
 ) -> Result<OCIResult, Error> {
     tracing::debug!(?reference, "pulling oci bundle");
-    let supported_types = vec![
-        "application/json",
-        "text/plain",
-        "application/vnd.oci.empty.v1+json",
-    ];
-    let image = client.pull(reference, auth, supported_types).await?;
 
-    let schema = image
+    // We aren't using the default `pull` function because that validates that all the layers are in the
+    // set of supported layers. Since we want to be able to add new layers for new features, we want the
+    // client to have forwards compatibility.
+    // To achieve that, we are going to fetch the manifest and then fetch the layers that this code cares about directly.
+    let (manifest, _) = client.pull_image_manifest( reference, auth ).await?;
+
+    let schema_layer = manifest
         .layers
         .iter()
         .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
         .ok_or(Error::OCILayerMissingTitle)?
         .clone();
 
+    let mut schema = Vec::new();
+    client
+        .pull_blob(reference, &schema_layer, &mut schema)
+        .await?;
+
     Ok(OCIResult {
-        schema: String::from_utf8(schema.data)?,
+        schema: String::from_utf8(schema)?,
     })
 }
 
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OCIConfig) -> Result<OCIResult, Error> {
     let reference: Reference = oci_config.url.as_str().parse()?;
-    let client_config = oci_client::client::ClientConfig {
-        protocol: oci_client::client::ClientProtocol::Https,
-        ..Default::default()
-    };
-
-    let mut client = ociClient::new(client_config);
-
     let auth = build_auth(&reference, &oci_config.apollo_key);
-
-    pull_oci(&mut client, &auth, &reference).await
+    pull_oci(&mut Client::default(), &auth, &reference).await
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::future::join_all;
+    use oci_client::client::{ClientConfig, ClientProtocol, ImageLayer};
+    use oci_client::manifest::{OciDescriptor, OciImageManifest, OciManifest, IMAGE_MANIFEST_MEDIA_TYPE, OCI_IMAGE_MEDIA_TYPE};
+    use url::Url;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::matchers::{method, path};
+    use crate::registry::Error::OCILayerMissingTitle;
     use super::*;
 
     #[test]
@@ -145,7 +150,7 @@ mod tests {
         // Check that it returns the correct RegistryAuth
         match auth {
             RegistryAuth::Basic(username, password) => {
-                assert_eq!(username, "apollo_registry");
+                assert_eq!(username, APOLLO_REGISTRY_USERNAME);
                 assert_eq!(password, apollo_key);
             }
             _ => panic!("Expected RegistryAuth::Basic, got something else"),
@@ -169,6 +174,117 @@ mod tests {
                 assert_ne!(username, "apollo_registry");
             }
             _ => {} // Any other type is fine for this test
+        }
+    }
+
+    async fn setup_mocks(mock_server: MockServer, layers: Vec<ImageLayer>) -> Reference {
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let layer_descriptors = join_all(layers.iter().map(async |layer| {
+            let blob_digest = layer.sha256_digest();
+            let blob_url = Url::parse(&format!("{}/v2/{}/blobs/{}", mock_server.uri(), graph_id, blob_digest)).expect("url must be valid");
+            Mock::given(method("GET"))
+                .and(path(blob_url.path()))
+                .respond_with(ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(layer.data.clone())
+                )
+                .mount(&mock_server)
+                .await;
+            OciDescriptor {
+                media_type: layer.media_type.clone(),
+                digest: blob_digest,
+                size: layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }
+        })).await;
+
+        let manifest_url = Url::parse(&format!("{}/v2/{}/manifests/{}", mock_server.uri(), graph_id, reference)).expect("url must be valid");
+        let oci_manifest = OciManifest::Image( OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: layer_descriptors,
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap())
+            )
+            .mount(&mock_server)
+            .await;
+
+
+        format!("{}/{}:{}", mock_server.address(), graph_id, reference).parse::<Reference>().expect("url must be valid")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_blob() {
+        let mock_server = MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect("Failed to fetch OCI bundle");
+        assert_eq!(result.schema, "test schema");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_extra_layers() {
+        let mock_server = MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let random_layer = ImageLayer {
+            data: "foo_bar".to_string().into_bytes(),
+            media_type: "foo_bar".to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect("Failed to fetch OCI bundle");
+        assert_eq!(result.schema, "test schema");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn error_layer_not_found() {
+        let mock_server = MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let random_layer = ImageLayer {
+            data: "foo_bar".to_string().into_bytes(),
+            media_type: "foo_bar".to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect_err("Expect can't fetch OCI bundle");
+        match result {
+            OCILayerMissingTitle => {
+                // Expected error
+            }
+            _ => {
+                panic!("Expected OCILayerMissingTitle error, got {:?}", result);
+            }
         }
     }
 }
