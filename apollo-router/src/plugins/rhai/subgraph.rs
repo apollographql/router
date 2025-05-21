@@ -29,8 +29,6 @@ pub(super) fn request_failure(
             .errors(vec![
                 Error::builder()
                     .message(error_details.message.unwrap_or_default())
-                    // TODO this doesn't precisely match previous behavior
-                    .extension_code("")
                     .build()
             ])
             .context(context)
@@ -59,8 +57,6 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .errors(vec![
                 Error::builder()
                     .message(error_details.message.unwrap_or_default())
-                    // TODO this doesn't precisely match previous behavior
-                    .extension_code("")
                     .build()
             ])
             .status_code(error_details.status)

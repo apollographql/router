@@ -265,27 +265,23 @@ mod tests {
     #[test]
     fn test_append_errors_path_fallback_and_override() {
         let expected_errors = vec![
-            Error {
-                message: "Something terrible happened!".to_string(),
-                path: Some(Path::from("here")),
-                ..Default::default()
-            },
-            Error {
-                message: "I mean for real".to_string(),
-                ..Default::default()
-            },
+            Error::builder()
+                .message("Something terrible happened!")
+                .path(Path::from("here"))
+                .build(),
+           Error::builder()
+               .message("I mean for real")
+               .build(),
         ];
 
         let mut errors_to_append = vec![
-            Error {
-                message: "Something terrible happened!".to_string(),
-                path: Some(Path::from("here")),
-                ..Default::default()
-            },
-            Error {
-                message: "I mean for real".to_string(),
-                ..Default::default()
-            },
+            Error::builder()
+                .message("Something terrible happened!")
+                .path(Path::from("here"))
+                .build(),
+            Error::builder()
+                .message("I mean for real")
+                .build(),
         ];
 
         let mut response = Response::builder().build();
@@ -365,7 +361,8 @@ mod tests {
                     })
                     .as_object()
                     .cloned()
-                    .unwrap()
+                    .unwrap(),
+                    // TODO need to ignore the apollo id for comparison
                 }])
                 .extensions(
                     bjson!({

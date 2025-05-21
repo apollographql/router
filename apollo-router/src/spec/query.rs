@@ -374,8 +374,6 @@ impl Query {
                                 Error::builder()
                                     .message(message)
                                     .path(Path::from_response_slice(path))
-                                    // TODO this doesn't precisely match previous behavior
-                                    .extension_code("")
                                     .build()
                                );
 
@@ -653,8 +651,6 @@ impl Query {
                                         field_name.as_str()
                                     ))
                                     .path(Path::from_response_slice(path))
-                                    // TODO this doesn't precisely match previous behavior
-                                    .extension_code("")
                                     .build()
                             );
 
@@ -811,8 +807,6 @@ impl Query {
                                 root_type_name
                             ))
                             .path(Path::from_response_slice(path))
-                            // TODO this doesn't precisely match previous behavior
-                            .extension_code("")
                             .build()
                         );
                         return Err(InvalidValue);

@@ -560,8 +560,6 @@ macro_rules! gen_map_deferred_response {
                                 let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
                                 let error = Error::builder()
                                     .message(error_details.message.unwrap_or_default())
-                                    // TODO this doesn't precisely match previous behavior
-                                    .extension_code("")
                                     .build();
                                 response.errors = vec![error];
                                 return Some(response);

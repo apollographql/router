@@ -116,21 +116,33 @@ impl Error {
     ///   Optional, may be called multiple times.
     ///   Adds one item to the [`Error::extensions`] map.
     ///
+    /// * `.extension_code(impl Into<`[`String`]`>)`
+    ///   Optional.
+    ///   Sets the "code" in the extension map. Will be ignored if extension already has this key
+    ///   set.
+    ///
+    /// * `.apollo_id(impl Into<`[`UUID`]`>)`
+    ///   Optional.
+    ///   Sets the unique identifier for this Error. This should only be used in cases of
+    ///   deserialization or testing. If not given, the ID will be auto-generated.
+    ///
     /// * `.build()`
     ///   Finishes the builder and returns a GraphQL [`Error`].
     #[builder(visibility = "pub")]
-    fn new<T: Into<String>>(
+    fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
-        extension_code: T,
+        extension_code: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         mut extensions: JsonMap<ByteString, Value>,
         apollo_id: Option<Uuid>
     ) -> Self {
-        extensions
-            .entry("code")
-            .or_insert_with(|| extension_code.into().into());
+        if let Some(code)  = extension_code  {
+            extensions
+                .entry("code")
+                .or_insert(Value::String(ByteString::from(code)));
+        }
         Self {
             message,
             locations,
@@ -141,8 +153,6 @@ impl Error {
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
-        let _value_str = value.to_string(); // TODO temp debug remove
-
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: format!("invalid error within `errors`: {}", error),
         })?;
@@ -249,20 +259,6 @@ impl Error {
 
     pub fn apollo_id(&self) -> Uuid {
         self.apollo_id
-    }
-}
-
-
-impl Default for Error {
-    fn default() -> Self {
-        Error {
-            message: String::default(),
-            locations: Vec::default(),
-            path: None,
-            extensions: Object::default(),
-            // Always generate a new UUID
-            apollo_id: Uuid::new_v4(),
-        }
     }
 }
 
