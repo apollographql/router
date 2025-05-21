@@ -165,7 +165,7 @@ type T
   @join__type(graph: TWO, key: "id")
 {
   id: ID!
-  tagged: String @join__field(graph: ONE) @tag(name: "tag")
+  tagged: TEnum @join__field(graph: ONE) @tag(name: "tag")
   hidden: String @inaccessible @join__field(graph: ONE)
   custom: String @join__field(graph: ONE) @custom @custom2
   authenticated: String @join__field(graph: ONE) @authenticated
@@ -189,4 +189,14 @@ type Z
   id: ID!
   y: String @custom(s: "x", e: ONE, i: {one: "one"})
   x: X @custom3(s: "x", e: ONE, i: {one: "one"})
+}
+
+enum TEnum @join__type(graph: ONE) {
+  ONE
+  TWO
+}
+
+input UnusedInput @join__type(graph: ONE) {
+  one: String
+  two: TEnum
 }

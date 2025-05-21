@@ -52,7 +52,7 @@ subgraphs:
 
         type T @key(fields: "id") {
           id: ID!
-          tagged: String @tag(name: "tag")
+          tagged: TEnum @tag(name: "tag")
           hidden: String @inaccessible
           custom: String @custom @custom2
           authenticated: String @authenticated
@@ -64,6 +64,18 @@ subgraphs:
             http: { GET: "/t/{$$this.id}/r" }
             selection: "id"
           )
+        }
+
+        enum TEnum {
+          ONE
+          TWO
+        }
+
+        # if we carry this definition over, it won't have a valid reference
+        # to the enum it its expanded subgraph, so it'll fail in JS merging
+        input UnusedInput {
+          one: String
+          two: TEnum
         }
 
         type R {
