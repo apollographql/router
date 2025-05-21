@@ -74,7 +74,7 @@ pub struct Error {
 
     // TODO do we need to implement a random one for default?
     /// A unique identifier for this error
-    apollo_id: Uuid
+    pub apollo_id: Uuid
 
     // TODO add attr to mark as counted, skip serialize?
     // TODO would include_subgraph_errors or a customer's plugin change this?
