@@ -188,12 +188,13 @@ impl LinkSpecDefinition {
         }
 
         let schema_definition = SchemaDefinitionPosition.get(schema.schema());
-        SchemaDefinitionPosition.insert_directive(
+        SchemaDefinitionPosition.insert_directive_at(
             schema,
             Component {
                 origin: schema_definition.origin_to_use(),
                 node: Node::new(Directive { name, arguments }),
             },
+            0, // @link to link spec should be first
         )?;
         Ok(())
     }

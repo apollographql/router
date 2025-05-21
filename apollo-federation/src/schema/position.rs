@@ -921,6 +921,15 @@ impl SchemaDefinitionPosition {
         schema: &mut FederationSchema,
         directive: Component<Directive>,
     ) -> Result<(), FederationError> {
+        self.insert_directive_at(schema, directive, self.get(&schema.schema).directives.len())
+    }
+
+    pub(crate) fn insert_directive_at(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+        index: usize,
+    ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         if schema_definition
             .directives
@@ -936,7 +945,10 @@ impl SchemaDefinitionPosition {
             .into());
         }
         let name = directive.name.clone();
-        schema_definition.make_mut().directives.push(directive);
+        schema_definition
+            .make_mut()
+            .directives
+            .insert(index, directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)?;
         schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         Ok(())

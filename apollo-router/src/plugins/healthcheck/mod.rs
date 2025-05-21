@@ -173,11 +173,16 @@ impl PluginPrivate for HealthCheck {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        tracing::info!(
-            "Health check exposed at {}{}",
-            init.config.listen,
-            init.config.path
-        );
+        // We always do the work to track readiness and liveness because we
+        // need that data to implement our `router_service`. We only log out
+        // our health tracing message if our health check is enabled.
+        if init.config.enabled {
+            tracing::info!(
+                "Health check exposed at {}{}",
+                init.config.listen,
+                init.config.path
+            );
+        }
         let live = Arc::new(AtomicBool::new(false));
         let ready = Arc::new(AtomicBool::new(false));
         let rejected = Arc::new(AtomicUsize::new(0));
@@ -219,6 +224,7 @@ impl PluginPrivate for HealthCheck {
     }
 
     // Track rejected requests due to traffic shaping.
+    // We always do this; even if the health check is disabled.
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let my_rejected = self.rejected.clone();
 
@@ -239,64 +245,66 @@ impl PluginPrivate for HealthCheck {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
 
-        let my_ready = self.ready.clone();
-        let my_live = self.live.clone();
+        if self.config.enabled {
+            let my_ready = self.ready.clone();
+            let my_live = self.live.clone();
 
-        let endpoint = Endpoint::from_router_service(
-            self.config.path.clone(),
-            service_fn(move |req: router::Request| {
-                let mut status_code = StatusCode::OK;
-                let health = if let Some(query) = req.router_request.uri().query() {
-                    let query_upper = query.to_ascii_uppercase();
-                    // Could be more precise, but sloppy match is fine for this use case
-                    if query_upper.starts_with("READY") {
-                        let status = if my_ready.load(Ordering::SeqCst) {
-                            HealthStatus::Up
+            let endpoint = Endpoint::from_router_service(
+                self.config.path.clone(),
+                service_fn(move |req: router::Request| {
+                    let mut status_code = StatusCode::OK;
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if my_ready.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if my_live.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
                         } else {
-                            // It's hard to get k8s to parse payloads. Especially since we
-                            // can't install curl or jq into our docker images because of CVEs.
-                            // So, compromise, k8s will interpret this as probe fail.
-                            status_code = StatusCode::SERVICE_UNAVAILABLE;
-                            HealthStatus::Down
-                        };
-                        Health { status }
-                    } else if query_upper.starts_with("LIVE") {
-                        let status = if my_live.load(Ordering::SeqCst) {
-                            HealthStatus::Up
-                        } else {
-                            // It's hard to get k8s to parse payloads. Especially since we
-                            // can't install curl or jq into our docker images because of CVEs.
-                            // So, compromise, k8s will interpret this as probe fail.
-                            status_code = StatusCode::SERVICE_UNAVAILABLE;
-                            HealthStatus::Down
-                        };
-                        Health { status }
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
                     } else {
                         Health {
                             status: HealthStatus::Up,
                         }
+                    };
+                    tracing::trace!(?health, request = ?req.router_request, "health check");
+                    async move {
+                        Ok(router::Response {
+                            response: http::Response::builder().status(status_code).body(
+                                router::body::from_bytes(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?,
+                                ),
+                            )?,
+                            context: req.context,
+                        })
                     }
-                } else {
-                    Health {
-                        status: HealthStatus::Up,
-                    }
-                };
-                tracing::trace!(?health, request = ?req.router_request, "health check");
-                async move {
-                    Ok(router::Response {
-                        response: http::Response::builder().status(status_code).body(
-                            router::body::from_bytes(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?,
-                            ),
-                        )?,
-                        context: req.context,
-                    })
-                }
-            })
-            .boxed(),
-        );
+                })
+                .boxed(),
+            );
 
-        map.insert(self.config.listen.clone(), endpoint);
+            map.insert(self.config.listen.clone(), endpoint);
+        }
 
         map
     }
@@ -335,7 +343,7 @@ mod test {
         config: &'static str,
         response_status_code: StatusCode,
     ) -> (
-        axum::Router,
+        Option<Endpoint>,
         Option<ServiceHandle<router::Request, router::BoxService>>,
         PluginTestHarness<HealthCheck>,
     ) {
@@ -375,9 +383,9 @@ mod test {
 
         let endpoints = test_harness.web_endpoints();
 
-        let endpoint = endpoints.get(&listen_addr).expect("it better be there");
+        let endpoint = endpoints.get(&listen_addr);
 
-        (endpoint.clone().into_router(), Some(svc), test_harness)
+        (endpoint.cloned(), Some(svc), test_harness)
     }
 
     // This could be improved. It makes assumptions about the content of config files regarding how
@@ -388,10 +396,11 @@ mod test {
         config: &'static str,
         status_string: &str,
         response_status_code: StatusCode,
+        expect_endpoint: bool,
     ) {
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
 
-        let (mut axum_router, pipeline_svc_opt, _test_harness) =
+        let (axum_router_opt, pipeline_svc_opt, _test_harness) =
             get_axum_router(listen_addr, config, response_status_code).await;
 
         let request = http::Request::builder()
@@ -408,31 +417,36 @@ mod test {
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
 
-        // This creates our web_endpoint (in this case the health check) so that we can call it
-        let mut svc = axum_router.as_service();
-        let response = svc
-            .ready()
-            .await
-            .expect("readied")
-            .call(request)
-            .await
-            .expect("called it");
-
-        let expected_code = if status_string == "DOWN" {
-            StatusCode::SERVICE_UNAVAILABLE
-        } else {
-            StatusCode::OK
-        };
-
-        assert_eq!(expected_code, response.status());
-
-        let j: serde_json::Value = serde_json::from_slice(
-            &crate::services::router::body::into_bytes(response)
+        if expect_endpoint {
+            let mut axum_router = axum_router_opt.expect("it better be there").into_router();
+            // This creates our web_endpoint (in this case the health check) so that we can call it
+            let mut svc = axum_router.as_service();
+            let response = svc
+                .ready()
                 .await
-                .expect("we have a body"),
-        )
-        .expect("some json");
-        assert_eq!(json!({"status": status_string }), j)
+                .expect("readied")
+                .call(request)
+                .await
+                .expect("called it");
+
+            let expected_code = if status_string == "DOWN" {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::OK
+            };
+
+            assert_eq!(expected_code, response.status());
+
+            let j: serde_json::Value = serde_json::from_slice(
+                &crate::services::router::body::into_bytes(response)
+                    .await
+                    .expect("we have a body"),
+            )
+            .expect("some json");
+            assert_eq!(json!({"status": status_string }), j)
+        } else {
+            assert!(axum_router_opt.is_none())
+        }
     }
 
     #[tokio::test]
@@ -443,6 +457,7 @@ mod test {
             include_str!("testdata/default_listener.router.yaml"),
             "UP",
             StatusCode::OK,
+            true,
         )
         .await;
     }
@@ -455,6 +470,7 @@ mod test {
             include_str!("testdata/custom_listener.router.yaml"),
             "UP",
             StatusCode::OK,
+            true,
         )
         .await;
     }
@@ -467,6 +483,7 @@ mod test {
             include_str!("testdata/allowed_ten_per_second.router.yaml"),
             "DOWN",
             StatusCode::GATEWAY_TIMEOUT,
+            true,
         )
         .await;
     }
@@ -479,6 +496,7 @@ mod test {
             include_str!("testdata/allowed_ten_per_second.router.yaml"),
             "DOWN",
             StatusCode::SERVICE_UNAVAILABLE,
+            true,
         )
         .await;
     }
@@ -491,6 +509,7 @@ mod test {
             include_str!("testdata/allowed_fifty_per_second.router.yaml"),
             "UP",
             StatusCode::GATEWAY_TIMEOUT,
+            true,
         )
         .await;
     }
@@ -503,6 +522,20 @@ mod test {
             include_str!("testdata/allowed_fifty_per_second.router.yaml"),
             "UP",
             StatusCode::SERVICE_UNAVAILABLE,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_disabled() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/disabled_listener.router.yaml"),
+            "UP",
+            StatusCode::SERVICE_UNAVAILABLE,
+            false,
         )
         .await;
     }

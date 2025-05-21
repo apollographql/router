@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
 expression: aggregated_metrics
+snapshot_kind: text
 ---
 {
   "traces_per_query": {
@@ -1465,5 +1466,9 @@ expression: aggregated_metrics
       "subtype": null,
       "licensed_operation_count": 2
     }
-  }
+  },
+  "router_features_enabled": [
+    "distributed_apq_cache",
+    "entity_cache"
+  ]
 }

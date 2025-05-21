@@ -1,6 +1,14 @@
-# Enable apq
+# Enable distributed apq cache
 apq:
   enabled: true
+  router:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+  subgraph:
+    all:
+      enabled: true
 
 # Enable entity cache
 preview_entity_cache:
