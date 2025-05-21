@@ -15,7 +15,7 @@ use crate::Context;
 use crate::plugins::connectors::make_requests::RequestInputs;
 use crate::services::external::externalize_header_map;
 
-pub(crate) struct RequestMerger<'merger> {
+pub(crate) struct MappingContextMerger<'merger> {
     pub(super) inputs: RequestInputs,
     pub(super) variables_used: &'merger HashSet<Namespace>,
     pub(super) config: Option<Value>,
@@ -25,7 +25,7 @@ pub(crate) struct RequestMerger<'merger> {
     pub(super) response: Option<Value>,
 }
 
-impl RequestMerger<'_> {
+impl MappingContextMerger<'_> {
     pub(crate) fn merge(self) -> IndexMap<String, Value> {
         let mut map =
             IndexMap::with_capacity_and_hasher(self.variables_used.len(), Default::default());
@@ -99,9 +99,9 @@ impl RequestMerger<'_> {
         self
     }
 
-    pub(crate) fn status(mut self, status: Option<u16>) -> Self {
+    pub(crate) fn status(mut self, status: u16) -> Self {
         // $status is available only for response mapping
-        if let (true, Some(status)) = (self.variables_used.contains(&Namespace::Status), status) {
+        if self.variables_used.contains(&Namespace::Status) {
             self.status = Some(Value::Number(status.into()));
         }
         self

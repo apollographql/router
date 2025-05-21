@@ -102,7 +102,7 @@ impl RawResponse {
                     .merger(&connector.response_variables)
                     .config(connector.config.as_ref())
                     .context(context)
-                    .status(Some(parts.status.as_u16()))
+                    .status(parts.status.as_u16())
                     .request(&connector.response_headers, &supergraph_request)
                     .response(&connector.response_headers, Some(&parts))
                     .merge();
@@ -168,7 +168,7 @@ impl RawResponse {
                         .merger(&connector.response_variables)
                         .config(connector.config.as_ref())
                         .context(context)
-                        .status(Some(parts.status.as_u16()))
+                        .status(parts.status.as_u16())
                         .request(&connector.response_headers, &supergraph_request)
                         .response(&connector.response_headers, Some(&parts))
                         .merge()

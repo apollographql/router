@@ -10,7 +10,7 @@ use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
 use parking_lot::Mutex;
-use request_merger::RequestMerger;
+use request_merger::MappingContextMerger;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -41,8 +41,8 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> RequestMerger {
-        RequestMerger {
+    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
+        MappingContextMerger {
             inputs: self,
             variables_used,
             config: None,
