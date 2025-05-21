@@ -879,6 +879,7 @@ impl SpecDefinition for FederationSpecDefinition {
             return specs;
         }
 
+        specs.push(Box::new(Self::extends_directive_specification()));
         specs.push(Box::new(self.shareable_directive_specification()));
 
         if let Some(inaccessible_spec) =

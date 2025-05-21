@@ -973,6 +973,7 @@ fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
         }
     }
 }
+<<<<<<< Updated upstream
 
 #[allow(dead_code, clippy::only_used_in_recursion)]
 fn validate_field_value_type_inner(
@@ -3095,3 +3096,5 @@ mod tests {
         // TODO: Implement proper validation for @fromContext on directive definition arguments
     }
 }
+=======
+>>>>>>> Stashed changes
