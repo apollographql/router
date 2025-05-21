@@ -12,12 +12,13 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::query_graph::build_query_graph::parse_context;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::validators::from_context::parse_context;
 
 fn unwrap_schema(fed_schema: &FederationSchema) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -52,8 +53,7 @@ impl SubgraphMetadata {
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
         let shareable_fields = if federation_spec_definition.is_fed1() {
-            // TODO (FED-428): Currently, `@shareable` is not used in Fed 1 schemas. But, the
-            // comments in the `collect_shareable_fields` function suggests that it may be used.
+            // `@shareable` is not used in Fed 1 schemas.
             Default::default()
         } else {
             Self::collect_shareable_fields(schema, federation_spec_definition)?
@@ -87,6 +87,10 @@ impl SubgraphMetadata {
 
     pub(crate) fn is_field_external(&self, field: &FieldDefinitionPosition) -> bool {
         self.external_metadata().is_external(field)
+    }
+
+    pub(crate) fn is_field_external_in_implementer(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_external_in_implementer(field)
     }
 
     pub(crate) fn is_field_fake_external(&self, field: &FieldDefinitionPosition) -> bool {
@@ -168,7 +172,7 @@ impl SubgraphMetadata {
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
             required_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
-                requires_directive.target.type_name.clone(),
+                requires_directive.target.type_name().clone(),
                 requires_directive.arguments.fields,
                 false,
             )?);
@@ -181,6 +185,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut shareable_fields = IndexSet::default();
+        // PORT_NOTE: The comment below is from the JS code. It doesn't seem to apply to the Rust code.
         // @shareable is only available on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
@@ -245,7 +250,11 @@ impl SubgraphMetadata {
             .into_iter()
             .filter_map(|d| d.ok())
         {
-            let (context, selection) = parse_context(from_context_directive.arguments.field)?;
+            let (Some(context), Some(selection)) =
+                parse_context(from_context_directive.arguments.field)
+            else {
+                continue;
+            };
             if let Some(entry_point) = entry_points.get(context.as_str()) {
                 for context_type in entry_point {
                     used_context_fields.extend(collect_target_fields_from_field_set(
@@ -305,6 +314,9 @@ pub(crate) struct ExternalMetadata {
     fake_external_fields: IndexSet<FieldDefinitionPosition>,
     /// Fields that are external because their parent type has an `@external` directive.
     fields_on_external_types: IndexSet<FieldDefinitionPosition>,
+    /// Fields which are not necessarily external on their source interface but have an implementation
+    /// which does mark that field as external.
+    fields_with_external_implementation: IndexSet<FieldDefinitionPosition>,
 }
 
 impl ExternalMetadata {
@@ -329,10 +341,34 @@ impl ExternalMetadata {
             Default::default()
         };
 
+        // We want to be able to check if an interface field has an implementation which marks it as external.
+        // We take the external fields we already collected and find possible interface candidates for object
+        // types. Then, we filter down to those candidates which actually have the field we're looking at.
+        let fields_with_external_implementation = external_fields
+            .iter()
+            .flat_map(|external_field| {
+                let Ok(ExtendedType::Object(ty)) = external_field.parent().get(schema.schema())
+                else {
+                    return vec![];
+                };
+                ty.implements_interfaces
+                    .iter()
+                    .map(|itf| {
+                        FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
+                            type_name: itf.name.clone(),
+                            field_name: external_field.field_name().clone(),
+                        })
+                    })
+                    .filter(|candidate_field| candidate_field.try_get(schema.schema()).is_some())
+                    .collect()
+            })
+            .collect();
+
         Ok(Self {
             external_fields,
             fake_external_fields,
             fields_on_external_types,
+            fields_with_external_implementation,
         })
     }
 
@@ -441,6 +477,14 @@ impl ExternalMetadata {
                 .fields_on_external_types
                 .contains(field_definition_position))
             && !self.is_fake_external(field_definition_position)
+    }
+
+    pub(crate) fn is_external_in_implementer(
+        &self,
+        field_definition_position: &FieldDefinitionPosition,
+    ) -> bool {
+        self.fields_with_external_implementation
+            .contains(field_definition_position)
     }
 
     pub(crate) fn is_fake_external(

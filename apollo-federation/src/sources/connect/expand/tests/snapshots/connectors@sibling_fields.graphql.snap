@@ -19,41 +19,23 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         transport: HttpJsonTransport {
             source_url: None,
-            connect_template: URLTemplate {
-                base: Some(
-                    Url {
-                        scheme: "https",
-                        cannot_be_a_base: false,
-                        username: "",
-                        password: None,
-                        host: Some(
-                            Domain(
-                                "my.api",
-                            ),
-                        ),
-                        port: None,
-                        path: "/",
-                        query: None,
-                        fragment: None,
-                    },
-                ),
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "t",
-                                    location: 15..16,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "https://my.api/t",
+                            location: 0..16,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -104,6 +86,16 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
     "connectors_T_b_0": Connector {
         id: ConnectId {
@@ -120,103 +112,81 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         transport: HttpJsonTransport {
             source_url: None,
-            connect_template: URLTemplate {
-                base: Some(
-                    Url {
-                        scheme: "https",
-                        cannot_be_a_base: false,
-                        username: "",
-                        password: None,
-                        host: Some(
-                            Domain(
-                                "my.api",
-                            ),
-                        ),
-                        port: None,
-                        path: "/",
-                        query: None,
-                        fragment: None,
-                    },
-                ),
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "t",
-                                    location: 15..16,
-                                },
-                            ),
-                        ],
-                    },
-                    StringTemplate {
-                        parts: [
-                            Expression(
-                                Expression {
-                                    expression: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "https://my.api/t/",
+                            location: 0..17,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
                                                     WithRange {
-                                                        node: $this,
+                                                        node: Field(
+                                                            "k",
+                                                        ),
                                                         range: Some(
-                                                            0..5,
+                                                            6..7,
                                                         ),
                                                     },
                                                     WithRange {
                                                         node: Key(
                                                             WithRange {
                                                                 node: Field(
-                                                                    "k",
+                                                                    "id",
                                                                 ),
                                                                 range: Some(
-                                                                    6..7,
+                                                                    8..10,
                                                                 ),
                                                             },
                                                             WithRange {
-                                                                node: Key(
-                                                                    WithRange {
-                                                                        node: Field(
-                                                                            "id",
-                                                                        ),
-                                                                        range: Some(
-                                                                            8..10,
-                                                                        ),
-                                                                    },
-                                                                    WithRange {
-                                                                        node: Empty,
-                                                                        range: Some(
-                                                                            10..10,
-                                                                        ),
-                                                                    },
-                                                                ),
+                                                                node: Empty,
                                                                 range: Some(
-                                                                    7..10,
+                                                                    10..10,
                                                                 ),
                                                             },
                                                         ),
                                                         range: Some(
-                                                            5..10,
+                                                            7..10,
                                                         ),
                                                     },
                                                 ),
                                                 range: Some(
-                                                    0..10,
+                                                    5..10,
                                                 ),
                                             },
-                                        },
-                                    ),
-                                    location: 18..28,
+                                        ),
+                                        range: Some(
+                                            0..10,
+                                        ),
+                                    },
                                 },
                             ),
-                        ],
-                    },
+                            location: 18..28,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -251,5 +221,15 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

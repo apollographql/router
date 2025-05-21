@@ -1,0 +1,42 @@
+### `supergraph`
+
+<ExpansionPanel title="supergraph YAML snippet">
+
+```yaml title="supergraph"
+supergraph:
+  defer_support: true
+  early_cancel: false
+  experimental_log_on_broken_pipe: false
+  generate_query_fragments: true
+  introspection: false
+  listen: example_listen
+  path: /
+  query_planning:
+    cache:
+      in_memory:
+        limit: 1
+      redis:
+        namespace: example_namespace
+        password: example_password
+        pool_size: 1
+        required_to_start: false
+        reset_ttl: true
+        timeout: null
+        tls:
+          certificate_authorities: null
+          client_authentication:
+            certificate_chain: example_certificate_chain
+            key: example_key
+        ttl:
+          nanos: 0
+          secs: 2592000
+        urls:
+        - http://example.com/urls_item
+        username: example_username
+    experimental_paths_limit: null
+    experimental_plans_limit: null
+    experimental_reuse_query_plans: false
+    warmed_up_queries: null
+```
+
+</ExpansionPanel>

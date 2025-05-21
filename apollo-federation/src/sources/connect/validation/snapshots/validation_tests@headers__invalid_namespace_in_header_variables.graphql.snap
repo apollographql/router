@@ -15,7 +15,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context, $request",
         locations: [
-            12:62..12:67,
+            12:62..12:71,
         ],
     },
     Message {

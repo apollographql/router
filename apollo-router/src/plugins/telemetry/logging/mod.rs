@@ -13,7 +13,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             let mut response = test_harness
@@ -42,7 +45,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             let mut response = test_harness
@@ -71,7 +77,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             test_harness

@@ -227,7 +227,7 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
                 .supergraph_service(|req| async {
@@ -275,7 +275,7 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
             harness
                 .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
@@ -330,7 +330,7 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_disabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
                 .supergraph_service(|req| async {
@@ -372,7 +372,7 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/filtered_field_length.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
                 .supergraph_service(|req| async {

@@ -1,5 +1,9 @@
 //! Validates `@source` directives
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::parser::SourceMap;
@@ -7,8 +11,11 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Value;
 use hashbrown::HashMap;
 
+use super::coordinates::SourceDirectiveCoordinate;
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
+use super::errors::ErrorsCoordinate;
+use super::http::UrlProperties;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
@@ -17,6 +24,7 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::source_http_argument_coordinate;
+use crate::sources::connect::validation::errors::Errors;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::parse_url;
@@ -67,6 +75,20 @@ impl<'schema> SourceDirective<'schema> {
         let (name, name_errors) = SourceName::from_directive(directive, &schema.sources);
         errors.extend(name_errors);
 
+        let coordinate = SourceDirectiveCoordinate {
+            directive,
+            name: name.unwrap_or_default(),
+        };
+
+        errors.extend(
+            Errors::parse(ErrorsCoordinate::Source { source: coordinate }, schema)
+                // TODO: Move type checking to a later phase so parsing can be shared with runtime
+                .and_then(|errors| errors.type_check(schema))
+                .err()
+                .into_iter()
+                .flatten(),
+        );
+
         if let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
@@ -88,6 +110,11 @@ impl<'schema> SourceDirective<'schema> {
                     errors.push(url_error);
                 }
             }
+
+            match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
+                Ok(url_properties) => errors.extend(url_properties.type_check(schema)),
+                Err(errs) => errors.extend(errs),
+            };
 
             errors.extend(
                 Headers::parse(
@@ -122,7 +149,7 @@ impl<'schema> SourceDirective<'schema> {
 }
 
 /// The `name` argument of a `@source` directive.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy, Default)]
 pub(super) struct SourceName<'schema>(&'schema str);
 
 impl<'schema> SourceName<'schema> {
@@ -211,6 +238,12 @@ impl<'schema> SourceName<'schema> {
 
     pub(crate) fn as_str(&self) -> &str {
         self.0
+    }
+}
+
+impl Display for SourceName<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 

@@ -2,21 +2,18 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
-use http::response::Parts;
 use parking_lot::Mutex;
+use request_merger::MappingContextMerger;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use serde_json_bytes::json;
 
 use super::http_json_transport::HttpJsonTransportError;
 use super::http_json_transport::make_request;
@@ -26,7 +23,8 @@ use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-use crate::services::external::externalize_header_map;
+
+pub(crate) mod request_merger;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -43,120 +41,16 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn merge(
-        &self,
-        variables_used: &HashSet<Namespace>,
-        headers_used: &HashSet<String>,
-        config: Option<&CustomConfiguration>,
-        context: &Context,
-        status: Option<u16>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-        response_parts: Option<&Parts>,
-    ) -> IndexMap<String, Value> {
-        let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
-
-        // Not all connectors reference $args
-        if variables_used.contains(&Namespace::Args) {
-            map.insert(
-                Namespace::Args.as_str().into(),
-                Value::Object(self.args.clone()),
-            );
+    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
+        MappingContextMerger {
+            inputs: self,
+            variables_used,
+            config: None,
+            context: None,
+            status: None,
+            request: None,
+            response: None,
         }
-
-        // $this only applies to fields on entity types (not Query or Mutation)
-        if variables_used.contains(&Namespace::This) {
-            map.insert(
-                Namespace::This.as_str().into(),
-                Value::Object(self.this.clone()),
-            );
-        }
-
-        // $batch only applies to entity resolvers on types
-        if variables_used.contains(&Namespace::Batch) {
-            map.insert(
-                Namespace::Batch.as_str().into(),
-                Value::Array(self.batch.clone().into_iter().map(Value::Object).collect()),
-            );
-        }
-
-        // $context could be a large object, so we only convert it to JSON
-        // if it's used. It can also be mutated between requests, so we have
-        // to convert it each time.
-        if variables_used.contains(&Namespace::Context) {
-            let context: Map<ByteString, Value> = context
-                .iter()
-                .map(|r| (r.key().as_str().into(), r.value().clone()))
-                .collect();
-            map.insert(Namespace::Context.as_str().into(), Value::Object(context));
-        }
-
-        // $config doesn't change unless the schema reloads, but we can avoid
-        // the allocation if it's unused.
-        if variables_used.contains(&Namespace::Config) {
-            if let Some(config) = config {
-                map.insert(Namespace::Config.as_str().into(), json!(config));
-            }
-        }
-
-        // $status is available only for response mapping
-        if variables_used.contains(&Namespace::Status) {
-            if let Some(status) = status {
-                map.insert(
-                    Namespace::Status.as_str().into(),
-                    Value::Number(status.into()),
-                );
-            }
-        }
-
-        // Add headers from the original router request.
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|(key, value)| {
-                    headers_used.contains(key.as_str()).then_some((
-                        key.as_str().into(),
-                        value
-                            .iter()
-                            .map(|s| Value::String(s.as_str().into()))
-                            .collect(),
-                    ))
-                })
-                .collect();
-            let request_object = json!({
-                "headers": Value::Object(new_headers)
-            });
-            map.insert(Namespace::Request.as_str().into(), request_object);
-        }
-
-        // Add headers from the connectors response
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Response) {
-            if let Some(response_parts) = response_parts {
-                let new_headers: Map<ByteString, Value> =
-                    externalize_header_map(&response_parts.headers)
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            headers_used.contains(key.as_str()).then_some((
-                                key.as_str().into(),
-                                value
-                                    .iter()
-                                    .map(|s| Value::String(s.as_str().into()))
-                                    .collect(),
-                            ))
-                        })
-                        .collect();
-                let response_object = json!({
-                    "headers": Value::Object(new_headers)
-                });
-                map.insert(Namespace::Response.as_str().into(), response_object);
-            }
-        }
-
-        map
     }
 }
 
@@ -345,15 +239,17 @@ fn request_params_to_requests(
         let connector = connector.clone();
         let (transport_request, mapping_problems) = make_request(
             &connector.transport,
-            response_key.inputs().merge(
-                &connector.request_variables,
-                &connector.request_headers,
-                connector.config.as_ref(),
-                &original_request.context,
-                None,
-                original_request.supergraph_request.clone(),
-                None,
-            ),
+            response_key
+                .inputs()
+                .clone()
+                .merger(&connector.request_variables)
+                .config(connector.config.as_ref())
+                .context(&original_request.context)
+                .request(
+                    &connector.request_headers,
+                    &original_request.supergraph_request,
+                )
+                .merge(),
             &original_request,
             debug,
         )?;
@@ -437,8 +333,8 @@ fn root_fields(
                     .to_string();
 
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
-                    .map_err(|_| {
-                        InvalidArguments("cannot get inputs from field arguments".into())
+                    .map_err(|err| {
+                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
                 let request_inputs = RequestInputs {
@@ -684,8 +580,8 @@ fn entities_with_fields_from_request(
 
             representations.iter().map(move |(i, representation)| {
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
-                    .map_err(|_| {
-                        InvalidArguments("cannot build inputs from field arguments".into())
+                    .map_err(|err| {
+                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
                 let response_name = field
@@ -761,33 +657,51 @@ fn batch_entities_from_request(
         Some(keys),
     ));
 
-    let inputs = RequestInputs {
-        batch: representations
-            .as_array()
-            .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
-            .iter()
-            .map(|rep| {
-                let obj = rep
-                    .as_object()
-                    .ok_or_else(|| {
-                        InvalidRepresentations("representation is not an object".into())
-                    })?
-                    .clone();
-                Ok::<_, MakeRequestError>(obj)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        ..Default::default()
+    // First, let's grab all the representations into a single batch
+    let batch = representations
+        .as_array()
+        .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
+        .iter()
+        .map(|rep| {
+            let obj = rep
+                .as_object()
+                .ok_or_else(|| InvalidRepresentations("representation is not an object".into()))?
+                .clone();
+            Ok::<_, MakeRequestError>(obj)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // If we've got a max_size set, chunk the batch into smaller batches. Otherwise, we'll default to just a single batch.
+    let max_size = connector.batch_settings.as_ref().and_then(|bs| bs.max_size);
+    let batches = if let Some(size) = max_size {
+        batch.chunks(size).map(|chunk| chunk.to_vec()).collect()
+    } else {
+        vec![batch]
     };
 
-    Ok(vec![ResponseKey::BatchEntity {
-        selection: selection.clone(),
-        inputs,
-        keys: keys.clone(),
-    }])
+    // Finally, map the batches to BatchEntity. Each one of these final BatchEntity's ends up being a outgoing request
+    let batch_entities = batches
+        .iter()
+        .map(|batch| {
+            let inputs = RequestInputs {
+                batch: batch.to_vec(),
+                ..Default::default()
+            };
+
+            ResponseKey::BatchEntity {
+                selection: selection.clone(),
+                inputs,
+                keys: keys.clone(),
+            }
+        })
+        .collect();
+
+    Ok(batch_entities)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
@@ -797,11 +711,11 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::ConnectorBatchSettings;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
     use insta::assert_debug_snapshot;
-    use url::Url;
 
     use crate::Context;
     use crate::graphql;
@@ -848,11 +762,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
@@ -860,8 +772,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -933,11 +847,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$").unwrap(),
             entity_resolver: None,
@@ -945,8 +857,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1044,11 +958,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -1056,8 +968,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1167,11 +1081,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
@@ -1179,8 +1091,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1289,11 +1203,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
@@ -1301,8 +1213,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1392,11 +1306,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field { field }").unwrap(),
             entity_resolver: None,
@@ -1404,8 +1316,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1517,11 +1431,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1529,8 +1441,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1677,11 +1591,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1689,8 +1601,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1834,11 +1748,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1846,8 +1758,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1962,11 +1876,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
@@ -1974,8 +1886,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1987,6 +1901,250 @@ mod tests {
                     args: {},
                     this: {},
                     batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"}]
+                },
+            },
+        ]
+        "#);
+    }
+
+    #[test]
+    fn batch_entities_from_request_within_max_size() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          id: ID!
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .and_keys(Some(keys))
+            .build();
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("id field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            error_settings: Default::default(),
+        };
+
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        [
+            BatchEntity {
+                selection: "id\nfield\nalias: field",
+                key_selection: "id",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {},
+                    batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"}]
+                },
+            },
+        ]
+        "#);
+    }
+
+    #[test]
+    fn batch_entities_from_request_above_max_size() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          id: ID!
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                        { "__typename": "Entity", "id": "3" },
+                        { "__typename": "Entity", "id": "4" },
+                        { "__typename": "Entity", "id": "5" },
+                        { "__typename": "Entity", "id": "6" },
+                        { "__typename": "Entity", "id": "7" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .and_keys(Some(keys))
+            .build();
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("id field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            error_settings: Default::default(),
+        };
+
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        [
+            BatchEntity {
+                selection: "id\nfield\nalias: field",
+                key_selection: "id",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {},
+                    batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"},{"__typename":"Entity","id":"3"},{"__typename":"Entity","id":"4"},{"__typename":"Entity","id":"5"}]
+                },
+            },
+            BatchEntity {
+                selection: "id\nfield\nalias: field",
+                key_selection: "id",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {},
+                    batch: [{"__typename":"Entity","id":"6"},{"__typename":"Entity","id":"7"}]
                 },
             },
         ]
@@ -2077,11 +2235,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path?id={$this.id}".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
@@ -2089,8 +2245,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2155,11 +2313,9 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -2167,8 +2323,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         let requests: Vec<_> = super::make_requests(

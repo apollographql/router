@@ -24,6 +24,7 @@ pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
     pub(crate) licensed_operation_count_by_type: Option<LicensedOperationCountByType>,
+    pub(crate) router_features_enabled: Vec<String>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -479,8 +480,20 @@ mod test {
 
     #[test]
     fn test_aggregation() {
-        let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
-        let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
+        let metric_1 = create_test_metric(
+            "client_1",
+            "version_1",
+            "library_name_1",
+            "library_version_1",
+            "report_key_1",
+        );
+        let metric_2 = create_test_metric(
+            "client_1",
+            "version_1",
+            "library_name_1",
+            "library_version_1",
+            "report_key_1",
+        );
         let aggregated_metrics = Report::new(vec![metric_1, metric_2]);
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(aggregated_metrics);
@@ -489,11 +502,41 @@ mod test {
 
     #[test]
     fn test_aggregation_grouping() {
-        let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
-        let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
-        let metric_3 = create_test_metric("client_2", "version_1", "report_key_1");
-        let metric_4 = create_test_metric("client_1", "version_2", "report_key_1");
-        let metric_5 = create_test_metric("client_1", "version_1", "report_key_2");
+        let metric_1 = create_test_metric(
+            "client_1",
+            "version_1",
+            "library_name_1",
+            "library_version_1",
+            "report_key_1",
+        );
+        let metric_2 = create_test_metric(
+            "client_1",
+            "version_1",
+            "library_name_1",
+            "library_version_1",
+            "report_key_1",
+        );
+        let metric_3 = create_test_metric(
+            "client_2",
+            "version_1",
+            "library_name_2",
+            "library_version_1",
+            "report_key_1",
+        );
+        let metric_4 = create_test_metric(
+            "client_1",
+            "version_2",
+            "library_name_1",
+            "library_version_2",
+            "report_key_1",
+        );
+        let metric_5 = create_test_metric(
+            "client_1",
+            "version_1",
+            "library_name_1",
+            "library_version_1",
+            "report_key_2",
+        );
         let aggregated_metrics =
             Report::new(vec![metric_1, metric_2, metric_3, metric_4, metric_5]);
         assert_eq!(aggregated_metrics.traces_per_query.len(), 2);
@@ -514,6 +557,8 @@ mod test {
     fn create_test_metric(
         client_name: &str,
         client_version: &str,
+        library_name: &str,
+        library_version: &str,
         stats_report_key: &str,
     ) -> SingleStatsReport {
         // This makes me sad. Really this should have just been a case of generate a couple of metrics using
@@ -537,8 +582,8 @@ mod test {
                             result: "".to_string(),
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
-                            client_library_name: String::new(),
-                            client_library_version: String::new(),
+                            client_library_name: library_name.to_string(),
+                            client_library_version: library_version.to_string(),
                             operation_type: String::new(),
                             operation_subtype: String::new(),
                         },
@@ -622,6 +667,10 @@ mod test {
                     query_metadata: None,
                 },
             )]),
+            router_features_enabled: vec![
+                "distributed_apq_cache".to_string(),
+                "entity_cache".to_string(),
+            ],
         }
     }
 

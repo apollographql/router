@@ -3,7 +3,9 @@ mod subgraph_ext;
 mod supergraph_ext;
 
 use std::any::TypeId;
+use std::any::type_name;
 use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -22,6 +24,7 @@ use tower_service::Service;
 
 use crate::Configuration;
 use crate::Notify;
+use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -78,6 +81,13 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
     plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
+
+impl<T: plugin::Plugin> Debug for PluginTestHarness<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PluginTestHarness<{}>", type_name::<T>())
+    }
+}
+
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
@@ -86,7 +96,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         config: Option<&'b str>,
         schema: Option<&'a str>,
         license: Option<LicenseState>,
-    ) -> Self {
+    ) -> Result<Self, BoxError> {
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
@@ -104,6 +114,12 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .get(name)
             .cloned()
             .unwrap_or(Value::Object(Default::default()));
+
+        // Only the telemetry plugin should have access to the full router config (even in tests)
+        let full_config = config
+            .validated_yaml
+            .clone()
+            .filter(|_| name == "telemetry");
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
             let schema = Schema::parse(schema, &config).unwrap();
@@ -134,17 +150,15 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             ))
             .notify(Notify::default())
             .license(license.unwrap_or_default())
+            .full_config(full_config)
             .build();
 
-        let plugin = factory
-            .create_instance(plugin_init)
-            .await
-            .expect("failed to create plugin");
+        let plugin = factory.create_instance(plugin_init).await?;
 
-        Self {
+        Ok(Self {
             plugin,
             phantom: Default::default(),
-        }
+        })
     }
 
     pub(crate) fn router_service<F>(
@@ -487,8 +501,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_router_service() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|_req| async {
             Ok(router::Response::fake_builder()
@@ -510,8 +526,10 @@ mod test_for_harness {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_service_multi_threaded() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -534,8 +552,10 @@ mod test_for_harness {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_is_ready() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.supergraph_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -558,8 +578,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_supergraph_service() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.supergraph_service(|_req| async {
             Ok(supergraph::Response::fake_builder()
@@ -578,8 +600,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_execution_service() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.execution_service(|_req| async {
             Ok(execution::Response::fake_builder()
@@ -598,8 +622,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_subgraph_service() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.subgraph_service("test_subgraph", |_req| async {
             let mut headers = HeaderMap::new();
@@ -619,8 +645,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_http_client_service() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.http_client_service("test_client", |req| async {
             Ok(http::HttpResponse {
@@ -643,8 +671,10 @@ mod test_for_harness {
     #[tokio::test]
     async fn test_router_service_metrics() {
         async {
-            let test_harness: PluginTestHarness<MyTestPlugin> =
-                PluginTestHarness::builder().build().await;
+            let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+                .build()
+                .await
+                .expect("test harness");
 
             let service = test_harness.router_service(|_req| async {
                 u64_counter!("test", "test", 1u64);
@@ -664,8 +694,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_router_service_assertions() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|mut req| async move {
             req.assert_context_contains("request-context-key");
@@ -713,8 +745,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_supergraph_service_assertions() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.supergraph_service(|mut req| async move {
             req.assert_context_contains("request-context-key");
@@ -762,8 +796,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_subgraph_service_assertions() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.subgraph_service("test_subgraph", |mut req| async move {
             req.assert_context_contains("request-context-key");
@@ -819,8 +855,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_canned_router_request_response() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|mut req| async move {
             req.assert_canned_body().await;
@@ -836,8 +874,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_canned_supergraph_request_response() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.supergraph_service(|mut req| async move {
             req.assert_canned_body().await;
@@ -853,8 +893,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_canned_subgraph_request_response() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.subgraph_service("test_subgraph", |mut req| async move {
             req.assert_canned_body().await;
@@ -870,8 +912,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_router_service_assert_contains_error() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|_req| async {
             Ok(router::Response::fake_builder()
@@ -895,8 +939,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_supergraph_service_assert_contains_error() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.supergraph_service(|_req| async {
             Ok(supergraph::Response::fake_builder()
@@ -920,8 +966,10 @@ mod test_for_harness {
 
     #[tokio::test]
     async fn test_subgraph_service_assert_error_contains_error() {
-        let test_harness: PluginTestHarness<MyTestPlugin> =
-            PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.subgraph_service("test_subgraph", |_req| async {
             Ok(subgraph::Response::fake_builder()

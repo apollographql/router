@@ -56,13 +56,11 @@ impl<'schema> EntityKeyChecker<'schema> {
 
         for (key, directive, _) in &self.resolvable_keys {
             let for_type = self.entity_connectors.get(&key.selection_set.ty);
-            let key_exists = for_type
-                .map(|connectors| {
-                    connectors
-                        .iter()
-                        .any(|connector| field_set_is_subset(key, connector))
-                })
-                .unwrap_or(false);
+            let key_exists = for_type.is_some_and(|connectors| {
+                connectors
+                    .iter()
+                    .any(|connector| field_set_is_subset(key, connector))
+            });
             if !key_exists {
                 messages.push(Message {
                     code: Code::MissingEntityConnector,
@@ -130,7 +128,7 @@ pub(crate) fn field_set_error(
             variables.iter().join("`, `"),
             type_name
         ),
-        locations: vec![],
+        locations: Vec::new(),
     }
 }
 

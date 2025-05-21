@@ -44,11 +44,12 @@ use crate::plugin::DynPlugin;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::query_planner::CachingQueryPlanner;
@@ -75,12 +76,10 @@ use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
-use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -436,10 +435,11 @@ async fn service_call(
                         ));
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            if let Some(condition) = supergraph_response_event.0.condition() {
-                                if !condition.lock().evaluate_event_response(resp, &ctx) {
-                                    return;
-                                }
+                            if !supergraph_response_event
+                                .condition
+                                .evaluate_event_response(resp, &ctx)
+                            {
+                                return;
                             }
                             attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
@@ -448,7 +448,7 @@ async fn service_call(
                                 ),
                             ));
                             log_event(
-                                supergraph_response_event.0.level(),
+                                supergraph_response_event.level,
                                 "supergraph.response",
                                 attrs.clone(),
                                 "",
@@ -1009,7 +1009,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let sb = Buffer::new(
             ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
                         .iter()
