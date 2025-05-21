@@ -399,9 +399,6 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
                 paths:
                   - target
-      - run:
-          name: Fixup JUnit results
-          command: circleci-junit-fix < ./target/nextest/ci/junit.xml > junit.xml
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
