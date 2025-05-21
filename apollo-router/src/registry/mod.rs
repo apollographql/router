@@ -77,14 +77,12 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
             RegistryAuth::Anonymous
         }
         Ok(DockerCredential::UsernamePassword(username, password)) => {
-            tracing::debug!("Found docker credentials");
+            tracing::debug!("Found username/password docker credentials");
             RegistryAuth::Basic(username, password)
         }
-        Ok(DockerCredential::IdentityToken(_)) => {
-            tracing::warn!(
-                "Cannot use contents of docker config, identity token not supported. Using anonymous auth"
-            );
-            RegistryAuth::Anonymous
+        Ok(DockerCredential::IdentityToken(token)) => {
+            tracing::debug!("Found identity token docker credentials");
+            RegistryAuth::Bearer(token)
         }
     }
 }
@@ -105,7 +103,7 @@ async fn pull_oci(
     let schema = image
         .layers
         .iter()
-        .find(|layer| layer.media_type == "application/apollo.schema")
+        .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
         .ok_or(Error::OCILayerMissingTitle)?
         .clone();
 
