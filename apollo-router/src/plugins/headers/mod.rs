@@ -12,7 +12,6 @@ use http::header::CONNECTION;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::header::Entry;
 use http::header::HOST;
 use http::header::HeaderName;
 use http::header::PROXY_AUTHENTICATE;
@@ -512,10 +511,7 @@ impl Remove {
     fn process_header_rules(&self, headers_mut: &mut HeaderMap) {
         match self {
             Remove::Named(name) => {
-                // Use `remove_entry_mult` since `remove` only removes the first instance of a header
-                if let Entry::Occupied(entry) = headers_mut.entry(name) {
-                    entry.remove_entry_mult();
-                }
+                headers_mut.remove(name);
             }
             Remove::Matching(matching) => {
                 let new_headers = headers_mut
@@ -552,13 +548,17 @@ impl Propagate {
             } => {
                 let target_header = rename.as_ref().unwrap_or(named);
                 if !already_propagated.contains(target_header.as_str()) {
-                    // If the header was already added previously by some other method (E.g Connectors), remove it since we're going to override it
+                    // If the header was already added previously by some other
+                    // method (e.g Connectors), remove it first before propagating
+                    // the value from the client request. This allows us to use
+                    // `.append` instead of `.insert` to handle multiple headers.
+                    //
+                    // Note: Rhai and Coprocessor plugins run after this plugin,
+                    // so this will not remove headers added there.
                     if existing_headers.contains_key(target_header) {
-                        // Use `remove_entry_mult` since `remove` only removes the first instance of a header
-                        if let Entry::Occupied(entry) = headers_mut.entry(target_header) {
-                            entry.remove_entry_mult();
-                        }
+                        headers_mut.remove(target_header);
                     }
+
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
@@ -583,13 +583,17 @@ impl Propagate {
                     .into_iter()
                     .for_each(|(name, headers)| {
                         if !already_propagated.contains(name.as_str()) {
-                            // If the header was already added previously by some other method (E.g Connectors), remove it since we're going to override it
+                            // If the header was already added previously by some other
+                            // method (e.g Connectors), remove it first before propagating
+                            // the value from the client request. This allows us to use
+                            // `.append` instead of `.insert` to handle multiple headers.
+                            //
+                            // Note: Rhai and Coprocessor plugins run after this plugin,
+                            // so this will not remove headers added there.
                             if existing_headers.contains_key(name) {
-                                // Use `remove_entry_mult` since `remove` only removes the first instance of a header
-                                if let Entry::Occupied(entry) = headers_mut.entry(name) {
-                                    entry.remove_entry_mult();
-                                }
+                                headers_mut.remove(name);
                             }
+
                             headers.for_each(|(_, value)| {
                                 headers_mut.append(name, value.clone());
                             });
@@ -992,6 +996,66 @@ mod test {
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_exact_multiple() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
+        .layer(mock);
+
+        let ctx = Context::new();
+        ctx.insert("my_key", "my_value_from_context".to_string())
+            .unwrap();
+        let req = SubgraphRequest {
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header("db", "vdb2")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+            subgraph_request: http::Request::builder()
+                .header("aa", "vaa") // will be removed
+                .header("aa", "vaa") // will be removed
+                .header("aa", "vaa2") // will be removed
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
+                .body(Request::builder().query("query").build())
+                .expect("expecting valid request"),
+            operation_kind: OperationKind::Query,
+            context: ctx,
+            subgraph_name: String::from("test"),
+            subscription_stream: None,
+            connection_closed_signal: None,
+            query_hash: Default::default(),
+            authorization: Default::default(),
+            executable_document: None,
+            id: SubgraphRequestId(String::new()),
+        };
+
+        service.ready().await?.call(req).await?;
         Ok(())
     }
 
