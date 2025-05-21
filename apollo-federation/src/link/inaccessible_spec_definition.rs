@@ -1,20 +1,19 @@
 use std::fmt;
+use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::Value;
-use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
-use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -24,6 +23,7 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
 use crate::schema::position;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -34,17 +34,18 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
 
 pub(crate) struct InaccessibleSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
+    minimum_federation_version: Version,
 }
 
 impl InaccessibleSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::inaccessible_identity(),
@@ -54,27 +55,12 @@ impl InaccessibleSpecDefinition {
         }
     }
 
-    pub(crate) fn inaccessible_directive(
-        &self,
-        schema: &FederationSchema,
-    ) -> Result<Directive, FederationError> {
-        let name_in_schema = self
-            .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)?
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
-            })?;
-        Ok(Directive {
-            name: name_in_schema,
-            arguments: Vec::new(),
-        })
-    }
-
     /// Returns the `@inaccessible` spec used in the given schema, if any.
     ///
     /// # Errors
     /// Returns an error if the schema specifies an `@inaccessible` spec version that is not
     /// supported by this version of the apollo-federation crate.
-    pub fn get_from_schema(
+    pub(crate) fn get_from_schema(
         schema: &FederationSchema,
     ) -> Result<Option<&'static Self>, FederationError> {
         let inaccessible_link = match schema
@@ -94,15 +80,53 @@ impl InaccessibleSpecDefinition {
         ))
     }
 
-    pub fn validate_inaccessible(&self, schema: &FederationSchema) -> Result<(), FederationError> {
+    pub(crate) fn validate_inaccessible(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<(), FederationError> {
         validate_inaccessible(schema, self)
     }
 
-    pub fn remove_inaccessible_elements(
+    pub(crate) fn remove_inaccessible_elements(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         remove_inaccessible_elements(schema, self)
+    }
+
+    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
+        let locations: &[DirectiveLocation] =
+            if self.url.version == (Version { major: 0, minor: 1 }) {
+                &[
+                    DirectiveLocation::FieldDefinition,
+                    DirectiveLocation::Object,
+                    DirectiveLocation::Interface,
+                    DirectiveLocation::Union,
+                ]
+            } else {
+                &[
+                    DirectiveLocation::FieldDefinition,
+                    DirectiveLocation::Object,
+                    DirectiveLocation::Interface,
+                    DirectiveLocation::Union,
+                    DirectiveLocation::ArgumentDefinition,
+                    DirectiveLocation::Scalar,
+                    DirectiveLocation::Enum,
+                    DirectiveLocation::EnumValue,
+                    DirectiveLocation::InputObject,
+                    DirectiveLocation::InputFieldDefinition,
+                ]
+            };
+
+        Box::new(DirectiveSpecification::new(
+            INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false, // not repeatable
+            locations,
+            true, // composes
+            Some(&|v| INACCESSIBLE_VERSIONS.get_minimum_required_version(v)),
+            None,
+        ))
     }
 }
 
@@ -111,25 +135,33 @@ impl SpecDefinition for InaccessibleSpecDefinition {
         &self.url
     }
 
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![self.directive_specification()]
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        // No type specs for @inaccessible
+        vec![]
+    }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
     }
 }
 
-lazy_static! {
-    pub(crate) static ref INACCESSIBLE_VERSIONS: SpecDefinitions<InaccessibleSpecDefinition> = {
+pub(crate) static INACCESSIBLE_VERSIONS: LazyLock<SpecDefinitions<InaccessibleSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            None,
+            Version { major: 1, minor: 0 },
         ));
         definitions.add(InaccessibleSpecDefinition::new(
             Version { major: 0, minor: 2 },
-            Some(Version { major: 2, minor: 0 }),
+            Version { major: 2, minor: 0 },
         ));
         definitions
-    };
-}
+    });
 
 fn is_type_system_location(location: DirectiveLocation) -> bool {
     matches!(
@@ -294,13 +326,12 @@ fn validate_inaccessible_in_default_value(
         // expected.
         (Value::Enum(_) | Value::String(_), ExtendedType::Enum(type_)) => {
             let value = match default_value {
-                Value::Enum(name) => name.clone(),
-                // It's no problem if this name is invalid.
-                Value::String(node_str) => Name::new_unchecked(node_str.clone()),
+                Value::Enum(name) => name.as_str(),
+                Value::String(s) => s,
                 // Guaranteed to be enum or string by parent match branch.
                 _ => unreachable!(),
             };
-            let Some(enum_value) = type_.values.get(&value) else {
+            let Some(enum_value) = type_.values.get(value) else {
                 return Ok(());
             };
             let enum_value_position = EnumValueDefinitionPosition {
@@ -438,8 +469,8 @@ fn validate_inaccessible_in_fields(
                         }.into());
                     }
                 } else if arg.is_required() {
-                    // When an argument is accessible and required, we check that
-                    // it isn't marked inaccessible in any interface implemented by
+                    // When an argument is accessible and required, we check that it
+                    // isn't marked inaccessible in any interface implemented by
                     // the argument's field. This is because the GraphQL spec
                     // requires that any arguments of an implementing field that
                     // aren't in its implemented field are optional.
@@ -536,7 +567,7 @@ impl IsInaccessibleExt for position::ObjectTypeDefinitionPosition {
         Ok(object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for ObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -550,7 +581,7 @@ impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for ObjectFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -574,7 +605,7 @@ impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
         Ok(interface.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
+impl IsInaccessibleExt for InterfaceFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -588,7 +619,7 @@ impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for InterfaceFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -612,7 +643,7 @@ impl IsInaccessibleExt for position::InputObjectTypeDefinitionPosition {
         Ok(input_object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InputObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for InputObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -656,7 +687,7 @@ impl IsInaccessibleExt for position::EnumTypeDefinitionPosition {
         Ok(enum_.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::EnumValueDefinitionPosition {
+impl IsInaccessibleExt for EnumValueDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,

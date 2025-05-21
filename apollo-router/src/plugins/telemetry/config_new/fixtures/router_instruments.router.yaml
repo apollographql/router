@@ -1,0 +1,52 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.body.size: true
+        http.server.response.body.size:
+          attributes:
+            http.response.status_code: false
+            acme.my_attribute:
+              response_header: x-my-header
+              default: unknown
+        acme.request.on_error:
+          value: unit
+          type: counter
+          unit: error
+          description: my description
+          condition:
+            not:
+              eq:
+                - 200
+                - response_status: code
+          attributes:
+            http.response.status_code: true
+        acme.request.on_critical_error:
+          value: unit
+          type: counter
+          unit: error
+          description: my description
+          condition:
+            eq:
+              - request time out
+              - error: reason
+          attributes:
+            http.response.status_code: true
+        acme.request.on_error_histo:
+          value: unit
+          type: histogram
+          unit: error
+          description: my description
+          condition:
+            not:
+              eq:
+                - 200
+                - response_status: code
+          attributes:
+            http.response.status_code: true
+        acme.request.header_value:
+          value:
+            request_header: x-my-header-count
+          type: counter
+          description: my description
+          unit: nb

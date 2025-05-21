@@ -3,35 +3,38 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::schema::Type;
+use petgraph::Direction;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::SelectionSet;
+use crate::internal_error;
+use crate::operation::Field;
+use crate::operation::InlineFragment;
+use crate::operation::SelectionSet;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 pub mod build_query_graph;
 pub(crate) mod condition_resolver;
-pub(crate) mod extract_subgraphs_from_supergraph;
 pub(crate) mod graph_path;
 pub mod output;
 pub(crate) mod path_tree;
@@ -46,6 +49,8 @@ use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
@@ -53,7 +58,7 @@ pub(crate) struct QueryGraphNode {
     pub(crate) type_: QueryGraphNodeType,
     /// An identifier of the underlying schema containing the `type_` this node points to. This is
     /// mainly used in federated query graphs, where the `source` is a subgraph name.
-    pub(crate) source: NodeStr,
+    pub(crate) source: Arc<str>,
     /// True if there is a cross-subgraph edge that is reachable from this node.
     pub(crate) has_reachable_cross_subgraph_edges: bool,
     /// @provides works by creating duplicates of the node/type involved in the provides and adding
@@ -69,7 +74,7 @@ pub(crate) struct QueryGraphNode {
 }
 
 impl QueryGraphNode {
-    pub fn is_root_node(&self) -> bool {
+    pub(crate) fn is_root_node(&self) -> bool {
         matches!(self.type_, QueryGraphNodeType::FederatedRootType(_))
     }
 }
@@ -80,7 +85,7 @@ impl Display for QueryGraphNode {
         if let Some(provide_id) = self.provide_id {
             write!(f, "-{}", provide_id)?;
         }
-        if self.root_kind.is_some() {
+        if self.is_root_node() {
             write!(f, "*")?;
         }
         Ok(())
@@ -104,7 +109,53 @@ impl Display for QueryGraphNodeType {
     }
 }
 
-#[derive(Debug, Clone)]
+impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => Ok(ty.try_into()?),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a composite type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => Ok(ty.try_into()?),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
+/// Contains all of the data necessary to connect the object field argument (`argument_coordinate`)
+/// with the `@fromContext` to its (grand)parent types contain a matching selection.
+#[derive(Debug, PartialEq, Clone)]
+pub struct ContextCondition {
+    context: String,
+    subgraph_name: Arc<str>,
+    // This is purposely left unparsed in query graphs, due to @fromContext selection sets being
+    // duck-typed.
+    selection: String,
+    types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
+    // PORT_NOTE: This field was renamed because the JS name (`namedParameter`) left confusion to
+    // how it was different from the argument name.
+    argument_name: Name,
+    // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
+    argument_coordinate: ObjectFieldArgumentDefinitionPosition,
+    // PORT_NOTE: This field was renamed from the JS name (`argType`) for consistency with the rest
+    // of the naming in this struct.
+    argument_type: Node<Type>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the
     /// edge represents a field, the `transition` will be a `FieldCollection` transition and will
@@ -122,6 +173,40 @@ pub(crate) struct QueryGraphEdge {
     ///
     /// Outside of keys, @requires edges also rely on conditions.
     pub(crate) conditions: Option<Arc<SelectionSet>>,
+    /// Edges can require that an override condition (provided during query
+    /// planning) be met in order to be taken. This is used for progressive
+    /// @override, where (at least) 2 subgraphs can resolve the same field, but
+    /// one of them has an @override with a label. If the override condition
+    /// matches the query plan parameters, this edge can be taken.
+    pub(crate) override_condition: Option<OverrideCondition>,
+    /// All arguments with `@fromContext` that need to be matched to an upstream graph path field
+    /// whose parent type has the corresponding `@context`.
+    pub(crate) required_contexts: Vec<ContextCondition>,
+}
+
+impl QueryGraphEdge {
+    pub(crate) fn new(
+        transition: QueryGraphEdgeTransition,
+        conditions: Option<Arc<SelectionSet>>,
+    ) -> Self {
+        Self {
+            transition,
+            conditions,
+            override_condition: None,
+            required_contexts: Vec::new(),
+        }
+    }
+
+    fn satisfies_override_conditions(
+        &self,
+        conditions_to_check: &EnabledOverrideConditions,
+    ) -> bool {
+        if let Some(override_condition) = &self.override_condition {
+            override_condition.check(conditions_to_check)
+        } else {
+            true
+        }
+    }
 }
 
 impl Display for QueryGraphEdge {
@@ -133,11 +218,36 @@ impl Display for QueryGraphEdge {
         {
             return Ok(());
         }
-        if let Some(conditions) = &self.conditions {
-            write!(f, "{} ⊢ {}", conditions, self.transition)
-        } else {
-            self.transition.fmt(f)
+
+        match (&self.override_condition, &self.conditions) {
+            (Some(override_condition), Some(conditions)) => write!(
+                f,
+                "{}, {} ⊢ {}",
+                conditions, override_condition, self.transition
+            ),
+            (Some(override_condition), None) => {
+                write!(f, "{} ⊢ {}", override_condition, self.transition)
+            }
+            (None, Some(conditions)) => write!(f, "{} ⊢ {}", conditions, self.transition),
+            _ => self.transition.fmt(f),
         }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct OverrideCondition {
+    pub(crate) label: String,
+    pub(crate) condition: bool,
+}
+
+impl OverrideCondition {
+    pub(crate) fn check(&self, enabled_conditions: &EnabledOverrideConditions) -> bool {
+        self.condition == enabled_conditions.contains(&self.label)
+    }
+}
+
+impl Display for OverrideCondition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} = {}", self.label, self.condition)
     }
 }
 
@@ -149,7 +259,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// A field edge, going from (a node for) the field parent type to the field's (base) type.
     FieldCollection {
         /// The name of the schema containing the field.
-        source: NodeStr,
+        source: Arc<str>,
         /// The object/interface field being collected.
         field_definition_position: FieldDefinitionPosition,
         /// Whether this field is part of an @provides.
@@ -160,7 +270,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// in common with it).
     Downcast {
         /// The name of the schema containing the from/to types.
-        source: NodeStr,
+        source: Arc<str>,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
         from_type_position: CompositeTypeDefinitionPosition,
@@ -192,7 +302,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// in which the corresponding edge will be found).
     InterfaceObjectFakeDownCast {
         /// The name of the schema containing the from type.
-        source: NodeStr,
+        source: Arc<str>,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
         from_type_position: CompositeTypeDefinitionPosition,
@@ -250,20 +360,27 @@ pub struct QueryGraph {
     /// graph, this will only ever be one value, but it will change for "federated" query graphs
     /// while they're being built (and after construction, will become FEDERATED_GRAPH_ROOT_SOURCE,
     /// which is a reserved placeholder value).
-    current_source: NodeStr,
+    current_source: Arc<str>,
     /// The nodes/edges of the query graph. Note that nodes/edges should never be removed, so
     /// indexes are immutable when a node/edge is created.
     graph: DiGraph<QueryGraphNode, QueryGraphEdge>,
     /// The sources on which the query graph was built, which is a set (potentially of size 1) of
     /// GraphQL schema keyed by the name identifying them. Note that the `source` strings in the
     /// nodes/edges of a query graph are guaranteed to be valid key in this map.
-    pub(crate) sources: IndexMap<NodeStr, ValidFederationSchema>,
+    sources: IndexMap<Arc<str>, ValidFederationSchema>,
+    /// For federated query graphs, this is a map from subgraph names to their schemas. This is the
+    /// same as `sources`, but is missing the dummy source FEDERATED_GRAPH_ROOT_SOURCE which isn't
+    /// really a subgraph.
+    subgraphs_by_name: IndexMap<Arc<str>, ValidFederationSchema>,
+    /// For federated query graphs, this is the supergraph schema; otherwise, this is `None`.
+    supergraph_schema: Option<ValidFederationSchema>,
     /// A map (keyed by source) that associates type names of the underlying schema on which this
     /// query graph was built to each of the nodes that points to a type of that name. Note that for
     /// a "federated" query graph source, each type name will only map to a single node.
-    types_to_nodes_by_source: IndexMap<NodeStr, IndexMap<NamedType, IndexSet<NodeIndex>>>,
+    types_to_nodes_by_source: IndexMap<Arc<str>, IndexMap<NamedType, IndexSet<NodeIndex>>>,
     /// A map (keyed by source) that associates schema root kinds to root nodes.
-    root_kinds_to_nodes_by_source: IndexMap<NodeStr, IndexMap<SchemaRootDefinitionKind, NodeIndex>>,
+    root_kinds_to_nodes_by_source:
+        IndexMap<Arc<str>, IndexMap<SchemaRootDefinitionKind, NodeIndex>>,
     /// Maps an edge to the possible edges that can follow it "productively", that is without
     /// creating a trivially inefficient path.
     ///
@@ -286,11 +403,22 @@ pub struct QueryGraph {
     /// significantly faster (and pretty easy). FWIW, when originally introduced, this optimization
     /// lowered composition validation on a big composition (100+ subgraphs) from ~4 minutes to
     /// ~10 seconds.
-    non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
+    non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
+    // PORT_NOTE: This field was renamed from the JS name (`subgraphToArgIndices`) to better
+    // align with downstream code.
+    /// Maps subgraph names to another map, for any subgraph with usages of `@fromContext`. This
+    /// other map then maps subgraph argument positions/coordinates (for `@fromContext` arguments)
+    /// to a unique identifier string (specifically, unique across pairs of subgraph names and
+    /// argument coordinates). This identifier is called the "context ID".
+    arguments_to_context_ids_by_source:
+        IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
+    /// To speed up the estimation of counting non-local selections, we precompute specific metadata
+    /// about the query graph and store that here.
+    non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
 }
 
 impl QueryGraph {
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &Arc<str> {
         &self.current_source
     }
 
@@ -298,55 +426,54 @@ impl QueryGraph {
         &self.graph
     }
 
+    pub(crate) fn supergraph_schema(&self) -> Result<ValidFederationSchema, FederationError> {
+        self.supergraph_schema
+            .clone()
+            .ok_or_else(|| internal_error!("Supergraph schema unexpectedly missing"))
+    }
+
     pub(crate) fn node_weight(&self, node: NodeIndex) -> Result<&QueryGraphNode, FederationError> {
-        self.graph.node_weight(node).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Node unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.graph
+            .node_weight(node)
+            .ok_or_else(|| internal_error!("Node unexpectedly missing"))
     }
 
     fn node_weight_mut(&mut self, node: NodeIndex) -> Result<&mut QueryGraphNode, FederationError> {
-        self.graph.node_weight_mut(node).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Node unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.graph
+            .node_weight_mut(node)
+            .ok_or_else(|| internal_error!("Node unexpectedly missing"))
     }
 
     pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> Result<&QueryGraphEdge, FederationError> {
-        self.graph.edge_weight(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.graph
+            .edge_weight(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
     fn edge_weight_mut(&mut self, edge: EdgeIndex) -> Result<&mut QueryGraphEdge, FederationError> {
-        self.graph.edge_weight_mut(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.graph
+            .edge_weight_mut(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
+    }
+
+    pub(crate) fn edge_head_weight(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<&QueryGraphNode, FederationError> {
+        let (head_id, _) = self.edge_endpoints(edge)?;
+        self.node_weight(head_id)
     }
 
     pub(crate) fn edge_endpoints(
         &self,
         edge: EdgeIndex,
     ) -> Result<(NodeIndex, NodeIndex), FederationError> {
-        self.graph.edge_endpoints(edge).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Edge unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.graph
+            .edge_endpoints(edge)
+            .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
-    pub(crate) fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
+    fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
         self.schema_by_source(&self.current_source)
     }
 
@@ -354,27 +481,27 @@ impl QueryGraph {
         &self,
         source: &str,
     ) -> Result<&ValidFederationSchema, FederationError> {
-        self.sources.get(source).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Schema unexpectedly missing".to_owned(),
-            }
-            .into()
-        })
+        self.sources
+            .get(source)
+            .ok_or_else(|| internal_error!(r#"Schema for "{source}" unexpectedly missing"#))
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
-        self.sources.iter()
+    pub(crate) fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
+        &self.subgraphs_by_name
     }
 
-    /// Returns an iterator over of node indices whose name matches the given type name.
-    pub(crate) fn nodes_for_type<'c, 'b: 'c, 'a: 'c>(
-        &'a self,
-        name: &'b Name,
-    ) -> impl 'c + Iterator<Item = NodeIndex> {
-        self.types_to_nodes_by_source
-            .values()
-            .filter_map(|tys| tys.get(name))
-            .flat_map(|vs| vs.iter().cloned())
+    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&Arc<str>, &ValidFederationSchema)> {
+        self.subgraphs_by_name.iter()
+    }
+
+    /// Returns the node indices whose name matches the given type name.
+    pub(crate) fn nodes_for_type(
+        &self,
+        name: &Name,
+    ) -> Result<&IndexSet<NodeIndex>, FederationError> {
+        self.types_to_nodes()?
+            .get(name)
+            .ok_or_else(|| internal_error!("No nodes unexpectedly found for type"))
     }
 
     pub(crate) fn types_to_nodes(
@@ -383,7 +510,7 @@ impl QueryGraph {
         self.types_to_nodes_by_source(&self.current_source)
     }
 
-    fn types_to_nodes_by_source(
+    pub(super) fn types_to_nodes_by_source(
         &self,
         source: &str,
     ) -> Result<&IndexMap<NamedType, IndexSet<NodeIndex>>, FederationError> {
@@ -448,8 +575,27 @@ impl QueryGraph {
             })
     }
 
-    pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, IndexSet<EdgeIndex>> {
-        &self.non_trivial_followup_edges
+    pub(crate) fn context_id_by_source_and_argument(
+        &self,
+        source: &str,
+        argument: &ObjectFieldArgumentDefinitionPosition,
+    ) -> Result<&Name, FederationError> {
+        self.arguments_to_context_ids_by_source
+            .get(source)
+            .and_then(|r| r.get(argument))
+            .ok_or_else(|| {
+                internal_error!("context ID unexpectedly missing for @fromContext argument")
+            })
+    }
+
+    pub(crate) fn is_context_used(&self) -> bool {
+        !self.arguments_to_context_ids_by_source.is_empty()
+    }
+
+    pub(crate) fn non_local_selection_metadata(
+        &self,
+    ) -> &non_local_selections_estimation::QueryGraphMetadata {
+        &self.non_local_selection_metadata
     }
 
     /// All outward edges from the given node (including self-key and self-root-type-resolution
@@ -458,26 +604,42 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph.edges_directed(node, Direction::Outgoing)
+    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(
-        &self,
-        node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph
-            .edges_directed(node, Direction::Outgoing)
-            .filter(|edge_ref| {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
+            |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
                         QueryGraphEdgeTransition::KeyResolution
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
-            })
+            },
+        ))
+    }
+
+    /// Edge iteration order is unspecified in petgraph, but appears to be
+    /// *reverse* insertion order in practice.
+    /// This can affect generated query plans, such as when two options have the same cost.
+    /// To match the JS code base, we want to iterate in insertion order.
+    ///
+    /// Sorting by edge indices relies on documented behavior:
+    /// <https://docs.rs/petgraph/latest/petgraph/graph/struct.Graph.html#graph-indices>
+    ///
+    /// As of this writing, edges of the query graph are removed
+    /// in `FederatedQueryGraphBuilder::update_edge_tail` which specifically preserves indices
+    /// by pairing with an insertion.
+    fn sorted_edges<'graph>(
+        edges: impl Iterator<Item = EdgeReference<'graph, QueryGraphEdge>>,
+    ) -> Vec<EdgeReference<'graph, QueryGraphEdge>> {
+        let mut edges: Vec<_> = edges.collect();
+        edges.sort_by_key(|e| -> EdgeIndex { e.id() });
+        edges
     }
 
     pub(crate) fn is_self_key_or_root_edge(
@@ -515,7 +677,7 @@ impl QueryGraph {
 
             let tail = edge_ref.target();
             let tail_weight = self.node_weight(tail)?;
-            if tail_weight.source != to_subgraph {
+            if tail_weight.source.as_ref() != to_subgraph {
                 continue;
             }
 
@@ -524,6 +686,7 @@ impl QueryGraph {
                 &OpGraphPathContext::default(),
                 &ExcludedDestinations::default(),
                 &ExcludedConditions::default(),
+                None,
             )?;
             let ConditionResolution::Satisfied { cost, .. } = condition_resolution else {
                 continue;
@@ -537,8 +700,61 @@ impl QueryGraph {
         Ok(false)
     }
 
-    pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+    pub(crate) fn locally_satisfiable_key(
+        &self,
+        edge_index: EdgeIndex,
+    ) -> Result<Option<SelectionSet>, FederationError> {
+        let edge_head = self.edge_head_weight(edge_index)?;
+        let QueryGraphNodeType::SchemaType(type_position) = &edge_head.type_ else {
+            return Err(FederationError::internal(
+                "Unable to compute locally_satisfiable_key. Edge head was unexpectedly pointing to a federated root type",
+            ));
+        };
+        let Some(subgraph_schema) = self.sources.get(&edge_head.source) else {
+            return Err(FederationError::internal(format!(
+                "Could not find subgraph source {}",
+                edge_head.source
+            )));
+        };
+        let Some(metadata) = subgraph_schema.subgraph_metadata() else {
+            return Err(FederationError::internal(format!(
+                "Could not find federation metadata for source {}",
+                edge_head.source
+            )));
+        };
+        let key_directive_definition = metadata
+            .federation_spec_definition()
+            .key_directive_definition(subgraph_schema)?;
+        let external_metadata = metadata.external_metadata();
+        let composite_type_position: CompositeTypeDefinitionPosition =
+            type_position.clone().try_into()?;
+        let type_ = composite_type_position.get(subgraph_schema.schema())?;
+        type_
+            .directives()
+            .get_all(&key_directive_definition.name)
+            .map(|key| {
+                metadata
+                    .federation_spec_definition()
+                    .key_directive_arguments(key)
+            })
+            .and_then(|key_value| {
+                parse_field_set(
+                    subgraph_schema,
+                    composite_type_position.type_name().clone(),
+                    key_value.fields,
+                    true,
+                )
+            })
+            .find_ok(|selection| !external_metadata.selects_any_external_field(selection))
+    }
+
+    pub(crate) fn edge_for_field(
+        &self,
+        node: NodeIndex,
+        field: &Field,
+        override_conditions: &EnabledOverrideConditions,
+    ) -> Option<EdgeIndex> {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
@@ -547,9 +763,14 @@ impl QueryGraph {
             else {
                 return None;
             };
+
+            if !edge_weight.satisfies_override_conditions(override_conditions) {
+                return None;
+            }
+
             // We explicitly avoid comparing parent type's here, to allow interface object
             // fields to match operation fields with the same name but differing types.
-            if field.data().field_position.field_name() == field_definition_position.field_name() {
+            if field.field_position.field_name() == field_definition_position.field_name() {
                 Some(edge_ref.id())
             } else {
                 None
@@ -574,11 +795,11 @@ impl QueryGraph {
         node: NodeIndex,
         inline_fragment: &InlineFragment,
     ) -> Option<EdgeIndex> {
-        let Some(type_condition_pos) = &inline_fragment.data().type_condition_position else {
+        let Some(type_condition_pos) = &inline_fragment.type_condition_position else {
             // No type condition means the type hasn't changed, meaning there is no edge to take.
             return None;
         };
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::Downcast {
                 to_type_position, ..
@@ -613,14 +834,17 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         op_graph_path_trigger: &OpGraphPathTrigger,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Option<Option<EdgeIndex>> {
         let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
             return None;
         };
         match op_path_element {
-            OpPathElement::Field(field) => self.edge_for_field(node, field).map(Some),
+            OpPathElement::Field(field) => self
+                .edge_for_field(node, field, override_conditions)
+                .map(Some),
             OpPathElement::InlineFragment(inline_fragment) => {
-                if inline_fragment.data().type_condition_position.is_some() {
+                if inline_fragment.type_condition_position.is_some() {
                     self.edge_for_inline_fragment(node, inline_fragment)
                         .map(Some)
                 } else {
@@ -650,7 +874,7 @@ impl QueryGraph {
                 "Unexpectedly encountered federation root node as tail node.",
             ));
         };
-        return match &edge_weight.transition {
+        match &edge_weight.transition {
             QueryGraphEdgeTransition::FieldCollection {
                 source,
                 field_definition_position,
@@ -659,10 +883,10 @@ impl QueryGraph {
                 let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
                     tail_type_pos.clone().try_into()
                 else {
-                    return Ok(IndexSet::new());
+                    return Ok(IndexSet::default());
                 };
                 let schema = self.schema_by_source(source)?;
-                let mut new_possible_runtime_types = IndexSet::new();
+                let mut new_possible_runtime_types = IndexSet::default();
                 for possible_runtime_type in possible_runtime_types {
                     let field_pos =
                         possible_runtime_type.field(field_definition_position.field_name().clone());
@@ -701,7 +925,7 @@ impl QueryGraph {
                         "Unexpectedly encountered non-object root operation type.",
                     ));
                 };
-                Ok(IndexSet::from([tail_type_pos]))
+                Ok(IndexSet::from_iter([tail_type_pos]))
             }
             QueryGraphEdgeTransition::SubgraphEnteringTransition => {
                 let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
@@ -710,12 +934,12 @@ impl QueryGraph {
                         "Unexpectedly encountered non-object root operation type.",
                     ));
                 };
-                Ok(IndexSet::from([tail_type_pos]))
+                Ok(IndexSet::from_iter([tail_type_pos]))
             }
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => {
                 Ok(possible_runtime_types.clone())
             }
-        };
+        }
     }
 
     /// Returns a selection set that can be used as a key for the given type, and that can be
@@ -750,24 +974,18 @@ impl QueryGraph {
 
         let ty = type_name.get(schema.schema())?;
 
-        for key in ty.directives().get_all(&key_directive_definition.name) {
-            let Some(value) = key
-                .argument_by_name("fields")
-                .and_then(|arg| arg.as_node_str())
-                .cloned()
-            else {
-                continue;
-            };
-            let selection = parse_field_set(schema, ty.name().clone(), &value)?;
-            let has_external = metadata
-                .external_metadata()
-                .selects_any_external_field(&selection)?;
-            if !has_external {
-                return Ok(Some(selection));
-            }
-        }
-
-        Ok(None)
+        ty.directives()
+            .get_all(&key_directive_definition.name)
+            .filter_map(|key| {
+                key.specified_argument_by_name("fields")
+                    .and_then(|arg| arg.as_str())
+            })
+            .map(|value| parse_field_set(schema, ty.name().clone(), value, true))
+            .find_ok(|selection| {
+                !metadata
+                    .external_metadata()
+                    .selects_any_external_field(selection)
+            })
     }
 
     pub(crate) fn is_cross_subgraph_edge(&self, edge: EdgeIndex) -> Result<bool, FederationError> {
@@ -791,7 +1009,7 @@ impl QueryGraph {
 
     pub(crate) fn has_an_implementation_with_provides(
         &self,
-        source: &NodeStr,
+        source: &Arc<str>,
         interface_field_definition_position: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
         let schema = self.schema_by_source(source)?;
@@ -806,17 +1024,14 @@ impl QueryGraph {
             .federation_spec_definition()
             .provides_directive_definition(schema)?;
 
-        for object_type_definition_position in
-            schema.possible_runtime_types(interface_field_definition_position.parent().into())?
-        {
-            let field_pos = object_type_definition_position
-                .field(interface_field_definition_position.field_name.clone());
-            let field = field_pos.get(schema.schema())?;
-            if field.directives.has(&provides_directive_definition.name) {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        Ok(schema
+            .possible_runtime_types(interface_field_definition_position.parent().into())?
+            .into_iter()
+            .map(|object_type_definition_position| {
+                let field_pos = object_type_definition_position
+                    .field(interface_field_definition_position.field_name.clone());
+                field_pos.get(schema.schema())
+            })
+            .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))?)
     }
 }

@@ -5,66 +5,55 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use ahash::HashMap;
+use ahash::HashMapExt;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
+use apollo_federation::query_plan::serializable_document::SerializableDocumentNotInitialized;
 use displaydoc::Display;
+use futures::StreamExt;
 use futures::future::Either;
 use futures::stream;
-use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::Context;
 use crate::error::Error;
-use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
-use crate::Context;
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-/// The cost calculation information stored in context for use in telemetry and other plugins that need to know what cost was calculated.
-pub(crate) struct CostContext {
-    pub(crate) estimated: f64,
-    pub(crate) actual: f64,
-    pub(crate) result: &'static str,
-}
-
-impl Default for CostContext {
-    fn default() -> Self {
-        Self {
-            estimated: 0.0,
-            actual: 0.0,
-            result: "COST_OK",
-        }
-    }
-}
-
-impl CostContext {
-    pub(crate) fn delta(&self) -> f64 {
-        self.estimated - self.actual
-    }
-
-    pub(crate) fn result(&mut self, error: DemandControlError) -> DemandControlError {
-        self.result = error.code();
-        error
-    }
-}
+pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
+pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
+pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
+pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -97,9 +86,9 @@ pub(crate) enum StrategyConfig {
     },
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum Mode {
+pub(crate) enum Mode {
     Measure,
     Enforce,
 }
@@ -137,10 +126,12 @@ pub(crate) enum DemandControlError {
     },
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
-    /// Invalid subgraph query: {0}
-    InvalidSubgraphQuery(ValidationErrors),
-    /// The response body could not be properly matched with its query's structure: {0}
-    ResponseTypingFailure(String),
+    /// {0}
+    SubgraphOperationNotInitialized(SerializableDocumentNotInitialized),
+    /// {0}
+    ContextSerializationError(String),
+    /// {0}
+    FederationError(FederationError),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -153,11 +144,13 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
-                Ok(vec![graphql::Error::builder()
-                    .extension_code(self.code())
-                    .extensions(extensions)
-                    .message(self.to_string())
-                    .build()])
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
             }
             DemandControlError::ActualCostTooExpensive {
                 actual_cost,
@@ -166,23 +159,38 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.actual", actual_cost.into());
                 extensions.insert("cost.max", max_cost.into());
-                Ok(vec![graphql::Error::builder()
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
+            }
+            DemandControlError::QueryParseFailure(_) => Ok(vec![
+                graphql::Error::builder()
                     .extension_code(self.code())
-                    .extensions(extensions)
                     .message(self.to_string())
-                    .build()])
-            }
-            DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
-            DemandControlError::ResponseTypingFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
-            DemandControlError::InvalidSubgraphQuery(errors) => {
-                Ok(errors.into_graphql_errors_infallible())
-            }
+                    .build(),
+            ]),
+            DemandControlError::SubgraphOperationNotInitialized(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
+            DemandControlError::ContextSerializationError(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
+            DemandControlError::FederationError(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
         }
     }
 }
@@ -193,8 +201,11 @@ impl DemandControlError {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
-            DemandControlError::ResponseTypingFailure(_) => "COST_RESPONSE_TYPING_FAILURE",
-            DemandControlError::InvalidSubgraphQuery(_) => "GRAPHQL_VALIDATION_FAILED",
+            DemandControlError::SubgraphOperationNotInitialized(_) => {
+                "SUBGRAPH_OPERATION_NOT_INITIALIZED"
+            }
+            DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
+            DemandControlError::FederationError(_) => "FEDERATION_ERROR",
         }
     }
 }
@@ -205,6 +216,94 @@ impl<T> From<WithErrors<T>> for DemandControlError {
     }
 }
 
+impl From<FieldLookupError<'_>> for DemandControlError {
+    fn from(value: FieldLookupError) -> Self {
+        match value {
+            FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(
+                "Attempted to look up a type which does not exist in the schema".to_string(),
+            ),
+            FieldLookupError::NoSuchField(type_name, _) => {
+                DemandControlError::QueryParseFailure(format!(
+                    "Attempted to look up a field on type {}, but the field does not exist",
+                    type_name
+                ))
+            }
+        }
+    }
+}
+
+impl From<FederationError> for DemandControlError {
+    fn from(value: FederationError) -> Self {
+        DemandControlError::FederationError(value)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct DemandControlContext {
+    pub(crate) strategy: Strategy,
+    pub(crate) variables: Object,
+}
+
+impl Context {
+    pub(crate) fn insert_estimated_cost(&self, cost: f64) -> Result<(), DemandControlError> {
+        self.insert(COST_ESTIMATED_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_estimated_cost(&self) -> Result<Option<f64>, DemandControlError> {
+        self.get::<&str, f64>(COST_ESTIMATED_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_actual_cost(&self, cost: f64) -> Result<(), DemandControlError> {
+        self.insert(COST_ACTUAL_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_actual_cost(&self) -> Result<Option<f64>, DemandControlError> {
+        self.get::<&str, f64>(COST_ACTUAL_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn get_cost_delta(&self) -> Result<Option<f64>, DemandControlError> {
+        let estimated = self.get_estimated_cost()?;
+        let actual = self.get_actual_cost()?;
+        Ok(estimated.zip(actual).map(|(est, act)| est - act))
+    }
+
+    pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
+        self.insert(COST_RESULT_KEY, result)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_cost_result(&self) -> Result<Option<String>, DemandControlError> {
+        self.get::<&str, String>(COST_RESULT_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_strategy(&self, strategy: String) -> Result<(), DemandControlError> {
+        self.insert(COST_STRATEGY_KEY, strategy)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_cost_strategy(&self) -> Result<Option<String>, DemandControlError> {
+        self.get::<&str, String>(COST_STRATEGY_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
+        self.extensions().with_lock(|lock| lock.insert(ctx));
+    }
+
+    pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
+        self.extensions().with_lock(|lock| lock.get().cloned())
+    }
+}
+
 pub(crate) struct DemandControl {
     config: DemandControlConfig,
     strategy_factory: StrategyFactory,
@@ -212,9 +311,11 @@ pub(crate) struct DemandControl {
 
 impl DemandControl {
     fn report_operation_metric(context: Context) {
-        let guard = context.extensions().lock();
-        let cost_context = guard.get::<CostContext>();
-        let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
+        let result = context
+            .get(COST_RESULT_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or("NO_CONTEXT".to_string());
         u64_counter!(
             "apollo.router.operations.demand_control",
             "Total operations with demand control enabled",
@@ -229,11 +330,34 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if !init.config.enabled {
+            return Ok(DemandControl {
+                strategy_factory: StrategyFactory::new(
+                    init.config.clone(),
+                    Arc::new(DemandControlledSchema::empty(
+                        init.supergraph_schema.clone(),
+                    )?),
+                    Arc::new(HashMap::new()),
+                ),
+                config: init.config,
+            });
+        }
+
+        let demand_controlled_supergraph_schema =
+            DemandControlledSchema::new(init.supergraph_schema.clone())?;
+        let mut demand_controlled_subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
+            let demand_controlled_subgraph_schema =
+                DemandControlledSchema::new(subgraph_schema.clone())?;
+            demand_controlled_subgraph_schemas
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
+        }
+
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
                 init.config.clone(),
-                init.supergraph_schema.clone(),
-                init.subgraph_schemas.clone(),
+                Arc::new(demand_controlled_supergraph_schema),
+                Arc::new(demand_controlled_subgraph_schemas),
             ),
             config: init.config,
         })
@@ -246,34 +370,50 @@ impl Plugin for DemandControl {
             let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
                 .checkpoint(move |req: execution::Request| {
-                    req.context.extensions().lock().insert(strategy.clone());
+                    req.context
+                        .insert_demand_control_context(DemandControlContext {
+                            strategy: strategy.clone(),
+                            variables: req.supergraph_request.body().variables.clone(),
+                        });
+
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => ControlFlow::Break(
-                            execution::Response::builder()
-                                .errors(
-                                    err.into_graphql_errors()
-                                        .expect("must be able to convert to graphql error"),
-                                )
-                                .context(req.context.clone())
-                                .build()
-                                .expect("Must be able to build response"),
-                        ),
+                        Err(err) => {
+                            let graphql_errors = err
+                                .into_graphql_errors()
+                                .expect("must be able to convert to graphql error");
+                            graphql_errors.iter().for_each(|mapped_error| {
+                                if let Some(Value::String(error_code)) =
+                                    mapped_error.extensions.get("code")
+                                {
+                                    emit_error_event(
+                                        error_code.as_str(),
+                                        &mapped_error.message,
+                                        mapped_error.path.clone(),
+                                    );
+                                }
+                            });
+                            ControlFlow::Break(
+                                execution::Response::builder()
+                                    .errors(graphql_errors)
+                                    .context(req.context.clone())
+                                    .build()
+                                    .expect("Must be able to build response"),
+                            )
+                        }
                     })
                 })
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
                         .context
-                        .unsupported_executable_document()
+                        .executable_document()
                         .expect("must have document");
                     let strategy = resp
                         .context
-                        .extensions()
-                        .lock()
-                        .get::<Strategy>()
-                        .expect("must have strategy")
-                        .clone();
+                        .get_demand_control_context()
+                        .map(|ctx| ctx.strategy)
+                        .expect("must have strategy");
                     let context = resp.context.clone();
 
                     // We want to sequence this code to run after all the subgraph responses have been scored.
@@ -324,21 +464,17 @@ impl Plugin for DemandControl {
 
     fn subgraph_service(
         &self,
-        _subgraph_name: &str,
+        subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         if !self.config.enabled {
             service
         } else {
+            let subgraph_name = subgraph_name.to_owned();
+            let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
-                    let strategy = req
-                        .context
-                        .extensions()
-                        .lock()
-                        .get::<Strategy>()
-                        .expect("must have strategy")
-                        .clone();
+                    let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
 
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_subgraph_request(&req) {
@@ -351,26 +487,24 @@ impl Plugin for DemandControl {
                                 )
                                 .context(req.context.clone())
                                 .extensions(crate::json_ext::Object::new())
+                                .subgraph_name(subgraph_name.clone())
                                 .build(),
                         ),
                     })
                 })
                 .map_future_with_request_data(
-                    |req: &subgraph::Request| {
+                    move |req: &subgraph::Request| {
                         //TODO convert this to expect
-                        req.executable_document.clone().unwrap_or_else(|| {
-                            Arc::new(Valid::assume_valid(ExecutableDocument::new()))
-                        })
+                        (
+                            subgraph_name_map_fut.clone(),
+                            req.executable_document.clone().unwrap_or_else(|| {
+                                Arc::new(Valid::assume_valid(ExecutableDocument::new()))
+                            }),
+                        )
                     },
-                    |req: Arc<Valid<ExecutableDocument>>, fut| async move {
+                    |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
-                        let strategy = resp
-                            .context
-                            .extensions()
-                            .lock()
-                            .get::<Strategy>()
-                            .expect("must have strategy")
-                            .clone();
+                        let strategy = resp.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
                         Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
@@ -378,6 +512,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
                                 .extensions(Object::new())
                                 .build(),
@@ -390,31 +525,32 @@ impl Plugin for DemandControl {
     }
 }
 
-register_plugin!("apollo", "experimental_demand_control", DemandControl);
+register_plugin!("apollo", "demand_control", DemandControl);
 
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
 
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use apollo_compiler::ast;
     use apollo_compiler::validation::Valid;
-    use apollo_compiler::ExecutableDocument;
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    use crate::Context;
     use crate::graphql;
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::demand_control::DemandControl;
+    use crate::plugins::demand_control::DemandControlContext;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::execution;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
     use crate::services::subgraph;
-    use crate::Context;
 
     #[tokio::test]
     async fn test_measure_on_execution_request() {
@@ -534,20 +670,17 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
-
+            .await
+            .expect("test harness");
         let ctx = context();
-
         let resp = plugin
-            .call_execution(
-                execution::Request::fake_builder().context(ctx).build(),
-                |req| {
-                    execution::Response::fake_builder()
-                        .context(req.context)
-                        .build()
-                        .unwrap()
-                },
-            )
+            .execution_service(|req| async {
+                Ok(execution::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .call(execution::Request::fake_builder().context(ctx).build())
             .await
             .unwrap();
 
@@ -561,22 +694,27 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
-        ctx.extensions().lock().insert(strategy);
+        ctx.insert_demand_control_context(DemandControlContext {
+            strategy,
+            variables: Default::default(),
+        });
         let mut req = subgraph::Request::fake_builder()
             .subgraph_name("test")
             .context(ctx)
             .build();
         req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
         let resp = plugin
-            .call_subgraph(req, |req| {
-                subgraph::Response::fake_builder()
+            .subgraph_service("test", |req| async {
+                Ok(subgraph::Response::fake_builder()
                     .context(req.context)
-                    .build()
+                    .build())
             })
+            .call(req)
             .await
             .unwrap();
 
@@ -584,15 +722,14 @@ mod test {
     }
 
     fn context() -> Context {
-        let parsed_document = ParsedDocumentInner {
-            executable: Arc::new(Valid::assume_valid(ExecutableDocument::new())),
-            hash: Arc::new(QueryHash::default()),
-            ast: ast::Document::new(),
-        };
+        let schema = Schema::parse_and_validate("type Query { f: Int }", "").unwrap();
+        let ast = ast::Document::parse("{__typename}", "").unwrap();
+        let doc = ast.to_executable_validate(&schema).unwrap();
+        let parsed_document =
+            ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
         ctx.extensions()
-            .lock()
-            .insert(ParsedDocument::new(parsed_document));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
     }
 

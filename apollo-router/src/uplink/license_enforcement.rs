@@ -11,16 +11,14 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::ast::Definition;
-use apollo_compiler::schema::Directive;
-use apollo_compiler::Node;
+use apollo_compiler::schema::ExtendedType;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
-use jsonwebtoken::decode;
-use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
+use jsonwebtoken::decode;
+use jsonwebtoken::jwk::JwkSet;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use serde::Deserialize;
@@ -28,13 +26,12 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use url::Url;
 
-use crate::plugins::authentication::convert_key_algorithm;
-use crate::spec::LINK_AS_ARGUMENT;
-use crate::spec::LINK_DIRECTIVE_NAME;
-use crate::spec::LINK_URL_ARGUMENT;
+use super::parsed_link_spec::ParsedLinkSpec;
 use crate::Configuration;
+use crate::plugins::authentication::jwks::convert_key_algorithm;
+use crate::spec::LINK_DIRECTIVE_NAME;
+use crate::spec::Schema;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
@@ -71,9 +68,15 @@ pub(crate) struct Claims {
     pub(crate) sub: String,
     pub(crate) aud: OneOrMany<Audience>,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "warnAt")]
+    /// When to warn the user about an expiring license that must be renewed to avoid halting the
+    /// router
     pub(crate) warn_at: SystemTime,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
+    /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
+    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
+    #[serde(rename = "throughputLimit")]
+    pub(crate) tps: Option<TpsLimit>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -84,70 +87,18 @@ where
     Ok(UNIX_EPOCH + Duration::from_secs(seconds as u64))
 }
 
+fn deserialize_ms_into_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let seconds = i32::deserialize(deserializer)?;
+    Ok(Duration::from_millis(seconds as u64))
+}
+
 #[derive(Debug)]
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
     restricted_schema_in_use: Vec<SchemaViolation>,
-}
-
-#[derive(Debug)]
-struct ParsedLinkSpec {
-    spec_name: String,
-    version: semver::Version,
-    spec_url: String,
-    imported_as: Option<String>,
-    url: String,
-}
-
-impl ParsedLinkSpec {
-    fn from_link_directive(
-        link_directive: &Node<Directive>,
-    ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
-        link_directive
-            .argument_by_name(LINK_URL_ARGUMENT)
-            .and_then(|value| {
-                let url_string = value.as_str();
-                let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
-
-                let mut segments = parsed_url.path_segments()?;
-                let spec_name = segments.next()?.to_string();
-                let spec_url = format!(
-                    "{}://{}/{}",
-                    parsed_url.scheme(),
-                    parsed_url.host()?,
-                    spec_name
-                );
-                let version_string = segments.next()?.strip_prefix('v')?;
-                let parsed_version =
-                    semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
-
-                let imported_as = link_directive
-                    .argument_by_name(LINK_AS_ARGUMENT)
-                    .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
-
-                Some(Ok(ParsedLinkSpec {
-                    spec_name,
-                    spec_url,
-                    version: parsed_version,
-                    imported_as,
-                    url: url_string?.to_string(),
-                }))
-            })
-    }
-
-    // Implements directive name construction logic for link directives.
-    // 1. If the link directive has an `as` argument, use that as the prefix.
-    // 2. If the link directive's spec name is the same as the default name, use the default name with no prefix.
-    // 3. Otherwise, use the spec name as the prefix.
-    fn directive_name(&self, default_name: &str) -> String {
-        if let Some(imported_as) = &self.imported_as {
-            format!("{}__{}", imported_as, default_name)
-        } else if self.spec_name == default_name {
-            default_name.to_string()
-        } else {
-            format!("{}__{}", self.spec_name, default_name)
-        }
-    }
 }
 
 impl LicenseEnforcementReport {
@@ -157,7 +108,7 @@ impl LicenseEnforcementReport {
 
     pub(crate) fn build(
         configuration: &Configuration,
-        schema: &apollo_compiler::ast::Document,
+        schema: &Schema,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -197,14 +148,14 @@ impl LicenseEnforcementReport {
     }
 
     fn validate_schema(
-        schema: &apollo_compiler::ast::Document,
+        schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_schema_definition())
-            .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
+            .supergraph_schema()
+            .schema_definition
+            .directives
+            .get_all(LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
                 ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
                     maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
@@ -212,20 +163,32 @@ impl LicenseEnforcementReport {
             })
             .collect::<HashMap<_, _>>();
 
+        let link_specs_in_join_directive = schema
+            .supergraph_schema()
+            .schema_definition
+            .directives
+            .get_all("join__directive")
+            .filter(|join| {
+                join.specified_argument_by_name("name")
+                    .and_then(|name| name.as_str())
+                    .map(|name| name == LINK_DIRECTIVE_NAME)
+                    .unwrap_or_default()
+            })
+            .filter_map(|join| {
+                join.specified_argument_by_name("args")
+                    .and_then(|arg| arg.as_object())
+            })
+            .filter_map(|link| {
+                ParsedLinkSpec::from_join_directive_args(link).map(|maybe_spec| {
+                    maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
+                })?
+            })
+            .collect::<HashMap<_, _>>();
+
         let mut schema_violations: Vec<SchemaViolation> = Vec::new();
 
-        for subgraph_url in schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_enum_type_definition())
-            .filter(|def| def.name == "join__Graph")
-            .flat_map(|def| def.values.iter())
-            .flat_map(|val| val.directives.iter())
-            .filter(|d| d.name == "join__graph")
-            .filter_map(|dir| (dir.arguments.iter().find(|arg| arg.name == "url")))
-            .filter_map(|arg| arg.value.as_str())
-        {
-            if subgraph_url.starts_with("unix://") {
+        for (_subgraph_name, subgraph_url) in schema.subgraphs() {
+            if subgraph_url.scheme_str() == Some("unix") {
                 schema_violations.push(SchemaViolation::DirectiveArgument {
                     url: "https://specs.apollo.dev/join/v0.3".to_string(),
                     name: "join__Graph".to_string(),
@@ -262,16 +225,19 @@ impl LicenseEnforcementReport {
                         if version_req.matches(&link_spec.version) {
                             let directive_name = link_spec.directive_name(name);
                             if schema
-                                .definitions
-                                .iter()
+                                .supergraph_schema()
+                                .types
+                                .values()
                                 .flat_map(|def| match def {
                                     // To traverse additional directive locations, add match arms for the respective definition types required.
                                     // As of writing this, this is only implemented for finding usages of progressive override on object type fields, but it can be extended to other directive locations trivially.
-                                    Definition::ObjectTypeDefinition(object_type_def) => {
-                                        let directives_on_object =
-                                            object_type_def.directives.get_all(&directive_name);
+                                    ExtendedType::Object(object_type_def) => {
+                                        let directives_on_object = object_type_def
+                                            .directives
+                                            .get_all(&directive_name)
+                                            .map(|component| &component.node);
                                         let directives_on_fields =
-                                            object_type_def.fields.iter().flat_map(|field| {
+                                            object_type_def.fields.values().flat_map(|field| {
                                                 field.directives.get_all(&directive_name)
                                             });
 
@@ -281,7 +247,9 @@ impl LicenseEnforcementReport {
                                     }
                                     _ => vec![],
                                 })
-                                .any(|directive| directive.argument_by_name(argument).is_some())
+                                .any(|directive| {
+                                    directive.specified_argument_by_name(argument).is_some()
+                                })
                             {
                                 schema_violations.push(SchemaViolation::DirectiveArgument {
                                     url: link_spec.url.to_string(),
@@ -290,6 +258,20 @@ impl LicenseEnforcementReport {
                                     explanation: explanation.to_string(),
                                 });
                             }
+                        }
+                    }
+                }
+                SchemaRestriction::SpecInJoinDirective {
+                    spec_url,
+                    name,
+                    version_req,
+                } => {
+                    if let Some(link_spec) = link_specs_in_join_directive.get(spec_url) {
+                        if version_req.matches(&link_spec.version) {
+                            schema_violations.push(SchemaViolation::Spec {
+                                url: link_spec.url.to_string(),
+                                name: name.to_string(),
+                            });
                         }
                     }
                 }
@@ -379,6 +361,10 @@ impl LicenseEnforcementReport {
                 .name("Advanced telemetry")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.telemetry..graphql")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.preview_file_uploads")
                 .name("File uploads plugin")
                 .build(),
@@ -387,8 +373,13 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.experimental_demand_control")
+                .path("$.demand_control")
                 .name("Demand control plugin")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry.apollo.metrics_reference_mode")
+                .value("extended")
+                .name("Apollo metrics extended references")
                 .build(),
         ]
     }
@@ -398,6 +389,26 @@ impl LicenseEnforcementReport {
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
                 spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+            },
+            SchemaRestriction::SpecInJoinDirective {
+                name: "connect".to_string(),
+                spec_url: "https://specs.apollo.dev/connect".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![], // all versions
+                },
+            },
+            SchemaRestriction::Spec {
+                name: "context".to_string(),
+                spec_url: "https://specs.apollo.dev/context".to_string(),
                 version_req: semver::VersionReq {
                     comparators: vec![semver::Comparator {
                         op: semver::Op::Exact,
@@ -436,6 +447,21 @@ impl LicenseEnforcementReport {
                 },
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             },
+            SchemaRestriction::DirectiveArgument {
+                name: "field".to_string(),
+                argument: "contextArguments".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 5.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
+            },
         ]
     }
 }
@@ -469,26 +495,69 @@ impl Display for LicenseEnforcementReport {
     }
 }
 
-/// License controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
+/// Claims extracted from the License, including ways Apollo limits the router's usage. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
 #[derive(Debug, Clone, Default)]
 pub struct License {
     pub(crate) claims: Option<Claims>,
 }
 
+/// Transactions Per Second limits. We talk as though this will be in seconds, but the Duration
+/// here is actually given to us in milliseconds via the License's JWT's claims
+#[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct TpsLimit {
+    pub(crate) capacity: usize,
+
+    #[serde(
+        deserialize_with = "deserialize_ms_into_duration",
+        rename = "durationMs"
+    )]
+    pub(crate) interval: Duration,
+}
+
+/// LicenseLimits represent what can be done with a router based on the claims in the License. You
+/// might have a certain tier be limited in its capacity for transactions over a certain duration,
+/// as an example
+#[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
+pub struct LicenseLimits {
+    /// Transaction Per Second limits. If none are found in the License's claims, there are no
+    /// limits to apply
+    pub(crate) tps: Option<TpsLimit>,
+}
+
 /// Licenses are converted into a stream of license states by the expander
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
-pub(crate) enum LicenseState {
+pub enum LicenseState {
     /// licensed
-    Licensed,
+    Licensed { limits: Option<LicenseLimits> },
     /// warn
-    LicensedWarn,
+    LicensedWarn { limits: Option<LicenseLimits> },
     /// halt
-    LicensedHalt,
+    LicensedHalt { limits: Option<LicenseLimits> },
 
     /// unlicensed
     #[default]
     Unlicensed,
+}
+
+impl LicenseState {
+    pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
+        match self {
+            LicenseState::Licensed { limits }
+            | LicenseState::LicensedWarn { limits }
+            | LicenseState::LicensedHalt { limits } => limits.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn get_name(&self) -> &'static str {
+        match self {
+            Self::Licensed { limits: _ } => "Licensed",
+            Self::LicensedWarn { limits: _ } => "LicensedWarn",
+            Self::LicensedHalt { limits: _ } => "LicensedHalt",
+            Self::Unlicensed => "Unlicensed",
+        }
+    }
 }
 
 impl Display for License {
@@ -583,6 +652,12 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
+
+    SpecInJoinDirective {
+        spec_url: String,
+        name: String,
+        version_req: semver::VersionReq,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -637,17 +712,20 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
-    use crate::Configuration;
+    use crate::uplink::license_enforcement::SchemaViolation;
 
+    #[track_caller]
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema = Schema::parse_ast(supergraph_schema).expect("supergraph schema must be valid");
+        let schema =
+            Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
         LicenseEnforcementReport::build(&config, &schema)
     }
 
@@ -693,6 +771,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
     fn test_restricted_unix_socket_via_schema() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
@@ -717,6 +796,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                tps: Default::default()
             }),
         );
     }
@@ -732,6 +812,7 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+                tps: Default::default()
             }),
         );
     }
@@ -776,6 +857,20 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn set_context() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/set_context.graphql"),
         );
 
         assert!(
@@ -851,5 +946,25 @@ mod test {
             report.restricted_schema_in_use.is_empty(),
             "shouldn't have found restricted features"
         );
+    }
+
+    #[test]
+    fn schema_enforcement_connectors() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+        );
+
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
     }
 }

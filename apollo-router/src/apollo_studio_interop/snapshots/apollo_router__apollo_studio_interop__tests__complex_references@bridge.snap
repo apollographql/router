@@ -1,0 +1,52 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: plan.usage_reporting
+---
+statsReportKey: "# Query\nquery Query($secondInput:Boolean!){basicInputTypeQuery(input:{}){listOfObjects{stringField}unionResponse{...on UnionType1{nullableString}}unionType2Response{unionType2Field}}noInputQuery{basicTypes{nonNullId nonNullInt}enumResponse interfaceImplementationResponse{implementation2Field sharedField}interfaceResponse{...on InterfaceImplementation1{implementation1Field sharedField}...on InterfaceImplementation2{implementation2Field sharedField}}listOfUnions{...on UnionType1{nullableString}}objectTypeWithInputField(secondInput:$secondInput){intField}}scalarResponseQuery}"
+referencedFieldsByType:
+  BasicTypesResponse:
+    fieldNames:
+      - nonNullId
+      - nonNullInt
+    isInterface: false
+  EverythingResponse:
+    fieldNames:
+      - basicTypes
+      - enumResponse
+      - interfaceImplementationResponse
+      - interfaceResponse
+      - listOfObjects
+      - listOfUnions
+      - objectTypeWithInputField
+      - unionResponse
+      - unionType2Response
+    isInterface: false
+  InterfaceImplementation1:
+    fieldNames:
+      - implementation1Field
+      - sharedField
+    isInterface: false
+  InterfaceImplementation2:
+    fieldNames:
+      - implementation2Field
+      - sharedField
+    isInterface: false
+  ObjectTypeResponse:
+    fieldNames:
+      - intField
+      - stringField
+    isInterface: false
+  Query:
+    fieldNames:
+      - basicInputTypeQuery
+      - noInputQuery
+      - scalarResponseQuery
+    isInterface: false
+  UnionType1:
+    fieldNames:
+      - nullableString
+    isInterface: false
+  UnionType2:
+    fieldNames:
+      - unionType2Field
+    isInterface: false

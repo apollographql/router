@@ -1,0 +1,24 @@
+fragment Fragment1 on InterfaceImplementation1 {
+    sharedField
+    implementation1Field
+}
+
+fragment Fragment2 on InterfaceImplementation2 @withArgs(arg2: "" arg1: "test" arg3: true arg5: [1,2] arg4: 2) @noArgs {
+    sharedField
+    implementation2Field
+}
+
+query DirectiveQuery @withArgs(arg2: "" arg1: "test") @noArgs {
+    noInputQuery {
+        enumResponse @withArgs(arg3: false arg5: [1,2] arg4: 2) @noArgs
+        unionResponse {
+            ... on UnionType1 @withArgs(arg2: "" arg1: "test") @noArgs {
+                unionType1Field
+            }
+        }
+        interfaceResponse {
+            ... Fragment1 @withArgs(arg1: "test") @noArgs
+            ... Fragment2
+        }
+    }
+}

@@ -1,0 +1,75 @@
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+    metrics:
+      prometheus:
+        enabled: true
+
+  instrumentation:
+    instruments:
+      router:
+        my_custom_router_instrument:
+          type: counter
+          value: unit
+          unit: reqs
+          description: "my test instrument"
+          attributes:
+            my_response_body:
+              response_body: true
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
+      graphql:
+        field.execution: true
+        list.length: true
+        "custom_counter":
+          description: "count of name field"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            graphql.type.name: true
+            graphql.field.type: true
+            graphql.field.name: true
+          condition:
+            eq:
+              - field_name: string
+              - "name"
+        "custom_histogram":
+          description: "histogram of review length"
+          type: histogram
+          unit: "unit"
+          attributes:
+            graphql.type.name: true
+            graphql.field.type: true
+            graphql.field.name: true
+          value:
+            list_length: value
+          condition:
+            eq:
+              - field_name: string
+              - "topProducts"

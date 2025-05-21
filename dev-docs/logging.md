@@ -106,7 +106,7 @@ expression: yaml
 - fields:
     alg: ES256
     reason: "invalid type: string \"Hmm\", expected a sequence"
-    index: 5
+    index: 5 
   level: WARN
   message: "ignoring a key since it is not valid, enable debug logs to full content"
 ```
@@ -130,7 +130,7 @@ Use `with_subscriber` to attach a subscriber to an async block.
 ```rust
     #[tokio::test]
     async fn test_async() {
-        async{...}.with_subscriber(assert_snapshot_subscriber!())
+        async{...}.with_subscriber(assert_snapshot_subscriber!()).await
     }
 ```
 

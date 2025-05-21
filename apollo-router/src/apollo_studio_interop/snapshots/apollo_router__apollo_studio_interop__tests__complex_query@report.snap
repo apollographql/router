@@ -1,0 +1,40 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# TransformedQuery\nfragment Fragment1 on EverythingResponse{basicTypes{nonNullFloat}}fragment Fragment2 on EverythingResponse{basicTypes{nullableFloat}}query TransformedQuery{scalarInputQuery(boolInput:true floatInput:0 idInput:\"\"intInput:0 listInput:[]stringInput:\"\")@skip(if:false)@include(if:true){enumResponse interfaceResponse{sharedField...on InterfaceImplementation2{implementation2Field}...on InterfaceImplementation1{implementation1Field}}objectTypeWithInputField(boolInput:true,secondInput:false){__typename intField stringField}...Fragment1...Fragment2}}"
+referencedFieldsByType:
+  AnInterface:
+    fieldNames:
+      - sharedField
+    isInterface: true
+  BasicTypesResponse:
+    fieldNames:
+      - nonNullFloat
+      - nullableFloat
+    isInterface: false
+  EverythingResponse:
+    fieldNames:
+      - basicTypes
+      - enumResponse
+      - interfaceResponse
+      - objectTypeWithInputField
+    isInterface: false
+  InterfaceImplementation1:
+    fieldNames:
+      - implementation1Field
+    isInterface: false
+  InterfaceImplementation2:
+    fieldNames:
+      - implementation2Field
+    isInterface: false
+  ObjectTypeResponse:
+    fieldNames:
+      - __typename
+      - intField
+      - stringField
+    isInterface: false
+  Query:
+    fieldNames:
+      - scalarInputQuery
+    isInterface: false

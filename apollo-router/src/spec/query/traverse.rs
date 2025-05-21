@@ -1,7 +1,7 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::FieldLookupError;
-use apollo_compiler::ExecutableDocument;
 use tower::BoxError;
 
 /// Traverse a document with the given visitor.
@@ -10,7 +10,7 @@ pub(crate) fn document(
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), BoxError> {
-    if let Ok(operation) = document.get_operation(operation_name) {
+    if let Ok(operation) = document.operations.get(operation_name) {
         visitor.operation(operation.object_type().as_str(), operation)?;
     }
 

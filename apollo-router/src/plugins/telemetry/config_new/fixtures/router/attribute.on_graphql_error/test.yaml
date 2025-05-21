@@ -1,0 +1,15 @@
+description: on_graphql_error attribute
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - context:
+        map:
+          "apollo::telemetry::contains_graphql_error": true
+    # This feels like a bug, on drop should still generate an error.
+    - router_response:
+        body: |
+          hello
+        status: 200

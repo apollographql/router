@@ -8,6 +8,7 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multer::Constraints;
 use multer::Multipart;
@@ -16,11 +17,12 @@ use pin_project_lite::pin_project;
 use tokio::sync::Mutex;
 use tokio::sync::OwnedMutexGuard;
 
+use super::Result as UploadResult;
 use super::config::MultipartRequestLimits;
 use super::error::FileUploadError;
 use super::map_field::MapField;
 use super::map_field::MapFieldRaw;
-use super::Result as UploadResult;
+use crate::services::router::body::RouterBody;
 
 // The limit to set for the map field in the multipart request.
 // We don't expect this to ever be reached, but we can always add a config option if needed later.
@@ -68,12 +70,12 @@ impl Drop for MultipartRequestState {
 
 impl MultipartRequest {
     pub(super) fn new(
-        request_body: hyper::Body,
+        request_body: RouterBody,
         boundary: String,
         limits: MultipartRequestLimits,
     ) -> Self {
         let multer = Multipart::with_constraints(
-            request_body,
+            request_body.into_data_stream(),
             boundary,
             Constraints::new().size_limit(SizeLimit::new().for_field("map", MAP_SIZE_LIMIT)),
         );

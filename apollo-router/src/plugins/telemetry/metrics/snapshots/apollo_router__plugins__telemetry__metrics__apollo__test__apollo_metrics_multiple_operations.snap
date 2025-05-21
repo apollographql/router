@@ -1,5 +1,0 @@
----
-source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-expression: results
----
-[]

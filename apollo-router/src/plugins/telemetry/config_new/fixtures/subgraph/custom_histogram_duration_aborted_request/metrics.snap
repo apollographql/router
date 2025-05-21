@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: "Custom histogram where subgraph response doesn't happen. This should still increment the metric on Drop."
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        subgraph:
+          custom.histogram.duration:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: duration
+---
+- name: custom.histogram.duration
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes: {}

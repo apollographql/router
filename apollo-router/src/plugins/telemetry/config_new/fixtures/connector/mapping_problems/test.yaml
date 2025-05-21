@@ -1,0 +1,58 @@
+description: Both subgraph and connector HTTP client duration metrics
+events:
+  - - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/users"
+        uri: "/users"
+        mapping_problems:
+          - level: Warn
+            count: 3
+            message: "request warn message"
+            path: "@.id"
+          - level: Info
+            count: 7
+            message: "request info message"
+            path: "@.id"
+    - connector_response:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/users"
+        status: 200
+        body: |
+          { "username": "foo" }
+        mapping_problems:
+          - level: Info
+            count: 3
+            message: "response info message"
+            path: "@.id"
+    - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/users"
+        uri: "/users"
+        mapping_problems:
+          - level: Info
+            count: 5
+            message: "request info message"
+            path: "@.id"
+    - connector_response:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/users"
+        status: 200
+        body: |
+          { "username": "foo" }
+        mapping_problems:
+          - level: Warn
+            count: 1
+            message: "response warn message"
+            path: "@.id"
+          - level: Error
+            count: 1
+            message: "response error message"
+            path: "@.id"

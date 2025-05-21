@@ -1,0 +1,20 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+type Product
+  @key(fields: "key_id")
+  @connect(
+    http: { POST: "http://myapi/products/", body: "$batch.id" }
+    selection: "id key_id name"
+    entity: true
+  )
+  @connect(
+    http: { POST: "http://myapi/products/", body: "$batch.key_id" }
+    selection: "id key_id name"
+    entity: true
+  ) {
+  id: ID!
+  key_id: ID!
+  name: String
+}

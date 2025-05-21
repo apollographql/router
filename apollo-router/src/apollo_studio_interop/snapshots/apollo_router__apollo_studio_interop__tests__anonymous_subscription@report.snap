@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# -\nsubscription{noInputSubscription{id}}"
+referencedFieldsByType:
+  EverythingResponse:
+    fieldNames:
+      - id
+    isInterface: false
+  Subscription:
+    fieldNames:
+      - noInputSubscription
+    isInterface: false

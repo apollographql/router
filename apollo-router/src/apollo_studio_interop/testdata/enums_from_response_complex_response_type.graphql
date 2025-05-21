@@ -1,0 +1,15 @@
+query EnumResponseQuery {
+  enumInputQuery {
+    enumResponse
+  }
+  enumResponseQuery {
+    list
+    listOfLists
+    nestedObject {
+      singleValue
+      listOfLists
+      list
+    }
+    singleValue
+  }
+}

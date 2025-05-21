@@ -1,60 +1,82 @@
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::atomic;
 use std::sync::Arc;
+use std::sync::atomic;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
-use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
+use either::Either;
+use itertools::Itertools;
+use itertools::izip;
 use petgraph::graph::EdgeIndex;
+use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use tracing::debug;
+use tracing::debug_span;
 
+use super::condition_resolver::ContextMapEntry;
+use crate::bail;
+use crate::display_helpers::DisplayOption;
+use crate::display_helpers::DisplaySlice;
+use crate::display_helpers::State as IndentedFormatter;
+use crate::display_helpers::write_indented_lines;
 use crate::error::FederationError;
-use crate::indented_display::write_indented_lines;
-use crate::indented_display::State as IndentedFormatter;
+use crate::error::SingleFederationError;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
+use crate::operation::DirectiveList;
+use crate::operation::Field;
+use crate::operation::HasSelectionKey;
+use crate::operation::InlineFragment;
+use crate::operation::SelectionId;
+use crate::operation::SelectionKey;
+use crate::operation::SelectionSet;
+use crate::operation::SiblingTypename;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::HasSelectionKey;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::RebaseErrorHandlingOption;
-use crate::query_plan::operation::SelectionId;
-use crate::query_plan::operation::SelectionKey;
-use crate::query_plan::operation::SelectionSet;
+use crate::query_graph::path_tree::Preference;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
+use crate::schema::ValidFederationSchema;
+use crate::schema::field_set::parse_field_value_without_validation;
+use crate::schema::field_set::validate_field_value;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
+use crate::utils::logging::snapshot;
+
+#[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
+pub(crate) struct ContextUsageEntry {
+    pub(crate) context_id: Name,
+    pub(crate) relative_path: Vec<FetchDataPathElement>,
+    pub(crate) selection_set: SelectionSet,
+    pub(crate) subgraph_argument_type: Node<Type>,
+}
 
 /// An immutable path in a query graph.
 ///
@@ -97,7 +119,7 @@ use crate::schema::ValidFederationSchema;
 // in the Rust code we don't have a distinguished type for that case. We instead check this at
 // runtime (at the callsites that require root nodes). This means the `RootPath` type in the
 // JS codebase is replaced with this one.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -106,6 +128,7 @@ where
     EdgeIndex: Into<TEdge>,
 {
     /// The query graph of which this is a path.
+    #[serde(skip)]
     graph: Arc<QueryGraph>,
     /// The node at which the path starts. This should be the head of the first non-`None` edge in
     /// the path if such edge exists, but if there are only `None` edges (or if there are zero
@@ -136,9 +159,13 @@ where
     /// to be confused with the `@override` directive, which is completely separate).
     ///
     /// This array stores the IDs associated with this path.
+    // TODO: There is a note of OverrideId to not add a (de)serialize derive. Once that is
+    // addressed, remove this skip
+    #[serde(skip)]
     own_path_ids: Arc<IndexSet<OverrideId>>,
     /// This array stores the IDs of paths that override this one. (See docs for `own_path_ids` for
     /// more info).
+    #[serde(skip)]
     overriding_path_ids: Arc<IndexSet<OverrideId>>,
     /// Names of all the possible runtime types the tail of the path can be.
     runtime_types_of_tail: Arc<IndexSet<ObjectTypeDefinitionPosition>>,
@@ -147,7 +174,18 @@ where
     runtime_types_before_tail_if_last_is_cast: Option<Arc<IndexSet<ObjectTypeDefinitionPosition>>>,
     /// If the trigger of the last edge in the `edges` array was an operation element with a
     /// `@defer` application, then the arguments of that application.
+    // TODO(@TylerBloom): Add in once defer is supported.
+    #[serde(skip)]
     defer_on_tail: Option<DeferDirectiveArguments>,
+    // PORT_NOTE: This field was renamed because the JS name (`contextToSelection`) implied it was
+    // a map to selections, which it isn't.
+    /// The IDs of contexts that have matched at the edge, for each edge in the path.
+    matching_context_ids: Vec<Option<MatchingContextIds>>,
+    // PORT_NOTE: This field was renamed because the JS name (`parameterToContext`) left confusion
+    // to how a parameter was different from an argument.
+    /// Maps of @fromContext arguments to info about the contexts used in those arguments, for each
+    /// edge in the path.
+    arguments_to_context_usages: Vec<Option<ArgumentsToContextUsages>>,
 }
 
 impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
@@ -174,6 +212,8 @@ where
             runtime_types_of_tail,
             runtime_types_before_tail_if_last_is_cast,
             defer_on_tail,
+            matching_context_ids: _,
+            arguments_to_context_usages: _,
         } = self;
 
         f.debug_struct("GraphPath")
@@ -204,7 +244,7 @@ pub(crate) enum GraphPathTrigger {
     Transition(Arc<QueryGraphEdgeTransition>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SubgraphEnteringEdgeInfo {
     /// The index within the `edges` array.
     index: usize,
@@ -215,24 +255,34 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 /// Wrapper for an override ID, which indicates a relationship between a group of `OpGraphPath`s
 /// where one "overrides" the others in the group.
 ///
-/// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
-/// to be something like UUIDs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
+/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
+/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
+/// provided (i.e. the inner type is a `Uuid` or the like).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct OverrideId(usize);
 
-/// Global storage for the counter used to allocate `OverrideId`s.
-static NEXT_OVERRIDE_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
+// Global storage for the counter used to uniquely identify selections
+static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 
 impl OverrideId {
     fn new() -> Self {
         // atomically increment global counter
-        Self(NEXT_OVERRIDE_ID.fetch_add(1, atomic::Ordering::AcqRel))
+        Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
 }
 
+pub(crate) type MatchingContextIds = IndexSet<Name>;
+pub(crate) type ArgumentsToContextUsages = IndexMap<Name, ContextUsageEntry>;
+
 /// The item type for [`GraphPath::iter`]
-pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
-    (TEdge, &'path Arc<TTrigger>, &'path Option<Arc<OpPathTree>>);
+pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
+    TEdge,
+    &'path Arc<TTrigger>,
+    &'path Option<Arc<OpPathTree>>,
+    Option<&'path MatchingContextIds>,
+    Option<&'path ArgumentsToContextUsages>,
+);
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -241,7 +291,12 @@ pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
 // codebase is replaced with this one.
 pub(crate) type OpGraphPath = GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+/// A `GraphPath` whose triggers are query graph transitions in some other query graph (essentially
+/// meaning that the path has been guided by a walk through that other query graph).
+#[allow(dead_code)]
+pub(crate) type TransitionGraphPath = GraphPath<QueryGraphEdgeTransition, EdgeIndex>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpGraphPathTrigger {
     OpPathElement(OpPathElement),
     Context(OpGraphPathContext),
@@ -257,7 +312,7 @@ impl Display for OpGraphPathTrigger {
 }
 
 /// A path of operation elements within a GraphQL operation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, serde::Serialize)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
 impl Deref for OpPath {
@@ -267,7 +322,7 @@ impl Deref for OpPath {
     }
 }
 
-impl std::fmt::Display for OpPath {
+impl Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
@@ -282,7 +337,35 @@ impl std::fmt::Display for OpPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+impl Preference for OpPathElement {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpPathElement::Field(x), OpPathElement::Field(y)) => {
+                // We prefer the one with a sibling typename (= Less).
+                // Otherwise, not comparable.
+                match (&x.sibling_typename, &y.sibling_typename) {
+                    (Some(_), None) => Some(true),
+                    (None, Some(_)) => Some(false),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Preference for OpGraphPathTrigger {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpGraphPathTrigger::OpPathElement(x), OpGraphPathTrigger::OpPathElement(y)) => {
+                x.preferred_over(y)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpPathElement {
     Field(Field),
     InlineFragment(InlineFragment),
@@ -298,10 +381,10 @@ impl HasSelectionKey for OpPathElement {
 }
 
 impl OpPathElement {
-    pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
+    pub(crate) fn directives(&self) -> &DirectiveList {
         match self {
-            OpPathElement::Field(field) => &field.data().directives,
-            OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+            OpPathElement::Field(field) => &field.directives,
+            OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.directives,
         }
     }
 
@@ -314,12 +397,12 @@ impl OpPathElement {
 
     pub(crate) fn is_terminal(&self) -> Result<bool, FederationError> {
         match self {
-            OpPathElement::Field(field) => field.data().is_leaf(),
+            OpPathElement::Field(field) => field.is_leaf(),
             OpPathElement::InlineFragment(_) => Ok(false),
         }
     }
 
-    pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+    pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
         match self {
             OpPathElement::Field(field) => field.sibling_typename(),
             OpPathElement::InlineFragment(_) => None,
@@ -328,8 +411,17 @@ impl OpPathElement {
 
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
         match self {
-            OpPathElement::Field(field) => field.data().field_position.parent(),
-            OpPathElement::InlineFragment(inline) => inline.data().parent_type_position.clone(),
+            OpPathElement::Field(field) => field.field_position.parent(),
+            OpPathElement::InlineFragment(inline) => inline.parent_type_position.clone(),
+        }
+    }
+
+    pub(crate) fn sub_selection_type_position(
+        &self,
+    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => Ok(field.output_base_type()?.try_into().ok()),
+            OpPathElement::InlineFragment(inline) => Ok(Some(inline.casted_type())),
         }
     }
 
@@ -345,7 +437,7 @@ impl OpPathElement {
         ] {
             let directive_name: &'static str = (&kind).into();
             if let Some(application) = self.directives().get(directive_name) {
-                let Some(arg) = application.argument_by_name("if") else {
+                let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
                         "@{} missing required argument \"if\"",
                         directive_name
@@ -391,11 +483,18 @@ impl OpPathElement {
     pub(crate) fn defer_directive_args(&self) -> Option<DeferDirectiveArguments> {
         match self {
             OpPathElement::Field(_) => None, // @defer cannot be on field at the moment
-            OpPathElement::InlineFragment(inline_fragment) => inline_fragment
-                .data()
-                .defer_directive_arguments()
-                .ok()
-                .flatten(),
+            OpPathElement::InlineFragment(inline_fragment) => {
+                inline_fragment.defer_directive_arguments().ok().flatten()
+            }
+        }
+    }
+
+    pub(crate) fn has_defer(&self) -> bool {
+        match self {
+            OpPathElement::Field(_) => false,
+            OpPathElement::InlineFragment(inline_fragment) => {
+                inline_fragment.directives.has("defer")
+            }
         }
     }
 
@@ -406,20 +505,20 @@ impl OpPathElement {
     /// ignored).
     pub(crate) fn without_defer(&self) -> Option<Self> {
         match self {
-            Self::Field(_) => Some(self.clone()), // unchanged
+            Self::Field(_) => Some(self.clone()),
             Self::InlineFragment(inline_fragment) => {
                 let updated_directives: DirectiveList = inline_fragment
-                    .data()
                     .directives
-                    .get_all("defer")
+                    .iter()
+                    .filter(|directive| directive.name != "defer")
                     .cloned()
                     .collect();
-                if inline_fragment.data().type_condition_position.is_none()
+                if inline_fragment.type_condition_position.is_none()
                     && updated_directives.is_empty()
                 {
                     return None;
                 }
-                if inline_fragment.data().directives.len() == updated_directives.len() {
+                if inline_fragment.directives.len() == updated_directives.len() {
                     Some(self.clone())
                 } else {
                     // PORT_NOTE: We won't need to port `this.copyAttachementsTo(updated);` line here
@@ -435,15 +534,12 @@ impl OpPathElement {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<OpPathElement>, FederationError> {
+    ) -> Result<OpPathElement, FederationError> {
         match self {
-            OpPathElement::Field(field) => field
-                .rebase_on(parent_type, schema, error_handling)
-                .map(|val| val.map(Into::into)),
-            OpPathElement::InlineFragment(inline) => inline
-                .rebase_on(parent_type, schema, error_handling)
-                .map(|val| val.map(Into::into)),
+            OpPathElement::Field(field) => Ok(field.rebase_on(parent_type, schema)?.into()),
+            OpPathElement::InlineFragment(inline) => {
+                Ok(inline.rebase_on(parent_type, schema)?.into())
+            }
         }
     }
 }
@@ -471,12 +567,12 @@ impl From<InlineFragment> for OpGraphPathTrigger {
 
 /// Records, as we walk a path within a GraphQL operation, important directives encountered
 /// (currently `@include` and `@skip` with their conditions).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, serde::Serialize)]
 pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most
     /// applied include/skip).
-    conditionals: Arc<Vec<Arc<OperationConditional>>>,
+    conditionals: Arc<Vec<OperationConditional>>,
 }
 
 impl OpGraphPathContext {
@@ -484,17 +580,18 @@ impl OpGraphPathContext {
         &self,
         operation_element: &OpPathElement,
     ) -> Result<OpGraphPathContext, FederationError> {
-        let mut new_context = self.clone();
         if operation_element.directives().is_empty() {
-            return Ok(new_context);
+            return Ok(self.clone());
         }
 
-        let new_conditionals = operation_element.extract_operation_conditionals()?;
-        if !new_conditionals.is_empty() {
-            Arc::make_mut(&mut new_context.conditionals)
-                .extend(new_conditionals.into_iter().map(Arc::new));
+        let mut new_conditionals = operation_element.extract_operation_conditionals()?;
+        if new_conditionals.is_empty() {
+            return Ok(self.clone());
         }
-        Ok(new_context)
+        new_conditionals.extend(self.iter().cloned());
+        Ok(OpGraphPathContext {
+            conditionals: Arc::new(new_conditionals),
+        })
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -502,7 +599,7 @@ impl OpGraphPathContext {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
-        self.conditionals.iter().map(|x| x.as_ref())
+        self.conditionals.iter()
     }
 }
 
@@ -524,7 +621,7 @@ impl Display for OpGraphPathContext {
 /// for this by splitting a path into multiple paths (one for each possible outcome). The common
 /// example is abstract types, where we may end up taking a different edge depending on the runtime
 /// type (e.g. during type explosion).
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct SimultaneousPaths(pub(crate) Vec<Arc<OpGraphPath>>);
 
 impl SimultaneousPaths {
@@ -532,7 +629,7 @@ impl SimultaneousPaths {
         match self.0.as_slice() {
             [] => f.write("<no path>"),
 
-            [first] => f.write_fmt(format_args!("{{ {first} }}")),
+            [first] => f.write_fmt(format_args!("{first}")),
 
             _ => {
                 f.write("{")?;
@@ -551,7 +648,7 @@ impl std::fmt::Debug for SimultaneousPaths {
     }
 }
 
-impl std::fmt::Display for SimultaneousPaths {
+impl Display for SimultaneousPaths {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.fmt_indented(&mut IndentedFormatter::new(f))
     }
@@ -563,7 +660,7 @@ impl std::fmt::Display for SimultaneousPaths {
 // PORT_NOTE: The JS codebase stored a `ConditionResolver` callback here, but it was the same for
 // a given traversal (and cached resolution across the traversal), so we accordingly store it in
 // `QueryPlanTraversal` and pass it down when needed instead.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
     pub(crate) paths: SimultaneousPaths,
     pub(crate) context: OpGraphPathContext,
@@ -572,23 +669,31 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
     pub(crate) lazily_computed_indirect_paths: Vec<Option<OpIndirectPaths>>,
 }
 
+impl Display for SimultaneousPathsWithLazyIndirectPaths {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.paths)
+    }
+}
+
 /// A "set" of excluded destinations (i.e. subgraph names). Note that we use a `Vec` instead of set
 /// because this is used in pretty hot paths (the whole path computation is CPU intensive) and will
 /// basically always be tiny (it's bounded by the number of distinct key on a given type, so usually
 /// 2-3 max; even in completely unrealistic cases, it's hard bounded by the number of subgraphs), so
 /// a `Vec` is going to perform a lot better than `IndexSet` in practice.
-#[derive(Debug, Clone)]
-pub(crate) struct ExcludedDestinations(Arc<Vec<NodeStr>>);
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ExcludedDestinations(Arc<Vec<Arc<str>>>);
 
 impl ExcludedDestinations {
-    fn is_excluded(&self, destination: &NodeStr) -> bool {
-        self.0.contains(destination)
+    fn is_excluded(&self, destination: &str) -> bool {
+        self.0
+            .iter()
+            .any(|excluded| excluded.as_ref() == destination)
     }
 
-    fn add_excluded(&self, destination: NodeStr) -> Self {
-        if !self.is_excluded(&destination) {
+    fn add_excluded(&self, destination: &Arc<str>) -> Self {
+        if !self.is_excluded(destination) {
             let mut new = self.0.as_ref().clone();
-            new.push(destination);
+            new.push(destination.clone());
             Self(Arc::new(new))
         } else {
             self.clone()
@@ -609,7 +714,7 @@ impl Default for ExcludedDestinations {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ExcludedConditions(Arc<Vec<Arc<SelectionSet>>>);
 
 impl ExcludedConditions {
@@ -638,19 +743,30 @@ impl Default for ExcludedConditions {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct IndirectPaths<TTrigger, TEdge>
+#[derive(serde::Serialize)]
+pub(crate) struct IndirectPaths<TTrigger, TEdge, TDeadEnds>
 where
     TTrigger: Eq + Hash,
     Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
+    UnadvanceableClosures: Into<TDeadEnds>,
 {
     paths: Arc<Vec<Arc<GraphPath<TTrigger, TEdge>>>>,
-    dead_ends: Arc<Unadvanceables>,
+    #[serde(skip_serializing)]
+    dead_ends: TDeadEnds,
 }
 
-type OpIndirectPaths = IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>>;
+type OpIndirectPaths = IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>, ()>;
+
+impl Clone for OpIndirectPaths {
+    fn clone(&self) -> Self {
+        Self {
+            paths: self.paths.clone(),
+            dead_ends: (),
+        }
+    }
+}
 
 impl std::fmt::Debug for OpIndirectPaths {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -681,7 +797,7 @@ impl OpIndirectPaths {
         field: &Field,
     ) -> Result<OpIndirectPaths, FederationError> {
         // We only handle leaves; Things are more complex for non-leaves.
-        if !field.data().is_leaf()? {
+        if !field.is_leaf()? {
             return Ok(self.clone());
         }
 
@@ -707,14 +823,23 @@ impl OpIndirectPaths {
         } else {
             OpIndirectPaths {
                 paths: Arc::new(filtered),
-                dead_ends: self.dead_ends.clone(),
+                dead_ends: (),
             }
         })
     }
 }
 
-#[derive(Debug, Clone)]
-struct Unadvanceables(Vec<Unadvanceable>);
+#[allow(dead_code)]
+pub(crate) struct UnadvanceableClosures(Vec<UnadvanceableClosure>);
+
+impl From<UnadvanceableClosures> for () {
+    fn from(_: UnadvanceableClosures) -> Self {}
+}
+
+pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Unadvanceables>;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct Unadvanceables(Vec<Unadvanceable>);
 
 impl Display for Unadvanceables {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -731,11 +856,11 @@ impl Display for Unadvanceables {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Unadvanceable {
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct Unadvanceable {
     reason: UnadvanceableReason,
-    from_subgraph: NodeStr,
-    to_subgraph: NodeStr,
+    from_subgraph: Arc<str>,
+    to_subgraph: Arc<str>,
     details: String,
 }
 
@@ -749,14 +874,16 @@ impl Display for Unadvanceable {
     }
 }
 
-#[derive(Debug, Clone, strum_macros::Display)]
-enum UnadvanceableReason {
+#[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
+#[allow(dead_code)]
+pub(crate) enum UnadvanceableReason {
     UnsatisfiableKeyCondition,
     UnsatisfiableRequiresCondition,
     UnresolvableInterfaceObject,
     NoMatchingTransition,
     UnreachableType,
     IgnoredIndirectPath,
+    UnsatisfiableOverrideCondition,
 }
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
@@ -765,7 +892,7 @@ enum UnadvanceableReason {
 /// set, and the `SimultaneousPaths` ends at the node at which that query is made instead of a node
 /// for the leaf field. The selection set gets copied "as-is" into the `FetchNode`, and also avoids
 /// extra `GraphPath` creation and work during `PathTree` merging.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct ClosedPath {
     pub(crate) paths: SimultaneousPaths,
     pub(crate) selection_set: Option<Arc<SelectionSet>>,
@@ -782,7 +909,7 @@ impl ClosedPath {
     }
 }
 
-impl std::fmt::Display for ClosedPath {
+impl Display for ClosedPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(ref selection_set) = self.selection_set {
             write!(f, "{} -> {}", self.paths, selection_set)
@@ -794,17 +921,142 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
+
+// A drop-in replacement for `BinaryHeap`, but behaves more like JS QP's `popMin` method.
+struct MaxHeap<T>
+where
+    T: Ord,
+{
+    items: Vec<T>,
+}
+
+impl<T> MaxHeap<T>
+where
+    T: Ord,
+{
+    fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        // PORT_NOTE: JS QP returns the max item, but favors the first inserted one if there are
+        //            multiple maximum items.
+        // Note: `position_max` returns the last of the equally maximum items. Thus, we use
+        //       `position_min_by` by reversing the ordering.
+        let pos = self.items.iter().position_min_by(|a, b| b.cmp(a))?;
+        Some(self.items.remove(pos))
+    }
+}
+
+impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
+    type Error = FederationError;
+
+    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
+        match value {
+            GraphPathTrigger::Op(op) => Ok(op),
+            GraphPathTrigger::Transition(_) => {
+                bail!("Failed to convert to GraphPathTrigger")
+            }
+        }
+    }
+}
+
+impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
+    type Error = FederationError;
+
+    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
+        match value {
+            GraphPathTrigger::Transition(transition) => Ok(transition),
+            GraphPathTrigger::Op(_) => Err(FederationError::internal(
+                "Failed to convert to GraphPathTrigger",
+            )),
+        }
+    }
+}
+
+#[derive(derive_more::From)]
+pub(crate) enum GraphPathTriggerRef<'a> {
+    Op(&'a OpGraphPathTrigger),
+    Transition(&'a QueryGraphEdgeTransition),
+}
+
+#[derive(derive_more::From)]
+pub(crate) enum GraphPathTriggerRefMut<'a> {
+    Op(&'a mut OpGraphPathTrigger),
+    // Unused:
+    // Transition(&'a mut QueryGraphEdgeTransition),
+}
+
+impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
+    fn from(value: &'a GraphPathTrigger) -> Self {
+        match value {
+            GraphPathTrigger::Op(value) => value.as_ref().into(),
+            GraphPathTrigger::Transition(value) => value.as_ref().into(),
+        }
+    }
+}
+
+/// `GraphPath` is generic over two types, `TTrigger` and `TEdge`. This trait helps abstract over
+/// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
+/// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
+/// potentially raise errors), this trait provides ways to access the data needed within.
+pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
+    fn get_field_mut<'a>(&'a mut self) -> Option<&'a mut Field>
+    where
+        &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRefMut::Op(OpGraphPathTrigger::OpPathElement(
+                OpPathElement::Field(field),
+            )) => Some(field),
+            _ => None,
+        }
+    }
+
+    fn get_field_parent_type<'a>(&'a self) -> Option<CompositeTypeDefinitionPosition>
+    where
+        &'a Self: Into<GraphPathTriggerRef<'a>>,
+    {
+        match self.into() {
+            GraphPathTriggerRef::Op(trigger) => match trigger {
+                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
+                    Some(field.field_position.parent())
+                }
+                _ => None,
+            },
+            GraphPathTriggerRef::Transition(trigger) => match trigger {
+                QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } => Some(field_definition_position.parent()),
+                _ => None,
+            },
+        }
+    }
+}
+
+impl GraphPathTriggerVariant for OpGraphPathTrigger {}
+
+impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
+    TTrigger: GraphPathTriggerVariant + Display,
+    for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
+    for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
     Arc<TTrigger>: Into<GraphPathTrigger>,
-    TEdge: Copy + Into<Option<EdgeIndex>>,
+    TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
 {
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
@@ -816,11 +1068,13 @@ where
             edge_triggers: vec![],
             edge_conditions: vec![],
             last_subgraph_entering_edge_info: None,
-            own_path_ids: Arc::new(IndexSet::new()),
-            overriding_path_ids: Arc::new(IndexSet::new()),
-            runtime_types_of_tail: Arc::new(IndexSet::new()),
+            own_path_ids: Arc::new(IndexSet::default()),
+            overriding_path_ids: Arc::new(IndexSet::default()),
+            runtime_types_of_tail: Arc::new(IndexSet::default()),
             runtime_types_before_tail_if_last_is_cast: None,
             defer_on_tail: None,
+            matching_context_ids: Vec::default(),
+            arguments_to_context_usages: Vec::default(),
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
         Ok(path)
@@ -838,13 +1092,13 @@ where
                     .schema_by_source(&head_weight.source)?
                     .possible_runtime_types(head_type_pos)?
             }
-            QueryGraphNodeType::FederatedRootType(_) => IndexSet::new(),
+            QueryGraphNodeType::FederatedRootType(_) => IndexSet::default(),
         })
     }
 
     pub(crate) fn add(
         &self,
-        trigger: TTrigger,
+        mut trigger: TTrigger,
         edge: TEdge,
         condition_resolution: ConditionResolution,
         defer: Option<DeferDirectiveArguments>,
@@ -852,6 +1106,7 @@ where
         let ConditionResolution::Satisfied {
             path_tree: condition_path_tree,
             cost: condition_cost,
+            context_map,
         } = condition_resolution
         else {
             return Err(FederationError::internal(
@@ -862,11 +1117,20 @@ where
         let mut edges = self.edges.clone();
         let mut edge_triggers = self.edge_triggers.clone();
         let mut edge_conditions = self.edge_conditions.clone();
+        let mut matching_context_ids = self.matching_context_ids.clone();
+        let mut arguments_to_context_usages = self.arguments_to_context_usages.clone();
+        let mut last_subgraph_entering_edge_info = if defer.is_none() {
+            self.last_subgraph_entering_edge_info.clone()
+        } else {
+            None
+        };
 
         let Some(new_edge) = edge.into() else {
             edges.push(edge);
             edge_triggers.push(Arc::new(trigger));
             edge_conditions.push(condition_path_tree);
+            matching_context_ids.push(None);
+            arguments_to_context_usages.push(None);
             return Ok(GraphPath {
                 graph: self.graph.clone(),
                 head: self.head,
@@ -877,11 +1141,7 @@ where
                 // We clear `last_subgraph_entering_edge_info` as we enter a `@defer`. That is
                 // because `last_subgraph_entering_edge_info` is used to eliminate some non-optimal
                 // paths, but we don't want those optimizations to bypass a `@defer` application.
-                last_subgraph_entering_edge_info: if defer.is_some() {
-                    None
-                } else {
-                    self.last_subgraph_entering_edge_info.clone()
-                },
+                last_subgraph_entering_edge_info,
                 own_path_ids: self.own_path_ids.clone(),
                 overriding_path_ids: self.overriding_path_ids.clone(),
                 runtime_types_of_tail: Arc::new(
@@ -890,6 +1150,8 @@ where
                 ),
                 runtime_types_before_tail_if_last_is_cast: None,
                 defer_on_tail: defer,
+                matching_context_ids,
+                arguments_to_context_usages,
             });
         };
 
@@ -928,7 +1190,7 @@ where
                         last_operation_element,
                     )) = last_operation_element.as_ref()
                     {
-                        if last_operation_element.data().directives.is_empty() {
+                        if last_operation_element.directives.is_empty() {
                             // This mean we have 2 typecasts back-to-back, and that means the
                             // previous operation element might not be useful on this path. More
                             // precisely, the previous typecast was only useful if it restricted the
@@ -971,6 +1233,9 @@ where
                             if !new_runtime_types_of_tail.is_empty()
                                 && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
                             {
+                                debug!(
+                                    "Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path."
+                                );
                                 // Note that `edge` starts at the node we wish to eliminate from the
                                 // path. So we need to replace it with the edge going directly from
                                 // the previous node to the new tail for this path.
@@ -1026,6 +1291,10 @@ where
                                         } else {
                                             self.defer_on_tail.clone()
                                         },
+                                        matching_context_ids: self.matching_context_ids.clone(),
+                                        arguments_to_context_usages: self
+                                            .arguments_to_context_usages
+                                            .clone(),
                                     });
                                 }
                             }
@@ -1058,6 +1327,12 @@ where
                 edges.push(edge);
                 edge_triggers.push(Arc::new(trigger));
                 edge_conditions.push(condition_path_tree);
+                if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
+                    last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                        index: self.edges.len() - 1,
+                        conditions_cost: condition_cost,
+                    });
+                }
                 return Ok(GraphPath {
                     graph: self.graph.clone(),
                     head: self.head,
@@ -1070,16 +1345,7 @@ where
                     //
                     // PORT_NOTE: In the JS codebase, the information for the last subgraph-entering
                     // is set incorrectly, in that the index is off by one. We fix that bug here.
-                    last_subgraph_entering_edge_info: if defer.is_none()
-                        && self.graph.is_cross_subgraph_edge(new_edge)?
-                    {
-                        Some(SubgraphEnteringEdgeInfo {
-                            index: self.edges.len() - 1,
-                            conditions_cost: condition_cost,
-                        })
-                    } else {
-                        None
-                    },
+                    last_subgraph_entering_edge_info,
                     own_path_ids: self.own_path_ids.clone(),
                     overriding_path_ids: self.overriding_path_ids.clone(),
                     runtime_types_of_tail: Arc::new(self.graph.advance_possible_runtime_types(
@@ -1089,32 +1355,74 @@ where
                     // We know last edge is not a cast.
                     runtime_types_before_tail_if_last_is_cast: None,
                     defer_on_tail: defer,
+                    matching_context_ids: self.matching_context_ids.clone(),
+                    arguments_to_context_usages: self.arguments_to_context_usages.clone(),
                 });
+            }
+        }
+
+        let (new_edge_conditions, new_matching_context_ids, new_arguments_to_context_usages) =
+            self.merge_edge_conditions_with_resolution(&condition_path_tree, &context_map);
+        let last_arguments_to_context_usages = new_arguments_to_context_usages.last();
+
+        if let Some(Some(last_arguments_to_context_usages)) = last_arguments_to_context_usages {
+            // TODO: Perhaps it is better to explicitly cast this to `GraphPathTriggerRefMut` and
+            // pull out the field from there.
+            if let Some(field) = trigger.get_field_mut() {
+                // We need to add the extra @fromContext arguments to the trigger, but its likely
+                // pointing to a schema that doesn't have them, so we update the trigger to use the
+                // appropriate subgraph schema and position first.
+                let QueryGraphEdgeTransition::FieldCollection {
+                    source,
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    bail!(
+                        "Unexpectedly found field trigger for non-field edge {}",
+                        edge_weight
+                    );
+                };
+                field.schema = self.graph.schema_by_source(source)?.clone();
+                field.field_position = field_definition_position.clone();
+
+                // Now we can append the extra @fromContext arguments.
+                let updated_field_arguments =
+                    last_arguments_to_context_usages
+                        .iter()
+                        .map(|(argument_name, usage_entry)| {
+                            Node::new(apollo_compiler::executable::Argument {
+                                name: argument_name.clone(),
+                                value: Node::new(Value::Variable(usage_entry.context_id.clone())),
+                            })
+                        });
+                field.arguments = field
+                    .arguments
+                    .iter()
+                    .cloned()
+                    .chain(updated_field_arguments)
+                    .collect();
             }
         }
 
         edges.push(edge);
         edge_triggers.push(Arc::new(trigger));
-        edge_conditions.push(condition_path_tree);
+        if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
+            last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                index: self.edges.len(),
+                conditions_cost: condition_cost,
+            });
+        }
         Ok(GraphPath {
             graph: self.graph.clone(),
             head: self.head,
             tail: edge_tail,
             edges,
             edge_triggers,
-            edge_conditions,
+            edge_conditions: new_edge_conditions,
             // Again, we don't want to set `last_subgraph_entering_edge_info` if we're entering a
             // `@defer` (see above).
-            last_subgraph_entering_edge_info: if defer.is_none()
-                && self.graph.is_cross_subgraph_edge(new_edge)?
-            {
-                Some(SubgraphEnteringEdgeInfo {
-                    index: self.edges.len(),
-                    conditions_cost: condition_cost,
-                })
-            } else {
-                None
-            },
+            last_subgraph_entering_edge_info,
             own_path_ids: self.own_path_ids.clone(),
             overriding_path_ids: self.overriding_path_ids.clone(),
             runtime_types_of_tail: Arc::new(
@@ -1143,33 +1451,110 @@ where
             } else {
                 None
             },
+            matching_context_ids: new_matching_context_ids,
+            arguments_to_context_usages: new_arguments_to_context_usages,
         })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn merge_edge_conditions_with_resolution(
+        &self,
+        condition_path_tree: &Option<Arc<OpPathTree>>,
+        context_map: &Option<IndexMap<Name, ContextMapEntry>>,
+    ) -> (
+        Vec<Option<Arc<OpPathTree>>>,
+        Vec<Option<IndexSet<Name>>>,
+        Vec<Option<IndexMap<Name, ContextUsageEntry>>>,
+    ) {
+        let mut edge_conditions = self.edge_conditions.clone();
+        let mut matching_context_ids = self.matching_context_ids.clone();
+        let mut arguments_to_context_usages = self.arguments_to_context_usages.clone();
+
+        edge_conditions.push(condition_path_tree.clone());
+        matching_context_ids.push(None);
+        if context_map.is_none() || context_map.as_ref().is_some_and(|m| m.is_empty()) {
+            arguments_to_context_usages.push(None);
+            (
+                edge_conditions,
+                matching_context_ids,
+                arguments_to_context_usages,
+            )
+        } else {
+            let mut new_arguments_to_context_usages = IndexMap::default();
+            for (_, entry) in context_map.iter().flat_map(|map| map.iter()) {
+                let idx = edge_conditions.len() - entry.levels_in_query_path - 1;
+
+                if let Some(path_tree) = &entry.path_tree {
+                    let merged_conditions = edge_conditions[idx]
+                        .as_ref()
+                        .map_or_else(|| path_tree.clone(), |condition| condition.merge(path_tree));
+                    edge_conditions[idx] = Some(merged_conditions);
+                }
+                matching_context_ids[idx]
+                    .get_or_insert_with(Default::default)
+                    .insert(entry.context_id.clone());
+
+                new_arguments_to_context_usages.insert(
+                    entry.argument_name.clone(),
+                    ContextUsageEntry {
+                        context_id: entry.context_id.clone(),
+                        relative_path: vec![
+                            FetchDataPathElement::Parent;
+                            entry.levels_in_data_path
+                        ],
+                        selection_set: entry.selection_set.clone(),
+                        subgraph_argument_type: entry.argument_type.clone(),
+                    },
+                );
+            }
+            arguments_to_context_usages.push(Some(new_arguments_to_context_usages));
+            (
+                edge_conditions,
+                matching_context_ids,
+                arguments_to_context_usages,
+            )
+        }
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
         debug_assert_eq!(self.edges.len(), self.edge_triggers.len());
         debug_assert_eq!(self.edges.len(), self.edge_conditions.len());
-        self.edges
-            .iter()
-            .copied()
-            .zip(&self.edge_triggers)
-            .zip(&self.edge_conditions)
-            .map(|((edge, trigger), condition)| (edge, trigger, condition))
+        debug_assert_eq!(self.edges.len(), self.matching_context_ids.len());
+        debug_assert_eq!(self.edges.len(), self.arguments_to_context_usages.len());
+        izip!(
+            self.edges.iter().copied(),
+            &self.edge_triggers,
+            &self.edge_conditions,
+            &self.matching_context_ids,
+            &self.arguments_to_context_usages,
+        )
+        .map(
+            |(edge, trigger, condition, matching_context_ids, arguments_to_context_usages)| {
+                (
+                    edge,
+                    trigger,
+                    condition,
+                    matching_context_ids.as_ref(),
+                    arguments_to_context_usages.as_ref(),
+                )
+            },
+        )
     }
 
-    pub(crate) fn next_edges<'a>(
-        &'a self,
-    ) -> Result<Box<dyn Iterator<Item = EdgeIndex> + 'a>, FederationError> {
+    pub(crate) fn next_edges(&self) -> Result<impl Iterator<Item = EdgeIndex>, FederationError> {
+        let get_id = |edge_ref: EdgeReference<_>| edge_ref.id();
+
         if self.defer_on_tail.is_some() {
             // If the path enters a `@defer` (meaning that what comes after needs to be deferred),
             // then it's the one special case where we explicitly need to ask for edges to self,
             // as we will force the use of a `@key` edge (so we can send the non-deferred part
             // immediately) and we may have to resume the deferred part in the same subgraph than
             // the one in which we were (hence the need for edges to self).
-            return Ok(Box::new(
+            return Ok(Either::Left(
                 self.graph
                     .out_edges_with_federation_self_edges(self.tail)
-                    .map(|edge_ref| edge_ref.id()),
+                    .into_iter()
+                    .map(get_id),
             ));
         }
 
@@ -1187,14 +1572,12 @@ where
                         "Unexpectedly missing entry for non-trivial followup edges map",
                     ));
                 };
-                return Ok(Box::new(non_trivial_followup_edges.iter().copied()));
+                return Ok(Either::Right(non_trivial_followup_edges.iter().copied()));
             }
         }
 
-        Ok(Box::new(
-            self.graph
-                .out_edges(self.tail)
-                .map(|edge_ref| edge_ref.id()),
+        Ok(Either::Left(
+            self.graph.out_edges(self.tail).into_iter().map(get_id),
         ))
     }
 
@@ -1304,6 +1687,12 @@ where
             == Some(self.edges.len() - 2))
     }
 
+    /*
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")
+    )]
+    */
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -1313,15 +1702,219 @@ where
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
         let edge_weight = self.graph.edge_weight(edge)?;
-        if edge_weight.conditions.is_none() {
+        if edge_weight.conditions.is_none() && edge_weight.required_contexts.is_empty() {
             return Ok(ConditionResolution::no_conditions());
         }
-        let resolution = condition_resolver.resolve(
+
+        /* Resolve context conditions */
+
+        let mut total_cost = 0.;
+        let mut context_map: IndexMap<Name, ContextMapEntry> = IndexMap::default();
+
+        if !edge_weight.required_contexts.is_empty() {
+            let mut was_unsatisfied = false;
+            for ctx in &edge_weight.required_contexts {
+                let mut levels_in_data_path = 0;
+                for (mut levels_in_query_path, (e, trigger)) in self
+                    .edges
+                    .iter()
+                    .zip(self.edge_triggers.iter())
+                    .rev()
+                    .enumerate()
+                {
+                    let parent_type = trigger.get_field_parent_type();
+                    levels_in_query_path += 1;
+                    if parent_type.is_some() {
+                        levels_in_data_path += 1;
+                    }
+                    let Some(e) = (*e).into() else { continue };
+                    if was_unsatisfied || context_map.contains_key(&ctx.argument_name) {
+                        continue;
+                    }
+                    // There's a context match if in the supergraph schema, the field's parent type
+                    // is equal to or a subtype of one of the @context types.
+                    let Some(parent_type) = parent_type else {
+                        continue;
+                    };
+                    let supergraph_schema = self.graph.supergraph_schema()?;
+                    let parent_type_in_supergraph: CompositeTypeDefinitionPosition =
+                        supergraph_schema
+                            .get_type(parent_type.type_name().clone())?
+                            .try_into()?;
+                    if !ctx.types_with_context_set.iter().fallible_any(|pos| {
+                        if pos.type_name() == parent_type_in_supergraph.type_name() {
+                            return Ok::<_, FederationError>(true);
+                        }
+                        match &parent_type_in_supergraph {
+                            CompositeTypeDefinitionPosition::Object(parent_type_in_supergraph) => {
+                                if parent_type_in_supergraph
+                                    .get(supergraph_schema.schema())?
+                                    .implements_interfaces
+                                    .iter()
+                                    .any(|item| &item.name == pos.type_name())
+                                {
+                                    return Ok(true);
+                                }
+                            }
+                            CompositeTypeDefinitionPosition::Interface(
+                                parent_type_in_supergraph,
+                            ) => {
+                                if parent_type_in_supergraph
+                                    .get(supergraph_schema.schema())?
+                                    .implements_interfaces
+                                    .iter()
+                                    .any(|item| &item.name == pos.type_name())
+                                {
+                                    return Ok(true);
+                                }
+                            }
+                            _ => {}
+                        }
+                        let pos_in_supergraph: CompositeTypeDefinitionPosition = supergraph_schema
+                            .get_type(pos.type_name().clone())?
+                            .try_into()?;
+                        if let CompositeTypeDefinitionPosition::Union(pos_in_supergraph) =
+                            &pos_in_supergraph
+                        {
+                            if pos_in_supergraph
+                                .get(supergraph_schema.schema())?
+                                .members
+                                .iter()
+                                .any(|item| &item.name == parent_type_in_supergraph.type_name())
+                            {
+                                return Ok(true);
+                            }
+                        }
+                        Ok(false)
+                    })? {
+                        continue;
+                    }
+
+                    // We have a match, so parse the selection set against the field's parent type
+                    // in the supergraph schema.
+                    let mut selection_set = parse_field_value_without_validation(
+                        &supergraph_schema,
+                        parent_type_in_supergraph.type_name().clone(),
+                        &ctx.selection,
+                    )?;
+
+                    // In the current version of @context (v0.1), type conditions (if they appear at
+                    // all) are only allowed at top-level, and are only allowed to reference object
+                    // types. Due to duck-typing semantics, there may be type conditions that have
+                    // an empty intersection in possible runtime types with their parent type, which
+                    // means we need to remove those type conditions for the selection set to be
+                    // considered valid GraphQL.
+                    let possible_runtime_types =
+                        supergraph_schema.possible_runtime_types(parent_type_in_supergraph)?;
+                    selection_set.selection_set.selections = selection_set
+                        .selection_set
+                        .selections
+                        .into_iter()
+                        .map(|selection| {
+                            let apollo_compiler::executable::Selection::InlineFragment(
+                                inline_fragment,
+                            ) = &selection
+                            else {
+                                return Ok::<_, FederationError>(Some(selection));
+                            };
+                            let Some(type_condition) = &inline_fragment.type_condition else {
+                                return Ok(Some(selection));
+                            };
+                            let type_condition_pos: ObjectTypeDefinitionPosition =
+                                supergraph_schema
+                                    .get_type(type_condition.clone())?
+                                    .try_into()?;
+                            if possible_runtime_types.contains(&type_condition_pos) {
+                                return Ok(Some(selection));
+                            }
+                            Ok(None)
+                        })
+                        .process_results(|r| r.flatten().collect())?;
+
+                    // The field set should be valid now, so we'll validate and convert to our
+                    // selection set representation.
+                    let selection_set = validate_field_value(&supergraph_schema, selection_set)?;
+                    let resolution = condition_resolver.resolve(
+                        e,
+                        context,
+                        excluded_destinations,
+                        excluded_conditions,
+                        Some(&selection_set),
+                    )?;
+                    let context_id = self.graph.context_id_by_source_and_argument(
+                        &ctx.subgraph_name,
+                        &ctx.argument_coordinate,
+                    )?;
+                    match &resolution {
+                        ConditionResolution::Satisfied {
+                            cost, path_tree, ..
+                        } => {
+                            total_cost += cost;
+                            let entry = ContextMapEntry {
+                                levels_in_data_path,
+                                levels_in_query_path,
+                                path_tree: path_tree.clone(),
+                                selection_set,
+                                argument_name: ctx.argument_name.clone(),
+                                argument_type: ctx.argument_type.clone(),
+                                context_id: context_id.clone(),
+                            };
+                            context_map.insert(ctx.argument_name.clone(), entry);
+                        }
+                        ConditionResolution::Unsatisfied { .. } => was_unsatisfied = true,
+                    }
+                }
+            }
+
+            if edge_weight
+                .required_contexts
+                .iter()
+                .any(|ctx| !context_map.contains_key(&ctx.argument_name))
+            {
+                debug!("@fromContext requires a context that is not set in graph path");
+                return Ok(ConditionResolution::Unsatisfied {
+                    reason: Some(UnsatisfiedConditionReason::NoSetContext),
+                });
+            }
+
+            if was_unsatisfied {
+                debug!("@fromContext selection set is unsatisfied");
+                return Ok(ConditionResolution::Unsatisfied { reason: None });
+            }
+
+            // it's possible that we will need to create a new fetch group at this point, in which
+            // case we'll need to collect the keys to jump back to this object as a precondition
+            // for satisfying it.
+            let (edge_head, _) = self.graph.edge_endpoints(edge)?;
+            if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                debug!("Post-context conditions cannot be satisfied");
+                return Ok(ConditionResolution::Unsatisfied {
+                    reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
+                });
+            }
+
+            if edge_weight.conditions.is_none() {
+                return Ok(ConditionResolution::Satisfied {
+                    cost: total_cost,
+                    path_tree: None,
+                    context_map: Some(context_map),
+                });
+            }
+        }
+
+        /* Resolve all other conditions */
+
+        debug_span!("Checking conditions {conditions} on edge {edge_weight}");
+        let mut resolution = condition_resolver.resolve(
             edge,
             context,
             excluded_destinations,
             excluded_conditions,
+            None,
         )?;
+        if matches!(resolution, ConditionResolution::Unsatisfied { .. }) {
+            return Ok(ConditionResolution::Unsatisfied { reason: None });
+        }
         if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
             if matches!(
                 edge_weight.transition,
@@ -1342,8 +1935,12 @@ where
                         true
                     };
                     if in_same_subgraph {
+                        debug!(
+                            "@requires conditions are satisfied, but validating post-require key."
+                        );
                         let (edge_head, _) = self.graph.edge_endpoints(edge)?;
                         if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                            debug!("Post-require conditions cannot be satisfied");
                             return Ok(ConditionResolution::Unsatisfied {
                                 reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
                             });
@@ -1368,6 +1965,20 @@ where
                 }
             }
         }
+        if let ConditionResolution::Satisfied {
+            cost,
+            context_map: ctx_map,
+            ..
+        } = &mut resolution
+        {
+            *cost += total_cost;
+            *ctx_map = Some(context_map);
+        }
+        snapshot!(
+            "ConditionResolution",
+            resolution.to_string(),
+            "Condition resolution"
+        );
         Ok(resolution)
     }
 
@@ -1375,18 +1986,33 @@ where
     // composition, but we'll need to port that code when we port composition.
     // PORT_NOTE: In the JS codebase, this was named
     // `advancePathWithNonCollectingAndTypePreservingTransitions`.
-    fn advance_with_non_collecting_and_type_preserving_transitions(
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(skip_all, level = "trace")
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn advance_with_non_collecting_and_type_preserving_transitions<TDeadEnds>(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        override_conditions: &EnabledOverrideConditions,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
         ) -> TTrigger,
-        node_and_trigger_to_edge: impl Fn(&Arc<QueryGraph>, NodeIndex, &Arc<TTrigger>) -> Option<TEdge>,
-    ) -> Result<IndirectPaths<TTrigger, TEdge>, FederationError> {
+        node_and_trigger_to_edge: impl Fn(
+            &Arc<QueryGraph>,
+            NodeIndex,
+            &Arc<TTrigger>,
+            &EnabledOverrideConditions,
+        ) -> Option<TEdge>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
+    ) -> Result<IndirectPaths<TTrigger, TEdge, TDeadEnds>, FederationError>
+    where
+        UnadvanceableClosures: Into<TDeadEnds>,
+    {
         // If we're asked for indirect paths after an "@interfaceObject fake down cast" but that
         // down cast comes just after non-collecting edge(s), then we can ignore the ask (skip
         // indirect paths from there). The reason is that the presence of the non-collecting edges
@@ -1397,7 +2023,7 @@ where
         if self.last_edge_is_interface_object_fake_down_cast_after_entering_subgraph()? {
             return Ok(IndirectPaths {
                 paths: Arc::new(vec![]),
-                dead_ends: Arc::new(Unadvanceables(vec![])),
+                dead_ends: UnadvanceableClosures(vec![]).into(),
             });
         }
 
@@ -1415,17 +2041,27 @@ where
         // be found).
         type BestPathInfo<TTrigger, TEdge> =
             Option<(Arc<GraphPath<TTrigger, TEdge>>, QueryPlanCost)>;
-        let mut best_path_by_source: IndexMap<NodeStr, BestPathInfo<TTrigger, TEdge>> =
-            IndexMap::new();
+        let mut best_path_by_source: IndexMap<Arc<str>, BestPathInfo<TTrigger, TEdge>> =
+            IndexMap::default();
         let dead_ends = vec![];
         // Note that through `excluded` we avoid taking the same edge from multiple options. But
         // that means it's important we try the smallest paths first. That is, if we could in theory
         // have path A -> B and A -> C -> B, and we can do B -> D, then we want to keep A -> B -> D,
         // not A -> C -> B -> D.
-        let mut heap: BinaryHeap<HeapElement<TTrigger, TEdge>> = BinaryHeap::new();
+        let mut heap: MaxHeap<HeapElement<TTrigger, TEdge>> = MaxHeap::new();
         heap.push(HeapElement(self.clone()));
+
         while let Some(HeapElement(to_advance)) = heap.pop() {
+            debug!("From {to_advance}");
+            let span = debug_span!(" |");
+            let _guard = span.enter();
             for edge in to_advance.next_edges()? {
+                debug!(
+                    "Testing edge {edge}",
+                    edge = EdgeIndexDisplay::new(edge, &self.graph)
+                );
+                let span = debug_span!(" |");
+                let _guard = span.enter();
                 let edge_weight = self.graph.edge_weight(edge)?;
                 if edge_weight.transition.collect_operation_elements() {
                     continue;
@@ -1434,6 +2070,12 @@ where
                 let edge_tail_weight = self.graph.node_weight(edge_tail)?;
 
                 if excluded_destinations.is_excluded(&edge_tail_weight.source) {
+                    debug!("Ignored: edge is excluded");
+                    continue;
+                }
+
+                if disabled_subgraphs.contains(&edge_tail_weight.source) {
+                    debug!("Ignored: subgraph is disabled");
                     continue;
                 }
 
@@ -1443,6 +2085,7 @@ where
                 // re-entering the current subgraph is actually useful.
                 if edge_tail_weight.source == original_source && to_advance.defer_on_tail.is_none()
                 {
+                    debug!("Ignored: edge get us back to our original source");
                     continue;
                 }
 
@@ -1458,21 +2101,30 @@ where
                     && !(to_advance.defer_on_tail.is_some()
                         && self.graph.is_self_key_or_root_edge(edge)?)
                 {
+                    debug!(r#"Ignored: edge is a top-level "RootTypeResolution""#);
                     continue;
                 }
 
                 let prev_for_source = best_path_by_source.get(&edge_tail_weight.source);
                 let prev_for_source = match prev_for_source {
                     Some(Some(prev_for_source)) => Some(prev_for_source),
-                    Some(None) => continue,
+                    Some(None) => {
+                        debug!(
+                            "Ignored: we've shown before than going to {original_source:?} is not productive"
+                        );
+                        continue;
+                    }
                     None => None,
                 };
 
                 if let Some(prev_for_source) = prev_for_source {
                     if (prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= 1)
+                            && prev_for_source.1 <= 1.0)
                     {
+                        debug!(
+                            "Ignored: a better (shorter) path to the same subgraph already added"
+                        );
                         // We've already found another path that gets us to the same subgraph rather
                         // than the edge we're about to check. If that previous path is strictly
                         // shorter than the path we'd obtain with the new edge, then we don't
@@ -1490,9 +2142,13 @@ where
                 }
 
                 if excluded_conditions.is_excluded(edge_weight.conditions.as_ref()) {
+                    debug!("Ignored: edge condition is excluded");
                     continue;
                 }
 
+                debug!("Validating conditions {edge_weight}");
+                let span = debug_span!(" |");
+                let guard = span.enter();
                 // As we validate the condition for this edge, it might be necessary to jump to
                 // another subgraph, but if for that we need to jump to the same subgraph we're
                 // trying to get to, then it means there is another, shorter way to go to our
@@ -1502,10 +2158,17 @@ where
                     edge,
                     condition_resolver,
                     context,
-                    &excluded_destinations.add_excluded(edge_tail_weight.source.clone()),
+                    &excluded_destinations.add_excluded(&edge_tail_weight.source),
                     excluded_conditions,
                 )?;
-                if let ConditionResolution::Satisfied { path_tree, cost } = condition_resolution {
+                if let ConditionResolution::Satisfied {
+                    path_tree,
+                    cost,
+                    context_map,
+                } = condition_resolution
+                {
+                    debug!("Condition satisfied");
+                    drop(guard);
                     // We can get to `edge_tail_weight.source` with that edge. But if we had already
                     // found another path to the same subgraph, we want to replace it with this one
                     // only if either 1) it is shorter or 2) if it's of equal size, only if the
@@ -1514,6 +2177,9 @@ where
                         if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
                             && prev_for_source.1 <= cost
                         {
+                            debug!(
+                                "Ignored: a better (less costly) path to the same subgraph already added"
+                            );
                             continue;
                         }
                     }
@@ -1582,7 +2248,9 @@ where
                                 let QueryGraphNodeType::FederatedRootType(root_kind) =
                                     &root_weight.type_
                                 else {
-                                    return Err(FederationError::internal("Encountered non-root path with a subgraph-entering transition"));
+                                    return Err(FederationError::internal(
+                                        "Encountered non-root path with a subgraph-entering transition",
+                                    ));
                                 };
                                 self.graph
                                     .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
@@ -1604,7 +2272,7 @@ where
                                 let last_subgraph_entering_edge_head_weight =
                                     self.graph.node_weight(last_subgraph_entering_edge_head)?;
                                 last_subgraph_entering_edge_head_weight.source
-                                    == last_subgraph_entering_edge_tail_weight.source
+                                    == edge_tail_weight.source
                             };
 
                             let direct_path_end_node =
@@ -1616,11 +2284,12 @@ where
                                             "Edge tail is unexpectedly a federated root",
                                         ));
                                     };
-                                    self.check_direct_path_from_node(
+                                    to_advance.check_direct_path_from_node(
                                         last_subgraph_entering_edge_info.index + 1,
                                         direct_path_start_node,
                                         edge_tail_type_pos,
                                         &node_and_trigger_to_edge,
+                                        override_conditions,
                                     )?
                                 } else {
                                     None
@@ -1630,7 +2299,7 @@ where
                                 let direct_key_edge_max_cost = last_subgraph_entering_edge_info
                                     .conditions_cost
                                     + if is_edge_to_previous_subgraph {
-                                        0
+                                        0.0
                                     } else {
                                         cost
                                     };
@@ -1642,6 +2311,29 @@ where
                                         direct_key_edge_max_cost,
                                     )?
                                 {
+                                    debug!(
+                                        "Ignored: edge correspond to a detour by subgraph {} from subgraph {:?}: ",
+                                        edge_tail_weight.source,
+                                        self.graph
+                                            .node_weight(last_subgraph_entering_edge_head)?
+                                            .source
+                                    );
+                                    debug!(
+                                        "we have a direct path from {} to {} in {}.",
+                                        self.graph
+                                            .node_weight(last_subgraph_entering_edge_head)?
+                                            .type_,
+                                        edge_tail_weight.type_,
+                                        self.graph
+                                            .node_weight(last_subgraph_entering_edge_head)?
+                                            .source
+                                    );
+                                    if !is_edge_to_previous_subgraph {
+                                        debug!(
+                                            "And, it can move to {} from there",
+                                            edge_tail_weight.source
+                                        );
+                                    }
                                     // We just found that going to the previous subgraph is useless
                                     // because there is a more direct path. But we additionally
                                     // record that this previous subgraph should be avoided
@@ -1671,7 +2363,11 @@ where
                     let updated_path = Arc::new(to_advance.add(
                         transition_and_context_to_trigger(&edge_weight.transition, context),
                         edge.into(),
-                        ConditionResolution::Satisfied { cost, path_tree },
+                        ConditionResolution::Satisfied {
+                            cost,
+                            path_tree,
+                            context_map,
+                        },
                         None,
                     )?);
                     best_path_by_source.insert(
@@ -1697,6 +2393,8 @@ where
                             heap.push(HeapElement(updated_path));
                         }
                     }
+                } else {
+                    debug!("Condition unsatisfiable");
                 }
             }
         }
@@ -1709,7 +2407,7 @@ where
                     .map(|p| p.0)
                     .collect(),
             ),
-            dead_ends: Arc::new(Unadvanceables(dead_ends)),
+            dead_ends: UnadvanceableClosures(dead_ends).into(),
         })
     }
 
@@ -1724,12 +2422,26 @@ where
         start_index: usize,
         start_node: NodeIndex,
         end_type_position: &OutputTypeDefinitionPosition,
-        node_and_trigger_to_edge: impl Fn(&Arc<QueryGraph>, NodeIndex, &Arc<TTrigger>) -> Option<TEdge>,
+        node_and_trigger_to_edge: impl Fn(
+            &Arc<QueryGraph>,
+            NodeIndex,
+            &Arc<TTrigger>,
+            &EnabledOverrideConditions,
+        ) -> Option<TEdge>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
+        // TODO: Temporary fix to avoid optimization if context exists, a permanent fix is here:
+        //       https://github.com/apollographql/federation/pull/3017#pullrequestreview-2083949094
+        if self.graph.is_context_used() {
+            return Ok(None);
+        }
+
         let mut current_node = start_node;
         for index in start_index..self.edges.len() {
             let trigger = &self.edge_triggers[index];
-            let Some(edge) = node_and_trigger_to_edge(&self.graph, current_node, trigger) else {
+            let Some(edge) =
+                node_and_trigger_to_edge(&self.graph, current_node, trigger, override_conditions)
+            else {
                 return Ok(None);
             };
 
@@ -1819,8 +2531,13 @@ where
 }
 
 impl OpGraphPath {
-    fn next_edge_for_field(&self, field: &Field) -> Option<EdgeIndex> {
-        self.graph.edge_for_field(self.tail, field)
+    fn next_edge_for_field(
+        &self,
+        field: &Field,
+        override_conditions: &EnabledOverrideConditions,
+    ) -> Option<EdgeIndex> {
+        self.graph
+            .edge_for_field(self.tail, field, override_conditions)
     }
 
     fn next_edge_for_inline_fragment(&self, inline_fragment: &InlineFragment) -> Option<EdgeIndex> {
@@ -1889,12 +2606,6 @@ impl OpGraphPath {
         (new_self, new_others)
     }
 
-    pub(crate) fn is_overridden_by(&self, other: &Self) -> bool {
-        self.overriding_path_ids
-            .iter()
-            .any(|overriding_id| other.own_path_ids.contains(overriding_id))
-    }
-
     pub(crate) fn subgraph_jumps(&self) -> Result<u32, FederationError> {
         self.subgraph_jumps_at_idx(0)
     }
@@ -1954,6 +2665,7 @@ impl OpGraphPath {
 
     pub(crate) fn terminate_with_non_requested_typename_field(
         &self,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpGraphPath, FederationError> {
         // If the last step of the path was a fragment/type-condition, we want to remove it before
         // we get __typename. The reason is that this avoid cases where this method would make us
@@ -1988,15 +2700,15 @@ impl OpGraphPath {
         else {
             return Ok(path);
         };
-        let typename_field = Field::new(FieldData {
-            schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-            field_position: tail_type_pos.introspection_typename_field(),
-            alias: None,
-            arguments: Arc::new(vec![]),
-            directives: Arc::new(Default::default()),
-            sibling_typename: None,
-        });
-        let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
+        let typename_field = Field::new_introspection_typename(
+            self.graph.schema_by_source(&tail_weight.source)?,
+            &tail_type_pos,
+            None,
+        );
+        let Some(edge) = self
+            .graph
+            .edge_for_field(path.tail, &typename_field, override_conditions)
+        else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
             ));
@@ -2060,6 +2772,11 @@ impl OpGraphPath {
             runtime_types_before_tail_if_last_is_cast: None,
             // TODO: The JS codebase copied this from the current path, which seems like a bug.
             defer_on_tail: self.defer_on_tail.clone(),
+            // PORT_NOTE: The JS codebase doesn't properly truncate these fields, this is a bug
+            // which we fix here.
+            matching_context_ids: self.matching_context_ids[0..prefix_length].to_vec(),
+            arguments_to_context_usages: self.arguments_to_context_usages[0..prefix_length]
+                .to_vec(),
         })
     }
 
@@ -2099,7 +2816,7 @@ impl OpGraphPath {
         let Some(self_edge) = self.edges[diff_pos] else {
             return Ok(false);
         };
-        let Some(other_edge) = self.edges[diff_pos] else {
+        let Some(other_edge) = other.edges[diff_pos] else {
             return Ok(false);
         };
         let other_edge_weight = other.graph.edge_weight(other_edge)?;
@@ -2120,7 +2837,7 @@ impl OpGraphPath {
         // from the interface while the other one from an implementation, they won't be technically
         // the "same" edge index. So we check that both are key-resolution edges, to the same
         // subgraph and type, and with the same condition.
-        let Some(other_next_edge) = self.edges[diff_pos + 1] else {
+        let Some(other_next_edge) = other.edges[diff_pos + 1] else {
             return Ok(false);
         };
         let (_, self_edge_tail) = other.graph.edge_endpoints(self_edge)?;
@@ -2142,10 +2859,10 @@ impl OpGraphPath {
         // So far, so good. Check that the rest of the paths are equal. Note that starts with
         // `diff_pos + 1` for `self`, but `diff_pos + 2` for `other` since we looked at two edges
         // there instead of one.
-        return Ok(self.edges[(diff_pos + 1)..]
+        Ok(self.edges[(diff_pos + 1)..]
             .iter()
             .zip(other.edges[(diff_pos + 2)..].iter())
-            .all(|(self_edge, other_edge)| self_edge == other_edge));
+            .all(|(self_edge, other_edge)| self_edge == other_edge))
     }
 
     /// This method is used to detect when using an interface field "directly" could fail (i.e. lead
@@ -2205,26 +2922,25 @@ impl OpGraphPath {
     // PORT_NOTE: In the JS code, this method was a free-standing function called "anImplementationIsEntityWithFieldShareable".
     fn has_an_entity_implementation_with_shareable_field(
         &self,
-        _source: &NodeStr,
-        itf: InterfaceFieldDefinitionPosition,
+        source: &Arc<str>,
+        interface_field_pos: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        let valid_schema = self.graph.schema()?;
-        let schema = valid_schema.schema();
-        let fed_spec = get_federation_spec_definition_from_subgraph(valid_schema)?;
-        let key_directive = fed_spec.key_directive_definition(valid_schema)?;
-        let shareable_directive = fed_spec.shareable_directive(valid_schema)?;
-        let comp_type_pos = CompositeTypeDefinitionPosition::Interface(itf.parent());
-        for implem in valid_schema.possible_runtime_types(comp_type_pos)? {
-            let ty = implem.get(schema)?;
-            let field = ty.fields.get(&itf.field_name).ok_or_else(|| {
-                FederationError::internal(
-                    "Unable to find interface field ({itf}) in schema: {schema}",
-                )
-            })?;
-            if !ty.directives.has(&key_directive.name) {
+        let fed_schema = self.graph.schema_by_source(source)?;
+        let schema = fed_schema.schema();
+        let fed_spec = get_federation_spec_definition_from_subgraph(fed_schema)?;
+        let key_directive = fed_spec.key_directive_definition(fed_schema)?;
+        let shareable_directive = fed_spec.shareable_directive_definition(fed_schema)?;
+        for implementation_type_pos in
+            fed_schema.possible_runtime_types(interface_field_pos.parent().into())?
+        {
+            let implementing_type = implementation_type_pos.get(schema)?;
+            if !implementing_type.directives.has(&key_directive.name) {
                 continue;
             }
-            if !field.directives.has(&shareable_directive.name) {
+            let implementing_field = implementation_type_pos
+                .field(interface_field_pos.field_name.clone())
+                .get(schema)?;
+            if !implementing_field.directives.has(&shareable_directive.name) {
                 continue;
             }
 
@@ -2235,68 +2951,78 @@ impl OpGraphPath {
             // And while it's not trivial to check this in general, there are some easy cases we can eliminate. For instance,
             // if the type in the current subgraph has only leaf fields, we can check that all other subgraphs reachable
             // from the implementation have the same set of leaf fields.
-            let base_ty_name = field.ty.inner_named_type();
-            if is_leaf_type(schema, base_ty_name) {
+            let implementing_field_base_type_name = implementing_field.ty.inner_named_type();
+            if is_leaf_type(schema, implementing_field_base_type_name) {
                 continue;
             }
-            let Some(ty) = schema.get_object(base_ty_name) else {
+            let Some(implementing_field_base_type) =
+                schema.get_object(implementing_field_base_type_name)
+            else {
+                // We officially "don't know", so we return "true" so type-explosion is tested.
                 return Ok(true);
             };
-            if ty
+            if implementing_field_base_type
                 .fields
                 .values()
                 .any(|f| !is_leaf_type(schema, f.ty.inner_named_type()))
             {
+                // Similar to above, we declare we "don't know" and test type-explosion.
                 return Ok(true);
             }
-            for node in self.graph.nodes_for_type(&ty.name) {
-                let node = self.graph.node_weight(node)?;
+            for node in self.graph.nodes_for_type(&implementing_type.name)? {
+                let node = self.graph.node_weight(*node)?;
                 let tail = self.graph.node_weight(self.tail)?;
                 if node.source == tail.source {
                     continue;
                 }
-                let Some(src) = self.graph.sources.get(&node.source) else {
-                    return Err(FederationError::internal(format!(
-                        "{node} has no valid schema in QueryGraph: {:?}",
-                        self.graph
-                    )));
-                };
-                let fed_spec = get_federation_spec_definition_from_subgraph(src)?;
-                let shareable_directive = fed_spec.shareable_directive(src)?;
+                let node_fed_schema = self.graph.schema_by_source(&node.source)?;
+                let node_schema = node_fed_schema.schema();
+                let node_fed_spec = get_federation_spec_definition_from_subgraph(node_fed_schema)?;
+                let node_shareable_directive =
+                    node_fed_spec.shareable_directive_definition(node_fed_schema)?;
                 let build_err = || {
                     Err(FederationError::internal(format!(
-                        "{implem} is an object in {} but a {} in {}",
+                        "{implementation_type_pos} is an object in {} but a {} in {}",
                         tail.source, node.type_, node.source
                     )))
                 };
-                let QueryGraphNodeType::SchemaType(node_ty) = &node.type_ else {
+                let QueryGraphNodeType::SchemaType(node_type_pos) = &node.type_ else {
                     return build_err();
                 };
-                let node_ty = node_ty.get(schema)?;
-                let other_fields = match node_ty {
-                    ExtendedType::Object(obj) => &obj.fields,
-                    ExtendedType::Interface(int) => &int.fields,
-                    _ => return build_err(),
-                };
-                let Some(field) = other_fields.get(&itf.field_name) else {
+                let node_type_pos: ObjectOrInterfaceTypeDefinitionPosition =
+                    node_type_pos.clone().try_into()?;
+                let node_field_pos = node_type_pos.field(interface_field_pos.field_name.clone());
+                let Some(node_field) = node_field_pos.try_get(node_schema) else {
                     continue;
                 };
-                if !field.directives.has(&shareable_directive.name) {
+                if !node_field.directives.has(&node_shareable_directive.name) {
                     continue;
                 }
-                let field_ty = field.ty.inner_named_type();
-                if field_ty != base_ty_name
-                    || !(schema.get_object(field_ty).is_some()
-                        || schema.get_interface(field_ty).is_some())
-                {
+                let node_field_base_type_name = node_field.ty.inner_named_type();
+                if implementing_field_base_type_name != node_field_base_type_name {
                     // We have a genuine difference here, so we should explore type explosion.
                     return Ok(true);
                 }
-                let names: HashSet<_> = other_fields.keys().collect();
-                if !ty.fields.keys().all(|f| names.contains(&f)) {
-                    // Same, we have a genuine difference.
+                let node_field_base_type_pos =
+                    node_fed_schema.get_type(node_field_base_type_name.clone())?;
+                let Some(node_field_base_type_pos): Option<
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                > = node_field_base_type_pos.try_into().ok() else {
+                    // Similar to above, we have a genuine difference.
+                    return Ok(true);
+                };
+
+                if !node_field_base_type_pos.fields(node_schema)?.all(|f| {
+                    implementing_field_base_type
+                        .fields
+                        .contains_key(f.field_name())
+                }) {
+                    // Similar to above, we have a genuine difference.
                     return Ok(true);
                 }
+                // Note that if the type is the same and the fields are a subset too, then we know
+                // the return types of those fields must be leaf types, or merging would have
+                // complained.
             }
             return Ok(false);
         }
@@ -2310,17 +3036,34 @@ impl OpGraphPath {
     /// have also created multiple options).
     ///
     /// For the second element, it is true if the result only has type-exploded results.
+    #[cfg_attr(feature = "snapshot_tracing", tracing::instrument(
+        skip_all,
+        level = "trace",
+        name = "GraphPath::advance_with_operation_element"
+        fields(label = operation_element.to_string())
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn advance_with_operation_element(
         &self,
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
+        let span = debug_span!(
+            "Trying to advance directly",
+            from = %self,
+            operation_element = %operation_element,
+        );
+        let _guard = span.enter();
         let tail_weight = self.graph.node_weight(self.tail)?;
         let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
             // We cannot advance any operation from here. We need to take the initial non-collecting
             // edges first.
+            debug!("Cannot advance federated graph root with direct operations");
             return Ok((None, None));
         };
         match operation_element {
@@ -2329,7 +3072,12 @@ impl OpGraphPath {
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
                         // Just take the edge corresponding to the field, if it exists and can be
                         // used.
-                        let Some(edge) = self.next_edge_for_field(operation_field) else {
+                        let Some(edge) =
+                            self.next_edge_for_field(operation_field, override_conditions)
+                        else {
+                            debug!(
+                                "No edge for field {operation_field} on object type {tail_weight}"
+                            );
                             return Ok((None, None));
                         };
 
@@ -2345,11 +3093,11 @@ impl OpGraphPath {
                         // on triggers being valid within a subgraph.
                         let mut operation_field = operation_field.clone();
                         if self.tail_is_interface_object()?
-                            && *operation_field.data().field_position.type_name()
+                            && *operation_field.field_position.type_name()
                                 != tail_type_pos.type_name
                         {
                             let field_on_tail_type = tail_type_pos
-                                .field(operation_field.data().field_position.field_name().clone());
+                                .field(operation_field.field_position.field_name().clone());
                             if field_on_tail_type
                                 .try_get(self.graph.schema_by_source(&tail_weight.source)?.schema())
                                 .is_none()
@@ -2360,14 +3108,14 @@ impl OpGraphPath {
                                     operation_field, edge_weight, self,
                                 )));
                             }
-                            operation_field = Field::new(FieldData {
+                            operation_field = Field {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
                                 field_position: field_on_tail_type.into(),
-                                alias: operation_field.data().alias.clone(),
-                                arguments: operation_field.data().arguments.clone(),
-                                directives: operation_field.data().directives.clone(),
-                                sibling_typename: operation_field.data().sibling_typename.clone(),
-                            })
+                                alias: operation_field.alias.clone(),
+                                arguments: operation_field.arguments.clone(),
+                                directives: operation_field.directives.clone(),
+                                sibling_typename: operation_field.sibling_typename.clone(),
+                            }
                         }
 
                         let field_path = self.add_field_edge(
@@ -2376,6 +3124,12 @@ impl OpGraphPath {
                             condition_resolver,
                             context,
                         )?;
+                        match &field_path {
+                            Some(_) => debug!("Collected field on object type {tail_weight}"),
+                            None => debug!(
+                                "Cannot satisfy @requires on field for object type {tail_weight}"
+                            ),
+                        }
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
                     OutputTypeDefinitionPosition::Interface(tail_type_pos) => {
@@ -2386,8 +3140,7 @@ impl OpGraphPath {
                         // for a direct interface edge and simply cast into that implementation
                         // below.
                         let field_is_of_an_implementation =
-                            *operation_field.data().field_position.type_name()
-                                != tail_type_pos.type_name;
+                            *operation_field.field_position.type_name() != tail_type_pos.type_name;
 
                         // First, we check if there is a direct edge from the interface (which only
                         // happens if we're in a subgraph that knows all of the implementations of
@@ -2408,7 +3161,7 @@ impl OpGraphPath {
                         let interface_edge = if field_is_of_an_implementation {
                             None
                         } else {
-                            self.next_edge_for_field(operation_field)
+                            self.next_edge_for_field(operation_field, override_conditions)
                         };
                         let interface_path = if let Some(interface_edge) = &interface_edge {
                             let field_path = self.add_field_edge(
@@ -2445,18 +3198,13 @@ impl OpGraphPath {
                                 // `direct_path_overrides_type_explosion` indicates that we're in
                                 // the 2nd case above, not the 1st one.
                                 operation_field
-                                    .data()
                                     .field_position
                                     .is_introspection_typename_field()
                                     || (!self.graph.is_provides_edge(*interface_edge)?
                                         && !self.graph.has_an_implementation_with_provides(
                                             &tail_weight.source,
                                             tail_type_pos.field(
-                                                operation_field
-                                                    .data()
-                                                    .field_position
-                                                    .field_name()
-                                                    .clone(),
+                                                operation_field.field_position.field_name().clone(),
                                             ),
                                         )?)
                             } else {
@@ -2476,24 +3224,21 @@ impl OpGraphPath {
                             // if the direct edge cannot be satisfied? Probably depends on the exact
                             // semantics of `@requires` on interface fields).
                             let operation_field_type_name = operation_field
-                                .data()
                                 .field_position
-                                .get(operation_field.data().schema.schema())?
+                                .get(operation_field.schema.schema())?
                                 .ty
                                 .inner_named_type();
                             let is_operation_field_type_leaf = matches!(
                                 operation_field
-                                    .data()
                                     .schema
                                     .get_type(operation_field_type_name.clone())?,
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
-                                && self.has_an_entity_implementation_with_shareable_field(
+                                || !self.has_an_entity_implementation_with_shareable_field(
                                     &tail_weight.source,
-                                    tail_type_pos.field(
-                                        operation_field.data().field_position.field_name().clone(),
-                                    ),
+                                    tail_type_pos
+                                        .field(operation_field.field_position.field_name().clone()),
                                 )?
                             {
                                 let Some(interface_path) = interface_path else {
@@ -2501,8 +3246,12 @@ impl OpGraphPath {
                                         "Unexpectedly missing interface path",
                                     ));
                                 };
+                                debug!(
+                                    "Collecting (leaf) field on interface {tail_weight} without type-exploding"
+                                );
                                 return Ok((Some(vec![interface_path.into()]), None));
                             }
+                            debug!("Collecting field on interface {tail_weight} as 1st option");
                         }
 
                         // There are 2 main cases to handle here:
@@ -2515,29 +3264,36 @@ impl OpGraphPath {
                         //   that case, we only want to consider that one implementation.
                         let implementations = if field_is_of_an_implementation {
                             let CompositeTypeDefinitionPosition::Object(field_parent_pos) =
-                                &operation_field.data().field_position.parent()
+                                &operation_field.field_position.parent()
                             else {
-                                return Err(FederationError::internal(
-                                    format!(
-                                        "{} requested on {}, but field's parent {} is not an object type",
-                                        operation_field.data().field_position,
-                                        tail_type_pos,
-                                        operation_field.data().field_position.type_name()
-                                    )
-                                ));
+                                return Err(FederationError::internal(format!(
+                                    "{} requested on {}, but field's parent {} is not an object type",
+                                    operation_field.field_position,
+                                    tail_type_pos,
+                                    operation_field.field_position.type_name()
+                                )));
                             };
                             if !self.runtime_types_of_tail.contains(field_parent_pos) {
-                                return Err(FederationError::internal(
-                                    format!(
-                                        "{} requested on {}, but field's parent {} is not an implementation type",
-                                        operation_field.data().field_position,
-                                        tail_type_pos,
-                                        operation_field.data().field_position.type_name()
-                                    )
-                                ));
+                                return Err(FederationError::internal(format!(
+                                    "{} requested on {}, but field's parent {} is not an implementation type",
+                                    operation_field.field_position,
+                                    tail_type_pos,
+                                    operation_field.field_position.type_name()
+                                )));
                             }
-                            Arc::new(IndexSet::from([field_parent_pos.clone()]))
+                            debug!("Casting into requested type {field_parent_pos}");
+                            Arc::new(IndexSet::from_iter([field_parent_pos.clone()]))
                         } else {
+                            match &interface_path {
+                                Some(_) => debug!(
+                                    "No direct edge: type exploding interface {tail_weight} into possible runtime types {:?}",
+                                    self.runtime_types_of_tail
+                                ),
+                                None => debug!(
+                                    "Type exploding interface {tail_weight} into possible runtime types {:?} as 2nd option",
+                                    self.runtime_types_of_tail
+                                ),
+                            }
                             self.runtime_types_of_tail.clone()
                         };
 
@@ -2546,19 +3302,18 @@ impl OpGraphPath {
                         // any gives us empty options, we bail.
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in implementations.as_ref() {
-                            let implementation_inline_fragment =
-                                InlineFragment::new(InlineFragmentData {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: Some(
-                                        implementation_type_pos.clone().into(),
-                                    ),
-                                    directives: Default::default(),
-                                    selection_id: SelectionId::new(),
-                                });
+                            debug!("Handling implementation {implementation_type_pos}");
+                            let span = debug_span!(" |");
+                            let guard = span.enter();
+                            let implementation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: Some(
+                                    implementation_type_pos.clone().into(),
+                                ),
+                                directives: Default::default(),
+                                selection_id: SelectionId::new(),
+                            };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
                                     self.clone().into(),
@@ -2570,31 +3325,53 @@ impl OpGraphPath {
                                     supergraph_schema.clone(),
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
+                                    override_conditions,
+                                    check_cancellation,
+                                    disabled_subgraphs,
                                 )?;
                             // If we find no options for that implementation, we bail (as we need to
                             // simultaneously advance all implementations).
                             let Some(mut implementation_options) = implementation_options else {
+                                drop(guard);
+                                debug!(
+                                    "Cannot collect field from {implementation_type_pos}: stopping with options [{interface_path:?}]"
+                                );
                                 return Ok((interface_path.map(|p| vec![p.into()]), None));
                             };
                             // If the new inline fragment makes it so that we're on an unsatisfiable
                             // branch, we just ignore that implementation.
                             if implementation_options.is_empty() {
+                                debug!(
+                                    "Cannot ever get {implementation_type_pos} from this branch, ignoring it"
+                                );
                                 continue;
                             }
                             // For each option, we call `advance_with_operation_element()` again on
                             // our own operation element (the field), which gives us some options
                             // (or not and we bail).
                             let mut field_options = vec![];
+                            debug!(
+                                "Trying to collect field from options {implementation_options:?}"
+                            );
                             for implementation_option in &mut implementation_options {
+                                let span = debug_span!(
+                                    "implementation option",
+                                    implementation_option = %implementation_option
+                                );
+                                let _guard = span.enter();
                                 let field_options_for_implementation = implementation_option
                                     .advance_with_operation_element(
                                         supergraph_schema.clone(),
                                         operation_element,
                                         condition_resolver,
+                                        override_conditions,
+                                        check_cancellation,
+                                        disabled_subgraphs,
                                     )?;
                                 let Some(field_options_for_implementation) =
                                     field_options_for_implementation
                                 else {
+                                    debug!("Cannot collect field");
                                     continue;
                                 };
                                 // Advancing a field should never get us into an unsatisfiable
@@ -2605,6 +3382,9 @@ impl OpGraphPath {
                                         operation_field
                                     )));
                                 }
+                                debug!(
+                                    "Collected field: adding {field_options_for_implementation:?}"
+                                );
                                 field_options.extend(
                                     field_options_for_implementation
                                         .into_iter()
@@ -2614,13 +3394,20 @@ impl OpGraphPath {
                             // If we find no options to advance that implementation, we bail (as we
                             // need to simultaneously advance all implementations).
                             if field_options.is_empty() {
+                                drop(guard);
+                                debug!(
+                                    "Cannot collect field from {implementation_type_pos}: stopping with options [{}]",
+                                    DisplayOption::new(&interface_path)
+                                );
                                 return Ok((interface_path.map(|p| vec![p.into()]), None));
                             };
+                            debug!("Collected field from {implementation_type_pos}");
                             options_for_each_implementation.push(field_options);
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                            check_cancellation,
+                        )?;
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
                                 if direct_path_overrides_type_explosion {
@@ -2628,16 +3415,14 @@ impl OpGraphPath {
                                 } else {
                                     (interface_path, all_options)
                                 };
-                            Ok((
-                                Some(
-                                    vec![interface_path.into()]
-                                        .into_iter()
-                                        .chain(all_options)
-                                        .collect(),
-                                ),
-                                None,
-                            ))
+                            let options = vec![interface_path.into()]
+                                .into_iter()
+                                .chain(all_options)
+                                .collect::<Vec<_>>();
+                            debug!("With type-exploded options: {}", DisplaySlice(&options));
+                            Ok((Some(options), None))
                         } else {
+                            debug!("With type-exploded options: {}", DisplaySlice(&all_options));
                             // TODO: This appears to be the only place returning non-None for the
                             // 2nd argument, so this could be Option<(Vec<SimultaneousPaths>, bool)>
                             // instead.
@@ -2645,7 +3430,9 @@ impl OpGraphPath {
                         }
                     }
                     OutputTypeDefinitionPosition::Union(_) => {
-                        let Some(typename_edge) = self.next_edge_for_field(operation_field) else {
+                        let Some(typename_edge) =
+                            self.next_edge_for_field(operation_field, override_conditions)
+                        else {
                             return Err(FederationError::internal(
                                 "Should always have an edge for __typename edge on an union",
                             ));
@@ -2656,6 +3443,7 @@ impl OpGraphPath {
                             condition_resolver,
                             context,
                         )?;
+                        debug!("Trivial collection of __typename for union");
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
                     _ => {
@@ -2671,7 +3459,6 @@ impl OpGraphPath {
             }
             OpPathElement::InlineFragment(operation_inline_fragment) => {
                 let type_condition_name = operation_inline_fragment
-                    .data()
                     .type_condition_position
                     .as_ref()
                     .map(|pos| pos.type_name())
@@ -2682,16 +3469,17 @@ impl OpGraphPath {
                     // on), it means we're essentially just applying some directives (could be a
                     // `@skip`/`@include` for instance). This doesn't make us take any edge, but if
                     // the operation element does has directives, we record it.
-                    let fragment_path = if operation_inline_fragment.data().directives.is_empty() {
+                    debug!(
+                        "No edge to take for condition {operation_inline_fragment} from current type"
+                    );
+                    let fragment_path = if operation_inline_fragment.directives.is_empty() {
                         self.clone()
                     } else {
                         self.add(
                             operation_inline_fragment.clone().into(),
                             None,
                             ConditionResolution::no_conditions(),
-                            operation_inline_fragment
-                                .data()
-                                .defer_directive_arguments()?,
+                            operation_inline_fragment.defer_directive_arguments()?,
                         )?
                     };
                     return Ok((Some(vec![fragment_path.into()]), None));
@@ -2709,17 +3497,18 @@ impl OpGraphPath {
                             let edge_weight = self.graph.edge_weight(edge)?;
                             if edge_weight.conditions.is_some() {
                                 return Err(FederationError::internal(
-                                    "Unexpectedly found condition on inline fragment collecting edge"
+                                    "Unexpectedly found condition on inline fragment collecting edge",
                                 ));
                             }
                             let fragment_path = self.add(
                                 operation_inline_fragment.clone().into(),
                                 Some(edge),
                                 ConditionResolution::no_conditions(),
-                                operation_inline_fragment
-                                    .data()
-                                    .defer_directive_arguments()?,
+                                operation_inline_fragment.defer_directive_arguments()?,
                             )?;
+                            debug!(
+                                "Using type-casting edge for {type_condition_name} from current type"
+                            );
                             return Ok((Some(vec![fragment_path.into()]), None));
                         }
 
@@ -2733,21 +3522,26 @@ impl OpGraphPath {
                                 .try_into()?,
                         )?;
                         let intersection = from_types.intersection(&to_types);
+                        debug!(
+                            "Trying to type-explode into intersection between current type and {type_condition_name} = [{}]",
+                            intersection.clone().format(",")
+                        );
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in intersection {
-                            let implementation_inline_fragment =
-                                InlineFragment::new(InlineFragmentData {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: Some(
-                                        implementation_type_pos.clone().into(),
-                                    ),
-                                    directives: operation_inline_fragment.data().directives.clone(),
-                                    selection_id: SelectionId::new(),
-                                });
+                            let span = debug_span!(
+                                "attempt type explosion",
+                                implementation_type = %implementation_type_pos
+                            );
+                            let guard = span.enter();
+                            let implementation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: Some(
+                                    implementation_type_pos.clone().into(),
+                                ),
+                                directives: operation_inline_fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
                                     self.clone().into(),
@@ -2759,13 +3553,21 @@ impl OpGraphPath {
                                     supergraph_schema.clone(),
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
+                                    override_conditions,
+                                    check_cancellation,
+                                    disabled_subgraphs,
                                 )?;
                             let Some(implementation_options) = implementation_options else {
+                                drop(guard);
+                                debug!(
+                                    "Cannot advance into {implementation_type_pos} from current type: no options for operation."
+                                );
                                 return Ok((None, None));
                             };
                             // If the new inline fragment makes it so that we're on an unsatisfiable
                             // branch, we just ignore that implementation.
                             if implementation_options.is_empty() {
+                                debug!("Cannot ever get type name from this branch, ignoring it");
                                 continue;
                             }
                             options_for_each_implementation.push(
@@ -2773,11 +3575,16 @@ impl OpGraphPath {
                                     .into_iter()
                                     .map(|s| s.paths)
                                     .collect(),
-                            )
+                            );
+                            debug!(
+                                "Advanced into type from current type: {options_for_each_implementation:?}"
+                            );
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                            check_cancellation,
+                        )?;
+                        debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
                     }
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
@@ -2801,9 +3608,10 @@ impl OpGraphPath {
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos {
                             if supergraph_schema
-                                .possible_runtime_types(type_condition_pos.clone().into())?
+                                .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
                             {
+                                debug!("Type is a super-type of the current type. No edge to take");
                                 // Type condition is applicable on the tail type, so the types are
                                 // already exploded but the condition can reference types from the
                                 // supergraph that are not present in the local subgraph.
@@ -2811,26 +3619,21 @@ impl OpGraphPath {
                                 // If the operation element has applied directives we need to
                                 // convert it to an inline fragment without type condition,
                                 // otherwise we ignore the fragment altogether.
-                                if operation_inline_fragment.data().directives.is_empty() {
+                                if operation_inline_fragment.directives.is_empty() {
                                     return Ok((Some(vec![self.clone().into()]), None));
                                 }
-                                let operation_inline_fragment =
-                                    InlineFragment::new(InlineFragmentData {
-                                        schema: self
-                                            .graph
-                                            .schema_by_source(&tail_weight.source)?
-                                            .clone(),
-                                        parent_type_position: tail_type_pos.clone().into(),
-                                        type_condition_position: None,
-                                        directives: operation_inline_fragment
-                                            .data()
-                                            .directives
-                                            .clone(),
-                                        selection_id: SelectionId::new(),
-                                    });
-                                let defer_directive_arguments = operation_inline_fragment
-                                    .data()
-                                    .defer_directive_arguments()?;
+                                let operation_inline_fragment = InlineFragment {
+                                    schema: self
+                                        .graph
+                                        .schema_by_source(&tail_weight.source)?
+                                        .clone(),
+                                    parent_type_position: tail_type_pos.clone().into(),
+                                    type_condition_position: None,
+                                    directives: operation_inline_fragment.directives.clone(),
+                                    selection_id: SelectionId::new(),
+                                };
+                                let defer_directive_arguments =
+                                    operation_inline_fragment.defer_directive_arguments()?;
                                 let fragment_path = self.add(
                                     operation_inline_fragment.into(),
                                     None,
@@ -2875,14 +3678,13 @@ impl OpGraphPath {
                                     operation_inline_fragment.clone().into(),
                                     Some(fake_downcast_edge),
                                     condition_resolution,
-                                    operation_inline_fragment
-                                        .data()
-                                        .defer_directive_arguments()?,
+                                    operation_inline_fragment.defer_directive_arguments()?,
                                 )?;
                                 return Ok((Some(vec![fragment_path.into()]), None));
                             }
                         }
 
+                        debug!("Cannot ever get type from current type: returning empty branch");
                         // The operation element we're dealing with can never return results (the
                         // type conditions applied have no intersection). This means we can fulfill
                         // this operation element (by doing nothing and returning an empty result),
@@ -2978,7 +3780,7 @@ impl OpGraphPath {
         // account (it may very well be that whatever comes after `u` is not in `A`, for instance).
         let self_tail_weight = self.graph.node_weight(self.tail)?;
         let other_tail_weight = self.graph.node_weight(other.tail)?;
-        if self_tail_weight.source == other_tail_weight.source {
+        if self_tail_weight.source != other_tail_weight.source {
             // As described above, we want to know if one of the paths has no jumps at all (after
             // the common prefix) while the other has some.
             self.compare_subgraph_jumps_after_last_common_node(other)
@@ -2988,38 +3790,107 @@ impl OpGraphPath {
     }
 }
 
-impl Display for OpGraphPath {
+struct EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    _phantom_data_for_edge: PhantomData<TEdge>,
+    graph: &'graph Arc<QueryGraph>,
+    edge_index: EdgeIndex,
+}
+
+impl<'graph, TEdge> EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn new(edge_index: EdgeIndex, graph: &'graph Arc<QueryGraph>) -> Self {
+        Self {
+            _phantom_data_for_edge: Default::default(),
+            graph,
+            edge_index,
+        }
+    }
+}
+
+impl<TEdge> Display for EdgeIndexDisplay<'_, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let e = self.edge_index;
+        let graph = self.graph.graph();
+        let (head_idx, tail_idx) = graph.edge_endpoints(e).ok_or(std::fmt::Error)?;
+        let head = &graph[head_idx];
+        let tail = &graph[tail_idx];
+        let edge = &graph[e];
+        let transition = &edge.transition;
+        write!(f, "{head} -> {tail} ({transition})")
+    }
+}
+
+impl<TTrigger, TEdge> Display for GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash + Display,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
-        let head = &self.graph.graph()[self.head];
-        if head.root_kind.is_some() && self.edges.is_empty() {
+        let graph = self.graph.graph();
+        let head = &graph[self.head];
+        let head_is_root_node = head.is_root_node();
+        if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
         }
-        if head.root_kind.is_some() {
+        if !head_is_root_node {
             write!(f, "{head}")?;
         }
         self.edges
             .iter()
             .cloned()
             .enumerate()
-            .try_for_each(|(i, e)| match e {
+            .try_for_each(|(i, e)| match e.into() {
                 Some(e) => {
-                    let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
-                    let node = &self.graph.graph()[tail];
-                    let edge = &self.graph.graph()[e];
-                    let label = edge.transition.to_string();
-                    write!(f, " --[{label}]--> {node}")
+                    let tail = graph.edge_endpoints(e).ok_or(std::fmt::Error)?.1;
+                    let node = &graph[tail];
+                    if i == 0 && head_is_root_node {
+                        write!(f, "{node}")
+                    } else {
+                        let edge = &graph[e];
+                        let label = edge.transition.to_string();
+
+                        if let Some(conditions) = &edge.conditions {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if !matches!(
+                            edge.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            write!(f, " --[{label}]--> {node}")
+                        } else {
+                            core::fmt::Result::Ok(())
+                        }
+                    }
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
             })?;
-        if let Some(label) = self.defer_on_tail.as_ref().and_then(|d| d.label()) {
+        if let Some(label) = self.defer_on_tail.as_ref().and_then(|d| d.label.as_ref()) {
             write!(f, "<defer='{label}'>")?;
         }
         if !self.runtime_types_of_tail.is_empty() {
             write!(f, " (types: [")?;
-            for ty in self.runtime_types_of_tail.iter() {
+            let mut iter = self.runtime_types_of_tail.iter();
+            if let Some(ty) = iter.next() {
+                // First item
                 write!(f, "{ty}")?;
+                // The rest
+                for ty in iter {
+                    write!(f, " {ty}")?;
+                }
             }
             write!(f, "])")?;
         }
@@ -3032,13 +3903,14 @@ impl SimultaneousPaths {
     /// the options for the `SimultaneousPaths` as a whole.
     fn flat_cartesian_product(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
-    ) -> Vec<SimultaneousPaths> {
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    ) -> Result<Vec<SimultaneousPaths>, FederationError> {
         // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
         // but when interfaces type-explode into many implementations, this can end up with fairly
         // large `Vec`s and be a bottleneck, and a more iterative version that pre-allocates `Vec`s
         // is quite a bit faster.
         if options_for_each_path.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         // Track, for each path, which option index we're at.
@@ -3047,12 +3919,22 @@ impl SimultaneousPaths {
         // Pre-allocate `Vec` for the result.
         let num_options = options_for_each_path
             .iter()
-            .map(|options| options.len())
-            .product();
+            .fold(1_usize, |product, options| {
+                product.saturating_mul(options.len())
+            });
+        if num_options > 1_000_000 {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Excessive number of combinations for a given path: {num_options}"
+                ),
+            }
+            .into());
+        }
         let mut product = Vec::with_capacity(num_options);
 
         // Compute the cartesian product.
         for _ in 0..num_options {
+            check_cancellation()?;
             let num_simultaneous_paths = options_for_each_path
                 .iter()
                 .zip(&option_indexes)
@@ -3075,7 +3957,7 @@ impl SimultaneousPaths {
             }
         }
 
-        product
+        Ok(product)
     }
 
     /// Given 2 `SimultaneousPaths` that represent 2 different options to reach the same query leaf
@@ -3099,9 +3981,9 @@ impl SimultaneousPaths {
         match (self.0.as_slice(), other.0.as_slice()) {
             ([a], [b]) => a.compare_single_path_options_complexity_out_of_context(b),
             ([a], _) => a.compare_single_vs_multi_path_options_complexity_out_of_context(other),
-            (_, [b]) => Ok(b
-                .compare_single_vs_multi_path_options_complexity_out_of_context(self)?
-                .reverse()),
+            (_, [b]) => b
+                .compare_single_vs_multi_path_options_complexity_out_of_context(self)
+                .map(Ordering::reverse),
             _ => Ok(Ordering::Equal),
         }
     }
@@ -3140,22 +4022,20 @@ impl SimultaneousPathsWithLazyIndirectPaths {
     /// For a given "input" path (identified by an idx in `paths`), each of its indirect options.
     fn indirect_options(
         &mut self,
-        updated_context: &OpGraphPathContext,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
-        // Note that the provided context will usually be one we had during construction (the
-        // `updated_context` will be `self.context` updated by whichever operation we're looking at,
-        // but only operation elements with a @skip/@include will change the context so it's pretty
-        // rare), which is why we save recomputation by caching the computed value in that case, but
-        // in case it's different, we compute without caching.
-        if *updated_context != self.context {
-            self.compute_indirect_paths(path_index, condition_resolver)?;
-        }
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
             Ok(indirect_paths.clone())
         } else {
-            let new_indirect_paths = self.compute_indirect_paths(path_index, condition_resolver)?;
+            let new_indirect_paths = self.compute_indirect_paths(
+                path_index,
+                condition_resolver,
+                override_conditions,
+                disabled_subgraphs,
+            )?;
             self.lazily_computed_indirect_paths[path_index] = Some(new_indirect_paths.clone());
             Ok(new_indirect_paths)
         }
@@ -3165,17 +4045,23 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
+        overridden_conditions: &EnabledOverrideConditions,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
             &self.context,
             condition_resolver,
             &self.excluded_destinations,
             &self.excluded_conditions,
+            overridden_conditions,
             // The transitions taken by this method are non-collecting transitions, in which case
             // the trigger is the context (which is really a hack to provide context information for
             // keys during fetch dependency graph updating).
             |_, context| OpGraphPathTrigger::Context(context.clone()),
-            |graph, node, trigger| graph.edge_for_op_graph_path_trigger(node, trigger),
+            |graph, node, trigger, overridden_conditions| {
+                graph.edge_for_op_graph_path_trigger(node, trigger, overridden_conditions)
+            },
+            disabled_subgraphs,
         )
     }
 
@@ -3211,7 +4097,16 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
+        debug!(
+            "Trying to advance paths for operation: path = {}, operation = {operation_element}",
+            self.paths
+        );
+        let span = debug_span!(" |");
+        let _guard = span.enter();
         let updated_context = self.context.with_context_of(operation_element)?;
         let mut options_for_each_path = vec![];
 
@@ -3219,17 +4114,29 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // references to `self`, which means cloning these paths when iterating.
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
+            check_cancellation()?;
+            debug!("Computing options for {path}");
+            let span = debug_span!(" |");
+            let gaurd = span.enter();
             let mut options = None;
             let should_reenter_subgraph = path.defer_on_tail.is_some()
                 && matches!(operation_element, OpPathElement::Field(_));
             if !should_reenter_subgraph {
+                debug!("Direct options");
+                let span = debug_span!(" |");
+                let gaurd = span.enter();
                 let (advance_options, has_only_type_exploded_results) = path
                     .advance_with_operation_element(
                         supergraph_schema.clone(),
                         operation_element,
                         &updated_context,
                         condition_resolver,
+                        override_conditions,
+                        check_cancellation,
+                        disabled_subgraphs,
                     )?;
+                debug!("{advance_options:?}");
+                drop(gaurd);
                 // If we've got some options, there are a number of cases where there is no point
                 // looking for indirect paths:
                 // - If the operation element is terminal: this means we just found a direct edge
@@ -3255,6 +4162,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                             && !has_only_type_exploded_results.unwrap_or(false))
                         || matches!(operation_element, OpPathElement::InlineFragment(_))
                     {
+                        debug!("Final options for {path}: {advance_options:?}");
                         // Note that if options is empty, that means this particular "branch" is
                         // unsatisfiable, so we should just ignore it.
                         if !advance_options.is_empty() {
@@ -3273,24 +4181,41 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             if let OpPathElement::Field(operation_field) = operation_element {
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
-                    .indirect_options(&updated_context, path_index, condition_resolver)?
+                    .indirect_options(
+                        path_index,
+                        condition_resolver,
+                        override_conditions,
+                        disabled_subgraphs,
+                    )?
                     .filter_non_collecting_paths_for_field(operation_field)?;
                 if !paths_with_non_collecting_edges.paths.is_empty() {
-                    for paths_with_non_collecting_edges in
+                    debug!(
+                        "{} indirect paths",
+                        paths_with_non_collecting_edges.paths.len()
+                    );
+                    for path_with_non_collecting_edges in
                         paths_with_non_collecting_edges.paths.iter()
                     {
-                        let (advance_options, _) = paths_with_non_collecting_edges
+                        debug!("For indirect path {path_with_non_collecting_edges}:");
+                        let span = debug_span!(" |");
+                        let _gaurd = span.enter();
+                        let (advance_options, _) = path_with_non_collecting_edges
                             .advance_with_operation_element(
                                 supergraph_schema.clone(),
                                 operation_element,
                                 &updated_context,
                                 condition_resolver,
+                                override_conditions,
+                                check_cancellation,
+                                disabled_subgraphs,
                             )?;
                         // If we can't advance the operation element after that path, ignore it,
                         // it's just not an option.
                         let Some(advance_options) = advance_options else {
+                            debug!("Ignoring: cannot be advanced with {operation_element}");
                             continue;
                         };
+                        debug!("Adding valid option: {advance_options:?}");
                         // `advance_with_operation_element()` can return an empty `Vec` only if the
                         // operation element is a fragment with a type condition that, on top of the
                         // "current" type is unsatisfiable. But as we've only taken type-preserving
@@ -3300,7 +4225,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         if advance_options.is_empty() {
                             return Err(FederationError::internal(format!(
                                 "Unexpected empty options after non-collecting path {} for {}",
-                                paths_with_non_collecting_edges, operation_element,
+                                path_with_non_collecting_edges, operation_element,
                             )));
                         }
                         // There is a special case we can deal with now. Namely, suppose we have a
@@ -3327,7 +4252,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // the new path renders unnecessary. Do note that we only make that check
                         // when the new option is a single-path option, because this gets kind of
                         // complicated otherwise.
-                        if paths_with_non_collecting_edges.tail_is_interface_object()? {
+                        if path_with_non_collecting_edges.tail_is_interface_object()? {
                             for indirect_option in &advance_options {
                                 if indirect_option.0.len() == 1 {
                                     let mut new_options = vec![];
@@ -3350,6 +4275,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         }
                         options.extend(advance_options);
                     }
+                } else {
+                    debug!("no indirect paths");
                 }
             }
 
@@ -3359,43 +4286,53 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             // but could still find a direct path. If so, it means it's a corner case where we
             // cannot do query-planner-based-@defer and have to fall back on not deferring.
             if options.is_empty() && should_reenter_subgraph {
+                let span = debug_span!(
+                    "Cannot defer (no indirect options); falling back to direct options"
+                );
+                let _guard = span.enter();
                 let (advance_options, _) = path.advance_with_operation_element(
                     supergraph_schema.clone(),
                     operation_element,
                     &updated_context,
                     condition_resolver,
+                    override_conditions,
+                    check_cancellation,
+                    disabled_subgraphs,
                 )?;
                 options = advance_options.unwrap_or_else(Vec::new);
+                debug!("{options:?}");
             }
 
             // At this point, if options is empty, it means we found no ways to advance the
             // operation element for this path, so we should return `None`.
             if options.is_empty() {
+                drop(gaurd);
+                debug!("No valid options for {operation_element}, aborting.");
                 return Ok(None);
             } else {
                 options_for_each_path.push(options);
             }
         }
 
-        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path);
+        let all_options =
+            SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?;
+        debug!("{all_options:?}");
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
 }
 
 // PORT_NOTE: JS passes a ConditionResolver here, we do not: see port note for
 // `SimultaneousPathsWithLazyIndirectPaths`
-// TODO(@goto-bus-stop): JS passes `override_conditions` here and maintains stores
-// references to it in the created paths. AFAICT override conditions
-// are shared mutable state among different query graphs, so having references to
-// it in many structures would require synchronization. We should likely pass it as
-// an argument to exactly the functionality that uses it.
-pub fn create_initial_options(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_initial_options(
     initial_path: GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>,
     initial_type: &QueryGraphNodeType,
     initial_context: OpGraphPathContext,
     condition_resolver: &mut impl ConditionResolver,
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
+    override_conditions: &EnabledOverrideConditions,
+    disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
     let mut lazy_initial_path = SimultaneousPathsWithLazyIndirectPaths::new(
@@ -3406,8 +4343,12 @@ pub fn create_initial_options(
     );
 
     if initial_type.is_federated_root_type() {
-        let initial_options =
-            lazy_initial_path.indirect_options(&initial_context, 0, condition_resolver)?;
+        let initial_options = lazy_initial_path.indirect_options(
+            0,
+            condition_resolver,
+            override_conditions,
+            disabled_subgraphs,
+        )?;
         let options = initial_options
             .paths
             .iter()
@@ -3438,9 +4379,7 @@ impl ClosedBranch {
         }
 
         // Keep track of which options should be kept.
-        let mut keep_options = std::iter::repeat_with(|| true)
-            .take(self.0.len())
-            .collect::<Vec<_>>();
+        let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
             if !keep_options[option_index] {
                 continue;
@@ -3483,7 +4422,7 @@ impl ClosedBranch {
             self.0
                 .into_iter()
                 .zip(&keep_options)
-                .filter(|(_, &keep_option)| keep_option)
+                .filter(|&(_, &keep_option)| keep_option)
                 .map(|(option, _)| option)
                 .collect(),
         ))
@@ -3491,12 +4430,12 @@ impl ClosedBranch {
 }
 
 impl OpPath {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {
@@ -3510,24 +4449,137 @@ impl OpPath {
         new.push(element);
         Self(new)
     }
+
+    pub(crate) fn conditional_directives(&self) -> DirectiveList {
+        self.0
+            .iter()
+            .flat_map(|path_element| {
+                path_element
+                    .directives()
+                    .iter()
+                    .filter(|d| d.name == "include" || d.name == "skip")
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
+    /// Not that if the fragment element should be filtered but it has applied directives, then we preserve those applications by
+    /// replacing with a fragment with no condition (but if there are no directive, we simply remove the fragment from the path).
+    // JS PORT NOTE: this method was called filterOperationPath in JS codebase
+    pub(crate) fn filter_on_schema(&self, schema: &ValidFederationSchema) -> OpPath {
+        let mut filtered: Vec<Arc<OpPathElement>> = vec![];
+        for element in &self.0 {
+            match element.as_ref() {
+                OpPathElement::InlineFragment(fragment) => {
+                    if let Some(type_condition) = &fragment.type_condition_position {
+                        if schema.get_type(type_condition.type_name().clone()).is_err() {
+                            if element.directives().is_empty() {
+                                continue; // skip this element
+                            } else {
+                                // Replace this element with an unconditioned inline fragment
+                                let updated_fragment = fragment.with_updated_type_condition(None);
+                                filtered.push(Arc::new(OpPathElement::InlineFragment(
+                                    updated_fragment,
+                                )));
+                            }
+                        } else {
+                            filtered.push(element.clone());
+                        }
+                    } else {
+                        filtered.push(element.clone());
+                    }
+                }
+                _ => {
+                    filtered.push(element.clone());
+                }
+            }
+        }
+        OpPath(filtered)
+    }
+
+    pub(crate) fn has_only_fragments(&self) -> bool {
+        // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
+        self.0
+            .iter()
+            .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
+    }
 }
 
-impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
-    type Error = FederationError;
+pub(crate) fn concat_paths_in_parents(
+    first: &Option<Arc<OpPath>>,
+    second: &Option<Arc<OpPath>>,
+) -> Option<Arc<OpPath>> {
+    if let (Some(first), Some(second)) = (first, second) {
+        Some(Arc::new(concat_op_paths(first.deref(), second.deref())))
+    } else {
+        None
+    }
+}
 
-    fn try_from(value: &'_ OpPath) -> Result<Self, Self::Error> {
-        value
-            .0
-            .iter()
-            .map(|path_element| {
-                Ok(match path_element.as_ref() {
-                    OpPathElement::Field(field) => QueryPathElement::Field(field.try_into()?),
-                    OpPathElement::InlineFragment(inline) => {
-                        QueryPathElement::InlineFragment(inline.try_into()?)
-                    }
-                })
-            })
-            .collect()
+pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
+    // While this is mainly a simple array concatenation, we optimize slightly by recognizing if the
+    // tail path starts by a fragment selection that is useless given the end of the head path
+    let Some(last_of_head) = head.last() else {
+        return tail.clone();
+    };
+    let mut result = head.clone();
+    if tail.is_empty() {
+        return result;
+    }
+    let conditionals = head.conditional_directives();
+    let tail_path = tail.0.clone();
+
+    // Note that in practice, we may be able to eliminate a few elements at the beginning of the path
+    // due do conditionals ('@skip' and '@include'). Indeed, a (tail) path crossing multiple conditions
+    // may start with: [ ... on X @include(if: $c1), ... on X @skip(if: $c2), (...)], but if `head`
+    // already ends on type `X` _and_ both the conditions on `$c1` and `$c2` are already found on `head`,
+    // then we can remove both fragments in `tail`.
+    let mut tail_iter = tail_path.iter();
+    for tail_node in &mut tail_iter {
+        if !is_useless_followup_element(last_of_head, tail_node, &conditionals)
+            .is_ok_and(|is_useless| is_useless)
+        {
+            result.0.push(tail_node.clone());
+            break;
+        }
+    }
+    result.0.extend(tail_iter.cloned());
+    result
+}
+
+fn is_useless_followup_element(
+    first: &OpPathElement,
+    followup: &OpPathElement,
+    conditionals: &DirectiveList,
+) -> Result<bool, FederationError> {
+    let type_of_first: Option<CompositeTypeDefinitionPosition> = match first {
+        OpPathElement::Field(field) => Some(field.output_base_type()?.try_into()?),
+        OpPathElement::InlineFragment(fragment) => fragment.type_condition_position.clone(),
+    };
+
+    let Some(type_of_first) = type_of_first else {
+        return Ok(false);
+    };
+
+    // The followup is useless if it's a fragment (with no directives we would want to preserve) whose type
+    // is already that of the first element (or a supertype).
+    match followup {
+        OpPathElement::Field(_) => Ok(false),
+        OpPathElement::InlineFragment(fragment) => {
+            let Some(type_of_second) = fragment.type_condition_position.clone() else {
+                return Ok(false);
+            };
+
+            let are_useless_directives = fragment.directives.is_empty()
+                || fragment.directives.iter().all(|d| conditionals.contains(d));
+            let is_same_type = type_of_first.type_name() == type_of_second.type_name();
+            let is_subtype = first
+                .schema()
+                .schema()
+                .is_subtype(type_of_second.type_name(), type_of_first.type_name());
+            Ok(are_useless_directives && (is_same_type || is_subtype))
+        }
     }
 }
 
@@ -3535,23 +4587,19 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
-    use apollo_compiler::schema::Name;
-    use apollo_compiler::NodeStr;
+    use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
 
+    use crate::operation::Field;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::Field;
-    use crate::query_plan::operation::FieldData;
-    use crate::schema::position::FieldDefinitionPosition;
-    use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
 
     #[test]
     fn path_display() {
@@ -3569,62 +4617,53 @@ mod tests {
         "#;
         let schema = Schema::parse_and_validate(src, "./").unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
-        let name = NodeStr::new("S1");
+        let name = "S1".into();
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
-        assert_eq!(path.to_string(), "_");
+        // NOTE: in general GraphPath would be used against a federated supergraph which would have
+        // a root node [query](_)* followed by a Query(S1) node
+        // This test is run against subgraph schema meaning it will start from Query(S1) node instead
+        assert_eq!(path.to_string(), "Query(S1) (types: [Query])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = FieldData {
-            schema: schema.clone(),
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
-        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
+        let field = Field::from_position(&schema, pos.into());
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field));
         let path = path
             .add(
                 trigger,
                 Some(EdgeIndex::new(3)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
+                    context_map: None,
                 },
                 None,
             )
             .unwrap();
-        assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
+        assert_eq!(path.to_string(), "Query(S1) --[t]--> T(S1) (types: [T])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = FieldData {
-            schema,
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
-        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
+        let field = Field::from_position(&schema, pos.into());
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field));
         let path = path
             .add(
                 trigger,
                 Some(EdgeIndex::new(1)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
+                    context_map: None,
                 },
                 None,
             )
             .unwrap();
         assert_eq!(
             path.to_string(),
-            "Query(S1)* --[t]--> T(S1) --[id]--> ID(S1)"
+            "Query(S1) --[t]--> T(S1) --[id]--> ID(S1)"
         );
     }
 }

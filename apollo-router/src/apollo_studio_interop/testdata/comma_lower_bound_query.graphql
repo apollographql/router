@@ -1,0 +1,5 @@
+query TestCommaLowerBound($arg: String, $slightlyTooLongName1234: String) {
+    manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName1234) {
+        enumResponse
+    }
+}

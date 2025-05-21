@@ -2,22 +2,24 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use futures::prelude::*;
-use tokio::sync::mpsc;
-#[cfg(test)]
-use tokio::sync::Notify;
-use tokio::sync::OwnedRwLockWriteGuard;
-use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
 use Event::NoMoreLicense;
 use Event::NoMoreSchema;
 use Event::Reload;
+use Event::RhaiReload;
 use Event::Shutdown;
 use State::Errored;
 use State::Running;
 use State::Startup;
 use State::Stopped;
+use futures::prelude::*;
+use itertools::Itertools;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -27,19 +29,22 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
-use crate::configuration::metrics::Metrics;
+use crate::ApolloRouterError::NoLicense;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
+use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseEnforcementReport;
-use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
-use crate::ApolloRouterError::NoLicense;
+use crate::uplink::license_enforcement::LicenseEnforcementReport;
+use crate::uplink::license_enforcement::LicenseLimits;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
 
@@ -54,14 +59,14 @@ pub(crate) struct ListenAddresses {
 enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
-        schema: Option<Arc<String>>,
+        schema: Option<Arc<SchemaState>>,
         license: Option<LicenseState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
         _metrics: Option<Metrics>,
-        schema: Arc<String>,
+        schema: Arc<SchemaState>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
@@ -118,9 +123,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
-        new_schema: Option<Arc<String>>,
+        new_schema: Option<Arc<SchemaState>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<LicenseState>,
+        force_reload: bool,
     ) -> Self
     where
         S: HttpServerFactory,
@@ -154,9 +160,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         .map_ok_or_else(Errored, |f| f)
                         .await,
                     );
-                    if matches!(new_state, Some(Running { .. })) {
-                        state_machine.http_server_factory.ready(true);
-                    }
                 }
             }
             Running {
@@ -209,7 +212,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     "processing event"
                 );
 
-                let need_reload = schema_reload || license_reload || configuration_reload;
+                let need_reload =
+                    force_reload || schema_reload || license_reload || configuration_reload;
 
                 if need_reload {
                     // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
@@ -272,18 +276,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         new_state.unwrap_or(self)
     }
 
-    async fn shutdown<S>(self, http_server_factory: &S) -> Self
-    where
-        S: HttpServerFactory,
-    {
+    async fn shutdown(self) -> Self {
         match self {
             Running {
                 server_handle: Some(server_handle),
                 mut all_connections_stopped_signals,
                 ..
             } => {
-                // We want to set the ready state to false before we start shutting down the server.
-                http_server_factory.ready(false);
                 tracing::info!("shutting down");
                 let state = server_handle
                     .shutdown()
@@ -308,7 +307,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
-        schema: Arc<String>,
+        schema_state: Arc<SchemaState>,
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
@@ -317,54 +316,87 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let report = {
-            let ast = Schema::parse_ast(&schema)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?;
-            // Check the license
-            LicenseEnforcementReport::build(&configuration, &ast)
-        };
+        let schema = Arc::new(
+            Schema::parse_arc(schema_state.clone(), &configuration)
+                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+        );
+        // Check the license
+        let report = LicenseEnforcementReport::build(&configuration, &schema);
 
-        match license {
-            LicenseState::Licensed => {
+        let license_limits = match license {
+            LicenseState::Licensed { limits } => {
                 tracing::debug!("A valid Apollo license has been detected.");
+                limits
             }
-            LicenseState::LicensedWarn if report.uses_restricted_features() => {
-                tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+            LicenseState::LicensedWarn { limits } if report.uses_restricted_features() => {
+                tracing::error!(
+                    "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                    report
+                );
+                limits
             }
-            LicenseState::LicensedHalt if report.uses_restricted_features() => {
-                tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+            LicenseState::LicensedHalt { limits } if report.uses_restricted_features() => {
+                tracing::error!(
+                    "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                    report
+                );
+                limits
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
-                if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
+                if crate::services::APOLLO_KEY.lock().is_some()
+                    && crate::services::APOLLO_GRAPH_REF.lock().is_some()
                 {
-                    tracing::error!("License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                    tracing::error!(
+                        "License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        report
+                    );
                 } else {
-                    tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                    tracing::error!(
+                        "Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        report
+                    );
                 }
 
                 return Err(ApolloRouterError::LicenseViolation);
             }
             _ => {
-                tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
+                tracing::debug!(
+                    "A valid Apollo license was not detected. However, no restricted features are in use."
+                );
+                // Without restricted features, there's no need to limit the router
+                Option::<LicenseLimits>::None
             }
-        }
+        };
 
         // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
-            LicenseState::Licensed
+            LicenseState::Licensed {
+                limits: license_limits,
+            }
         } else {
             license
         };
+
+        if let Err(feature_gate_violations) =
+            FeatureGateEnforcementReport::build(&configuration, &schema).check()
+        {
+            tracing::error!(
+                "The schema contains preview features not enabled in configuration.\n\n{}",
+                feature_gate_violations.iter().join("\n")
+            );
+            return Err(ApolloRouterError::FeatureGateViolation);
+        }
 
         let router_service_factory = state_machine
             .router_configurator
             .create(
                 state_machine.is_telemetry_disabled,
                 configuration.clone(),
-                schema.to_string(),
+                schema,
                 previous_router_service_factory,
                 None,
+                effective_license,
             )
             .await
             .map_err(ServiceCreationError)?;
@@ -422,7 +454,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         Ok(Running {
             configuration,
             _metrics: metrics,
-            schema,
+            schema: schema_state,
             license,
             server_handle: Some(server_handle),
             router_service_factory,
@@ -521,48 +553,62 @@ where
                 .expect("must have listen address guard"),
         };
 
-        // Mark ourselves as live at this point
-
-        self.http_server_factory.live(true);
-
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
-            let event_name = format!("{event:?}");
+            let event_name = match &event {
+                Event::UpdateLicense(license_state) => {
+                    format!("UpdateLicense({})", license_state.get_name())
+                }
+                event => format!("{event:?}"),
+            };
+
             let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
-                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None)
+                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None, false)
                         .await
                 }
                 NoMoreConfiguration => state.no_more_configuration().await,
                 UpdateSchema(schema) => {
                     state
-                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None)
+                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None, false)
                         .await
                 }
                 NoMoreSchema => state.no_more_schema().await,
                 UpdateLicense(license) => {
                     state
-                        .update_inputs(&mut self, None, None, Some(license))
+                        .update_inputs(&mut self, None, None, Some(license), false)
                         .await
                 }
-                Reload => state.update_inputs(&mut self, None, None, None).await,
+                Reload => {
+                    state
+                        .update_inputs(&mut self, None, None, None, false)
+                        .await
+                }
+                RhaiReload => state.update_inputs(&mut self, None, None, None, true).await,
                 NoMoreLicense => state.no_more_license().await,
-                Shutdown => state.shutdown(&self.http_server_factory).await,
+                Shutdown => state.shutdown().await,
             };
 
             // Update the shared state
             #[cfg(test)]
             self.notify_updated.notify_one();
 
-            tracing::debug!(
-                monotonic_counter.apollo_router_state_change_total = 1u64,
+            tracing::info!(
                 event = event_name,
                 state = ?state,
                 previous_state,
                 "state machine transitioned"
+            );
+            u64_counter!(
+                "apollo.router.state.change.total",
+                "Router state changes",
+                1,
+                event = event_name,
+                state = format!("{state:?}"),
+                previous_state = previous_state
             );
 
             // If we've errored then exit even if there are potentially more messages
@@ -571,9 +617,6 @@ where
             }
         }
         tracing::info!("stopped");
-
-        // Note that ready(false) will not be called on a non-graceful shutdown.
-        self.http_server_factory.live(false);
 
         match state {
             Stopped => Ok(()),
@@ -590,13 +633,12 @@ mod tests {
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
-    use std::sync::Mutex;
 
     use futures::channel::oneshot;
-    use mockall::mock;
-    use mockall::predicate::eq;
     use mockall::Sequence;
+    use mockall::mock;
     use multimap::MultiMap;
+    use parking_lot::Mutex;
     use serde_json::json;
     use test_log::test;
     use tower::BoxError;
@@ -609,14 +651,19 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
+    use crate::services::RouterRequest;
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
-    use crate::services::RouterRequest;
+    use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
 
-    fn example_schema() -> String {
-        include_str!("testdata/supergraph.graphql").to_owned()
+    fn example_schema() -> SchemaState {
+        SchemaState {
+            sdl: include_str!("testdata/supergraph.graphql").to_owned(),
+            launch_id: None,
+        }
     }
 
     macro_rules! assert_matches {
@@ -632,7 +679,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_configuration() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -647,7 +694,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_schema() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -662,7 +709,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_license() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -683,7 +730,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_licensed() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -692,20 +739,22 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
     async fn restricted_licensed_halted() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -714,20 +763,22 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedHalt),
+                    UpdateLicense(LicenseState::LicensedHalt {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
     async fn restricted_licensed_warn() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -736,20 +787,22 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedWarn),
+                    UpdateLicense(LicenseState::LicensedWarn {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
     async fn restricted_licensed_unlicensed() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         // The unlicensed event is dropped so we should get a reload
         assert_matches!(
@@ -759,7 +812,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
@@ -768,13 +823,13 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn restricted_unlicensed() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -790,13 +845,13 @@ mod tests {
             .await,
             Err(ApolloRouterError::LicenseViolation)
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
 
     #[test(tokio::test)]
     async fn unrestricted_unlicensed_restricted_licensed() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -807,20 +862,22 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn listen_addresses_are_locked() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 0, 0, 0, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         let is_telemetry_disabled = false;
         let state_machine =
             StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
@@ -830,7 +887,7 @@ mod tests {
     #[test(tokio::test)]
     async fn shutdown_during_startup() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(server_factory, router_factory, stream::iter(vec![Shutdown])).await,
             Ok(())
@@ -840,7 +897,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_shutdown() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -849,20 +906,20 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
     async fn startup_reload_schema() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -870,8 +927,11 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ])
@@ -879,13 +939,13 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn startup_no_reload_schema() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -893,22 +953,28 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
     async fn startup_reload_license() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -916,22 +982,27 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -940,7 +1011,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
@@ -957,13 +1028,13 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn extract_routing_urls() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -972,14 +1043,14 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -988,9 +1059,9 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -999,13 +1070,13 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                 ])
             )
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -1016,7 +1087,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1026,9 +1097,9 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
@@ -1038,15 +1109,18 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -1057,7 +1131,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1067,20 +1141,20 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _, _| {
+            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
@@ -1090,21 +1164,24 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .homepage(Homepage::builder().enabled(true).build())
                             .build()
                             .unwrap()
                     ),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ]),
             )
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     mock! {
@@ -1119,9 +1196,10 @@ mod tests {
                 &'a mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
-                schema: String,
+                schema: Arc<Schema>,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+                license: LicenseState
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
@@ -1134,6 +1212,7 @@ mod tests {
             type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+            fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = router::BoxService;
@@ -1151,8 +1230,6 @@ mod tests {
             fn create_server(&self,
                 configuration: Arc<Configuration>,
                 main_listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
-            fn live(&self, live: bool);
-            fn ready(&self, ready: bool);
         }
     }
 
@@ -1177,12 +1254,6 @@ mod tests {
             let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })
         }
-        fn live(&self, live: bool) {
-            self.live(live);
-        }
-        fn ready(&self, ready: bool) {
-            self.ready(ready);
-        }
     }
 
     async fn execute(
@@ -1198,10 +1269,6 @@ mod tests {
 
     fn create_mock_server_factory(
         expect_times_called: usize,
-        live_true_times: usize,
-        ready_true_times: usize,
-        live_false_times: usize,
-        ready_false_times: usize,
     ) -> (
         MockMyHttpServerFactory,
         (SharedOneShotReceiver, SharedOneShotReceiver),
@@ -1218,13 +1285,9 @@ mod tests {
                 move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel();
-                    shutdown_receivers_clone
-                        .lock()
-                        .unwrap()
-                        .push(shutdown_receiver);
+                    shutdown_receivers_clone.lock().push(shutdown_receiver);
                     extra_shutdown_receivers_clone
                         .lock()
-                        .unwrap()
                         .push(extra_shutdown_receiver);
 
                     let server = async move {
@@ -1251,26 +1314,6 @@ mod tests {
                     ))
                 },
             );
-        server_factory
-            .expect_live()
-            .with(eq(true))
-            .times(live_true_times)
-            .return_const(());
-        server_factory
-            .expect_ready()
-            .with(eq(true))
-            .times(ready_true_times)
-            .return_const(());
-        server_factory
-            .expect_live()
-            .with(eq(false))
-            .times(live_false_times)
-            .return_const(());
-        server_factory
-            .expect_ready()
-            .with(eq(false))
-            .times(ready_false_times)
-            .return_const(());
         (
             server_factory,
             (shutdown_receivers, extra_shutdown_receivers),
@@ -1287,7 +1330,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _, _| {
+            .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1300,15 +1343,14 @@ mod tests {
                 .expect_create()
                 .times(expect_times_called - 1)
                 .withf(
-                    move |_, _configuration: &Arc<Configuration>,
+                    move |_,
+                          _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
-                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>|
-                          {
-                            previous_router_service_factory.is_some()
-                          },
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
+                          _| { previous_router_service_factory.is_some() },
                 )
-                .returning(move |_, _, _, _, _| {
+                .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().return_once(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);

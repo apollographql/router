@@ -1,26 +1,79 @@
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use tower::ServiceExt;
 
+use crate::Context;
+use crate::TestHarness;
 use crate::metrics::FutureMetricsExt;
-use crate::plugin::test::MockRouterService;
-use crate::plugin::test::MockSupergraphService;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::test::MockRouterService;
+use crate::plugin::test::MockSupergraphService;
 use crate::plugins::progressive_override::Config;
-use crate::plugins::progressive_override::ProgressiveOverridePlugin;
+use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
+use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
+use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::progressive_override::ProgressiveOverridePlugin;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
+use crate::services::RouterResponse;
+use crate::services::SupergraphResponse;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::router;
 use crate::services::supergraph;
-use crate::services::RouterResponse;
-use crate::services::SupergraphResponse;
-use crate::Context;
-use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
+
+#[test]
+fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
+    let schema_for_version = |version| {
+        format!(
+            r#"schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/{}", for: EXECUTION)
+                @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
+
+                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#,
+            version
+        )
+    };
+
+    let join_v3_schema = Schema::parse(schema_for_version("v0.3"), "test").unwrap();
+    assert!(
+        crate::spec::Schema::directive_name(
+            &join_v3_schema,
+            JOIN_SPEC_BASE_URL,
+            JOIN_SPEC_VERSION_RANGE,
+            JOIN_FIELD_DIRECTIVE_NAME,
+        )
+        .is_none()
+    );
+
+    let join_v4_schema = Schema::parse(schema_for_version("v0.4"), "test").unwrap();
+    assert!(
+        crate::spec::Schema::directive_name(
+            &join_v4_schema,
+            JOIN_SPEC_BASE_URL,
+            JOIN_SPEC_VERSION_RANGE,
+            JOIN_FIELD_DIRECTIVE_NAME,
+        )
+        .is_some()
+    );
+
+    let join_v5_schema = Schema::parse(schema_for_version("v0.5"), "test").unwrap();
+
+    assert!(
+        crate::spec::Schema::directive_name(
+            &join_v5_schema,
+            JOIN_SPEC_BASE_URL,
+            JOIN_SPEC_VERSION_RANGE,
+            JOIN_FIELD_DIRECTIVE_NAME,
+        )
+        .is_some()
+    )
+}
 
 #[tokio::test]
 async fn plugin_disables_itself_with_no_progressive_override_usages() {
@@ -64,9 +117,11 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
         assert!(!labels_on_context.contains(&Arc::new("percent(0)".to_string())));
         assert!(!labels_on_context.contains(&Arc::new("percent(100)".to_string())));
         assert!(labels_on_context.len() == 3);
-        assert!(vec!["bar", "baz", "foo"]
-            .into_iter()
-            .all(|s| labels_on_context.contains(&Arc::new(s.to_string()))));
+        assert!(
+            vec!["bar", "baz", "foo"]
+                .into_iter()
+                .all(|s| labels_on_context.contains(&Arc::new(s.to_string())))
+        );
         RouterResponse::fake_builder().build()
     });
 
@@ -133,7 +188,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )
@@ -145,8 +200,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(
@@ -206,7 +260,7 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )
@@ -218,8 +272,7 @@ async fn get_json_query_plan(query: &str) -> serde_json::Value {
     let context: Context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -230,6 +283,9 @@ async fn get_json_query_plan(query: &str) -> serde_json::Value {
 
     let supergraph_service = TestHarness::builder()
         .configuration_json(serde_json::json! {{
+            "include_subgraph_errors": {
+                "all": true
+            },
             "plugins": {
                 "experimental.expose_query_plan": true
             }
@@ -281,7 +337,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )
@@ -293,8 +349,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(

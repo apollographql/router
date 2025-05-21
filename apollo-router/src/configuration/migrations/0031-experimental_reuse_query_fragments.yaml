@@ -1,0 +1,4 @@
+description: supergraph.experimental_reuse_query_fragments fragment optimization config is no longer supported and superseded by supergraph.generate_query_fragments
+actions:
+  - type: delete
+    path: supergraph.experimental_reuse_query_fragments

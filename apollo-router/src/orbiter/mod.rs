@@ -17,15 +17,16 @@ use serde_json::Value;
 use tower::BoxError;
 use uuid::Uuid;
 
+use crate::Configuration;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::router::service::RouterCreator;
 use crate::services::HasSchema;
+use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
-use crate::Configuration;
+use crate::uplink::license_enforcement::LicenseState;
 
 /// This session id is created once when the router starts. It persists between config reloads and supergraph schema changes.
 static SESSION_ID: OnceCell<Uuid> = OnceCell::new();
@@ -97,9 +98,10 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
@@ -108,9 +110,10 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 schema.clone(),
                 previous_router,
                 extra_plugins,
+                license,
             )
             .await
-            .map(|factory| {
+            .inspect(|factory| {
                 if !is_telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
@@ -122,7 +125,6 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                         }
                     });
                 }
-                factory
             })
     }
 }
@@ -311,13 +313,14 @@ mod test {
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
-    use serde_json::json;
     use serde_json::Value;
+    use serde_json::json;
 
+    use crate::Configuration;
+    use crate::configuration::ConfigurationError;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
-    use crate::Configuration;
 
     #[test]
     fn test_visit_args() {
@@ -360,20 +363,13 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        let config: Configuration =
+        let result: ConfigurationError =
             Configuration::from_str("supergraph:\n  preview_defer_support: true")
-                .expect("config must be valid");
-        let mut usage = HashMap::new();
-        visit_config(
-            &mut usage,
-            config
-                .validated_yaml
-                .as_ref()
-                .expect("config should have had validated_yaml"),
-        );
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(usage);
-        });
+                .expect_err("expected an error");
+        // Note: Can't implement PartialEq on ConfigurationError, so...
+        let err_message = "configuration had errors";
+        let err_error = "\n1. at line 2\n\n  supergraph:\n┌   preview_defer_support: true\n└-----> Additional properties are not allowed ('preview_defer_support' was unexpected)\n\n".to_string();
+        matches!(result, ConfigurationError::InvalidConfiguration {message, error} if err_message == message && err_error == error);
     }
 
     #[test]
@@ -381,7 +377,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -399,7 +395,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -417,7 +413,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse_test(schema_string, &Default::default()).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

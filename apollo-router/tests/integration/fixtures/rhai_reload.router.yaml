@@ -1,0 +1,4 @@
+# Note: This file is not checked into the repository but is created/removed during test execution so that we can test rhai script reloading
+rhai:
+  scripts: "tests/fixtures"
+  main: "test_reload.rhai"

@@ -26,6 +26,8 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 use uuid::Uuid;
 
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::context::Context;
 use crate::graphql;
 use crate::graphql::Response;
@@ -39,9 +41,8 @@ use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
@@ -67,13 +68,34 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
-    /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
-    /// (default: true)
-    pub(crate) enable_deduplication: bool,
+    /// Configure subgraph subscription deduplication
+    pub(crate) deduplication: DeduplicationConfig,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+}
+
+/// Subscription deduplication configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeduplicationConfig {
+    /// Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.
+    /// (default: true)
+    pub(crate) enabled: bool,
+    /// List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical.
+    /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
+    /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
+    pub(crate) ignored_headers: HashSet<String>,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ignored_headers: Default::default(),
+        }
+    }
 }
 
 impl Default for SubscriptionConfig {
@@ -81,7 +103,7 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -209,14 +231,6 @@ pub(crate) enum Enabled {
     Enabled,
 }
 
-/// Using websocket to directly connect to subgraph
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct PassthroughMode {
-    /// WebSocket configuration for specific subgraphs
-    subgraph: SubgraphPassthroughMode,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// WebSocket configuration for a specific subgraph
@@ -236,7 +250,7 @@ fn default_path() -> String {
     String::from("/callback")
 }
 
-fn default_listen_addr() -> ListenAddr {
+pub(crate) fn default_listen_addr() -> ListenAddr {
     ListenAddr::SocketAddr("127.0.0.1:4000".parse().expect("valid ListenAddr"))
 }
 
@@ -283,7 +297,7 @@ impl Plugin for Subscription {
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
-                    Ok(ControlFlow::Break(subgraph::Response::builder().context(req.context).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build()))
+                    Ok(ControlFlow::Break(subgraph::Response::builder().context(req.context).subgraph_name(req.subgraph_name).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build()))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -302,7 +316,7 @@ impl Plugin for Subscription {
                 .clone()
                 .expect("cannot run subscription in callback mode without a hmac key");
             let endpoint = Endpoint::from_router_service(
-                format!("{path}/:callback"),
+                format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
                     .boxed(),
             );
@@ -437,7 +451,7 @@ impl Service<router::Request> for CallbackService {
 
                 match parts.method {
                     Method::POST => {
-                        let cb_body = hyper::body::to_bytes(body)
+                        let cb_body = router::body::into_bytes(Into::<RouterBody>::into(body))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -454,7 +468,7 @@ impl Service<router::Request> for CallbackService {
                                 return Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::BAD_REQUEST)
-                                        .body(err.into())
+                                        .body(router::body::from_bytes(err))
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 });
@@ -481,7 +495,7 @@ impl Service<router::Request> for CallbackService {
                             return Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::UNAUTHORIZED)
-                                    .body("verifier doesn't match".into())
+                                    .body(router::body::from_bytes("verifier doesn't match"))
                                     .map_err(BoxError::from)?,
                                 context: req.context,
                             });
@@ -502,7 +516,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body("suscription doesn't exist".into())
+                                                .body(router::body::from_bytes("suscription doesn't exist"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -510,16 +524,18 @@ impl Service<router::Request> for CallbackService {
                                 };
                                 // Keep the subscription to the client opened
                                 payload.subscribed = Some(true);
-                                tracing::info!(
-                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
-                                        subscriptions.mode="callback"
-                                    );
+                                u64_counter!(
+                                    "apollo.router.operations.subscriptions.events",
+                                    "Number of subscription events",
+                                    1,
+                                    subscriptions.mode = "callback"
+                                );
                                 handle.send_sync(payload)?;
 
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::OK)
-                                        .body::<hyper::Body>("".into())
+                                        .body(router::body::empty())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -532,7 +548,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body::<hyper::Body>("".into())
+                                            .body(router::body::empty())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -541,7 +557,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body("suscription doesn't exist".into())
+                                            .body(router::body::from_bytes("suscription doesn't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -556,7 +572,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
-                                            .body("id used for the verifier is not part of ids array".into())
+                                            .body(router::body::from_bytes("id used for the verifier is not part of ids array"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -567,7 +583,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
-                                            .body::<hyper::Body>("".into())
+                                            .body(router::body::empty())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -575,7 +591,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body("suscriptions don't exist".into())
+                                            .body(router::body::from_bytes("suscriptions don't exist"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -597,11 +613,13 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body(serde_json::to_string_pretty(&InvalidIdsPayload{
-                                                invalid_ids,
-                                                id,
-                                                verifier,
-                                            })?.into())
+                                            .body(router::body::from_bytes(
+                                                serde_json::to_string_pretty(&InvalidIdsPayload{
+                                                    invalid_ids,
+                                                    id,
+                                                    verifier,
+                                                })?,
+                                            ))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -618,7 +636,7 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body("unknown topic".into())
+                                                    .body(router::body::from_bytes("unknown topic"))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
@@ -627,16 +645,18 @@ impl Service<router::Request> for CallbackService {
                                             return Ok(router::Response {
                                                 response: http::Response::builder()
                                                     .status(StatusCode::NOT_FOUND)
-                                                    .body(err.to_string().into())
+                                                    .body(router::body::from_bytes(err.to_string()))
                                                     .map_err(BoxError::from)?,
                                                 context: req.context,
                                             });
                                          }
                                     };
-                                    tracing::info!(
-                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
-                                        subscriptions.mode="callback",
-                                        subscriptions.complete=true
+                                    u64_counter!(
+                                        "apollo.router.operations.subscriptions.events",
+                                        "Number of subscription events",
+                                        1,
+                                        subscriptions.mode = "callback",
+                                        subscriptions.complete = true
                                     );
                                     if let Err(_err) = handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
@@ -644,7 +664,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body("cannot send errors to the client".into())
+                                                .body(router::body::from_bytes("cannot send errors to the client"))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -654,7 +674,7 @@ impl Service<router::Request> for CallbackService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body("cannot force delete".into())
+                                            .body(router::body::from_bytes("cannot force delete"))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -662,7 +682,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
-                                        .body::<hyper::Body>("".into())
+                                        .body(router::body::empty())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -672,7 +692,7 @@ impl Service<router::Request> for CallbackService {
                     _ => Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body::<hyper::Body>("".into())
+                            .body(router::body::empty())
                             .map_err(BoxError::from)?,
                         context: req.context,
                     }),
@@ -705,7 +725,9 @@ fn ensure_id_consistency(
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body::<hyper::Body>("id from url path and id from body are different".into())
+                    .body(router::body::from_bytes(
+                        "id from url path and id from body are different",
+                    ))
                     .expect("this body is valid"),
                 context: context.clone(),
             })
@@ -719,18 +741,20 @@ mod tests {
 
     use futures::StreamExt;
     use serde_json::Value;
-    use tower::util::BoxService;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxService;
 
     use super::*;
+    use crate::Notify;
     use crate::graphql::Request;
     use crate::http_ext;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Notify;
+    use crate::services::router::body;
+    use crate::uplink::license_enforcement::LicenseState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
@@ -762,7 +786,7 @@ mod tests {
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(body::empty())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -775,6 +799,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -791,7 +816,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -811,7 +836,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -840,7 +865,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -858,7 +883,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(
                 SubscriptionPayload::Heartbeat {
                     id: new_sub_id.clone(),
@@ -897,13 +922,14 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
+                    .license(LicenseState::default())
                     .build(),
             )
             .await
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(body::empty())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -916,6 +942,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -932,7 +959,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -946,7 +973,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -985,13 +1012,14 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
+                    .license(LicenseState::default())
                     .build(),
             )
             .await
             .unwrap();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
-            .body(Default::default())
+            .body(body::empty())
             .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
@@ -1004,6 +1032,7 @@ mod tests {
             .unwrap()
             .into_router();
         let resp = web_endpoint
+            .as_service()
             .ready()
             .await
             .unwrap()
@@ -1021,7 +1050,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
                 id: new_sub_id.clone(),
                 verifier: verifier.clone(),
@@ -1041,7 +1070,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1068,14 +1097,16 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(
                 SubscriptionPayload::Complete {
                     id: new_sub_id.clone(),
-                    errors: Some(vec![graphql::Error::builder()
-                        .message("cannot complete the subscription")
-                        .extension_code("SUBSCRIPTION_ERROR")
-                        .build()]),
+                    errors: Some(vec![
+                        graphql::Error::builder()
+                            .message("cannot complete the subscription")
+                            .extension_code("SUBSCRIPTION_ERROR")
+                            .build(),
+                    ]),
                     verifier: verifier.clone(),
                 },
             ))
@@ -1089,10 +1120,12 @@ mod tests {
         assert_eq!(
             msg,
             graphql::Response::builder()
-                .errors(vec![graphql::Error::builder()
-                    .message("cannot complete the subscription")
-                    .extension_code("SUBSCRIPTION_ERROR")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("cannot complete the subscription")
+                        .extension_code("SUBSCRIPTION_ERROR")
+                        .build()
+                ])
                 .build()
         );
 
@@ -1100,7 +1133,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1166,7 +1199,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(subgraph_response.response.body(), &graphql::Response::builder().data(serde_json_bytes::Value::Null).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build());
+        assert_eq!(
+            subgraph_response.response.body(),
+            &graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "cannot execute a subscription if it's not enabled in the configuration"
+                        )
+                        .extension_code("SUBSCRIPTION_DISABLED")
+                        .build()
+                )
+                .extensions(Object::default())
+                .build()
+        );
     }
 
     #[test]
@@ -1400,7 +1447,7 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.enable_deduplication);
+        assert!(sub_config.deduplication.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
     }

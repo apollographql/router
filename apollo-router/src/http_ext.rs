@@ -7,12 +7,11 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
+use http::HeaderValue;
 use http::header;
 use http::header::HeaderName;
-use http::HeaderValue;
 use multimap::MultiMap;
 
 use crate::graphql;
@@ -20,7 +19,7 @@ use crate::services::APPLICATION_JSON_HEADER_VALUE;
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderName` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.
@@ -47,7 +46,7 @@ pub struct TryIntoHeaderName {
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderValue`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderValue` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.
@@ -194,9 +193,8 @@ impl PartialEq for TryIntoHeaderName {
 
 impl Hash for TryIntoHeaderName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match &self.result {
-            Ok(value) => value.hash(state),
-            Err(_) => {}
+        if let Ok(value) = &self.result {
+            value.hash(state)
         }
     }
 }
@@ -445,7 +443,7 @@ impl IntoResponse for Response<graphql::Response> {
             .headers
             .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(json_body_bytes))
     }
 }
 
@@ -454,7 +452,7 @@ impl IntoResponse for Response<Bytes> {
         // todo: chunks?
         let (parts, body) = http::Response::from(self).into_parts();
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(body))
     }
 }
 

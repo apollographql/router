@@ -1,0 +1,10 @@
+headers:
+  all:
+    request:
+      - propagate:
+          matching: .*
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b

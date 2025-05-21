@@ -1,0 +1,2 @@
+csrf:
+  unsafe_disabled: true

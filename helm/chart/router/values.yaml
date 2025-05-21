@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
+# -- See https://www.apollographql.com/docs/graphos/reference/router/configuration#yaml-config-file for yaml structure
 router:
   configuration:
     supergraph:
@@ -21,6 +21,9 @@ managedFederation:
   # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
   # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
   existingSecret:
+  # -- If using managed federation, the name of the key within the existing Secret which stores the graph API key.
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as key, defaults to using a key of `managedFederationApiKey`
+  existingSecretKeyRefKey:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
 
@@ -135,6 +138,7 @@ service:
   type: ClusterIP
   port: 80
   annotations: {}
+  targetport: http
 
 serviceMonitor:
   enabled: false
@@ -164,6 +168,8 @@ virtualservice:
   # gatewayNames: []
   #  - "gateway-1"
   #  - "gateway-2"
+  # Hosts: "" # configurable but will default to '*'
+  #  - somehost.domain.com
   # http:
   #   main:
   #     # set enabled to true to add
@@ -218,6 +224,13 @@ autoscaling:
   #     type: cpu
   #     targetUtilizationPercentage: 75
 
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+rollingUpdate:
+  {}
+# Defaults if not set are:
+#  maxUnavailable: 25%
+#  maxSurge: 25%
+
 nodeSelector: {}
 
 tolerations: []
@@ -243,3 +256,6 @@ probes:
 
 # -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
 topologySpreadConstraints: []
+
+# -- Sets the restart policy of pods
+restartPolicy: Always

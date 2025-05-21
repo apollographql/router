@@ -9,11 +9,11 @@ use router_fuzz::generate_valid_operation;
 use serde_json::json;
 use serde_json::Value;
 
-const GATEWAY_URL: &str = "http://localhost:4100/graphql";
+const SUBGRAPH_URL: &str = "http://localhost:4005";
 const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
-    let generated_operation = match generate_valid_operation(data, "fuzz/supergraph-fed2.graphql") {
+    let generated_operation = match generate_valid_operation(data, "fuzz/subgraph/api.graphql") {
         Ok((d, _)) => d,
         Err(_err) => {
             return;
@@ -27,32 +27,33 @@ fuzz_target!(|data: &[u8]| {
         .send()
         .unwrap()
         .json::<Value>();
-    let gateway_response = http_client
-        .post(GATEWAY_URL)
+    let subgraph_response = http_client
+        .post(SUBGRAPH_URL)
         .json(&json!({ "query": generated_operation }))
         .send()
         .unwrap()
         .json::<Value>();
 
-    debug!("======= DOCUMENT =======");
+    debug!("======= OPERATION ======");
     debug!("{}", generated_operation);
     debug!("========================");
     debug!("======= RESPONSE =======");
-    if router_response.is_ok() != gateway_response.is_ok() {
+    if router_response.is_ok() != subgraph_response.is_ok() {
         let router_error = if let Err(err) = &router_response {
             Some(err)
         } else {
             None
         };
-        let gateway_error = if let Err(err) = &gateway_response {
+        let subgraph_error = if let Err(err) = &subgraph_response {
             Some(err)
         } else {
             None
         };
-        if router_error.is_some() && gateway_error.is_some() {
+        if router_error.is_some() && subgraph_error.is_some() {
             // Do not check errors for now
             return;
         }
+
         let mut file = OpenOptions::new()
             .read(true)
             .create(true)
@@ -67,8 +68,8 @@ fuzz_target!(|data: &[u8]| {
 ====DOCUMENT===
 {generated_operation}
 
-====GATEWAY====
-{gateway_error:?}
+====SUBGRAPH====
+{subgraph_error:?}
 
 ====ROUTER====
 {router_error:?}
@@ -82,7 +83,7 @@ fuzz_target!(|data: &[u8]| {
 
         panic!()
     } else if router_response.is_ok() {
-        let gateway_errors_detected = gateway_response
+        let subgraph_errors_detected = subgraph_response
             .as_ref()
             .unwrap()
             .as_object()
@@ -98,13 +99,13 @@ fuzz_target!(|data: &[u8]| {
             .get("errors")
             .map(|e| !e.as_array().unwrap().len())
             .unwrap_or(0);
-        if gateway_errors_detected > 0 && gateway_errors_detected == router_errors_detected {
+        if subgraph_errors_detected > 0 && router_errors_detected > 0 {
             // Do not check the shape of errors right now
             return;
         }
         let router_response = serde_json::to_string_pretty(&router_response.unwrap()).unwrap();
-        let gateway_response = serde_json::to_string_pretty(&gateway_response.unwrap()).unwrap();
-        if router_response != gateway_response {
+        let subgraph_response = serde_json::to_string_pretty(&subgraph_response.unwrap()).unwrap();
+        if router_response != subgraph_response {
             let mut file = OpenOptions::new()
                 .read(true)
                 .create(true)
@@ -119,8 +120,8 @@ fuzz_target!(|data: &[u8]| {
 ====DOCUMENT===
 {generated_operation}
 
-====GATEWAY====
-{gateway_response}
+====SUBGRAPH====
+{subgraph_response}
 
 ====ROUTER====
 {router_response}
@@ -128,7 +129,7 @@ fuzz_target!(|data: &[u8]| {
 
 "#
             );
-            debug!("{errors}");
+            debug!("ERRORS: {errors}");
             file.write_all(errors.as_bytes()).unwrap();
             file.flush().unwrap();
 

@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
+expression: results
+snapshot_kind: text
+---
+[
+  {
+    "request_id": "[REDACTED]",
+    "stats": {},
+    "licensed_operation_count_by_type": {
+      "type": "query",
+      "subtype": null,
+      "licensed_operation_count": 1
+    },
+    "router_features_enabled": []
+  }
+]

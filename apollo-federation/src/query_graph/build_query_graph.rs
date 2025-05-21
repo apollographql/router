@@ -1,38 +1,43 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
-use apollo_compiler::Schema;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use itertools::Itertools;
+use petgraph::Direction;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use strum::IntoEnumIterator;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
-use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
+use crate::operation::merge_selection_sets;
+use crate::query_graph::ContextCondition;
+use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::operation::merge_selection_sets;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -41,7 +46,9 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
+use crate::schema::validators::from_context::parse_context;
+use crate::supergraph::extract_subgraphs_from_supergraph;
+use crate::utils::FallibleIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -58,47 +65,54 @@ pub fn build_federated_query_graph(
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
     let for_query_planning = for_query_planning.unwrap_or(true);
-    let mut query_graph = QueryGraph {
+    let query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
-        current_source: NodeStr::new(""),
+        current_source: "".into(),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
-    let subgraphs =
-        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
-    for (subgraph_name, subgraph) in subgraphs {
-        let builder = SchemaQueryGraphBuilder::new(
-            query_graph,
-            NodeStr::new(&subgraph_name),
-            subgraph.schema,
-            Some(api_schema.clone()),
-            for_query_planning,
-        )?;
-        query_graph = builder.build()?;
-    }
-    let federated_builder = FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?;
-    query_graph = federated_builder.build()?;
-    Ok(query_graph)
+    let query_graph =
+        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
+            .into_iter()
+            .fallible_fold(query_graph, |query_graph, (subgraph_name, subgraph)| {
+                SchemaQueryGraphBuilder::new(
+                    query_graph,
+                    subgraph_name,
+                    subgraph.schema,
+                    Some(api_schema.clone()),
+                    for_query_planning,
+                )?
+                .build()
+            })?;
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
 }
 
 /// Builds a query graph based on the provided schema (usually an API schema outside of testing).
 ///
 /// Assumes the given schemas have been validated.
 pub fn build_query_graph(
-    name: NodeStr,
+    name: Arc<str>,
     schema: ValidFederationSchema,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
-        current_source: NodeStr::new(""),
+        current_source: "".into(),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -110,15 +124,15 @@ struct BaseQueryGraphBuilder {
 }
 
 impl BaseQueryGraphBuilder {
-    fn new(mut query_graph: QueryGraph, source: NodeStr, schema: ValidFederationSchema) -> Self {
+    fn new(mut query_graph: QueryGraph, source: Arc<str>, schema: ValidFederationSchema) -> Self {
         query_graph.current_source = source.clone();
         query_graph.sources.insert(source.clone(), schema);
         query_graph
             .types_to_nodes_by_source
-            .insert(source.clone(), IndexMap::new());
+            .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::new());
+            .insert(source, IndexMap::default());
         Self { query_graph }
     }
 
@@ -133,14 +147,9 @@ impl BaseQueryGraphBuilder {
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        self.query_graph.graph.add_edge(
-            head,
-            tail,
-            QueryGraphEdge {
-                transition,
-                conditions,
-            },
-        );
+        self.query_graph
+            .graph
+            .add_edge(head, tail, QueryGraphEdge::new(transition, conditions));
         let head_weight = self.query_graph.node_weight(head)?;
         let tail_weight = self.query_graph.node_weight(tail)?;
         if head_weight.source != tail_weight.source {
@@ -195,7 +204,7 @@ impl BaseQueryGraphBuilder {
             self.query_graph
                 .types_to_nodes_mut()?
                 .entry(pos.type_name().clone())
-                .or_insert_with(IndexSet::new)
+                .or_default()
                 .insert(node);
         }
         Ok(node)
@@ -240,7 +249,7 @@ impl SchemaQueryGraphBuilder {
     /// a subgraph query graph is being built.
     fn new(
         query_graph: QueryGraph,
-        source: NodeStr,
+        source: Arc<str>,
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
@@ -290,7 +299,7 @@ impl SchemaQueryGraphBuilder {
         if let Some(subgraph_metadata) = self.base.query_graph.schema()?.subgraph_metadata() {
             Ok(subgraph_metadata
                 .external_metadata()
-                .is_external(field_definition_position)?)
+                .is_external(field_definition_position))
         } else {
             Ok(false)
         }
@@ -371,12 +380,12 @@ impl SchemaQueryGraphBuilder {
                 if self.subgraph.is_some() {
                     self.maybe_add_interface_fields_edges(pos.clone(), node)?;
                 }
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             OutputTypeDefinitionPosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             // Any other case (scalar or enum; input objects are not possible here) is terminal and
             // has no edges to consider.
@@ -956,16 +965,18 @@ struct FederatedQueryGraphBuilder {
 
 impl FederatedQueryGraphBuilder {
     fn new(
-        query_graph: QueryGraph,
+        mut query_graph: QueryGraph,
         supergraph_schema: ValidFederationSchema,
     ) -> Result<Self, FederationError> {
+        query_graph.supergraph_schema = Some(supergraph_schema.clone());
         let base = BaseQueryGraphBuilder::new(
             query_graph,
-            NodeStr::new(FEDERATED_GRAPH_ROOT_SOURCE),
+            FEDERATED_GRAPH_ROOT_SOURCE.into(),
             // This is a dummy schema that should never be used, so it's fine if we assume validity
             // here (note that empty schemas have no Query type, making them invalid GraphQL).
             ValidFederationSchema::new(Valid::assume_valid(Schema::new()))?,
         );
+
         let subgraphs = FederatedQueryGraphBuilderSubgraphs::new(&base)?;
         Ok(FederatedQueryGraphBuilder {
             base,
@@ -975,11 +986,14 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn build(mut self) -> Result<QueryGraph, FederationError> {
+        self.copy_subgraphs();
         self.add_federated_root_nodes()?;
         self.copy_types_to_nodes()?;
         self.add_root_edges()?;
         self.handle_key()?;
         self.handle_requires()?;
+        self.handle_progressive_overrides()?;
+        self.handle_context()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -989,19 +1003,34 @@ impl FederatedQueryGraphBuilder {
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes metadata for estimating the count
+        // of non_local_selections.
+        self.base.query_graph.non_local_selection_metadata =
+            precompute_non_local_selection_metadata(&self.base.query_graph)?;
         Ok(self.base.build())
     }
 
-    fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
-        let mut root_kinds = IndexSet::new();
-        for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
+    fn copy_subgraphs(&mut self) {
+        for (source, schema) in &self.base.query_graph.sources {
             if *source == self.base.query_graph.current_source {
                 continue;
             }
-            for root_kind in root_kinds_to_nodes.keys() {
-                root_kinds.insert(*root_kind);
-            }
+            self.base
+                .query_graph
+                .subgraphs_by_name
+                .insert(source.clone(), schema.clone());
         }
+    }
+
+    fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
+        let root_kinds = self
+            .base
+            .query_graph
+            .root_kinds_to_nodes_by_source
+            .iter()
+            .filter(|(source, _)| **source != self.base.query_graph.current_source)
+            .flat_map(|(_, root_kind_to_nodes)| root_kind_to_nodes.keys().copied())
+            .collect::<IndexSet<_>>();
         for root_kind in root_kinds {
             self.base.create_root_node(root_kind.into(), root_kind)?;
         }
@@ -1009,15 +1038,15 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn copy_types_to_nodes(&mut self) -> Result<(), FederationError> {
-        let mut federated_type_to_nodes = IndexMap::new();
+        let mut federated_type_to_nodes = IndexMap::default();
         for (source, types_to_nodes) in &self.base.query_graph.types_to_nodes_by_source {
             if *source == self.base.query_graph.current_source {
                 continue;
             }
             for (type_name, nodes) in types_to_nodes {
-                let federated_nodes = federated_type_to_nodes
+                let federated_nodes: &mut IndexSet<_> = federated_type_to_nodes
                     .entry(type_name.clone())
-                    .or_insert_with(IndexSet::new);
+                    .or_default();
                 for node in nodes {
                     federated_nodes.insert(*node);
                 }
@@ -1138,7 +1167,8 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_pos.type_name().clone(),
-                    &application.fields,
+                    application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1263,7 +1293,8 @@ impl FederatedQueryGraphBuilder {
                                 implementation_type_in_other_subgraph_pos
                                     .type_name()
                                     .clone(),
-                                &application.fields,
+                                application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1325,10 +1356,12 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .requires_directive_arguments(directive)?;
+                // @requires field set is validated against the supergraph
                 let conditions = parse_field_set(
-                    schema,
+                    &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
-                    &application.fields,
+                    application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1339,10 +1372,10 @@ impl FederatedQueryGraphBuilder {
             // like this way in the JS codebase, so we'll mimic the behavior for now.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
@@ -1356,6 +1389,290 @@ impl FederatedQueryGraphBuilder {
             let edge_weight_mut = self.base.query_graph.edge_weight_mut(edge)?;
             edge_weight_mut.conditions = Some(Arc::new(new_conditions));
         }
+        Ok(())
+    }
+
+    /// Handling progressive overrides here. For each progressive @override
+    /// application (with a label), we want to update the edges to the overridden
+    /// field within the "to" and "from" subgraphs with their respective override
+    /// condition (the label and a T/F value). The "from" subgraph will have an
+    /// override condition of `false`, whereas the "to" subgraph will have an
+    /// override condition of `true`.
+    fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
+        let mut edge_to_conditions: IndexMap<EdgeIndex, OverrideCondition> = Default::default();
+
+        fn collect_edge_condition(
+            query_graph: &QueryGraph,
+            target_graph: &str,
+            target_field: &ObjectFieldDefinitionPosition,
+            label: &str,
+            condition: bool,
+            edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
+        ) -> Result<(), FederationError> {
+            let target_field = FieldDefinitionPosition::Object(target_field.clone());
+            let subgraph_nodes = query_graph
+                .types_to_nodes_by_source
+                .get(target_graph)
+                .unwrap();
+            let parent_node = subgraph_nodes
+                .get(target_field.type_name())
+                .unwrap()
+                .first()
+                .unwrap();
+            for edge in query_graph.out_edges(*parent_node) {
+                let edge_weight = query_graph.edge_weight(edge.id())?;
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    continue;
+                };
+
+                if &target_field == field_definition_position {
+                    edge_to_conditions.insert(
+                        edge.id(),
+                        OverrideCondition {
+                            label: label.to_string(),
+                            condition,
+                        },
+                    );
+                }
+            }
+            Ok(())
+        }
+
+        for (to_subgraph_name, subgraph) in &self.base.query_graph.subgraphs_by_name {
+            let subgraph_data = self.subgraphs.get(to_subgraph_name)?;
+            if let Some(override_referencers) = subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.overrides_directive_definition_name)
+            {
+                for field_definition_position in &override_referencers.object_fields {
+                    let field = field_definition_position.get(subgraph.schema())?;
+                    for directive in field
+                        .directives
+                        .get_all(&subgraph_data.overrides_directive_definition_name)
+                    {
+                        let application = subgraph_data
+                            .federation_spec_definition
+                            .override_directive_arguments(directive)?;
+                        if let Some(label) = application.label {
+                            collect_edge_condition(
+                                &self.base.query_graph,
+                                to_subgraph_name,
+                                field_definition_position,
+                                label,
+                                true,
+                                &mut edge_to_conditions,
+                            )?;
+                            collect_edge_condition(
+                                &self.base.query_graph,
+                                application.from,
+                                field_definition_position,
+                                label,
+                                false,
+                                &mut edge_to_conditions,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (edge, condition) in edge_to_conditions {
+            let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
+            mutable_edge.override_condition = Some(condition);
+        }
+        Ok(())
+    }
+
+    fn handle_context(&mut self) -> Result<(), FederationError> {
+        let mut subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>> =
+            Default::default();
+        let mut coordinate_map: IndexMap<
+            Arc<str>,
+            IndexMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
+        > = Default::default();
+        for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
+            let subgraph_data = self.subgraphs.get(subgraph_name)?;
+            let Some(context_refs) = &subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.context_directive_definition_name)
+            else {
+                continue;
+            };
+            let Some(from_context_refs) = &subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.from_context_directive_definition_name)
+            else {
+                continue;
+            };
+
+            // Collect data for @context
+            let mut context_name_to_types: IndexMap<
+                &str,
+                IndexSet<CompositeTypeDefinitionPosition>,
+            > = Default::default();
+            for object_def_pos in &context_refs.object_types {
+                let object = object_def_pos.get(subgraph.schema())?;
+                for dir in object
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(object_def_pos.clone().into());
+                }
+            }
+            for interface_def_pos in &context_refs.interface_types {
+                let interface = interface_def_pos.get(subgraph.schema())?;
+                for dir in interface
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(interface_def_pos.clone().into());
+                }
+            }
+            for union_def_pos in &context_refs.union_types {
+                let union = union_def_pos.get(subgraph.schema())?;
+                for dir in union
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(union_def_pos.clone().into());
+                }
+            }
+
+            // Collect data for @fromContext
+            let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
+            for object_field_arg in &from_context_refs.object_field_arguments {
+                let input_value = object_field_arg.get(subgraph.schema())?;
+                subgraph_to_args
+                    .entry(subgraph_name.clone())
+                    .or_default()
+                    .push(object_field_arg.clone());
+                let field_coordinate = object_field_arg.parent();
+                let Some(dir) = input_value.directives.get(
+                    subgraph_data
+                        .from_context_directive_definition_name
+                        .as_str(),
+                ) else {
+                    bail!(
+                        "Argument {} unexpectedly missing @fromContext directive",
+                        object_field_arg
+                    );
+                };
+                let application = subgraph_data
+                    .federation_spec_definition
+                    .from_context_directive_arguments(dir)?;
+
+                // if parse_context returns None, assume that the @fromContext validator will return the actual error
+                // it isn't necessary to throw here, we can just ignore it
+                let (Some(context), Some(selection)) = parse_context(application.field) else {
+                    continue;
+                };
+                let Some(types_with_context_set) = context_name_to_types.get(context.as_str())
+                else {
+                    continue;
+                };
+                let conditions = ContextCondition {
+                    context,
+                    subgraph_name: subgraph_name.clone(),
+                    selection,
+                    types_with_context_set: types_with_context_set.clone(),
+                    argument_name: object_field_arg.argument_name.to_owned(),
+                    argument_coordinate: object_field_arg.clone(),
+                    argument_type: input_value.ty.clone(),
+                };
+                coordinate_map
+                    .entry(field_coordinate.clone())
+                    .or_default()
+                    .push(conditions);
+            }
+        }
+
+        for edge in self.base.query_graph.graph.edge_indices() {
+            let edge_weight = self.base.query_graph.edge_weight(edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } = &edge_weight.transition
+            else {
+                continue;
+            };
+            let FieldDefinitionPosition::Object(obj_field) = field_definition_position else {
+                continue;
+            };
+            let Some(contexts) = coordinate_map.get_mut(source) else {
+                continue;
+            };
+            let Some(required_contexts) = contexts.get(obj_field) else {
+                continue;
+            };
+            self.base
+                .query_graph
+                .edge_weight_mut(edge)?
+                .required_contexts
+                .extend_from_slice(required_contexts);
+        }
+
+        // Add the context argument mapping
+        self.base.query_graph.arguments_to_context_ids_by_source = self
+            .base
+            .query_graph
+            .subgraphs()
+            .enumerate()
+            .filter_map(|(index, (source, _))| {
+                subgraph_to_args
+                    .get_key_value(source)
+                    .map(|(source, args)| (index, source, args))
+            })
+            .map(|(index, source, args)| {
+                Ok::<_, FederationError>((
+                    source.clone(),
+                    args.iter()
+                        // TODO: We're manually sorting by the actual GraphQL coordinate string here
+                        //       to mimic the behavior of JS code. In the future, we could just sort
+                        //       the argument position in the natural tuple-based way.
+                        .sorted_by_key(|arg| {
+                            format!(
+                                "{}.{}({}:)",
+                                arg.type_name, arg.field_name, arg.argument_name
+                            )
+                        })
+                        .enumerate()
+                        .map(|(i, arg)| {
+                            Ok::<_, FederationError>((
+                                arg.clone(),
+                                format!("contextualArgument_{}_{}", index + 1, i).try_into()?,
+                            ))
+                        })
+                        .process_results(|r| r.collect())?,
+                ))
+            })
+            .process_results(|r| r.collect())?;
+
         Ok(())
     }
 
@@ -1393,7 +1710,8 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_type_pos.type_name().clone(),
-                    &application.fields,
+                    application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1410,10 +1728,10 @@ impl FederatedQueryGraphBuilder {
             // merge the selection sets before into one.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
@@ -1443,7 +1761,7 @@ impl FederatedQueryGraphBuilder {
 
     fn add_provides_edges(
         base: &mut BaseQueryGraphBuilder,
-        source: &NodeStr,
+        source: &Arc<str>,
         head: NodeIndex,
         provided: &SelectionSet,
         provide_id: u32,
@@ -1457,8 +1775,8 @@ impl FederatedQueryGraphBuilder {
                     Selection::Field(field_selection) => {
                         let existing_edge_info = base
                             .query_graph
-                            .graph
-                            .edges_directed(node, Direction::Outgoing)
+                            .out_edges_with_federation_self_edges(node)
+                            .into_iter()
                             .find_map(|edge_ref| {
                                 let edge_weight = edge_ref.weight();
                                 let QueryGraphEdgeTransition::FieldCollection {
@@ -1469,7 +1787,7 @@ impl FederatedQueryGraphBuilder {
                                     return None;
                                 };
                                 if field_definition_position.field_name()
-                                    == field_selection.field.data().name()
+                                    == field_selection.field.name()
                                 {
                                     Some((edge_ref.id(), edge_ref.target()))
                                 } else {
@@ -1502,9 +1820,8 @@ impl FederatedQueryGraphBuilder {
                             // fix this below by filtering by provide_id.
                             let field = field_selection
                                 .field
-                                .data()
                                 .field_position
-                                .get(field_selection.field.data().schema.schema())?;
+                                .get(field_selection.field.schema.schema())?;
                             let tail_type = field.ty.inner_named_type();
                             let possible_tails = base
                                 .query_graph
@@ -1546,7 +1863,6 @@ impl FederatedQueryGraphBuilder {
                                 source: source.clone(),
                                 field_definition_position: field_selection
                                     .field
-                                    .data()
                                     .field_position
                                     .clone(),
                                 is_part_of_provides: true,
@@ -1563,7 +1879,6 @@ impl FederatedQueryGraphBuilder {
                     Selection::InlineFragment(inline_fragment_selection) => {
                         if let Some(type_condition_pos) = &inline_fragment_selection
                             .inline_fragment
-                            .data()
                             .type_condition_position
                         {
                             // We should always have an edge: otherwise it would mean we list a type
@@ -1585,8 +1900,8 @@ impl FederatedQueryGraphBuilder {
                             // construction.
                             let (edge, tail) = base
                                 .query_graph
-                                .graph
-                                .edges_directed(node, Direction::Outgoing)
+                                .out_edges_with_federation_self_edges(node)
+                                .into_iter()
                                 .find_map(|edge_ref| {
                                     let edge_weight = edge_ref.weight();
                                     let QueryGraphEdgeTransition::Downcast {
@@ -1617,13 +1932,6 @@ impl FederatedQueryGraphBuilder {
                             // propagating the provided selections.
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
-                    }
-                    Selection::FragmentSpread(_) => {
-                        return Err(SingleFederationError::Internal {
-                            message: "Unexpectedly found named fragment in FieldSet scalar"
-                                .to_owned(),
-                        }
-                        .into());
                     }
                 }
             }
@@ -1698,11 +2006,7 @@ impl FederatedQueryGraphBuilder {
         new_node_weight.has_reachable_cross_subgraph_edges = has_reachable_cross_subgraph_edges;
 
         let mut new_edges = Vec::new();
-        for edge_ref in base
-            .query_graph
-            .graph
-            .edges_directed(node, Direction::Outgoing)
-        {
+        for edge_ref in base.query_graph.out_edges_with_federation_self_edges(node) {
             let edge_tail = edge_ref.target();
             let edge_weight = edge_ref.weight();
             new_edges.push(QueryGraphEdgeData {
@@ -1826,6 +2130,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -1856,13 +2164,9 @@ impl FederatedQueryGraphBuilder {
         for edge in self.base.query_graph.graph.edge_indices() {
             let edge_weight = self.base.query_graph.edge_weight(edge)?;
             let (_, tail) = self.base.query_graph.edge_endpoints(edge)?;
-            let mut non_trivial_followups = IndexSet::new();
-            for followup_edge_ref in self
-                .base
-                .query_graph
-                .graph
-                .edges_directed(tail, Direction::Outgoing)
-            {
+            let out_edges = self.base.query_graph.out_edges(tail);
+            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
+            for followup_edge_ref in out_edges {
                 let followup_edge_weight = followup_edge_ref.weight();
                 match edge_weight.transition {
                     QueryGraphEdgeTransition::KeyResolution => {
@@ -1891,7 +2195,8 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if conditions.selections == followup_conditions.selections {
+
+                            if conditions == followup_conditions {
                                 continue;
                             }
                         }
@@ -1915,14 +2220,14 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }
                     }
                     _ => {}
                 }
-                non_trivial_followups.insert(followup_edge_ref.id());
+                non_trivial_followups.push(followup_edge_ref.id());
             }
             self.base
                 .query_graph
@@ -1936,13 +2241,13 @@ impl FederatedQueryGraphBuilder {
 const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
 
 struct FederatedQueryGraphBuilderSubgraphs {
-    map: IndexMap<NodeStr, FederatedQueryGraphBuilderSubgraphData>,
+    map: IndexMap<Arc<str>, FederatedQueryGraphBuilderSubgraphData>,
 }
 
 impl FederatedQueryGraphBuilderSubgraphs {
     fn new(base: &BaseQueryGraphBuilder) -> Result<Self, FederationError> {
         let mut subgraphs = FederatedQueryGraphBuilderSubgraphs {
-            map: IndexMap::new(),
+            map: IndexMap::default(),
         };
         for (source, schema) in &base.query_graph.sources {
             if *source == base.query_graph.current_source {
@@ -1974,6 +2279,18 @@ impl FederatedQueryGraphBuilderSubgraphs {
                         ),
                     }
                 })?;
+            let overrides_directive_definition_name = federation_spec_definition
+                .override_directive_definition(schema)?
+                .name
+                .clone();
+            let context_directive_definition_name = federation_spec_definition
+                .context_directive_definition(schema)?
+                .name
+                .clone();
+            let from_context_directive_definition_name = federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name
+                .clone();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -1982,6 +2299,9 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     requires_directive_definition_name,
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
+                    overrides_directive_definition_name,
+                    context_directive_definition_name,
+                    from_context_directive_definition_name,
                 },
             );
         }
@@ -2007,8 +2327,12 @@ struct FederatedQueryGraphBuilderSubgraphData {
     requires_directive_definition_name: Name,
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
+    overrides_directive_definition_name: Name,
+    context_directive_definition_name: Name,
+    from_context_directive_definition_name: Name,
 }
 
+#[derive(Debug)]
 struct QueryGraphEdgeData {
     head: NodeIndex,
     tail: NodeIndex,
@@ -2022,11 +2346,11 @@ impl QueryGraphEdgeData {
     }
 }
 
-fn resolvable_key_applications(
-    directives: &ComponentDirectiveList,
+fn resolvable_key_applications<'doc>(
+    directives: &'doc ComponentDirectiveList,
     key_directive_definition_name: &Name,
     federation_spec_definition: &'static FederationSpecDefinition,
-) -> Result<Vec<KeyDirectiveArguments>, FederationError> {
+) -> Result<Vec<KeyDirectiveArguments<'doc>>, FederationError> {
     let mut applications = Vec::new();
     for directive in directives.get_all(key_directive_definition_name) {
         let key_directive_application =
@@ -2041,35 +2365,34 @@ fn resolvable_key_applications(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
-    use apollo_compiler::schema::Name;
-    use apollo_compiler::NodeStr;
+    use apollo_compiler::Name;
     use apollo_compiler::Schema;
-    use indexmap::IndexMap;
-    use indexmap::IndexSet;
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::collections::IndexSet;
+    use apollo_compiler::name;
+    use petgraph::Direction;
     use petgraph::graph::NodeIndex;
     use petgraph::visit::EdgeRef;
-    use petgraph::Direction;
 
     use crate::error::FederationError;
-    use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::QueryGraphNode;
     use crate::query_graph::QueryGraphNodeType;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::OutputTypeDefinitionPosition;
     use crate::schema::position::ScalarTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
-    use crate::schema::ValidFederationSchema;
 
-    const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
+    const SCHEMA_NAME: &str = "test";
 
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
         let schema =
             ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
-        build_query_graph(SCHEMA_NAME, schema)
+        build_query_graph(SCHEMA_NAME.into(), schema)
     }
 
     fn assert_node_type(
@@ -2082,7 +2405,7 @@ mod tests {
             *query_graph.node_weight(node)?,
             QueryGraphNode {
                 type_: QueryGraphNodeType::SchemaType(output_type_definition_position),
-                source: SCHEMA_NAME,
+                source: SCHEMA_NAME.into(),
                 has_reachable_cross_subgraph_edges: false,
                 provide_id: None,
                 root_kind,
@@ -2096,7 +2419,7 @@ mod tests {
         head: NodeIndex,
         field_names: IndexSet<Name>,
     ) -> Result<IndexMap<Name, NodeIndex>, FederationError> {
-        let mut result = IndexMap::new();
+        let mut result = IndexMap::default();
         for field_name in field_names {
             // PORT_NOTE: In the JS codebase, there were a lot of asserts here, but they were all
             // duplicated with single_edge() (or they tested the JS codebase's graph representation,
@@ -2121,8 +2444,8 @@ mod tests {
         let schema = query_graph.schema()?;
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
-            source: SCHEMA_NAME,
-            field_definition_position: field_pos.clone().into(),
+            source: SCHEMA_NAME.into(),
+            field_definition_position: field_pos.into(),
             is_part_of_provides: false,
         };
         let mut tails = query_graph
@@ -2170,7 +2493,7 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<IndexSet<_>>(),
-            IndexSet::from([SchemaRootDefinitionKind::Query])
+            IndexSet::from_iter([SchemaRootDefinitionKind::Query])
         );
 
         let root_node = query_graph
@@ -2196,7 +2519,7 @@ mod tests {
         let root_fields = named_edges(
             &query_graph,
             *root_node,
-            IndexSet::from([name!("__typename"), name!("t1")]),
+            IndexSet::from_iter([name!("__typename"), name!("t1")]),
         )?;
 
         let root_typename_tail = root_fields.get("__typename").unwrap();
@@ -2230,7 +2553,7 @@ mod tests {
         let t1_fields = named_edges(
             &query_graph,
             *t1_node,
-            IndexSet::from([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
+            IndexSet::from_iter([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
         )?;
 
         let t1_typename_tail = t1_fields.get("__typename").unwrap();
@@ -2300,7 +2623,7 @@ mod tests {
         let t2_fields = named_edges(
             &query_graph,
             *t2_node,
-            IndexSet::from([name!("__typename"), name!("t")]),
+            IndexSet::from_iter([name!("__typename"), name!("t")]),
         )?;
 
         let t2_typename_tail = t2_fields.get("__typename").unwrap();

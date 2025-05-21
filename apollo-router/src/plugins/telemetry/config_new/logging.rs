@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::time::Duration;
 
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::InstanceType;
 use schemars::schema::Metadata;
 use schemars::schema::ObjectValidation;
@@ -10,17 +12,14 @@ use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SingleOrVec;
 use schemars::schema::SubschemaValidation;
-use schemars::JsonSchema;
-use serde::de::MapAccess;
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 
-use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
+use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::resource::ConfigResource;
-use crate::services::SupergraphRequest;
 
 /// Logging configuration.
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -33,44 +32,6 @@ pub(crate) struct Logging {
     #[serde(skip)]
     /// Settings for logging to a file.
     pub(crate) file: File,
-
-    /// Log configuration to log request and response for subgraphs and supergraph
-    /// Note that this will be removed when events are implemented.
-    #[serde(rename = "experimental_when_header")]
-    pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-impl Logging {
-    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
-        let misconfiguration = self.when_header.iter().any(|cfg| match cfg {
-            HeaderLoggingCondition::Matching { headers, body, .. }
-            | HeaderLoggingCondition::Value { headers, body, .. } => !body && !headers,
-        });
-
-        if misconfiguration {
-            Err(ConfigurationError::InvalidConfiguration {
-                message: "'experimental_when_header' configuration for logging is invalid",
-                error: String::from(
-                    "body and headers must not be both false because it doesn't enable any logs",
-                ),
-            })
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
-        self.when_header
-            .iter()
-            .fold((false, false), |(log_headers, log_body), current| {
-                let (current_log_headers, current_log_body) = current.should_log(req);
-                (
-                    log_headers || current_log_headers,
-                    log_body || current_log_body,
-                )
-            })
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
@@ -192,11 +153,19 @@ impl JsonSchema for Format {
         "logging_format".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Does nothing, but will compile error if the
         let types = vec![
-            ("json", JsonFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html"),
-            ("text", TextFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html"),
+            (
+                "json",
+                JsonFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+            ),
+            (
+                "text",
+                TextFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+            ),
         ];
 
         Schema::Object(SchemaObject {
@@ -335,9 +304,44 @@ pub(crate) struct JsonFormat {
     /// Include the resource with the log event. (default: true)
     pub(crate) display_resource: bool,
     /// Include the trace id (if any) with the log event. (default: true)
-    pub(crate) display_trace_id: bool,
+    pub(crate) display_trace_id: DisplayTraceIdFormat,
     /// Include the span id (if any) with the log event. (default: true)
     pub(crate) display_span_id: bool,
+    /// List of span attributes to attach to the json log object
+    pub(crate) span_attributes: HashSet<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum DisplayTraceIdFormat {
+    // /// Format the Trace ID as a hexadecimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    // #[default]
+    // Hexadecimal,
+    // /// Format the Trace ID as a hexadecimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    // OpenTelemetry,
+    // /// Format the Trace ID as a decimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 16)
+    // Decimal,
+
+    // /// Datadog
+    // Datadog,
+
+    // /// UUID format with dashes
+    // /// (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)
+    // Uuid,
+    TraceIdFormat(TraceIdFormat),
+    Bool(bool),
+}
+
+impl Default for DisplayTraceIdFormat {
+    fn default() -> Self {
+        Self::TraceIdFormat(TraceIdFormat::default())
+    }
 }
 
 impl Default for JsonFormat {
@@ -353,8 +357,9 @@ impl Default for JsonFormat {
             display_current_span: false,
             display_span_list: true,
             display_resource: true,
-            display_trace_id: true,
+            display_trace_id: DisplayTraceIdFormat::Bool(true),
             display_span_id: true,
+            span_attributes: HashSet::new(),
         }
     }
 }
@@ -389,7 +394,7 @@ pub(crate) struct TextFormat {
     /// Include all of the containing span information with the log event. (default: true)
     pub(crate) display_span_list: bool,
     /// Include the trace id (if any) with the log event. (default: false)
-    pub(crate) display_trace_id: bool,
+    pub(crate) display_trace_id: DisplayTraceIdFormat,
     /// Include the span id (if any) with the log event. (default: false)
     pub(crate) display_span_id: bool,
 }
@@ -410,7 +415,7 @@ impl Default for TextFormat {
             display_resource: false,
             display_current_span: true,
             display_span_list: true,
-            display_trace_id: false,
+            display_trace_id: DisplayTraceIdFormat::Bool(false),
             display_span_id: false,
         }
     }
@@ -432,13 +437,10 @@ pub(crate) enum Rollover {
 
 #[cfg(test)]
 mod test {
-    use regex::Regex;
     use serde_json::json;
 
-    use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
     use crate::plugins::telemetry::config_new::logging::Format;
-    use crate::plugins::telemetry::config_new::logging::Logging;
-    use crate::services::SupergraphRequest;
+
     #[test]
     fn format_de() {
         let format = serde_json::from_value::<Format>(json!("text")).unwrap();
@@ -449,93 +451,5 @@ mod test {
         assert_eq!(format, Format::Text(Default::default()));
         let format = serde_json::from_value::<Format>(json!({"json":{}})).unwrap();
         assert_eq!(format, Format::Json(Default::default()));
-    }
-
-    #[test]
-    fn test_logging_conf_validation() {
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-
-        logging_conf.validate().unwrap();
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: false,
-                body: false,
-            }],
-            ..Default::default()
-        };
-
-        let validate_res = logging_conf.validate();
-        assert!(validate_res.is_err());
-        assert_eq!(validate_res.unwrap_err().to_string(), "'experimental_when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs");
-    }
-
-    #[test]
-    fn test_logging_conf_should_log() {
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "test".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        let req = SupergraphRequest::fake_builder()
-            .header("test", "foobar")
-            .build()
-            .unwrap();
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::from("foobar"),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            when_header: vec![
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^foo*").unwrap(),
-                    headers: true,
-                    body: false,
-                },
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^*bar$").unwrap(),
-                    headers: false,
-                    body: true,
-                },
-            ],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, true));
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "testtest".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (false, false));
     }
 }

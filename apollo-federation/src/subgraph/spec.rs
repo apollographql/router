@@ -1,5 +1,9 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -7,10 +11,10 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::ast::InvalidNameError;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -20,28 +24,25 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
-use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
-use lazy_static::lazy_static;
 use thiserror::Error;
 
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
-use crate::link::spec::Version;
-use crate::link::Import;
-use crate::link::Link;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::link::Import;
+use crate::link::Link;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
 use crate::subgraph::spec::FederationSpecError::UnsupportedFederationDirective;
 use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 
 pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
+pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
 pub const KEY_DIRECTIVE_NAME: Name = name!("key");
 pub const EXTENDS_DIRECTIVE_NAME: Name = name!("extends");
 pub const EXTERNAL_DIRECTIVE_NAME: Name = name!("external");
+pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const INACCESSIBLE_DIRECTIVE_NAME: Name = name!("inaccessible");
 pub const INTF_OBJECT_DIRECTIVE_NAME: Name = name!("interfaceObject");
 pub const OVERRIDE_DIRECTIVE_NAME: Name = name!("override");
@@ -50,6 +51,7 @@ pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
 pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
 pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
 pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
+pub const CONTEXTFIELDVALUE_SCALAR_NAME: Name = name!("ContextFieldValue");
 
 // federated types
 pub const ANY_SCALAR_NAME: Name = name!("_Any");
@@ -67,11 +69,13 @@ pub const FEDERATION_V1_DIRECTIVE_NAMES: [Name; 5] = [
     REQUIRES_DIRECTIVE_NAME,
 ];
 
-pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
+pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     COMPOSE_DIRECTIVE_NAME,
+    CONTEXT_DIRECTIVE_NAME,
     KEY_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
     EXTERNAL_DIRECTIVE_NAME,
+    FROM_CONTEXT_DIRECTIVE_NAME,
     INACCESSIBLE_DIRECTIVE_NAME,
     INTF_OBJECT_DIRECTIVE_NAME,
     OVERRIDE_DIRECTIVE_NAME,
@@ -81,13 +85,18 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
     TAG_DIRECTIVE_NAME,
 ];
 
+pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
+    [FIELDSET_SCALAR_NAME, CONTEXTFIELDVALUE_SCALAR_NAME];
+
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.
 enum FederationDirectiveName {
     Compose,
+    Context,
     Key,
     Extends,
     External,
+    FromContext,
     Inaccessible,
     IntfObject,
     Override,
@@ -97,13 +106,18 @@ enum FederationDirectiveName {
     Tag,
 }
 
-lazy_static! {
-    static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
-        IndexMap::from([
+static FEDERATION_DIRECTIVE_NAMES_TO_ENUM: LazyLock<IndexMap<Name, FederationDirectiveName>> =
+    LazyLock::new(|| {
+        IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
+            (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
             (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
+            (
+                FROM_CONTEXT_DIRECTIVE_NAME,
+                FederationDirectiveName::FromContext,
+            ),
             (
                 INACCESSIBLE_DIRECTIVE_NAME,
                 FederationDirectiveName::Inaccessible,
@@ -118,8 +132,7 @@ lazy_static! {
             (SHAREABLE_DIRECTIVE_NAME, FederationDirectiveName::Shareable),
             (TAG_DIRECTIVE_NAME, FederationDirectiveName::Tag),
         ])
-    };
-}
+    });
 
 const MIN_FEDERATION_VERSION: Version = Version { major: 2, minor: 0 };
 const MAX_FEDERATION_VERSION: Version = Version { major: 2, minor: 5 };
@@ -136,13 +149,13 @@ pub enum FederationSpecError {
     },
     #[error("Unsupported federation directive import {0}")]
     UnsupportedFederationDirective(String),
-    #[error("Invalid GraphQL name {0}")]
-    InvalidGraphQLName(String),
+    #[error(transparent)]
+    InvalidGraphQLName(InvalidNameError),
 }
 
 impl From<InvalidNameError> for FederationSpecError {
     fn from(err: InvalidNameError) -> Self {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.0))
+        FederationSpecError::InvalidGraphQLName(err)
     }
 }
 
@@ -201,8 +214,7 @@ macro_rules! applied_specification {
                 if let Some(spec_alias) = &self.link.spec_alias {
                     applied_link_directive.arguments.push(Argument {
                         name: name!("as"),
-                        // TODO `spec_alias.into()` when https://github.com/apollographql/apollo-rs/pull/773 is released
-                        value: Value::String(<Name as AsRef::<NodeStr>>::as_ref(&spec_alias).clone()).into(),
+                        value: spec_alias.as_str().into(),
                     }.into())
                 }
                 if let Some(purpose) = &self.link.purpose {
@@ -276,7 +288,7 @@ impl FederationSpecDefinitions {
         name: &Name,
         alias: &Option<Name>,
     ) -> Result<DirectiveDefinition, FederationSpecError> {
-        // TODO: NodeStr is not annotated with #[derive(PartialEq, Eq)], so Clippy warns it should
+        // TODO: `Name` has custom `PartialEq` and `Eq` impl so Clippy warns it should
         // not be used in pattern matching (as some future Rust version will likely turn this into
         // a hard error). We resort instead to indexing into a static IndexMap to get an enum, which
         // can be used in a match.
@@ -285,9 +297,11 @@ impl FederationSpecDefinitions {
         };
         Ok(match enum_name {
             FederationDirectiveName::Compose => self.compose_directive_definition(alias),
+            FederationDirectiveName::Context => self.context_directive_definition(alias),
             FederationDirectiveName::Key => self.key_directive_definition(alias)?,
             FederationDirectiveName::Extends => self.extends_directive_definition(alias),
             FederationDirectiveName::External => self.external_directive_definition(alias),
+            FederationDirectiveName::FromContext => self.from_context_directive_definition(alias),
             FederationDirectiveName::Inaccessible => self.inaccessible_directive_definition(alias),
             FederationDirectiveName::IntfObject => {
                 self.interface_object_directive_definition(alias)
@@ -309,6 +323,15 @@ impl FederationSpecDefinitions {
         }
     }
 
+    /// scalar ContextFieldValue
+    pub fn contextfieldvalue_scalar_definition(&self, alias: &Option<Name>) -> ScalarType {
+        ScalarType {
+            description: None,
+            name: alias.clone().unwrap_or(CONTEXTFIELDVALUE_SCALAR_NAME),
+            directives: Default::default(),
+        }
+    }
+
     fn fields_argument_definition(&self) -> Result<InputValueDefinition, FederationSpecError> {
         Ok(InputValueDefinition {
             description: None,
@@ -326,16 +349,42 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(COMPOSE_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("name"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: true,
             locations: vec![DirectiveLocation::Schema],
+        }
+    }
+
+    /// directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+    fn context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
+            repeatable: true,
+            locations: vec![
+                DirectiveLocation::Interface,
+                DirectiveLocation::Object,
+                DirectiveLocation::Union,
+            ],
         }
     }
 
@@ -388,6 +437,34 @@ impl FederationSpecDefinitions {
         }
     }
 
+    // The directive is named `@fromContext`. This is confusing for clippy, as
+    // `from` is a conventional prefix used in conversion methods, which do not
+    // take `self` as an argument. This function does **not** perform
+    // conversion, but extracts `@fromContext` directive definition.
+    /// directive @fromContext(field: ContextFieldValue) on ARGUMENT_DEFINITION
+    #[allow(clippy::wrong_self_convention)]
+    fn from_context_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
+        DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(FROM_CONTEXT_DIRECTIVE_NAME),
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("field"),
+                    ty: Type::Named(
+                        self.namespaced_type_name(&CONTEXTFIELDVALUE_SCALAR_NAME, false),
+                    )
+                    .into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
+            repeatable: false,
+            locations: vec![DirectiveLocation::ArgumentDefinition],
+        }
+    }
+
     /// directive @inaccessible on
     ///   | ARGUMENT_DEFINITION
     ///   | ENUM
@@ -436,14 +513,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(OVERRIDE_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("from"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("from"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: false,
             locations: vec![DirectiveLocation::FieldDefinition],
         }
@@ -506,14 +585,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(TAG_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("name"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: true,
             locations: vec![
                 DirectiveLocation::ArgumentDefinition,
@@ -556,8 +637,8 @@ impl FederationSpecDefinitions {
             description: None,
             name: SERVICE_TYPE,
             directives: Default::default(),
-            fields: IndexMap::new(),
-            implements_interfaces: IndexSet::new(),
+            fields: IndexMap::default(),
+            implements_interfaces: IndexSet::default(),
         };
         service_type.fields.insert(
             name!("_sdl"),
@@ -650,7 +731,8 @@ impl LinkSpecDefinitions {
                     .into(),
                 ),
             ]
-            .into(),
+            .into_iter()
+            .collect(),
         }
     }
 
@@ -721,7 +803,17 @@ impl Default for LinkSpecDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::database::federation_link_identity;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+    use crate::link::spec::Identity;
+
+    // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
+    // to define the ground work for that in `apollo-at-link` first.
+    fn federation_link_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("federation"),
+        }
+    }
 
     #[test]
     fn handle_unsupported_federation_version() {

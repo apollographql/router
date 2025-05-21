@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::Configuration;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
     pub(crate) height: T,
@@ -56,6 +57,7 @@ impl OperationLimits<bool> {
 
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
+    query_metrics_in: &mut OperationLimits<u32>,
     configuration: &Configuration,
     query: &str,
     document: &ExecutableDocument,
@@ -68,12 +70,7 @@ pub(crate) fn check(
         root_fields: config_limits.max_root_fields,
         aliases: config_limits.max_aliases,
     };
-    if !max.map(|limit| limit.is_some()).any() {
-        // No configured limit
-        return Ok(());
-    }
-
-    let Ok(operation) = document.get_operation(operation_name) else {
+    let Ok(operation) = document.operations.get(operation_name) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
         // if it wasn’t already before we got to this code path.
@@ -82,6 +79,16 @@ pub(crate) fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(document, &mut fragment_cache, &operation.selection_set);
+
+    // Keep a record of the measurements
+    *query_metrics_in = measured;
+
+    // If we don't have a configured limit, we can just return Ok
+    if !max.map(|limit| limit.is_some()).any() {
+        // No configured limit
+        return Ok(());
+    }
+
     let exceeded = max.combine(measured, |_, config, measured| {
         if let Some(limit) = config {
             measured > limit
@@ -118,7 +125,7 @@ enum Computation<T> {
 /// Recursively measure the given selection set against each limit
 fn count<'a>(
     document: &'a executable::ExecutableDocument,
-    fragment_cache: &mut HashMap<&'a executable::Name, Computation<OperationLimits<u32>>>,
+    fragment_cache: &mut HashMap<&'a Name, Computation<OperationLimits<u32>>>,
     selection_set: &'a executable::SelectionSet,
 ) -> OperationLimits<u32> {
     let mut counts = OperationLimits {
@@ -132,29 +139,29 @@ fn count<'a>(
         match selection {
             executable::Selection::Field(field) => {
                 let nested = count(document, fragment_cache, &field.selection_set);
-                counts.depth = counts.depth.max(1 + nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.depth = counts.depth.max(nested.depth.saturating_add(1));
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
                 // Multiple aliases for the same field could use different arguments
                 // Until we do full merging for limit checking purpose,
                 // approximate measured height with an upper bound rather than a lower bound.
                 let used_name = if let Some(alias) = &field.alias {
-                    counts.aliases += 1;
+                    counts.aliases = counts.aliases.saturating_add(1);
                     alias
                 } else {
                     &field.name
                 };
                 let not_seen_before = fields_seen.insert(used_name);
                 if not_seen_before {
-                    counts.height += 1;
-                    counts.root_fields += 1;
+                    counts.height = counts.height.saturating_add(1);
+                    counts.root_fields = counts.root_fields.saturating_add(1);
                 }
             }
             executable::Selection::InlineFragment(fragment) => {
                 let nested = count(document, fragment_cache, &fragment.selection_set);
                 counts.depth = counts.depth.max(nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
             }
             executable::Selection::FragmentSpread(fragment) => {
                 let name = &fragment.fragment_name;
@@ -183,8 +190,8 @@ fn count<'a>(
                     Some(Computation::Done(cached)) => nested = *cached,
                 }
                 counts.depth = counts.depth.max(nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
             }
         }
     }

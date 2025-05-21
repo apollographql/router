@@ -1,0 +1,68 @@
+query EnhancedFragmentQuery {
+    noInputQuery {
+        listOfBools
+        interfaceResponse {
+            ... on InterfaceImplementation2 {
+                implementation2Field
+            }
+            ...bbbInterfaceFragment
+            ...aaaInterfaceFragment
+            ... {
+                ... on InterfaceImplementation1 {
+                    implementation1Field
+                }
+            }
+            ... {
+                ... on InterfaceImplementation2 {
+                    sharedField
+                }
+            }
+            ... on InterfaceImplementation1 {
+                implementation1Field
+            }
+        }
+        unionResponse {
+            ... on UnionType2 {
+                unionType2Field
+            }
+            ... on UnionType1 {
+                unionType1Field
+            }
+        }
+        ...zzzFragment
+        ...aaaFragment
+        ...ZZZFragment
+    }
+}
+
+fragment zzzFragment on EverythingResponse {
+    listOfInterfaces {
+        sharedField
+    }
+}
+
+fragment ZZZFragment on EverythingResponse {
+    listOfInterfaces {
+        sharedField
+    }
+}
+
+fragment aaaFragment on EverythingResponse {
+    listOfInterfaces {
+        sharedField
+    }
+}
+
+fragment UnusedFragment on InterfaceImplementation2 {
+    sharedField
+    implementation2Field
+}
+
+fragment bbbInterfaceFragment on InterfaceImplementation2 {
+    sharedField
+    implementation2Field
+}
+
+fragment aaaInterfaceFragment on InterfaceImplementation1 {
+    sharedField
+}

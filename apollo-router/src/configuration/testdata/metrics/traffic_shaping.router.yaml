@@ -12,9 +12,4 @@ traffic_shaping:
       capacity: 100
       interval: 1s
     experimental_http2: enable
-    experimental_retry:
-      ttl: 1s
-      min_per_sec: 2
-      retry_mutations: true
-      retry_percent: 2
 

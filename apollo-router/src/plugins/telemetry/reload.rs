@@ -1,113 +1,67 @@
 use std::io::IsTerminal;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::Tracer;
+use opentelemetry::Context;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceFlags;
-use opentelemetry_api::trace::TraceState;
-use opentelemetry_api::Context;
-use rand::thread_rng;
-use rand::Rng;
+use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
-use tracing_core::Subscriber;
-use tracing_subscriber::filter::Filtered;
-use tracing_subscriber::fmt::FormatFields;
-use tracing_subscriber::layer::Filter;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Registry;
 
-use super::config::SamplerOption;
-use super::config_new::logging::RateLimit;
-use super::dynamic_attribute::DynSpanAttributeLayer;
+use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
-use super::metrics::span_metrics_exporter::SpanMetricsLayer;
-use super::ROUTER_SPAN_NAME;
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::metrics::layer::MetricsLayer;
-use crate::metrics::meter_provider;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
-use crate::router_factory::STARTING_SPAN_NAME;
+use crate::tracer::TraceId;
 
-pub(crate) type LayeredRegistry =
-    Layered<SpanMetricsLayer, Layered<DynSpanAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
 
-pub(super) type LayeredTracer = Layered<
-    Filtered<
-        OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>,
-        SamplingFilter,
-        LayeredRegistry,
-    >,
-    LayeredRegistry,
->;
+pub(super) type LayeredTracer =
+    Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
-pub(super) static SPAN_SAMPLING_RATE: AtomicU64 = AtomicU64::new(0);
-
-pub(super) static METRICS_LAYER: OnceCell<MetricsLayer> = OnceCell::new();
-pub(crate) fn metrics_layer() -> &'static MetricsLayer {
-    METRICS_LAYER.get_or_init(|| MetricsLayer::new(meter_provider().clone()))
-}
-
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
-            "noop",
-            None::<String>,
-            None::<String>,
-            None,
-        ),
+        opentelemetry_sdk::trace::TracerProvider::default()
+            .tracer_builder("noop")
+            .build(),
     );
-    let opentelemetry_layer = otel::layer()
-        .with_tracer(hot_tracer.clone())
-        .with_filter(SamplingFilter::new());
+    let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        FmtLayer::new(
-            FilteringFormatter::new(Text::default(), filter_metric_events, &RateLimit::default()),
-            std::io::stdout,
-        )
-        .boxed()
+        FmtLayer::new(Text::default(), std::io::stdout).boxed()
     } else {
-        FmtLayer::new(
-            FilteringFormatter::new(Json::default(), filter_metric_events, &RateLimit::default()),
-            std::io::stdout,
-        )
-        .boxed()
+        FmtLayer::new(Json::default(), std::io::stdout).boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
-
-    let metrics_layer = metrics_layer();
 
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
@@ -118,11 +72,10 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
-                .with(DynSpanAttributeLayer::new())
-                .with(SpanMetricsLayer::default())
+                .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
-                .with(metrics_layer.clone())
+                .with(WarnLegacyMetricsLayer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 
@@ -166,109 +119,25 @@ pub(crate) fn prepare_context(context: Context) -> Context {
     }
     context
 }
-pub(crate) struct SamplingFilter;
 
-#[allow(dead_code)]
-impl SamplingFilter {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-
-    pub(super) fn configure(sampler: &SamplerOption) {
-        let ratio = match sampler {
-            SamplerOption::TraceIdRatioBased(ratio) => {
-                // can't use std::cmp::min because f64 is not Ord
-                if *ratio > 1.0 {
-                    1.0
-                } else {
-                    *ratio
-                }
-            }
-            SamplerOption::Always(s) => match s {
-                super::config::Sampler::AlwaysOn => 1f64,
-                super::config::Sampler::AlwaysOff => 0f64,
-            },
-        };
-
-        SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
-    }
-
-    fn sample(&self) -> bool {
-        let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
-    }
+#[derive(Clone, Debug)]
+pub(crate) enum SampledSpan {
+    NotSampled(TraceId, SpanId),
+    Sampled(TraceId, SpanId),
 }
 
-impl<S> Filter<S> for SamplingFilter
-where
-    S: Subscriber + for<'span> LookupSpan<'span>,
-{
-    fn enabled(
-        &self,
-        meta: &tracing::Metadata<'_>,
-        cx: &tracing_subscriber::layer::Context<'_, S>,
-    ) -> bool {
-        // we ignore metric events
-        if !meta.is_span() {
-            return meta.fields().iter().any(|f| f.name() == "message");
+impl SampledSpan {
+    pub(crate) fn trace_and_span_id(&self) -> (TraceId, SpanId) {
+        match self {
+            SampledSpan::NotSampled(trace_id, span_id)
+            | SampledSpan::Sampled(trace_id, span_id) => (trace_id.clone(), *span_id),
         }
-
-        // if there's an exsting otel context set by the client request, and it is sampled,
-        // then that trace is sampled
-        let current_otel_context = opentelemetry::Context::current();
-        if current_otel_context.span().span_context().is_sampled() {
-            return true;
-        }
-
-        let current_span = cx.current_span();
-        if let Some(spanref) = current_span
-            // the current span, which is the parent of the span that might get enabled here,
-            // exists, but it might have been enabled by another layer like metrics
-            .id()
-            .and_then(|id| cx.span(id))
-        {
-            return spanref.is_sampled();
-        }
-
-        // always sample the router loading trace
-        if meta.name() == STARTING_SPAN_NAME {
-            return true;
-        }
-
-        // we only make the sampling decision on the root span. If we reach here for any other span,
-        // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
-            return false;
-        }
-
-        // - there's no parent span (it's the root), so we make the sampling decision
-        self.sample()
-    }
-
-    fn on_new_span(
-        &self,
-        _attrs: &tracing_core::span::Attributes<'_>,
-        id: &tracing_core::span::Id,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<SampledSpan>().is_none() {
-            extensions.insert(SampledSpan);
-        }
-    }
-
-    fn on_close(&self, id: tracing_core::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        extensions.remove::<SampledSpan>();
     }
 }
-
-struct SampledSpan;
 
 pub(crate) trait IsSampled {
     fn is_sampled(&self) -> bool;
+    fn get_trace_id(&self) -> Option<TraceId>;
 }
 
 impl<'a, T> IsSampled for SpanRef<'a, T>
@@ -279,18 +148,73 @@ where
         // if this extension is set, that means the parent span was accepted, and so the
         // entire trace is accepted
         let extensions = self.extensions();
-        extensions.get::<SampledSpan>().is_some()
+        extensions
+            .get::<SampledSpan>()
+            .map(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .unwrap_or_default()
+    }
+
+    fn get_trace_id(&self) -> Option<TraceId> {
+        let extensions = self.extensions();
+        extensions.get::<SampledSpan>().map(|s| match s {
+            SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _) => {
+                trace_id.clone()
+            }
+        })
     }
 }
-/// prevents span fields from being formatted to a string when writing logs
-pub(crate) struct NullFieldFormatter;
 
-impl<'writer> FormatFields<'writer> for NullFieldFormatter {
-    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
-        &self,
-        _writer: tracing_subscriber::fmt::format::Writer<'writer>,
-        _fields: R,
-    ) -> std::fmt::Result {
-        Ok(())
+const LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
+const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
+const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
+const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
+
+/// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
+struct WarnLegacyMetricsLayer;
+
+// We can't use the tracing macros inside our `on_event` callback, instead we have to manually
+// produce an event, which requires a significant amount of ceremony.
+// This metadata mimicks what `tracing::error!()` does.
+static WARN_LEGACY_METRIC_CALLSITE: tracing_core::callsite::DefaultCallsite =
+    tracing_core::callsite::DefaultCallsite::new(&WARN_LEGACY_METRIC_METADATA);
+static WARN_LEGACY_METRIC_METADATA: tracing_core::Metadata = tracing_core::metadata! {
+    name: "warn_legacy_metric",
+    target: module_path!(),
+    level: tracing_core::Level::ERROR,
+    fields: &["message", "metric_name"],
+    callsite: &WARN_LEGACY_METRIC_CALLSITE,
+    kind: tracing_core::metadata::Kind::EVENT,
+};
+
+impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        if let Some(field) = event.fields().find(|field| {
+            field
+                .name()
+                .starts_with(LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_COUNTER)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_HISTOGRAM)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_VALUE)
+        }) {
+            // Doing all this manually is a flippin nightmare!
+            // We allocate a bunch but I reckon it's fine because this only happens in a deprecated
+            // code path that we want people to upgrade from.
+            let fields = WARN_LEGACY_METRIC_METADATA.fields();
+            let message_field = fields.field("message").unwrap();
+            let message =
+                "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry"
+                    .to_string();
+            let name_field = fields.field("metric_name").unwrap();
+            let metric_name = field.name().to_string();
+            let value_set = &[
+                (&message_field, Some(&message as &dyn tracing::Value)),
+                (&name_field, Some(&metric_name as &dyn tracing::Value)),
+            ];
+            let value_set = fields.value_set(value_set);
+            ctx.event(&tracing_core::Event::new(
+                &WARN_LEGACY_METRIC_METADATA,
+                &value_set,
+            ));
+        }
     }
 }

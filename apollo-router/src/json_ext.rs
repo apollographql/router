@@ -5,6 +5,7 @@
 use std::cmp::min;
 use std::fmt;
 
+use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
 use regex::Captures;
 use regex::Regex;
@@ -25,9 +26,25 @@ pub(crate) type Object = Map<ByteString, Value>;
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:\|\[)(?<condition>.+?)(?:,\s*|)(?:\])")
+    Regex::new(r"\|\[(?<condition>.+?)?\]")
         .expect("this regex to check for type conditions is valid")
 });
+
+/// Extract the condition list from the regex captures.
+fn extract_matched_conditions(caps: &Captures) -> TypeConditions {
+    caps.name("condition")
+        .map(|c| c.as_str().split(',').map(|s| s.to_string()).collect())
+        .unwrap_or_default()
+}
+
+fn split_path_element_and_type_conditions(s: &str) -> (String, Option<TypeConditions>) {
+    let mut type_conditions = None;
+    let path_element = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
+        type_conditions = Some(extract_matched_conditions(caps));
+        ""
+    });
+    (path_element.to_string(), type_conditions)
+}
 
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
@@ -71,14 +88,22 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn deep_merge(&mut self, other: Self);
 
+    /// Deep merge two JSON objects, overwriting values in `self` if it has the same key as `other`.
+    /// For GraphQL response objects, this uses schema information to avoid overwriting a concrete
+    /// `__typename` with an interface name.
+    #[track_caller]
+    fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema);
+
     /// Returns `true` if the values are equal and the objects are ordered the same.
     ///
     /// **Note:** this is recursive.
+    #[cfg(test)]
     fn eq_and_ordered(&self, other: &Self) -> bool;
 
     /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the
     /// values in `self`.
     #[track_caller]
+    #[cfg(test)]
     fn is_subset(&self, superset: &Value) -> bool;
 
     /// Create a `Value` by inserting a value at a subpath.
@@ -142,6 +167,8 @@ pub(crate) trait ValueExt {
     /// function to handle `PathElement::Fragment`).
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
+
+    fn as_i32(&self) -> Option<i32>;
 }
 
 impl ValueExt for Value {
@@ -181,6 +208,54 @@ impl ValueExt for Value {
         }
     }
 
+    fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
+        match (self, other) {
+            (Value::Object(a), Value::Object(b)) => {
+                for (key, value) in b.into_iter() {
+                    let k = key.clone();
+                    match a.entry(key) {
+                        Entry::Vacant(e) => {
+                            e.insert(value);
+                        }
+                        Entry::Occupied(e) => match (e.into_mut(), value) {
+                            (Value::String(type1), Value::String(type2))
+                                if k.as_str() == TYPENAME =>
+                            {
+                                // If type1 is a subtype of type2, we skip this overwrite to preserve the more specific `__typename`
+                                // in the response. Ideally, we could use `Schema::is_implementation`, but that looks to be buggy
+                                // and does not catch the problem we are trying to resolve.
+                                if !schema.is_subtype(type2.as_str(), type1.as_str()) {
+                                    *type1 = type2;
+                                }
+                            }
+                            (t, s) => t.type_aware_deep_merge(s, schema),
+                        },
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(mut b)) => {
+                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
+                    a_value.type_aware_deep_merge(b_value, schema);
+                }
+
+                a.extend(b);
+            }
+            (_, Value::Null) => {}
+            (Value::Object(_), Value::Array(_)) => {
+                failfast_debug!("trying to replace an object with an array");
+            }
+            (Value::Array(_), Value::Object(_)) => {
+                failfast_debug!("trying to replace an array with an object");
+            }
+            (a, b) => {
+                if b != Value::Null {
+                    *a = b;
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
     fn eq_and_ordered(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
@@ -194,7 +269,7 @@ impl ValueExt for Value {
                         (Some((field_a, value_a)), Some((field_b, value_b)))
                             if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -211,7 +286,7 @@ impl ValueExt for Value {
                         (Some(value_a), Some(value_b))
                             if ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -221,6 +296,7 @@ impl ValueExt for Value {
         }
     }
 
+    #[cfg(test)]
     fn is_subset(&self, superset: &Value) -> bool {
         match (self, superset) {
             (Value::Object(subset), Value::Object(superset)) => {
@@ -349,7 +425,7 @@ impl ValueExt for Value {
                     _other => {
                         return Err(FetchError::ExecutionPathNotFound {
                             reason: "expected an array".to_string(),
-                        })
+                        });
                     }
                 },
                 PathElement::Key(k, type_conditions) => {
@@ -374,7 +450,7 @@ impl ValueExt for Value {
                         _other => {
                             return Err(FetchError::ExecutionPathNotFound {
                                 reason: "expected an object".to_string(),
-                            })
+                            });
                         }
                     }
                 }
@@ -460,9 +536,13 @@ impl ValueExt for Value {
             && self
                 .get(TYPENAME)
                 .and_then(|v| v.as_str())
-                .map_or(true, |typename| {
+                .is_none_or(|typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
+    }
+
+    fn as_i32(&self) -> Option<i32> {
+        self.as_i64()?.to_i32()
     }
 }
 
@@ -758,13 +838,13 @@ where
 
 struct FlattenVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
+impl serde::de::Visitor<'_> for FlattenVisitor {
     type Value = Option<TypeConditions>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(
             formatter,
-            "a string that is '@', potentially preceded of followed by type conditions"
+            "a string that is '@', potentially followed by type conditions"
         )
     }
 
@@ -772,23 +852,9 @@ impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions: Vec<String> = Vec::new();
-        let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.name("condition")
-                    .map(|c| {
-                        c.as_str()
-                            .split(',')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-            );
-            ""
-        });
-
-        if path == "@" {
-            Ok((!type_conditions.is_empty()).then_some(type_conditions))
+        let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+        if path_element == "@" {
+            Ok(type_conditions)
         } else {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(s),
@@ -806,11 +872,7 @@ where
     S: serde::Serializer,
 {
     let tc_string = if let Some(c) = type_conditions {
-        if !c.is_empty() {
-            format!("|[{}]", c.join(","))
-        } else {
-            "".to_string()
-        }
+        format!("|[{}]", c.join(","))
     } else {
         "".to_string()
     };
@@ -827,13 +889,13 @@ where
 
 struct KeyVisitor;
 
-impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+impl serde::de::Visitor<'_> for KeyVisitor {
     type Value = (String, Option<TypeConditions>);
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(
             formatter,
-            "a string, potentially preceded of followed by type conditions"
+            "a string, potentially followed by type conditions"
         )
     }
 
@@ -841,21 +903,7 @@ impl<'de> serde::de::Visitor<'de> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        let mut type_conditions = Vec::new();
-        let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-            type_conditions.extend(
-                caps.extract::<1>()
-                    .1
-                    .map(|s| s.split(',').map(|s| s.to_string()))
-                    .into_iter()
-                    .flatten(),
-            );
-            ""
-        });
-        Ok((
-            key.to_string(),
-            (!type_conditions.is_empty()).then_some(type_conditions),
-        ))
+        Ok(split_path_element_and_type_conditions(s))
     }
 }
 
@@ -868,11 +916,7 @@ where
     S: serde::Serializer,
 {
     let tc_string = if let Some(c) = type_conditions {
-        if !c.is_empty() {
-            format!("|[{}]", c.join(","))
-        } else {
-            "".to_string()
-        }
+        format!("|[{}]", c.join(","))
     } else {
         "".to_string()
     };
@@ -889,7 +933,7 @@ where
 
 struct FragmentVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
+impl serde::de::Visitor<'_> for FragmentVisitor {
     type Value = String;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -914,43 +958,16 @@ where
 }
 
 fn flatten_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Vec::new();
-    let path = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
-        ""
-    });
-
-    if path != "@" {
+    let (path_element, type_conditions) = split_path_element_and_type_conditions(s);
+    if path_element != "@" {
         return Err("invalid flatten".to_string());
     }
-    Ok(PathElement::Flatten(
-        (!type_conditions.is_empty()).then_some(type_conditions),
-    ))
+    Ok(PathElement::Flatten(type_conditions))
 }
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
-    let mut type_conditions = Vec::new();
-    let key = TYPE_CONDITIONS_REGEX.replace(s, |caps: &Captures| {
-        type_conditions.extend(
-            caps.extract::<1>()
-                .1
-                .map(|s| s.split(',').map(|s| s.to_string()))
-                .into_iter()
-                .flatten(),
-        );
-        ""
-    });
-
-    Ok(PathElement::Key(
-        key.to_string(),
-        (!type_conditions.is_empty()).then_some(type_conditions),
-    ))
+    let (key, type_conditions) = split_path_element_and_type_conditions(s);
+    Ok(PathElement::Key(key, type_conditions))
 }
 
 /// A path into the result document.
@@ -1041,9 +1058,7 @@ impl Path {
             PathElement::Key(key, type_conditions) => {
                 let mut tc = String::new();
                 if let Some(c) = type_conditions {
-                    if !c.is_empty() {
-                        tc = format!("|[{}]", c.join(","));
-                    }
+                    tc = format!("|[{}]", c.join(","));
                 };
                 Some(format!("{}{}", key, tc))
             }
@@ -1113,17 +1128,13 @@ impl fmt::Display for Path {
                 PathElement::Key(key, type_conditions) => {
                     write!(f, "{key}")?;
                     if let Some(c) = type_conditions {
-                        if !c.is_empty() {
-                            write!(f, "|[{}]", c.join(","))?;
-                        }
+                        write!(f, "|[{}]", c.join(","))?;
                     };
                 }
                 PathElement::Flatten(type_conditions) => {
                     write!(f, "@")?;
                     if let Some(c) = type_conditions {
-                        if !c.is_empty() {
-                            write!(f, "|[{}]", c.join(","))?;
-                        }
+                        write!(f, "|[{}]", c.join(","))?;
                     };
                 }
                 PathElement::Fragment(name) => {
@@ -1157,19 +1168,26 @@ mod tests {
     /// the path, and so we use the following simple schema for tests. Note however that tests that
     /// don't use fragments in the path essentially ignore this schema.
     fn test_schema() -> Schema {
-        Schema::parse_test(
+        Schema::parse(
             r#"
            schema
-             @core(feature: "https://specs.apollo.dev/core/v0.1"),
-             @core(feature: "https://specs.apollo.dev/join/v0.1")
+             @link(url: "https://specs.apollo.dev/link/v1.0")
+             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
            {
              query: Query
            }
-           directive @core(feature: String!) repeatable on SCHEMA
+
            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+           directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
+           scalar link__Import
 
            enum join__Graph {
-               FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+             FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+           }
+
+           enum link__Purpose {
+             SECURITY
+             EXECUTION
            }
 
            type Query {
@@ -1268,6 +1286,66 @@ mod tests {
     }
 
     #[test]
+    fn interface_typename_merging() {
+        let schema = Schema::parse(
+                r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            interface I {
+                s: String
+            }
+
+            type C implements I {
+                s: String
+            }
+
+            type Query {
+                i: I
+            }
+        "#,
+            &Default::default(),
+        )
+        .expect("valid schema");
+        let mut response1 = json!({
+            "__typename": "C"
+        });
+        let response2 = json!({
+            "__typename": "I",
+            "s": "data"
+        });
+
+        response1.type_aware_deep_merge(response2, &schema);
+
+        assert_eq!(
+            response1,
+            json!({
+                "__typename": "C",
+                "s": "data"
+            })
+        );
+    }
+
+    #[test]
     fn test_is_subset_eq() {
         assert_is_subset!(
             json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
@@ -1314,7 +1392,9 @@ mod tests {
 
         // test objects nested
         assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
-        assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(
+            !json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}}))
+        );
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
 

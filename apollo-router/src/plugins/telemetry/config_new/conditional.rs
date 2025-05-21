@@ -4,24 +4,25 @@ use std::mem;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SubschemaValidation;
-use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Deserializer;
 use serde::de::Error;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 /// The state of the conditional.
@@ -77,10 +78,10 @@ where
         format!("conditional_attribute_{}", type_name::<T>())
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Add condition to each variant in the schema.
         //Maybe we can rearrange this for a smaller schema
-        let selector = gen.subschema_for::<T>();
+        let selector = generator.subschema_for::<T>();
 
         Schema::Object(SchemaObject {
             metadata: None,
@@ -107,7 +108,7 @@ where
                             required: Default::default(),
                             properties: [(
                                 "condition".to_string(),
-                                gen.subschema_for::<Condition<T>>(),
+                                generator.subschema_for::<Condition<T>>(),
                             )]
                             .into(),
                             pattern_properties: Default::default(),
@@ -148,12 +149,25 @@ where
     }
 }
 
-impl<Att, Request, Response> Selector for Conditional<Att>
+impl<Att, Request, Response, EventResponse> Conditional<Att>
 where
-    Att: Selector<Request = Request, Response = Response>,
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        match &self.condition {
+            Some(cond) => cond.lock().validate(None),
+            None => Ok(()),
+        }
+    }
+}
+
+impl<Att, Request, Response, EventResponse> Selector for Conditional<Att>
+where
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match &self.condition {
@@ -196,6 +210,39 @@ where
         }
     }
 
+    fn on_response_event(
+        &self,
+        response: &Self::EventResponse,
+        ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_event_response(response, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending | State::Returned, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
+                if condition.lock().evaluate_event_response(response, ctx) {
+                    self.selector.on_response_event(response, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_response_event(response, ctx)
+            }
+            _ => None,
+        }
+    }
+
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
         let value = mem::take(&mut *self.value.lock());
@@ -224,6 +271,84 @@ where
             }
             _ => None,
         }
+    }
+
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_error(error, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
+                if condition.lock().evaluate_error(error, ctx) {
+                    self.selector.on_error(error, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_error(error, ctx)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        response_value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition
+                    .lock()
+                    .evaluate_response_field(ty, field, response_value, ctx)
+                {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
+                if condition
+                    .lock()
+                    .evaluate_response_field(ty, field, response_value, ctx)
+                {
+                    self.selector
+                        .on_response_field(ty, field, response_value, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector
+                    .on_response_field(ty, field, response_value, ctx)
+            }
+            _ => None,
+        }
+    }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        self.selector.is_active(stage)
     }
 }
 
@@ -299,11 +424,11 @@ where
 #[cfg(test)]
 mod test {
     use http::StatusCode;
-    use opentelemetry_api::Value;
+    use opentelemetry::Value;
 
-    use crate::plugins::telemetry::config_new::conditional::Conditional;
-    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
+    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 
     fn on_response(conditional: Conditional<RouterSelector>) -> Option<Value> {
         conditional.on_response(
@@ -520,10 +645,12 @@ mod test {
         "#;
 
         let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
-        assert!(result
-            .expect_err("should have got error")
-            .to_string()
-            .contains("data did not match any variant of untagged enum RouterSelector"),)
+        assert!(
+            result
+                .expect_err("should have got error")
+                .to_string()
+                .contains("data did not match any variant of untagged enum RouterSelector"),
+        )
     }
 
     #[test]
@@ -535,10 +662,12 @@ mod test {
         "#;
 
         let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
-        assert!(result
-            .expect_err("should have got error")
-            .to_string()
-            .contains("unknown variant `aaargh`"),)
+        assert!(
+            result
+                .expect_err("should have got error")
+                .to_string()
+                .contains("unknown variant `aaargh`"),
+        )
     }
 
     #[test]

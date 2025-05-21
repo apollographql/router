@@ -1,0 +1,30 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# DirectiveQuery\nfragment Fragment1 on InterfaceImplementation1{implementation1Field sharedField}fragment Fragment2 on InterfaceImplementation2@noArgs@withArgs(arg1:\"\",arg2:\"\",arg3:true,arg4:0,arg5:[]){implementation2Field sharedField}query DirectiveQuery@withArgs(arg1:\"\",arg2:\"\")@noArgs{noInputQuery{enumResponse@withArgs(arg3:false,arg4:0,arg5:[])@noArgs interfaceResponse{...Fragment1@noArgs@withArgs(arg1:\"\")...Fragment2}unionResponse{...on UnionType1@noArgs@withArgs(arg1:\"\",arg2:\"\"){unionType1Field}}}}"
+referencedFieldsByType:
+  EverythingResponse:
+    fieldNames:
+      - enumResponse
+      - interfaceResponse
+      - unionResponse
+    isInterface: false
+  InterfaceImplementation1:
+    fieldNames:
+      - implementation1Field
+      - sharedField
+    isInterface: false
+  InterfaceImplementation2:
+    fieldNames:
+      - implementation2Field
+      - sharedField
+    isInterface: false
+  Query:
+    fieldNames:
+      - noInputQuery
+    isInterface: false
+  UnionType1:
+    fieldNames:
+      - unionType1Field
+    isInterface: false

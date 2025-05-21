@@ -1,10 +1,9 @@
 version: "3.9"
 services:
-
   apollo-router:
     container_name: apollo-router
     build: ./router
-    image: ghcr.io/apollographql/router:v1.46.0
+    image: ghcr.io/apollographql/router:v2.2.1
     volumes:
       - ./supergraph.graphql:/etc/config/supergraph.graphql
       - ./router/zipkin.router.yaml:/etc/config/configuration.yaml
@@ -15,14 +14,12 @@ services:
         "-s",
         "/etc/config/supergraph.graphql",
         "--log",
-        "info"
+        "info",
       ]
     ports:
       - 4000:4000
     environment:
       - RUST_BACKTRACE=1
-    # environment:
-    #   - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
     depends_on:
       - zipkin
 
@@ -36,6 +33,6 @@ services:
 
   zipkin:
     container_name: zipkin
-    image: openzipkin/zipkin:3.0.6
+    image: openzipkin/zipkin:3.5.1
     ports:
       - 9411:9411

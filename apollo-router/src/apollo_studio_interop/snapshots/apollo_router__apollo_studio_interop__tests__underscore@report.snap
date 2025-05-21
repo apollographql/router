@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# UnderscoreQuery\nquery UnderscoreQuery($_arg3_:String,$arg2_:String){underscoreQuery(_arg2:$arg2_,_arg3_:$_arg3_,arg_:\"\"){_ _name _name_ name_}}"
+referencedFieldsByType:
+  Query:
+    fieldNames:
+      - underscoreQuery
+    isInterface: false
+  UnderscoreResponse:
+    fieldNames:
+      - _
+      - _name
+      - _name_
+      - name_
+    isInterface: false

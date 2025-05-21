@@ -1,0 +1,12 @@
+{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "87b3393750af706fde5c3bbdf37533012f4d4eeecb82f621b596c34249428153",
+      "name": "getWeatherData",
+      "type": "query",
+      "body": "query getWeatherData($search: String!) {\n  geoByAddress(search: $search) {\n    lat\n    long\n    weather {\n      conditions\n      forecastSnowFall\n      temperature\n      windSpeed\n      currentSnowDepth\n      __typename\n    }\n    __typename\n  }\n}"
+    }
+  ]
+}

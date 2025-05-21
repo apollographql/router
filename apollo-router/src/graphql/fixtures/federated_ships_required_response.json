@@ -1,0 +1,14 @@
+{
+    "data": {
+        "ships": [
+            {
+                "name": "Boaty McBoatface",
+                "registrationFee": 200
+            },
+            {
+                "name": "HMS Grapherson",
+                "registrationFee": 150
+            }
+        ]
+    }
+}

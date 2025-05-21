@@ -1,0 +1,18 @@
+description: Custom histogram where subgraph response doesn't happen. This should still increment the metric on Drop.
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: custom_value
+        query: "query { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"

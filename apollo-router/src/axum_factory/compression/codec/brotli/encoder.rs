@@ -5,14 +5,10 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 
+use brotli::enc::StandardAlloc;
 use brotli::enc::backward_references::BrotliEncoderParams;
-use brotli::enc::encode::BrotliEncoderCompressStream;
-use brotli::enc::encode::BrotliEncoderCreateInstance;
-use brotli::enc::encode::BrotliEncoderHasMoreOutput;
-use brotli::enc::encode::BrotliEncoderIsFinished;
 use brotli::enc::encode::BrotliEncoderOperation;
 use brotli::enc::encode::BrotliEncoderStateStruct;
-use brotli::enc::StandardAlloc;
 
 use crate::axum_factory::compression::codec::Encode;
 use crate::axum_factory::compression::util::PartialBuffer;
@@ -23,7 +19,7 @@ pub(crate) struct BrotliEncoder {
 
 impl BrotliEncoder {
     pub(crate) fn new(params: BrotliEncoderParams) -> Self {
-        let mut state = BrotliEncoderCreateInstance(StandardAlloc::default());
+        let mut state = BrotliEncoderStateStruct::new(StandardAlloc::default());
         state.params = params;
         Self { state }
     }
@@ -40,8 +36,7 @@ impl BrotliEncoder {
         let mut input_len = 0;
         let mut output_len = 0;
 
-        if BrotliEncoderCompressStream(
-            &mut self.state,
+        if !self.state.compress_stream(
             op,
             &mut in_buf.len(),
             in_buf,
@@ -51,8 +46,7 @@ impl BrotliEncoder {
             &mut output_len,
             &mut None,
             &mut |_, _, _, _| (),
-        ) <= 0
-        {
+        ) {
             return Err(Error::new(ErrorKind::Other, "brotli error"));
         }
 
@@ -86,7 +80,7 @@ impl Encode for BrotliEncoder {
             BrotliEncoderOperation::BROTLI_OPERATION_FLUSH,
         )?;
 
-        Ok(BrotliEncoderHasMoreOutput(&self.state) == 0)
+        Ok(!self.state.has_more_output())
     }
 
     fn finish(
@@ -99,7 +93,7 @@ impl Encode for BrotliEncoder {
             BrotliEncoderOperation::BROTLI_OPERATION_FINISH,
         )?;
 
-        Ok(BrotliEncoderIsFinished(&self.state) == 1)
+        Ok(self.state.is_finished())
     }
 }
 

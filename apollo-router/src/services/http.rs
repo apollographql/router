@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 use std::sync::Arc;
 
-use hyper::Body;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use super::Plugins;
+use super::router::body::RouterBody;
 use crate::Context;
 
 pub(crate) mod service;
@@ -21,24 +21,24 @@ pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
-    pub(crate) http_request: http::Request<Body>,
+    pub(crate) http_request: http::Request<RouterBody>,
     pub(crate) context: Context,
 }
 
 #[non_exhaustive]
 pub(crate) struct HttpResponse {
-    pub(crate) http_response: http::Response<Body>,
+    pub(crate) http_response: http::Response<RouterBody>,
     pub(crate) context: Context,
 }
 
 #[derive(Clone)]
 pub(crate) struct HttpClientServiceFactory {
-    pub(crate) service: Arc<dyn MakeHttpService>,
+    pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl HttpClientServiceFactory {
-    pub(crate) fn new(service: Arc<dyn MakeHttpService>, plugins: Arc<Plugins>) -> Self {
+    pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
         HttpClientServiceFactory { service, plugins }
     }
 
@@ -46,30 +46,32 @@ impl HttpClientServiceFactory {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &crate::Configuration,
-        http2: crate::plugins::traffic_shaping::Http2Config,
+        client_config: crate::configuration::shared::Client,
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpClientService::from_config(
+        let service = HttpClientService::from_config_for_subgraph(
             service,
             configuration,
             &rustls::RootCertStore::empty(),
-            http2,
+            client_config,
         )
         .unwrap();
 
         HttpClientServiceFactory {
-            service: Arc::new(service),
-            plugins: Arc::new(IndexMap::new()),
+            service,
+            plugins: Arc::new(IndexMap::default()),
         }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.make();
+        let service = self.service.clone();
         self.plugins
             .iter()
             .rev()
-            .fold(service, |acc, (_, e)| e.http_client_service(name, acc))
+            .fold(service.boxed(), |acc, (_, e)| {
+                e.http_client_service(name, acc)
+            })
     }
 }
 

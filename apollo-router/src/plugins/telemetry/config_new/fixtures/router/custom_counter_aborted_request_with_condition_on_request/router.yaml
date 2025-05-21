@@ -1,0 +1,16 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: false
+        "custom_counter":
+          description: "count of requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          # This instrument should not be triggered as the condition is never true
+          condition:
+            eq:
+              - request_header: "always-true"
+              - static: "true"

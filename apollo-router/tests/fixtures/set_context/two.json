@@ -1,0 +1,43 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "query Query__two__2($representations:[_Any!]!){_entities(representations:$representations){...on U{k}}}",
+        "operationName": "Query__two__2",
+        "variables": { "representations": [{ "__typename": "U", "id": "1" }] }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "k": "k value"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "query": "query Query_fetch_failure__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on U{b}}}",
+        "operationName": "Query_fetch_failure__Subgraph2__1",
+        "variables": {
+          "representations": [{ "__typename": "U", "id": "1" }]
+        }
+      },
+      "response": {
+        "data": null,
+        "errors": [{
+          "message": "Some error",
+          "locations": [
+            {
+              "line": 3,
+              "column": 5
+            }
+          ],
+          "path": ["t", "u"]    
+        }
+        ]
+      }
+    }
+  ]
+}

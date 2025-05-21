@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: "Custom histogram where supergraph response doesn't happen. This should still increment the metric on Drop."
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        supergraph:
+          custom.histogram:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: unit
+---
+- name: custom.histogram
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 1
+        count: 1
+        attributes: {}

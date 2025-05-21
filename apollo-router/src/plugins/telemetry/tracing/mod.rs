@@ -2,26 +2,30 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::trace::BatchConfig;
-use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::trace::EvictedHashMap;
-use opentelemetry::sdk::trace::Span;
-use opentelemetry::sdk::trace::SpanProcessor;
-use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
-use opentelemetry::KeyValue;
+use opentelemetry::trace::TraceResult;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::BatchConfig;
+use opentelemetry_sdk::trace::BatchConfigBuilder;
+use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
 use super::config_new::spans::Spans;
+use super::formatters::APOLLO_CONNECTOR_PREFIX;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
-pub(crate) mod jaeger;
+#[allow(unreachable_pub, dead_code)]
+pub(crate) mod datadog_exporter;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
@@ -41,32 +45,25 @@ struct ApolloFilterSpanProcessor<T: SpanProcessor> {
     delegate: T,
 }
 
-pub(crate) static APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
-
 impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
     fn on_start(&self, span: &mut Span, cx: &Context) {
         self.delegate.on_start(span, cx);
     }
 
     fn on_end(&self, span: SpanData) {
-        if span
-            .attributes
-            .iter()
-            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-        {
-            let attributes_len = span.attributes.len();
+        if span.attributes.iter().any(|kv| {
+            kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                || kv.key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+        }) {
             let span = SpanData {
                 attributes: span
                     .attributes
                     .into_iter()
-                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-                    .fold(
-                        EvictedHashMap::new(attributes_len as u32, attributes_len),
-                        |mut m, (k, v)| {
-                            m.insert(KeyValue::new(k, v));
-                            m
-                        },
-                    ),
+                    .filter(|kv| {
+                        !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                            && !kv.key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+                    })
+                    .collect(),
                 ..span
             };
 
@@ -80,8 +77,12 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&mut self) -> TraceResult<()> {
+    fn shutdown(&self) -> TraceResult<()> {
         self.delegate.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource)
     }
 }
 
@@ -90,6 +91,7 @@ where
     Self: Sized + SpanProcessor,
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
+    fn always_sampled(self) -> DatadogSpanProcessor<Self>;
 }
 
 impl<T: SpanProcessor> SpanProcessorExt for T
@@ -98,6 +100,12 @@ where
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self> {
         ApolloFilterSpanProcessor { delegate: self }
+    }
+
+    /// This span processor will always send spans to the exporter even if they are not sampled. This is useful for the datadog agent which
+    /// uses spans for metrics.
+    fn always_sampled(self) -> DatadogSpanProcessor<Self> {
+        DatadogSpanProcessor::new(self)
     }
 }
 
@@ -158,13 +166,13 @@ fn max_concurrent_exports_default() -> usize {
 
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
-        let mut default = BatchConfig::default();
-        default = default.with_scheduled_delay(config.scheduled_delay);
-        default = default.with_max_queue_size(config.max_queue_size);
-        default = default.with_max_export_batch_size(config.max_export_batch_size);
-        default = default.with_max_export_timeout(config.max_export_timeout);
-        default = default.with_max_concurrent_exports(config.max_concurrent_exports);
-        default
+        BatchConfigBuilder::default()
+            .with_scheduled_delay(config.scheduled_delay)
+            .with_max_queue_size(config.max_queue_size)
+            .with_max_export_batch_size(config.max_export_batch_size)
+            .with_max_export_timeout(config.max_export_timeout)
+            .with_max_concurrent_exports(config.max_concurrent_exports)
+            .build()
     }
 }
 

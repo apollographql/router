@@ -1,26 +1,25 @@
-
 [package]
 name = "router-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
 edition = "2018"
+license-file = "../LICENSE"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
-apollo-compiler.workspace = true
-apollo-smith.workspace = true
+libfuzzer-sys = "=0.4.9"
+apollo-federation = { path = "../apollo-federation" }
 apollo-parser.workspace = true
-env_logger = "0.10.2"
+apollo-smith.workspace = true
+bnf = "0.5.0"
+env_logger = "0.11.0"
 log = "0.4"
+rand = "0.8.0"
 reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json.workspace = true
-tokio.workspace = true
-# note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.21+v2.7.5"
 
 [dev-dependencies]
 anyhow = "1"
@@ -54,14 +53,8 @@ test = false
 doc = false
 
 [[bin]]
-name = "federation"
-path = "fuzz_targets/federation.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "apollo_router_studio_interop"
-path = "fuzz_targets/apollo_router_studio_interop.rs"
+name = "connector_selection_parse"
+path = "fuzz_targets/connector_selection_parse.rs"
 test = false
 doc = false
 bench = false

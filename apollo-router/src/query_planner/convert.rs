@@ -1,23 +1,17 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
-use crate::query_planner::bridge_query_planner as bridge;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
-use crate::query_planner::selection;
 use crate::query_planner::subscription;
 
-impl From<&'_ next::QueryPlan> for bridge::QueryPlan {
-    fn from(value: &'_ next::QueryPlan) -> Self {
-        let next::QueryPlan {
-            node,
-            statistics: _,
-        } = value;
-        Self { node: option(node) }
-    }
+pub(crate) fn convert_root_query_plan_node(js: &next::QueryPlan) -> Option<plan::PlanNode> {
+    let next::QueryPlan {
+        node,
+        statistics: _,
+    } = js;
+    option(node)
 }
 
 impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
@@ -74,18 +68,19 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites,
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
-            requires: requires.as_deref().map(vec).unwrap_or_default(),
+            requires: requires.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
-            operation_name: operation_name.clone(),
+            operation: operation_document.clone(),
+            operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
-            id: id.map(|id| id.to_string().into()),
+            id: id.map(|id| id.to_string()),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
+            context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         })
@@ -153,13 +148,13 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites: _,
         } = value;
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
-            operation_name: operation_name.clone(),
+            operation: operation_document.clone(),
+            operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
@@ -175,7 +170,7 @@ impl From<&'_ next::PrimaryDeferBlock> for plan::Primary {
         } = value;
         Self {
             node: option(node).map(Box::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
@@ -195,24 +190,21 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
             query_path: crate::json_ext::Path(
                 query_path
                     .iter()
-                    .filter_map(|e| match e {
-                        next::QueryPathElement::Field(field) => Some(
-                            // TODO: type conditioned fetching once it s available in the rust planner
-                            crate::graphql::JsonPathElement::Key(
-                                field.response_key().to_string(),
-                                None,
-                            ),
-                        ),
-                        next::QueryPathElement::InlineFragment(inline) => {
-                            inline.type_condition.as_ref().map(|cond| {
-                                crate::graphql::JsonPathElement::Fragment(cond.to_string())
-                            })
+                    .map(|e| match e {
+                        next::QueryPathElement::Field { response_key } =>
+                        // TODO: type conditioned fetching once it s available in the rust planner
+                        {
+                            crate::graphql::JsonPathElement::Key(response_key.to_string(), None)
+                        }
+
+                        next::QueryPathElement::InlineFragment { type_condition } => {
+                            crate::graphql::JsonPathElement::Fragment(type_condition.to_string())
                         }
                     })
                     .collect(),
             ),
             node: option(node).map(Arc::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
@@ -221,54 +213,6 @@ impl From<&'_ next::DeferredDependency> for plan::Depends {
     fn from(value: &'_ next::DeferredDependency) -> Self {
         let next::DeferredDependency { id } = value;
         Self { id: id.clone() }
-    }
-}
-
-impl From<&'_ executable::Selection> for selection::Selection {
-    fn from(value: &'_ executable::Selection) -> Self {
-        match value {
-            executable::Selection::Field(field) => Self::Field(field.as_ref().into()),
-            executable::Selection::InlineFragment(inline) => {
-                Self::InlineFragment(inline.as_ref().into())
-            }
-            executable::Selection::FragmentSpread(_) => unreachable!(),
-        }
-    }
-}
-
-impl From<&'_ executable::Field> for selection::Field {
-    fn from(value: &'_ executable::Field) -> Self {
-        let executable::Field {
-            definition: _,
-            alias,
-            name,
-            arguments: _,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            alias: alias.clone(),
-            name: name.clone(),
-            selections: if selection_set.selections.is_empty() {
-                None
-            } else {
-                Some(vec(&selection_set.selections))
-            },
-        }
-    }
-}
-
-impl From<&'_ executable::InlineFragment> for selection::InlineFragment {
-    fn from(value: &'_ executable::InlineFragment) -> Self {
-        let executable::InlineFragment {
-            type_condition,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            type_condition: type_condition.clone(),
-            selections: vec(&selection_set.selections),
-        }
     }
 }
 
@@ -306,11 +250,21 @@ impl From<&'_ next::FetchDataKeyRenamer> for rewrites::DataKeyRenamer {
 
 impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
     fn from(value: &'_ next::FetchDataPathElement) -> Self {
+        // TODO: Go all in on Name eventually
         match value {
-            // TODO: Type conditioned fetching once it's available in the rust planner
-            next::FetchDataPathElement::Key(value) => Self::Key(value.to_string(), None),
-            next::FetchDataPathElement::AnyIndex => Self::Flatten(None),
+            next::FetchDataPathElement::Key(name, conditions) => Self::Key(
+                name.to_string(),
+                conditions
+                    .as_ref()
+                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
+            ),
+            next::FetchDataPathElement::AnyIndex(conditions) => Self::Flatten(
+                conditions
+                    .as_ref()
+                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
+            ),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
+            next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
         }
     }
 }

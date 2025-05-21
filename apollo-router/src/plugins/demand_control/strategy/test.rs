@@ -1,10 +1,9 @@
 use apollo_compiler::ExecutableDocument;
 
+use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::test::TestError;
 use crate::plugins::demand_control::test::TestStage;
-use crate::plugins::demand_control::CostContext;
-use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution::Request;
 use crate::services::subgraph::Response;
 
@@ -17,13 +16,17 @@ pub(crate) struct Test {
 
 impl StrategyImpl for Test {
     fn on_execution_request(&self, request: &Request) -> Result<(), DemandControlError> {
-        let mut extensions = request.context.extensions().lock();
-        let cost_context = extensions.get_or_default_mut::<CostContext>();
         match self {
             Test {
                 stage: TestStage::ExecutionRequest,
                 error,
-            } => Err(cost_context.result(error.into())),
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
@@ -32,13 +35,17 @@ impl StrategyImpl for Test {
         &self,
         request: &crate::services::subgraph::Request,
     ) -> Result<(), DemandControlError> {
-        let mut extensions = request.context.extensions().lock();
-        let cost_context = extensions.get_or_default_mut::<CostContext>();
         match self {
             Test {
                 stage: TestStage::SubgraphRequest,
                 error,
-            } => Err(cost_context.result(error.into())),
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
@@ -48,13 +55,17 @@ impl StrategyImpl for Test {
         _request: &ExecutableDocument,
         response: &Response,
     ) -> Result<(), DemandControlError> {
-        let mut extensions = response.context.extensions().lock();
-        let cost_context = extensions.get_or_default_mut::<CostContext>();
         match self {
             Test {
                 stage: TestStage::SubgraphResponse,
                 error,
-            } => Err(cost_context.result(error.into())),
+            } => {
+                let error: DemandControlError = error.into();
+                response
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
@@ -65,13 +76,15 @@ impl StrategyImpl for Test {
         _request: &ExecutableDocument,
         _response: &crate::graphql::Response,
     ) -> Result<(), DemandControlError> {
-        let mut extensions = context.extensions().lock();
-        let cost_context = extensions.get_or_default_mut::<CostContext>();
         match self {
             Test {
                 stage: TestStage::ExecutionResponse,
                 error,
-            } => Err(cost_context.result(error.into())),
+            } => {
+                let error: DemandControlError = error.into();
+                context.insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }

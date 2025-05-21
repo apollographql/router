@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  apollo:
+    errors:
+      preview_extended_error_metrics: enabled

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,15 +13,18 @@ use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
 use fred::prelude::RedisError;
 use fred::prelude::RedisErrorKind;
+use fred::prelude::RedisPool;
 use fred::types::ClusterRouting;
 use fred::types::Expiration;
 use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::ScanResult;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
 use futures::FutureExt;
+use futures::Stream;
 use tower::BoxError;
 use url::Url;
 
@@ -47,9 +52,39 @@ pub(crate) struct RedisValue<V>(pub(crate) V)
 where
     V: ValueType;
 
+/// `DropSafeRedisPool` is a wrapper for `fred::prelude::RedisPool` which closes the pool's Redis
+/// connections when it is dropped.
+//
+// Dev notes:
+// * the inner `RedisPool` must be wrapped in an `Arc` because closing the connections happens
+//   in a spawned async task.
+// * why not just implement this within `Drop` for `RedisCacheStorage`? Because `RedisCacheStorage`
+//   is cloned frequently throughout the router, and we don't want to close the connections
+//   when each clone is dropped, only when the last instance is dropped.
+struct DropSafeRedisPool(Arc<RedisPool>);
+impl Deref for DropSafeRedisPool {
+    type Target = RedisPool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for DropSafeRedisPool {
+    fn drop(&mut self) {
+        let inner = self.0.clone();
+        tokio::spawn(async move {
+            let result = inner.quit().await;
+            if let Err(err) = result {
+                tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
+            }
+        });
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<RedisClient>,
+    inner: Arc<DropSafeRedisPool>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
@@ -140,7 +175,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
+    pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
         let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
@@ -156,7 +191,10 @@ impl RedisCacheStorage {
         if let Some(tls) = config.tls.as_ref() {
             let tls_cert_store = tls.create_certificate_store().transpose()?;
             let client_cert_config = tls.client_authentication.as_ref();
-            let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+            let tls_client_config = generate_tls_client_config(
+                tls_cert_store,
+                client_cert_config.map(|arc| arc.as_ref()),
+            )?;
             let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_client_config));
 
             client_config.tls = Some(TlsConfig {
@@ -165,47 +203,17 @@ impl RedisCacheStorage {
             });
         }
 
-        let client = RedisClient::new(
+        Self::create_client(
             client_config,
-            Some(PerformanceConfig {
-                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
-                ..Default::default()
-            }),
-            None,
-            Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
-        );
-        let _handle = client.connect();
-
-        // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.error_rx();
-        let mut reconnect_rx = client.reconnect_rx();
-
-        tokio::spawn(async move {
-            while let Ok(error) = error_rx.recv().await {
-                tracing::error!("Client disconnected with error: {:?}", error);
-            }
-        });
-        tokio::spawn(async move {
-            while reconnect_rx.recv().await.is_ok() {
-                tracing::info!("Redis client reconnected.");
-            }
-        });
-
-        // a TLS connection to a TCP Redis could hang, so we add a timeout
-        tokio::time::timeout(Duration::from_secs(5), client.wait_for_connect())
-            .await
-            .map_err(|_| {
-                RedisError::new(RedisErrorKind::Timeout, "timeout connecting to Redis")
-            })??;
-
-        tracing::trace!("redis connection established");
-        Ok(Self {
-            inner: Arc::new(client),
-            namespace: config.namespace.map(Arc::new),
-            ttl: config.ttl,
+            config.timeout.unwrap_or(Duration::from_millis(500)),
+            config.pool_size as usize,
+            config.namespace,
+            config.ttl,
+            config.reset_ttl,
             is_cluster,
-            reset_ttl: config.reset_ttl,
-        })
+            caller,
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -215,34 +223,76 @@ impl RedisCacheStorage {
             ..Default::default()
         };
 
-        let client = RedisClient::new(
+        Self::create_client(
+            client_config,
+            Duration::from_millis(2),
+            1,
+            None,
+            None,
+            false,
+            false,
+            "test",
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_client(
+        client_config: RedisConfig,
+        timeout: Duration,
+        pool_size: usize,
+        namespace: Option<String>,
+        ttl: Option<Duration>,
+        reset_ttl: bool,
+        is_cluster: bool,
+        caller: &'static str,
+    ) -> Result<Self, BoxError> {
+        let pooled_client = RedisPool::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout: Duration::from_millis(2),
+                default_command_timeout: timeout,
                 ..Default::default()
             }),
             None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
-        );
-        let _handle = client.connect();
+            pool_size,
+        )?;
+        let _handle = pooled_client.connect();
 
-        // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.error_rx();
-        let mut reconnect_rx = client.reconnect_rx();
+        for client in pooled_client.clients() {
+            // spawn tasks that listen for connection close or reconnect events
+            let mut error_rx = client.error_rx();
+            let mut reconnect_rx = client.reconnect_rx();
 
-        tokio::spawn(async move {
-            while let Ok(error) = error_rx.recv().await {
-                tracing::error!("Client disconnected with error: {:?}", error);
-            }
-        });
-        tokio::spawn(async move {
-            while reconnect_rx.recv().await.is_ok() {
-                tracing::info!("Redis client reconnected.");
-            }
-        });
+            i64_up_down_counter_with_unit!(
+                "apollo.router.cache.redis.connections",
+                "Number of Redis connections",
+                "{connection}",
+                1,
+                kind = caller
+            );
+
+            tokio::spawn(async move {
+                while let Ok(error) = error_rx.recv().await {
+                    tracing::error!("Client disconnected with error: {:?}", error);
+                }
+            });
+            tokio::spawn(async move {
+                while reconnect_rx.recv().await.is_ok() {
+                    tracing::info!("Redis client reconnected.");
+                }
+                i64_up_down_counter_with_unit!(
+                    "apollo.router.cache.redis.connections",
+                    "Number of Redis connections",
+                    "{connection}",
+                    -1,
+                    kind = caller
+                );
+            });
+        }
 
         // a TLS connection to a TCP Redis could hang, so we add a timeout
-        tokio::time::timeout(Duration::from_secs(5), client.wait_for_connect())
+        tokio::time::timeout(Duration::from_secs(5), pooled_client.wait_for_connect())
             .await
             .map_err(|_| {
                 RedisError::new(RedisErrorKind::Timeout, "timeout connecting to Redis")
@@ -250,11 +300,11 @@ impl RedisCacheStorage {
 
         tracing::trace!("redis connection established");
         Ok(Self {
-            inner: Arc::new(client),
-            ttl: None,
-            namespace: None,
-            is_cluster: false,
-            reset_ttl: false,
+            inner: Arc::new(DropSafeRedisPool(Arc::new(pooled_client))),
+            namespace: namespace.map(Arc::new),
+            ttl,
+            is_cluster,
+            reset_ttl,
         })
     }
 
@@ -366,56 +416,53 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        if self.reset_ttl && self.ttl.is_some() {
-            let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.pipeline();
-            let key = self.make_key(key);
-            let res = pipeline
-                .get::<fred::types::RedisValue, _>(&key)
-                .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!(error = %e, "redis get error");
-                    }
-                    e
-                })
-                .ok()?;
-            if !res.is_queued() {
-                tracing::error!("could not queue GET command");
-                return None;
-            }
-            let res: fred::types::RedisValue = pipeline
-                .expire(
-                    &key,
-                    self.ttl
-                        .expect("we already checked the presence of ttl")
-                        .as_secs() as i64,
-                )
-                .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!(error = %e, "redis get error");
-                    }
-                    e
-                })
-                .ok()?;
-            if !res.is_queued() {
-                tracing::error!("could not queue EXPIRE command");
-                return None;
-            }
+        match self.ttl {
+            Some(ttl) if self.reset_ttl => {
+                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
+                let key = self.make_key(key);
+                let res = pipeline
+                    .get::<fred::types::RedisValue, _>(&key)
+                    .await
+                    .map_err(|e| {
+                        if !e.is_not_found() {
+                            tracing::error!(error = %e, "redis get error");
+                        }
+                        e
+                    })
+                    .ok()?;
+                if !res.is_queued() {
+                    tracing::error!("could not queue GET command");
+                    return None;
+                }
+                let res: fred::types::RedisValue = pipeline
+                    .expire(&key, ttl.as_secs() as i64)
+                    .await
+                    .map_err(|e| {
+                        if !e.is_not_found() {
+                            tracing::error!(error = %e, "redis get error");
+                        }
+                        e
+                    })
+                    .ok()?;
+                if !res.is_queued() {
+                    tracing::error!("could not queue EXPIRE command");
+                    return None;
+                }
 
-            let (first, _): (Option<RedisValue<V>>, bool) = pipeline
-                .all()
-                .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!(error = %e, "redis get error");
-                    }
-                    e
-                })
-                .ok()?;
-            first
-        } else {
-            self.inner
+                let (first, _): (Option<RedisValue<V>>, bool) = pipeline
+                    .all()
+                    .await
+                    .map_err(|e| {
+                        if !e.is_not_found() {
+                            tracing::error!(error = %e, "redis get error");
+                        }
+                        e
+                    })
+                    .ok()?;
+                first
+            }
+            _ => self
+                .inner
                 .get::<RedisValue<V>, _>(self.make_key(key))
                 .await
                 .map_err(|e| {
@@ -424,7 +471,7 @@ impl RedisCacheStorage {
                     }
                     e
                 })
-                .ok()
+                .ok(),
         }
     }
 
@@ -451,7 +498,7 @@ impl RedisCacheStorage {
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
-            // across multipe nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
             let len = keys.len();
             let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
             for (index, key) in keys.into_iter().enumerate() {
@@ -538,7 +585,7 @@ impl RedisCacheStorage {
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
-                let pipeline = self.inner.pipeline();
+                let pipeline = self.inner.next().pipeline();
 
                 for (key, value) in data {
                     let _ = pipeline
@@ -557,6 +604,50 @@ impl RedisCacheStorage {
         };
         tracing::trace!("insert result {:?}", r);
     }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result(
+        &self,
+        keys: Vec<fred::types::RedisKey>,
+    ) -> Option<u32> {
+        let mut h: HashMap<u16, Vec<fred::types::RedisKey>> = HashMap::new();
+        for key in keys.into_iter() {
+            let hash = ClusterRouting::hash_key(key.as_bytes());
+            let entry = h.entry(hash).or_default();
+            entry.push(key);
+        }
+
+        // then we query all the key groups at the same time
+        let results: Vec<Result<u32, RedisError>> =
+            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
+        let mut total = 0u32;
+
+        for res in results {
+            match res {
+                Ok(res) => total += res,
+                Err(e) => {
+                    tracing::error!(error = %e, "redis del error");
+                }
+            }
+        }
+
+        Some(total)
+    }
+
+    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    pub(crate) fn scan_with_namespaced_results(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+        let pattern = self.make_key(RedisKey(pattern));
+        if self.is_cluster {
+            Box::pin(self.inner.next().scan_cluster(pattern, count, None))
+        } else {
+            Box::pin(self.inner.next().scan(pattern, count, None))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -565,11 +656,18 @@ mod test {
 
     use url::Url;
 
+    use crate::cache::storage::ValueType;
+
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {
             time: SystemTime,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                None
+            }
         }
 
         let invalid_json_payload = super::RedisValue(Stuff {

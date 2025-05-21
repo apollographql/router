@@ -1,0 +1,6 @@
+query TopProduct2($first: Int) { 
+    topProducts(first: $first) { 
+        upc 
+        name
+    } 
+}

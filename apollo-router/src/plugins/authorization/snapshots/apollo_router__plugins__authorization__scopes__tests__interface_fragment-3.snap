@@ -22,12 +22,7 @@ query:
 extracted_scopes: {"read:user", "read:username"}
 request scopes: ["read:user", "read:username"]
 filtered:
-fragment F on User {
-  id2: id
-  name
-}
-
-query {
+{
   topProducts {
     type
   }
@@ -35,6 +30,11 @@ query {
     id
     ...F
   }
+}
+
+fragment F on User {
+  id2: id
+  name
 }
 
 paths: []

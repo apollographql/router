@@ -1,0 +1,22 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom_counter:
+            description: count of requests
+            type: counter
+            unit: unit
+            value: unit
+            condition:
+              eq:
+                - response_header: never-true
+                - static: "true"
+---
+[]

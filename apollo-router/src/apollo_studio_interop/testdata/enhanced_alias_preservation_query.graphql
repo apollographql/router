@@ -1,0 +1,16 @@
+query AliasQuery {
+    xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
+        aliased: enumResponse
+    }
+    aaAlias: enumInputQuery(enumInput: SOME_VALUE_2) {
+        aliasedAgain: enumResponse
+    }
+    ZZAlias: enumInputQuery(enumInput: SOME_VALUE_3) {
+        enumResponse
+    }
+    enumInputQuery(enumInput: SOME_VALUE_1) {
+        enumResponse
+        aliasedId: id
+        nullableId
+    }
+}

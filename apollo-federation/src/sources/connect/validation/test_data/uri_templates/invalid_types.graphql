@@ -1,0 +1,42 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect"]
+)
+
+type Query {
+    argIsArray(val: [String]): String
+    @connect(
+        http: { GET: "http://127.0.0.1/{$args.val}" }
+        selection: "$"
+    )
+    
+    argIsObject(val: Input): String
+    @connect(
+        http: { GET: "http://127.0.0.1/{$args.val}" }
+        selection: "$"
+    )
+}
+
+type This {
+    anArray: [String] @external
+    thisIsArray: String
+    @connect(
+        http: { GET: "http://127.0.0.1/{$this.anArray}" }
+        selection: "$"
+    )
+    anObject: Object @external
+    requiresAnObject: String
+    @connect(
+        http: { GET: "http://127.0.0.1?obj={$this.anObject}" }
+        selection: "$"
+    )
+}
+
+input Input {
+    val: String
+}
+
+type Object {
+    stuff: String @external
+}

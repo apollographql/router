@@ -50,7 +50,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .emit_rerun_if_changed(false)
-        .compile(&[reports_out],  &[&out_dir])?;
+        .compile_protos(&[reports_out],  &[&out_dir])?;
 
     Ok(())
 }

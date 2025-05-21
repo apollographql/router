@@ -343,6 +343,9 @@ message ReportHeader {
   // attached to a schema in the backend.
   string executable_schema_id = 11;
 
+  // The unique reporting agent that generated this report.
+  string agent_id = 13;
+
   reserved 3; // removed string service = 3;
 }
 
@@ -428,6 +431,9 @@ message StatsContext {
   // The result of the operation. Either OK or the error code that caused the operation to fail.
   // This will not contain all errors from a query, only the primary reason the operation failed. e.g. a limits failure or an auth failure.
   string result = 6;
+  // Client awareness contexts
+  string client_library_name = 7;
+  string client_library_version = 8;
 }
 
 message ContextualizedQueryLatencyStats {
@@ -546,6 +552,15 @@ message Report {
   // operations. If this is false, each operation is described in precisely
   // one of those two fields.
   bool traces_pre_aggregated = 7;
+
+  // This indicates whether or not extended references are enabled, which are within the stats with context and contain
+  // input type and enum value references. We need this flag so we can tell if the option is enabled even when there are
+  // no extended references to report.
+  bool extended_references_enabled = 9;
+
+  // A list of features enabled by router at the time this report was generated.
+  // It is expected to be included only by Apollo Router, not by any other reporting agent.
+  repeated string router_features_enabled = 10;
 }
 
 
@@ -555,6 +570,9 @@ message ContextualizedStats {
   // Key is type name. This structure provides data for the count and latency of individual
   // field executions and thus only reflects operations for which field-level tracing occurred.
   map<string, TypeStat> per_type_stat = 3;
+
+  // Extended references including input types and enum values.
+  ExtendedReferences extended_references = 6;
 
   // Per type stats that are obtained directly by the router or gateway rather than FTV1.
   map<string, LocalTypeStat> local_per_type_stat = 7;
@@ -570,12 +588,41 @@ message ContextualizedStats {
 }
 
 message QueryMetadata {
-  // The operation name. For now this is a required field if QueryMetadata is present.
+  // The operation name. For operations with a PQ ID as the stats report key, either name or signature must be present in the metadata.
   string name = 1;
-  // the operation signature. For now this is a required field if QueryMetadata is present.
+  // the operation signature. For operations with a PQ ID as the stats report key, either name or signature must be present in the metadata.
   string signature = 2;
   // (Optional) Persisted query ID that was used to request this operation.
   string pq_id = 3;
+
+}
+
+message ExtendedReferences {
+  map<string, InputTypeStats> input_types = 1;
+
+  // Map of enum name to stats about that enum.
+  map<string, EnumStats> enum_values = 2;
+}
+
+message InputTypeStats {
+  // Map of input object type to the stats about the fields within that object.
+  map<string, InputFieldStats> field_names = 1;
+}
+
+message InputFieldStats {
+  // The total number of operations that reference the input object field.
+  uint64 refs = 1;
+
+  // The number of operations that reference the input object field as a null value.
+  uint64 null_refs = 2;
+
+  // The number of operations that don't reference this input object field (the field is missing or undefined).
+  uint64 missing = 3;
+}
+
+message EnumStats {
+  // Map of enum value name to the number of referencing operations.
+  map<string, uint64> enum_values = 1;
 }
 
 // A sequence of traces and stats. If Report.traces_pre_aggregated (at the top

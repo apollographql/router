@@ -6,8 +6,11 @@ use apollo_router::register_plugin;
 use apollo_router::services::router;
 use apollo_router::Endpoint;
 use apollo_router::ListenAddr;
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
+use http_body_util::BodyExt;
+use http_body_util::Full;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -83,7 +86,7 @@ impl Service<router::Request> for SimpleEndpoint {
         let fut = async move {
             let body = req.router_request.into_body();
 
-            let body = hyper::body::to_bytes(body).await.unwrap();
+            let body = body.collect().await.unwrap().to_bytes();
 
             let mut json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
             tracing::info!("✉️ got payload:");
@@ -113,7 +116,7 @@ impl Service<router::Request> for SimpleEndpoint {
                 let context = context.get_mut("entries").unwrap(); // context always has entries.
                 if let Some(context) = context.as_object_mut() {
                     context.insert(
-                        "apollo_authentication::JWT::claims".to_string(),
+                        "apollo::authentication::jwt_claims".to_string(),
                         json! { true },
                     );
                 }
@@ -123,7 +126,7 @@ impl Service<router::Request> for SimpleEndpoint {
                         "context".to_string(),
                         json! {{
                             "entries": {
-                                "apollo_authentication::JWT::claims": true
+                                "apollo::authentication::jwt_claims": true
                             }
                         }},
                     )
@@ -145,7 +148,11 @@ impl Service<router::Request> for SimpleEndpoint {
             // return the modified payload
             let http_response = http::Response::builder()
                 .status(StatusCode::OK)
-                .body(hyper::Body::from(serde_json::to_vec(&json_body).unwrap()))
+                .body(
+                    Full::new(Bytes::from(serde_json::to_vec(&json_body).unwrap()))
+                        .map_err(|_never| "there is an error")
+                        .boxed_unsync(),
+                )
                 .unwrap();
             let mut router_response = router::Response::from(http_response);
             router_response.context = req.context;

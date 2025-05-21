@@ -7,8 +7,8 @@ use static_assertions::assert_impl_all;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
-use crate::graphql;
 use crate::Context;
+use crate::graphql;
 
 pub(crate) mod service;
 

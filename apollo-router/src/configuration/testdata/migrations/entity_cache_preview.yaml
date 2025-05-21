@@ -1,0 +1,14 @@
+preview_entity_cache:
+  redis:
+    urls: [ "redis://localhost:6379" ]
+    timeout: 5ms
+    ttl: 60s
+  enabled: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraphs:
+    accounts:
+      enabled: false
+    products:
+      ttl: 120s

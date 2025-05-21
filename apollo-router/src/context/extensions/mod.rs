@@ -131,10 +131,10 @@ impl Extensions {
     /// Check whether the extension set is empty or not.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.map.as_ref().map_or(true, |map| map.is_empty())
+        self.map.as_ref().is_none_or(|map| map.is_empty())
     }
 
-    /// Get the numer of extensions available.
+    /// Get the number of extensions available.
     #[inline]
     pub fn len(&self) -> usize {
         self.map.as_ref().map_or(0, |map| map.len())

@@ -8,11 +8,12 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::gen::SchemaSettings;
+use schemars::r#gen::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
@@ -25,85 +26,50 @@ fn schema_generation() {
     insta::with_settings!({sort_maps => true}, {
         assert_json_snapshot!(&schema)
     });
+    let json_schema =
+        serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");
+    assert!(
+        json_schema.len() < 500 * 1024,
+        "schema must be less than 500kb"
+    );
 }
 
 #[test]
 fn routing_url_in_schema() {
-    let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
+    let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
+    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
-        }
-        "#;
-    let schema = crate::spec::Schema::parse_test(schema, &Default::default()).unwrap();
-
-    let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
+    let subgraphs: HashMap<&str, &Uri> = schema.subgraphs().map(|(k, v)| (k.as_str(), v)).collect();
 
     // if no configuration override, use the URL from the supergraph
     assert_eq!(
-        subgraphs.get(&"accounts".to_string()).unwrap().to_string(),
+        subgraphs.get("accounts").unwrap().to_string(),
         "http://localhost:4001/graphql"
     );
     // if both configuration and schema specify a non empty URL, the configuration wins
     // this should show a warning in logs
     assert_eq!(
-        subgraphs.get(&"inventory".to_string()).unwrap().to_string(),
+        subgraphs.get("inventory").unwrap().to_string(),
         "http://localhost:4002/graphql"
     );
     // if the configuration has a non empty routing URL, and the supergraph
     // has an empty one, the configuration wins
     assert_eq!(
-        subgraphs.get(&"products".to_string()).unwrap().to_string(),
+        subgraphs.get("products").unwrap().to_string(),
         "http://localhost:4003/graphql"
     );
 
     assert_eq!(
-        subgraphs.get(&"reviews".to_string()).unwrap().to_string(),
+        subgraphs.get("reviews").unwrap().to_string(),
         "http://localhost:4004/graphql"
     );
 }
 
 #[test]
 fn missing_subgraph_url() {
-    let schema_error = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "")
-        }"#;
-    let schema_error = crate::spec::Schema::parse_test(schema_error, &Default::default())
+    let schema_error =
+        include_str!("../testdata/invalid_minimal_supergraph_missing_subgraph_url.graphql");
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -139,7 +105,12 @@ fn bad_graphql_path_configuration_without_slash() {
         .supergraph(Supergraph::fake_builder().path("test").build())
         .build()
         .unwrap_err();
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"
+        )
+    );
 }
 
 #[test]
@@ -149,7 +120,12 @@ fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         .build()
         .unwrap_err();
 
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"
+        )
+    );
 }
 
 #[test]
@@ -327,7 +303,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+    );
 }
 
 #[test]
@@ -346,7 +325,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+    );
 }
 
 #[test]
@@ -365,7 +347,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
+    );
 }
 
 #[test]
@@ -384,20 +369,14 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`"
+    );
 }
 
 #[test]
 fn validate_project_config_files() {
-    std::env::set_var("DATADOG_AGENT_HOST", "http://example.com");
-    std::env::set_var("JAEGER_HOST", "http://example.com");
-    std::env::set_var("JAEGER_USERNAME", "username");
-    std::env::set_var("JAEGER_PASSWORD", "pass");
-    std::env::set_var("ZIPKIN_HOST", "http://example.com");
-    std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
-    std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
-    std::env::set_var("PARSER_MAX_RECURSION", "500");
-
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
     #[cfg(unix)]
@@ -409,7 +388,7 @@ fn validate_project_config_files() {
     let embedded_yaml_matcher =
         Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
 
-    fn it(path: &str) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 
@@ -425,7 +404,7 @@ fn validate_project_config_files() {
         {
             continue;
         }
-        #[cfg(not(telemetry_next))]
+        #[cfg(not(feature = "telemetry_next"))]
         if entry.path().to_string_lossy().contains("telemetry_next") {
             continue;
         }
@@ -448,11 +427,19 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                if let Err(e) = validate_yaml_configuration(
-                    &yaml,
-                    Expansion::default().unwrap(),
-                    Mode::NoUpgrade,
-                ) {
+                let expansion = Expansion::default_builder()
+                    .mocked_env_var("DATADOG_AGENT_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_USERNAME", "username")
+                    .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("ZIPKIN_HOST", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
+                    .mocked_env_var("PARSER_MAX_RECURSION", "500")
+                    .build()
+                    .unwrap();
+
+                if let Err(e) = validate_yaml_configuration(&yaml, expansion, Mode::NoUpgrade) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -466,13 +453,16 @@ fn validate_project_config_files() {
 
 #[test]
 fn it_does_not_leak_env_variable_values() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("Must have an error because we expect a boolean");
@@ -481,7 +471,10 @@ supergraph:
 
 #[test]
 fn line_precise_config_errors_with_inline_sequence_env_expansion() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -491,7 +484,7 @@ supergraph:
 cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
@@ -500,7 +493,10 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_sequence_env_expansion() {
-    std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
 
     let error = validate_yaml_configuration(
         r#"
@@ -513,7 +509,7 @@ cors:
     - Content-Type
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
@@ -522,6 +518,7 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+    #[allow(clippy::literal_string_with_formatting_args)]
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -571,13 +568,13 @@ supergraph:
 
 #[test]
 fn expansion_prefixing() {
-    std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
     validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.NEEDS_PREFIX}
         "#,
         Expansion::builder()
+            .mocked_env_var("TEST_CONFIG_NEEDS_PREFIX", "true")
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
@@ -624,6 +621,7 @@ fn upgrade_old_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
+                upgrade::UpgradeMode::Major,
             )
             .expect("configuration could not be updated");
             let new_config =
@@ -642,8 +640,44 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
+                    panic!(
+                        "migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}"
+                    )
                 }
+            }
+        }
+    }
+}
+
+#[derive(RustEmbed)]
+#[folder = "src/configuration/testdata/migrations/minor"]
+struct AssetMinor;
+
+#[test]
+fn upgrade_old_minor_configuration() {
+    for file_name in AssetMinor::iter() {
+        if file_name.ends_with(".yaml") {
+            let source = AssetMinor::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data)
+                .expect("expected utf8")
+                .to_string();
+            let new_config = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                true,
+                upgrade::UpgradeMode::Minor,
+            )
+            .expect("configuration could not be updated");
+            let new_config =
+                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+
+            let result = validate_yaml_configuration(
+                &new_config,
+                Expansion::builder().build(),
+                Mode::NoUpgrade,
+            );
+
+            if let Err(err) = result {
+                panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
             }
         }
     }
@@ -651,7 +685,7 @@ fn upgrade_old_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(&generate_config_schema())
+    let schema = serde_json::to_value(generate_config_schema())
         .expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();
@@ -712,7 +746,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -722,16 +756,16 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{supergraph_route}"
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
@@ -741,10 +775,12 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(&conf.supergraph.sanitized_path(), "/test");
 
-    assert!(Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*/whatever").build())
-        .build()
-        .is_err());
+    assert!(
+        Configuration::builder()
+            .supergraph(Supergraph::builder().path("/*/whatever").build())
+            .build()
+            .is_err()
+    );
 }
 
 #[test]
@@ -806,8 +842,8 @@ fn test_subgraph_override() {
         s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    let generator = settings.into_generator();
+    let schema = generator.into_root_schema_for::<TestSubgraphOverride>();
     insta::assert_json_snapshot!(schema);
 }
 
@@ -885,7 +921,7 @@ fn test_deserialize_derive_default() {
     // Walk every source file and check that #[derive(Default)] is not used.
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("src");
-    fn it(path: &Path) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &Path) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 
@@ -950,7 +986,12 @@ fn it_defaults_health_check_configuration() {
 #[test]
 fn it_sets_custom_health_check_path() {
     let conf = Configuration::builder()
-        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("/healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -961,7 +1002,12 @@ fn it_sets_custom_health_check_path() {
 fn it_adds_slash_to_custom_health_check_path_if_missing() {
     let conf = Configuration::builder()
         // NB the missing `/`
-        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -1094,6 +1140,61 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
     assert!(config.batch_include("accounts"));
 }
 
+#[test]
+fn it_processes_unspecified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, None);
+}
+
+#[test]
+fn it_processes_specified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "maximum_size": 10
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, Some(10));
+}
+
+#[test]
+fn it_includes_default_header_read_timeout_when_server_config_omitted() {
+    let json_config = json!({});
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(10)
+    );
+}
+
+#[test]
+fn it_processes_specified_server_config_correctly() {
+    let json_config = json!({
+        "server": {
+            "http": {
+                "header_read_timeout": "30s"
+            }
+        }
+    });
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(30)
+    );
+}
+
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
     let serde_field_default = Regex::new(
         r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,
@@ -1125,20 +1226,4 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
-}
-
-#[test]
-fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
-    let conf = Configuration::builder()
-        .supergraph(
-            Supergraph::builder()
-                .generate_query_fragments(true)
-                .reuse_query_fragments(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    assert!(conf.supergraph.generate_query_fragments);
-    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }

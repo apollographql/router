@@ -1,0 +1,45 @@
+query Query($secondInput: Boolean!) {
+    scalarResponseQuery
+    noInputQuery {
+        basicTypes {
+            nonNullId
+            nonNullInt
+        }
+        enumResponse
+        interfaceImplementationResponse {
+            sharedField
+            implementation2Field
+        }
+        interfaceResponse {
+            ... on InterfaceImplementation1 {
+                implementation1Field
+                sharedField
+            }
+            ... on InterfaceImplementation2 {
+                implementation2Field
+                sharedField
+            }
+        }
+        listOfUnions {
+            ... on UnionType1 {
+                nullableString
+            }
+        }
+        objectTypeWithInputField(secondInput: $secondInput) {
+            intField
+        }
+    }
+    basicInputTypeQuery(input: { someFloat: 1 }) {
+        unionResponse {
+            ... on UnionType1 {
+                nullableString
+            }
+        }
+        unionType2Response {
+            unionType2Field
+        }
+        listOfObjects {
+            stringField
+        }
+    }
+}

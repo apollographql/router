@@ -1,4 +1,4 @@
-use apollo_compiler::Parser;
+use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
@@ -118,12 +118,11 @@ impl FormatTest {
         let query_type_name = self.query_type_name.unwrap_or("Query");
 
         let schema = match self.federation_version {
-            FederationVersion::Fed1 => with_supergraph_boilerplate(schema, query_type_name),
-            FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema, query_type_name),
+            FederationVersion::Fed1 => with_supergraph_boilerplate_fed1(schema, query_type_name),
+            FederationVersion::Fed2 => with_supergraph_boilerplate(schema, query_type_name),
         };
 
-        let schema =
-            Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let api_schema = schema.api_schema();
         let query =
@@ -132,7 +131,6 @@ impl FormatTest {
 
         query.format_response(
             &mut response,
-            self.operation,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -162,7 +160,7 @@ impl FormatTest {
     }
 }
 
-fn with_supergraph_boilerplate(content: &str, query_type_name: &str) -> String {
+fn with_supergraph_boilerplate_fed1(content: &str, query_type_name: &str) -> String {
     format!(
         r#"
     schema
@@ -174,7 +172,7 @@ fn with_supergraph_boilerplate(content: &str, query_type_name: &str) -> String {
     }}
     directive @core(feature: String!) repeatable on SCHEMA
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+    directive @inaccessible on OBJECT| FIELD_DEFINITION | INTERFACE | UNION
     enum join__Graph {{
         TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
     }}
@@ -184,36 +182,28 @@ fn with_supergraph_boilerplate(content: &str, query_type_name: &str) -> String {
     )
 }
 
-fn with_supergraph_boilerplate_fed2(content: &str, query_type_name: &str) -> String {
+fn with_supergraph_boilerplate(content: &str, query_type_name: &str) -> String {
     format!(
         r#"
         schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
         @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+        @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
         {{
             query: {query_type_name}
         }}
 
         directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
         directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ENUM | ENUM_VALUE | SCALAR | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ARGUMENT_DEFINITION
+        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
         scalar join__FieldSet
         scalar link__Import
         enum link__Purpose {{
-        """
-        `SECURITY` features provide metadata necessary to securely resolve fields.
-        """
-        SECURITY
-
-        """
-        `EXECUTION` features provide metadata necessary for operation execution.
-        """
-        EXECUTION
+            SECURITY
+            EXECUTION
         }}
 
         enum join__Graph {{
@@ -1394,8 +1384,7 @@ macro_rules! run_validation {
             Value::Object(object) => object,
             _ => unreachable!("variables must be an object"),
         };
-        let schema =
-            Schema::parse_test(&$schema, &Default::default()).expect("could not parse schema");
+        let schema = Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
         let request = Request::builder()
             .variables(variables)
             .query($query.to_string())
@@ -1790,16 +1779,24 @@ fn variable_validation() {
 
     let schema = r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1")
-            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-             {
+             @link(url: "https://specs.apollo.dev/link/v1.0")
+             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: Query
             mutation: Mutation
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        directive @join__type( graph: join__Graph!  key: join__FieldSet extension: Boolean! = false resolvable: Boolean! = true isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+        scalar join__FieldSet
+        scalar link__Import
+
+        enum link__Purpose {
+            SECURITY
+            EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
@@ -1807,7 +1804,7 @@ fn variable_validation() {
         type Mutation{
             foo(input: FooInput!): FooResponse!
         }
-        type Query{
+        type Query @join__type(graph: TEST){
             data: String
         }
 
@@ -3458,7 +3455,7 @@ fn it_parses_default_floats() {
         "Query",
     );
 
-    let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+    let schema = Schema::parse(&schema, &Default::default()).unwrap();
     let value = schema
         .supergraph_schema()
         .get_input_object("WithAllKindsOfFloats")
@@ -3491,7 +3488,7 @@ fn it_statically_includes() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3508,10 +3505,8 @@ fn it_statically_includes() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3532,14 +3527,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3563,10 +3556,8 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3599,14 +3590,12 @@ fn it_statically_includes() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3640,7 +3629,7 @@ fn it_statically_skips() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3657,10 +3646,8 @@ fn it_statically_skips() {
         &Default::default(),
     )
     .expect("could not parse query");
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3681,14 +3668,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
         _ => panic!("expected a field"),
     }
@@ -3712,10 +3697,8 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 1);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 1);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3748,14 +3731,12 @@ fn it_statically_skips() {
     )
     .expect("could not parse query");
 
-    assert_eq!(query.operations.len(), 1);
-    let operation = &query.operations[0];
-    assert_eq!(operation.selection_set.len(), 2);
-    match operation.selection_set.first().unwrap() {
+    assert_eq!(query.operation.selection_set.len(), 2);
+    match query.operation.selection_set.first().unwrap() {
         Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
         _ => panic!("expected a field"),
     }
-    match operation.selection_set.get(1).unwrap() {
+    match query.operation.selection_set.get(1).unwrap() {
         Selection::Field {
             name,
             selection_set: Some(selection_set),
@@ -3781,7 +3762,7 @@ fn it_should_fail_with_empty_selection_set() {
     }",
         "Query",
     );
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
     let _query_error = Query::parse(
         "query  {
@@ -5076,37 +5057,26 @@ fn fragment_on_interface_on_query() {
     let schema = r#"schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
-        @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
     {
         query: MyQueryObject
     }
 
-    directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ENUM | ENUM_VALUE | SCALAR | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ARGUMENT_DEFINITION
 
     scalar join__FieldSet
     scalar link__Import
     enum link__Purpose {
-    """
-    `SECURITY` features provide metadata necessary to securely resolve fields.
-    """
-    SECURITY
-
-    """
-    `EXECUTION` features provide metadata necessary for operation execution.
-    """
-    EXECUTION
+        SECURITY
+        EXECUTION
     }
 
     enum join__Graph {
         TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
     }
 
-    type MyQueryObject implements Interface {
+    type MyQueryObject implements Interface @join__type(graph: TEST){
         object: MyObject
         other: String
     }
@@ -5129,7 +5099,7 @@ fn fragment_on_interface_on_query() {
         }
     }";
 
-    let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse(schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
     let query =
         Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
@@ -5145,7 +5115,6 @@ fn fragment_on_interface_on_query() {
 
     query.format_response(
         &mut response,
-        None,
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
@@ -5306,67 +5275,6 @@ fn fragment_on_interface() {
             }
         }})
         .test();
-}
-
-#[test]
-fn parse_introspection_query() {
-    let schema = "type Query {
-        foo: String
-        stuff: Bar
-        array: [Bar]
-        baz: String
-    }
-    type Bar {
-        bar: String
-        baz: String
-    }";
-
-    let schema = with_supergraph_boilerplate(schema, "Query");
-    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
-
-    let query = "{
-        __type(name: \"Bar\") {
-          name
-          fields {
-            name
-            type {
-              name
-            }
-          }
-        }
-      }";
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
-
-    let query = "query {
-        __schema {
-          queryType {
-            name
-          }
-        }
-      }";
-
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
-
-    let query = "query {
-        __typename
-      }";
-
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
 }
 
 #[test]
@@ -5633,7 +5541,7 @@ fn query_operation_nullification() {
 
 #[test]
 fn test_error_path_works_across_inline_fragments() {
-    let schema = Schema::parse_test(
+    let schema = Schema::parse(
         r#"
     schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -5740,7 +5648,6 @@ fn test_error_path_works_across_inline_fragments() {
     .unwrap();
 
     assert!(query.contains_error_path(
-        None,
         &None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
         BooleanValues { bits: 0 }
@@ -5750,29 +5657,44 @@ fn test_error_path_works_across_inline_fragments() {
 #[test]
 fn test_query_not_named_query() {
     let config = Default::default();
-    let schema = Schema::parse_test(
+    let schema = Schema::parse(
         r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1")
-            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-            {
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: TheOneAndOnlyQuery
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+
+        scalar join__FieldSet
+        scalar link__Import
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+  
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
 
-        type TheOneAndOnlyQuery { example: Boolean }
+        type TheOneAndOnlyQuery @join__type(graph: TEST) { example: Boolean }
         "#,
         &Default::default(),
     )
     .unwrap();
     let query = Query::parse("{ example }", None, &schema, &config).unwrap();
-    let selection = &query.operations[0].selection_set[0];
+    let selection = &query.operation.selection_set[0];
     assert!(
         matches!(
             selection,
@@ -5789,23 +5711,30 @@ fn test_query_not_named_query() {
 #[test]
 fn filtered_defer_fragment() {
     let config = Configuration::default();
-    let schema = Schema::parse_test(
+    let schema = Schema::parse(
         r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1")
-            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-            {
-                query: Query
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+            query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+        scalar join__FieldSet
+        scalar link__Import
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
 
-        type Query {
+        type Query @join__type(graph: TEST) {
             a: A
         }
 
@@ -5836,12 +5765,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, None).unwrap();
+    let (fragments, operation, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5849,7 +5778,7 @@ fn filtered_defer_fragment() {
     let mut query = Query {
         string: query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5862,12 +5791,12 @@ fn filtered_defer_fragment() {
         .parse_ast(filtered_query, "filtered_query.graphql")
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operations, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, None).unwrap();
+    let (fragments, operation, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
-        &operations,
+        &operation,
         &fragments.map,
         &defer_stats,
     )
@@ -5876,7 +5805,7 @@ fn filtered_defer_fragment() {
     let filtered = Query {
         string: filtered_query.to_string(),
         fragments,
-        operations,
+        operation,
         filtered_query: None,
         subselections,
         defer_stats,
@@ -5897,7 +5826,6 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
@@ -5907,7 +5835,6 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        None,
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },

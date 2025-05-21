@@ -1,0 +1,28 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter should not be incremented as the condition is not true on drop.
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom_counter:
+            description: count of requests
+            type: counter
+            unit: unit
+            value: unit
+            condition:
+              eq:
+                - request_header: always-true
+                - static: "true"
+---
+- name: custom_counter
+  description: count of requests
+  unit: unit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}

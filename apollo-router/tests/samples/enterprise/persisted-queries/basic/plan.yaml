@@ -1,0 +1,129 @@
+enterprise: true
+
+actions:
+- type: Start
+  schema_path: ./supergraph.graphql
+  configuration_path: ./configuration.yaml
+  subgraphs:
+    accounts:
+      requests:
+      - request:
+          body:
+            query: "query GetMyName__accounts__0 { me { name } }"
+        response:
+          body:
+            data:
+              me:
+                name: "Ada Lovelace"
+      - request:
+          body:
+            query: "query GetMyName__accounts__0 { me { mobileAlias: name } }"
+        response:
+          body:
+            data:
+              me:
+                mobileAlias: "Ada Lovelace"
+      - request:
+          body:
+            query: "query GetYourName__accounts__0 { you: me { name } }"
+        response:
+          body:
+            data:
+              you:
+                name: "Ada Lovelace"
+
+# Successfully run a persisted query.
+- type: Request
+  description: "Run a persisted query"
+  request:
+    extensions:
+      persistedQuery:
+        version: 1
+        sha256Hash: "GetMyNameID"
+  expected_response:
+    data:
+      me:
+        name: "Ada Lovelace"
+
+# Successfully run a persisted query with client name that has its own
+# operation, using the client name header configured in
+# `telemetry.apollo.client_name_header`.
+- type: Request
+  description: "Run a persisted query with client_name_header"
+  request:
+    extensions:
+      persistedQuery:
+        version: 1
+        sha256Hash: "GetMyNameID"
+  headers:
+    custom-client-name: mobile
+  expected_response:
+    data:
+      me:
+        mobileAlias: "Ada Lovelace"
+
+# Successfully run a persisted query with client name that has its own
+# operation, setting the client name via context in a Rhai plugin.
+- type: Request
+  description: "Run a persisted query with plugin-set client name"
+  request:
+    extensions:
+      persistedQuery:
+        version: 1
+        sha256Hash: "GetMyNameID"
+  headers:
+    plugin-client-name: mobile
+  expected_response:
+    data:
+      me:
+        mobileAlias: "Ada Lovelace"
+
+# Successfully run a persisted query with random client name falling back to the
+# version without client name.
+- type: Request
+  description: "Run a persisted query with fallback client name"
+  request:
+    extensions:
+      persistedQuery:
+        version: 1
+        sha256Hash: "GetMyNameID"
+  headers:
+    custom-client-name: something-not-mobile
+  expected_response:
+    data:
+      me:
+        name: "Ada Lovelace"
+
+- type: Request
+  description: "Unknown persisted query ID"
+  request:
+    extensions:
+      persistedQuery:
+        version: 1
+        sha256Hash: "unknown_query"
+  expected_response:
+    errors:
+    - message: "Persisted query 'unknown_query' not found in the persisted query list"
+      extensions:
+        code: PERSISTED_QUERY_NOT_IN_LIST
+
+- type: Request
+  description: "Normal non-PQ POSTs work"
+  request:
+    query: "query GetYourName { you: me { name } }"
+  expected_response:
+    data:
+      you:
+        name: "Ada Lovelace"
+
+- type: Request
+  description: "Proper error when sending malformed request body"
+  request: ""
+  expected_response:
+    errors:
+    - message: "Invalid GraphQL request"
+      extensions:
+        code: INVALID_GRAPHQL_REQUEST
+        details: 'failed to deserialize the request body into JSON: invalid type: string "", expected a GraphQL request at line 1 column 2'
+
+- type: Stop

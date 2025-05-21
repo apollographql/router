@@ -1,0 +1,51 @@
+[
+  {
+    "request": {
+      "method": "GET",
+      "path": "api/search?query=Boston",
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "content-type": [
+          "application/json; charset=utf-8"
+        ]
+      },
+      "body": {
+        "Locations": [
+          {
+            "Coords": {
+              "Lat": "1.1",
+              "Lon": "2.2"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "GET",
+      "path": "weather/1.1,2.2",
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "content-type": [
+          "application/json; charset=utf-8"
+        ]
+      },
+      "body": {
+        "currentConditions": {
+          "snow": 1.1,
+          "temp": 2.2,
+          "windspeed": 3.3,
+          "conditions": "cold",
+          "snowdepth": 4.4
+        }
+      }
+    }
+  }
+]

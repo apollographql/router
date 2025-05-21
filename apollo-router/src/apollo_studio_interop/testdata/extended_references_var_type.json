@@ -1,0 +1,12 @@
+{ 
+  "input": {
+    "inputInt": 1, 
+    "inputString": "x", 
+    "listInput": [], 
+    "enumInput": null, 
+    "nestedType": { 
+      "someFloat": 2,
+      "someNullableFloat": null
+    }
+  }
+}

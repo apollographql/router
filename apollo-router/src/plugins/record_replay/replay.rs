@@ -3,12 +3,12 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use console::style;
 use http::Method;
 use http::Uri;
 use multimap::MultiMap;
+use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -22,12 +22,12 @@ use crate::context::Context;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::services::TryIntoHeaderName;
+use crate::services::TryIntoHeaderValue;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::TryIntoHeaderName;
-use crate::services::TryIntoHeaderValue;
 
 #[derive(Debug)]
 pub(crate) struct Replay {
@@ -116,7 +116,7 @@ impl Plugin for Replay {
                         recorded_set.difference(&runtime_values).collect::<Vec<_>>();
 
                     if !missing_values.is_empty() {
-                        report.lock().unwrap().push(ReplayReport::HeaderDifference {
+                        report.lock().push(ReplayReport::HeaderDifference {
                             name: k.clone(),
                             recorded: recorded_values.clone(),
                             runtime: runtime_values.iter().map(|v| v.to_string()).collect(),
@@ -148,7 +148,6 @@ impl Plugin for Replay {
                     if recorded_chunk_str != chunk_str {
                         report
                             .lock()
-                            .unwrap()
                             .push(ReplayReport::ClientResponseChunkDifference(
                                 i,
                                 recorded_chunk_str.clone(),
@@ -177,13 +176,10 @@ impl Plugin for Replay {
                     .unwrap_or_default();
 
                 if recorded != runtime {
-                    report
-                        .lock()
-                        .unwrap()
-                        .push(ReplayReport::QueryPlanDifference(
-                            recorded.clone(),
-                            runtime.clone(),
-                        ));
+                    report.lock().push(ReplayReport::QueryPlanDifference(
+                        recorded.clone(),
+                        runtime.clone(),
+                    ));
                 }
 
                 req
@@ -218,31 +214,27 @@ impl Plugin for Replay {
                     let subgraph_response = subgraph::Response::new_from_response(
                         http::Response::new(fetch.response.chunks[0].clone()),
                         req.context.clone(),
+                        subgraph_name.clone(),
+                        req.id.clone(),
                     );
 
                     let runtime_variables = req.subgraph_request.body().variables.clone();
                     let recorded_variables = fetch.request.variables.clone();
 
                     if runtime_variables != recorded_variables {
-                        report
-                            .lock()
-                            .unwrap()
-                            .push(ReplayReport::VariablesDifference {
-                                name: operation_name.clone(),
-                                runtime: runtime_variables,
-                                recorded: recorded_variables,
-                            });
+                        report.lock().push(ReplayReport::VariablesDifference {
+                            name: operation_name.clone(),
+                            runtime: runtime_variables,
+                            recorded: recorded_variables,
+                        });
                     }
 
                     Ok(ControlFlow::Break(subgraph_response))
                 } else {
-                    report
-                        .lock()
-                        .unwrap()
-                        .push(ReplayReport::SubgraphRequestMissed(
-                            subgraph_name.clone(),
-                            operation_name.clone(),
-                        ));
+                    report.lock().push(ReplayReport::SubgraphRequestMissed(
+                        subgraph_name.clone(),
+                        operation_name.clone(),
+                    ));
 
                     // TODO: break with an empty response or error instead? If
                     // the subgraph routing url is accessible this will hit the
@@ -257,7 +249,7 @@ impl Plugin for Replay {
 
 #[derive(Debug)]
 pub(crate) enum ReplayReport {
-    QueryPlanDifference(String, String),
+    QueryPlanDifference(Arc<String>, Arc<String>),
     ClientResponseChunkDifference(usize, String, String),
     SubgraphRequestMissed(String, String),
     HeaderDifference {

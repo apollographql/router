@@ -1,0 +1,17 @@
+---
+source: apollo-router/tests/integration/introspection.rs
+expression: response
+---
+errors:
+  - message: "Field \"__schema\" of type \"Query\" must have a selection of subfields. Did you mean \"__schema { ... }\"?"
+    locations:
+      - line: 1
+        column: 3
+    extensions:
+      code: GRAPHQL_VALIDATION_FAILED
+  - message: "Cannot query field \"query\" on type \"__Schema\"."
+    locations:
+      - line: 1
+        column: 14
+    extensions:
+      code: GRAPHQL_VALIDATION_FAILED

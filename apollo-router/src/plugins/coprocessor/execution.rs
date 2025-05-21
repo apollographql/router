@@ -5,28 +5,26 @@ use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
-use super::externalize_header_map;
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
-use crate::response;
 use crate::services::execution;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -38,13 +36,13 @@ pub(super) struct ExecutionRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -53,7 +51,7 @@ pub(super) struct ExecutionResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct ExecutionStage {
     /// The request configuration
@@ -71,12 +69,15 @@ impl ExecutionStage {
         sdl: Arc<String>,
     ) -> execution::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
-            + Clone
+        C: Service<
+                http::Request<RouterBody>,
+                Response = http::Response<RouterBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -84,7 +85,7 @@ impl ExecutionStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -102,9 +103,7 @@ impl ExecutionStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
 
@@ -143,9 +142,7 @@ impl ExecutionStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
 
@@ -175,6 +172,7 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -188,12 +186,12 @@ async fn process_execution_request_stage<C>(
     request_config: ExecutionRequestConf,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -208,9 +206,9 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
     let query_plan = request_config
@@ -230,15 +228,10 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
-    drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::ExecutionRequest,
-    );
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -254,16 +247,18 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response: crate::graphql::Response =
-                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
+            let graphql_response =
+                graphql::Response::from_value(co_processor_output.body.unwrap_or(Value::Null))
                     .unwrap_or_else(|error| {
-                        crate::graphql::Response::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                .build()])
+                        graphql::Response::builder()
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                    .build(),
+                            ])
                             .build()
                     });
 
@@ -280,7 +275,12 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (key, value) in context.try_into_iter()? {
+                for (mut key, value) in context.try_into_iter()? {
+                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                        &request_config.context
+                    {
+                        key = context_key_from_deprecated(key);
+                    }
                     execution_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -295,16 +295,19 @@ where
     // Finally, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
-
-    let new_body: crate::graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
+    let new_body: graphql::Request = match co_processor_output.body {
+        Some(value) => serde_json_bytes::from_value(value)?,
         None => body,
     };
 
     request.supergraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -330,20 +333,20 @@ async fn process_execution_response_stage<C>(
     response_config: ExecutionResponseConf,
 ) -> Result<execution::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (first, rest): (Option<response::Response>, graphql::ResponseStream) =
-        body.into_future().await;
+    let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
+        StreamExt::into_future(body).await;
 
     // If first is None, we return an error
     let first = first.ok_or_else(|| {
@@ -358,9 +361,9 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json::to_value(&first).expect("serialization will not fail"));
+        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::execution_builder()
@@ -376,15 +379,10 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
-    drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::ExecutionResponse,
-    );
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -395,17 +393,19 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: crate::response::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => first,
-    };
+    let new_body = handle_graphql_response(first, co_processor_output.body)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -428,14 +428,14 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let response_config_context = response_config.context.clone();
 
             async move {
                 let body_to_send = response_config.body.then(|| {
-                    serde_json::to_value(&deferred_response).expect("serialization will not fail")
+                    serde_json_bytes::to_value(&deferred_response)
+                        .expect("serialization will not fail")
                 });
-                let context_to_send = response_config
-                    .context
-                    .then(|| generator_map_context.clone());
+                let context_to_send = response_config_context.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -451,11 +451,9 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
@@ -465,27 +463,29 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: crate::response::Response =
-                    match co_processor_output.body {
-                        Some(value) => serde_json::from_value(value)?,
-                        None => deferred_response,
-                    };
+                let new_deferred_response =
+                    handle_graphql_response(deferred_response, co_processor_output.body)?;
 
                 if let Some(context) = co_processor_output.context {
-                    for (key, value) in context.try_into_iter()? {
+                    for (mut key, value) in context.try_into_iter()? {
+                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                            &response_config_context
+                        {
+                            key = context_key_from_deprecated(key);
+                        }
                         generator_map_context.upsert_json_value(key, move |_current| value);
                     }
                 }
 
                 // We return the deferred_response into our stream of response chunks
-                Ok(new_deferred_response)
+                Ok::<_, BoxError>(new_deferred_response)
             }
         })
-        .map(|res: Result<response::Response, BoxError>| match res {
+        .map(|res: Result<graphql::Response, BoxError>| match res {
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("coprocessor error handling deferred execution response: {e}");
-                response::Response::builder()
+                graphql::Response::builder()
                     .error(
                         Error::builder()
                             .message("Internal error handling deferred response")
@@ -513,29 +513,31 @@ mod tests {
 
     use futures::future::BoxFuture;
     use http::StatusCode;
-    use hyper::Body;
-    use serde_json::json;
+    use serde_json_bytes::json;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use super::*;
+    use crate::json_ext::Object;
     use crate::plugin::test::MockExecutionService;
-    use crate::plugin::test::MockHttpClientService;
+    use crate::plugin::test::MockInternalHttpClientService;
     use crate::services::execution;
+    use crate::services::router;
+    use crate::services::router::body::RouterBody;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
 
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
             });
@@ -548,16 +550,16 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockHttpClientService::new();
+                    let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client.expect_call().returning(callback);
                     mock_http_client
                 });
@@ -574,7 +576,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: false,
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -618,16 +620,16 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -688,7 +690,7 @@ mod tests {
         let request = execution::Request::fake_builder().build();
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             service
                 .oneshot(request)
                 .await
@@ -708,7 +710,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: false,
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -720,10 +722,10 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_execution_service = MockExecutionService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -780,7 +782,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -796,81 +798,85 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
-            Box::pin(async {
-                let deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
-                        .unwrap();
+        let mock_http_client =
+            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                assert_eq!(
-                    PipelineStep::ExecutionResponse.to_string(),
-                    deserialized_response.stage
-                );
+                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                    assert_eq!(
+                        PipelineStep::ExecutionResponse.to_string(),
+                        deserialized_response.stage
+                    );
 
-                assert_eq!(
-                    json! {{"data":{ "test": 1234_u32 }}},
-                    deserialized_response.body.unwrap()
-                );
+                    assert_eq!(
+                        json! {{"data":{ "test": 1234_u32 }}},
+                        deserialized_response.body.unwrap()
+                    );
 
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "ExecutionResponse",
-                  "control": {
-                      "break": 400
-                  },
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": {
-                    "data": { "test": 42 }
-                  },
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldn't change"
-                });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
-                    .unwrap())
-            })
-        });
+                    let input = json!(
+                          {
+                      "version": 1,
+                      "stage": "ExecutionResponse",
+                      "control": {
+                          "break": 400
+                      },
+                      "id": "1b19c05fdafc521016df33148ad63c1b",
+                      "headers": {
+                        "cookie": [
+                          "tasty_cookie=strawberry"
+                        ],
+                        "content-type": [
+                          "application/json"
+                        ],
+                        "host": [
+                          "127.0.0.1:4000"
+                        ],
+                        "apollo-federation-include-trace": [
+                          "ftv1"
+                        ],
+                        "apollographql-client-name": [
+                          "manual"
+                        ],
+                        "accept": [
+                          "*/*"
+                        ],
+                        "user-agent": [
+                          "curl/7.79.1"
+                        ],
+                        "content-length": [
+                          "46"
+                        ]
+                      },
+                      "body": {
+                        "data": { "test": 42 }
+                      },
+                      "context": {
+                        "entries": {
+                          "accepts-json": false,
+                          "accepts-wildcard": true,
+                          "accepts-multipart": false,
+                          "this-is-a-test-context": 42
+                        }
+                      },
+                      "sdl": "the sdl shouldn't change"
+                    });
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&input).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
 
         let service = execution_stage.as_service(
             mock_http_client,
@@ -901,7 +907,7 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // the body should have changed:
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
     }
@@ -911,7 +917,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -948,40 +954,42 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
-            Box::pin(async {
-                let mut deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
-                        .unwrap();
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                assert_eq!(
-                    PipelineStep::ExecutionResponse.to_string(),
-                    deserialized_response.stage
-                );
-
-                // Copy the has_next from the body into the data for checking later
-                deserialized_response
-                    .body
-                    .as_mut()
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .get_mut("data")
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(
-                        "has_next".to_string(),
-                        serde_json::Value::from(deserialized_response.has_next.unwrap_or_default()),
+        let mock_http_client =
+            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                    assert_eq!(
+                        PipelineStep::ExecutionResponse.to_string(),
+                        deserialized_response.stage
                     );
 
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
-                    ))
-                    .unwrap())
-            })
-        });
+                    // Copy the has_next from the body into the data for checking later
+                    deserialized_response
+                        .body
+                        .as_mut()
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .get_mut("data")
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .insert(
+                            "has_next".to_string(),
+                            Value::from(deserialized_response.has_next.unwrap_or_default()),
+                        );
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                        ))
+                        .unwrap())
+                })
+            });
 
         let service = execution_stage.as_service(
             mock_http_client,
@@ -998,17 +1006,17 @@ mod tests {
 
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
     }

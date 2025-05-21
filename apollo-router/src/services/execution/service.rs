@@ -1,6 +1,5 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,28 +8,29 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::validation::Valid;
-use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::Stream;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::once;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing::event;
 use tracing::Instrument;
 use tracing::Span;
+use tracing::event;
 use tracing_core::Level;
 
+use crate::apollo_studio_interop::ReferencedEnums;
+use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -39,27 +39,34 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
-use crate::services::execution;
-use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::Plugins;
-use crate::services::SubgraphServiceFactory;
-use crate::spec::query::subselections::BooleanValues;
+use crate::services::execution;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+use crate::spec::query::subselections::BooleanValues;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
+    apollo_telemetry_config: Option<ApolloTelemetryConfig>,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -116,13 +123,10 @@ impl ExecutionService {
         let context = req.context;
         let ctx = context.clone();
         let variables = req.supergraph_request.body().variables.clone();
-        let operation_name = req.supergraph_request.body().operation_name.clone();
 
         let (sender, receiver) = mpsc::channel(10);
-        let is_deferred = req
-            .query_plan
-            .is_deferred(operation_name.as_deref(), &variables);
-        let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
+        let is_deferred = req.query_plan.is_deferred(&variables);
+        let is_subscription = req.query_plan.is_subscription();
         let mut claims = None;
         if is_deferred {
             claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS).ok().flatten()
@@ -145,9 +149,10 @@ impl ExecutionService {
             .query_plan
             .execute(
                 &context,
-                &self.subgraph_service_factory,
+                &self.fetch_service_factory,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
+                &self.subgraph_schemas,
                 sender,
                 subscription_handle.clone(),
                 &self.subscription_config,
@@ -180,6 +185,11 @@ impl ExecutionService {
 
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
+
+        let metrics_ref_mode = match &self.apollo_telemetry_config {
+            Some(conf) => conf.metrics_reference_mode,
+            _ => ApolloMetricsReferenceMode::default(),
+        };
 
         let execution_span = Span::current();
 
@@ -227,11 +237,12 @@ impl ExecutionService {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
                         &query,
-                        operation_name.as_deref(),
                         &variables,
                         is_deferred,
                         &schema,
                         &mut nullified_paths,
+                        metrics_ref_mode,
+                        &context,
                         response,
                     )
                 }))
@@ -241,13 +252,15 @@ impl ExecutionService {
         ExecutionResponse::new_from_response(http::Response::new(stream as _), ctx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_graphql_response(
         query: &Arc<Query>,
-        operation_name: Option<&str>,
         variables: &Object,
         is_deferred: bool,
         schema: &Arc<Schema>,
         nullified_paths: &mut Vec<Path>,
+        metrics_ref_mode: ApolloMetricsReferenceMode,
+        context: &crate::Context,
         mut response: Response,
     ) -> Option<Response> {
         // responses that would fall under a path that was previously nullified are not sent
@@ -277,7 +290,7 @@ impl ExecutionService {
         }
 
         let has_next = response.has_next.unwrap_or(true);
-        let variables_set = query.defer_variables_set(operation_name, variables);
+        let variables_set = query.defer_variables_set(variables);
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
@@ -314,7 +327,6 @@ impl ExecutionService {
             if let Some(filtered_query) = query.filtered_query.as_ref() {
                 paths = filtered_query.format_response(
                     &mut response,
-                    operation_name,
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
@@ -325,14 +337,48 @@ impl ExecutionService {
                 query
                     .format_response(
                         &mut response,
-                        operation_name,
                         variables.clone(),
                         schema.api_schema(),
                         variables_set,
                     )
                     ,
             );
+
+            for error in response.errors.iter_mut() {
+                if let Some(path) = &mut error.path {
+                    // Check if path can be matched to the supergraph query and truncate if not
+                    let matching_len = query.matching_error_path_length(path);
+                    if path.len() != matching_len {
+                        path.0.drain(matching_len..);
+
+                        if path.is_empty() {
+                            error.path = None;
+                        }
+
+                        // if path was invalid that means we can't trust locations either
+                        error.locations.clear();
+                    }
+                }
+            }
+
             nullified_paths.extend(paths);
+
+            let mut referenced_enums = context
+                .extensions()
+                .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                .unwrap_or_default();
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+                extract_enums_from_response(
+                    query.clone(),
+                    schema.api_schema(),
+                    response_body,
+                    &mut referenced_enums,
+                )
+            };
+
+            context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {
@@ -343,12 +389,9 @@ impl ExecutionService {
 
                 response.errors.retain(|error| match &error.path {
                     None => true,
-                    Some(error_path) => query.contains_error_path(
-                        operation_name,
-                        &response.label,
-                        error_path,
-                        variables_set,
-                    ),
+                    Some(error_path) => {
+                        query.contains_error_path(&response.label, error_path, variables_set)
+                    }
                 });
 
                 response.label = rewrite_defer_label(&response);
@@ -396,7 +439,6 @@ impl ExecutionService {
 
                 Self::split_incremental_response(
                     query,
-                    operation_name,
                     has_next,
                     variables_set,
                     response,
@@ -408,7 +450,6 @@ impl ExecutionService {
 
     fn split_incremental_response(
         query: &Arc<Query>,
-        operation_name: Option<&str>,
         has_next: bool,
         variables_set: BooleanValues,
         response: Response,
@@ -427,12 +468,8 @@ impl ExecutionService {
                     .filter(|error| match &error.path {
                         None => false,
                         Some(error_path) => {
-                            query.contains_error_path(
-                                operation_name,
-                                &response.label,
-                                error_path,
-                                variables_set,
-                            ) && error_path.starts_with(&path)
+                            query.contains_error_path(&response.label, error_path, variables_set)
+                                && error_path.starts_with(&path)
                         }
                     })
                     .cloned()
@@ -442,7 +479,7 @@ impl ExecutionService {
                     .extensions
                     .iter()
                     .map(|(key, value)| {
-                        if key.as_str() == "valueCompletion" {
+                        if key.as_str() == EXTENSIONS_VALUE_COMPLETION_KEY {
                             let value = match value.as_array() {
                                 None => Value::Null,
                                 Some(v) => Value::Array(
@@ -595,9 +632,9 @@ async fn consume_responses(
 #[derive(Clone)]
 pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
@@ -610,14 +647,22 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
             .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
+        let apollo_telemetry_conf = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == "apollo.telemetry")
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
+            .map(|t| t.config.apollo.clone());
 
         ServiceBuilder::new()
             .service(
                 self.plugins.iter().rev().fold(
                     crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_service_factory: self.subgraph_service_factory.clone(),
+                        fetch_service_factory: self.fetch_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
+                        subgraph_schemas: self.subgraph_schemas.clone(),
+                        apollo_telemetry_config: apollo_telemetry_conf,
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),

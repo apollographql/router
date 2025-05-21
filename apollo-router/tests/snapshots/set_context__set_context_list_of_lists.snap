@@ -1,0 +1,114 @@
+---
+source: apollo-router/tests/set_context.rs
+expression: response
+snapshot_kind: text
+---
+{
+  "data": {
+    "tList": [
+      {
+        "id": "1",
+        "uList": [
+          {
+            "field": 3456
+          }
+        ]
+      },
+      {
+        "id": "2",
+        "uList": [
+          {
+            "field": 4567
+          }
+        ]
+      }
+    ]
+  },
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "authorization": {
+                "is_authenticated": false,
+                "policies": [],
+                "scopes": []
+              },
+              "contextRewrites": null,
+              "id": null,
+              "inputRewrites": null,
+              "kind": "Fetch",
+              "operation": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
+              "operationKind": "query",
+              "operationName": "QueryLL__Subgraph1__0",
+              "outputRewrites": null,
+              "schemaAwareHash": "1623e5c5abcc506f378e168da719f9163a03ee62feba9413b5664c8d6b5f1b37",
+              "serviceName": "Subgraph1",
+              "variableUsages": []
+            },
+            {
+              "kind": "Flatten",
+              "node": {
+                "authorization": {
+                  "is_authenticated": false,
+                  "policies": [],
+                  "scopes": []
+                },
+                "contextRewrites": [
+                  {
+                    "kind": "KeyRenamer",
+                    "path": [
+                      "..",
+                      "... on T",
+                      "prop"
+                    ],
+                    "renameKeyTo": "contextualArgument_1_0"
+                  }
+                ],
+                "id": null,
+                "inputRewrites": null,
+                "kind": "Fetch",
+                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+                "operationKind": "query",
+                "operationName": "QueryLL__Subgraph1__1",
+                "outputRewrites": null,
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ],
+                    "typeCondition": "U"
+                  }
+                ],
+                "schemaAwareHash": "9f32284e712d75def9f4f7d28f563ff31101b9e6492cef5158b9b10b3a389cd2",
+                "serviceName": "Subgraph1",
+                "variableUsages": [
+                  "contextualArgument_1_0"
+                ]
+              },
+              "path": [
+                "",
+                "tList",
+                "@",
+                "uList",
+                "@"
+              ]
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          __typename\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+    }
+  }
+}

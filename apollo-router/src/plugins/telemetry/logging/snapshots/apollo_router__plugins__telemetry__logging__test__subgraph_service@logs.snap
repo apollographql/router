@@ -6,15 +6,8 @@ expression: yaml
   level: INFO
   message: response
   span:
-    apollo.subgraph.name: subgraph
-    graphql.document: "query { foo }"
-    graphql.operation.name: ""
     name: subgraph
     otel.kind: INTERNAL
   spans:
-    - apollo.subgraph.name: subgraph
-      graphql.document: "query { foo }"
-      graphql.operation.name: ""
-      name: subgraph
+    - name: subgraph
       otel.kind: INTERNAL
-

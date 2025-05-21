@@ -1,0 +1,12 @@
+query SomeQuery {
+    ... on Query {
+        ... {
+            basicResponseQuery {
+                id
+            }
+        }
+    }
+    noInputQuery {
+        enumResponse
+    }
+}

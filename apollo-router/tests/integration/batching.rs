@@ -4,7 +4,7 @@ use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::ValueExt as _;
+use crate::integration::ValueExt as _;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
@@ -140,19 +140,22 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     if test_is_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - errors:
-        - message: expected error in A
-    - data:
-        entryA:
-          index: 2
-    - data:
-        entryA:
-          index: 3
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - errors:
+            - message: expected error in A
+              path: []
+              extensions:
+                service: a
+        - data:
+            entryA:
+              index: 2
+        - data:
+            entryA:
+              index: 3
+        "###);
     }
 
     Ok(())
@@ -189,24 +192,30 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryB:
-          index: 0
-    - errors:
-        - message: expected error in A
-    - errors:
-        - message: expected error in B
-    - data:
-        entryA:
-          index: 2
-    - data:
-        entryB:
-          index: 2
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryB:
+              index: 0
+        - errors:
+            - message: expected error in A
+              path: []
+              extensions:
+                service: a
+        - errors:
+            - message: expected error in B
+              path: []
+              extensions:
+                service: b
+        - data:
+            entryA:
+              index: 2
+        - data:
+            entryB:
+              index: 2
+        "###);
     }
 
     Ok(())
@@ -243,29 +252,26 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     .await?;
 
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - data:
-        entryA:
-          index: 1
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    "###);
+        assert_yaml_snapshot!(responses, @r"
+        - data:
+            entryA:
+              index: 0
+        - errors:
+            - message: Your request has been timed out
+              path: []
+              extensions:
+                code: GATEWAY_TIMEOUT
+                service: b
+        - data:
+            entryA:
+              index: 1
+        - errors:
+            - message: Your request has been timed out
+              path: []
+              extensions:
+                code: GATEWAY_TIMEOUT
+                service: b
+        ");
     }
 
     Ok(())
@@ -316,39 +322,35 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
     // verify the output
     let responses = [results_a, results_b].concat();
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryA:
-          index: 1
-    - data:
-        entryA:
-          index: 2
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    "###);
+        assert_yaml_snapshot!(responses, @r"
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryA:
+              index: 1
+        - data:
+            entryA:
+              index: 2
+        - errors:
+            - message: Your request has been timed out
+              path: []
+              extensions:
+                code: GATEWAY_TIMEOUT
+                service: b
+        - errors:
+            - message: Your request has been timed out
+              path: []
+              extensions:
+                code: GATEWAY_TIMEOUT
+                service: b
+        - errors:
+            - message: Your request has been timed out
+              path: []
+              extensions:
+                code: GATEWAY_TIMEOUT
+                service: b
+        ");
     }
 
     Ok(())
@@ -392,12 +394,12 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 0
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     - data:
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 
@@ -441,7 +443,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__b__0 {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -486,7 +488,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 
@@ -569,22 +571,26 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - errors:
-        - message: Subgraph A is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 0
-    - errors:
-        - message: Subgraph A is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 1
-    "###);
+        ---
+        - errors:
+            - message: Subgraph A is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+                service: a
+        - data:
+            entryB:
+              index: 0
+        - errors:
+            - message: Subgraph A is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+                service: a
+        - data:
+            entryB:
+              index: 1
+        "###);
     }
 
     Ok(())
@@ -675,7 +681,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -712,33 +718,35 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryB:
-          index: 0
-    - data:
-        entryA:
-          index: 1
-    - data:
-        entryB:
-          index: 1
-    - errors:
-        - message: Subgraph A index 2 is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 2
-    - data:
-        entryA:
-          index: 3
-    - data:
-        entryB:
-          index: 3
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryB:
+              index: 0
+        - data:
+            entryA:
+              index: 1
+        - data:
+            entryB:
+              index: 1
+        - errors:
+            - message: Subgraph A index 2 is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+                service: a
+        - data:
+            entryB:
+              index: 2
+        - data:
+            entryA:
+              index: 3
+        - data:
+            entryB:
+              index: 3
+        "###);
     }
 
     Ok(())
@@ -775,7 +783,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -840,13 +848,14 @@ mod helper {
     use apollo_router::graphql::Request;
     use apollo_router::graphql::Response;
     use tower::BoxError;
-    use wiremock::matchers;
     use wiremock::MockServer;
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers;
 
     use super::test_is_enabled;
     use crate::integration::common::IntegrationTest;
+    use crate::integration::common::Query;
 
     /// Helper type for specifying a valid handler
     pub type Handler = fn(&wiremock::Request) -> ResponseTemplate;
@@ -906,7 +915,9 @@ mod helper {
 
         // Execute the request
         let request = serde_json::to_value(requests)?;
-        let (_span, response) = router.execute_query(&request).await;
+        let (_span, response) = router
+            .execute_query(Query::builder().body(request).build())
+            .await;
 
         serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
     }
@@ -917,7 +928,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -933,7 +944,7 @@ mod helper {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -961,7 +972,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -1000,7 +1011,7 @@ mod helper {
 
         // Extract info about this operation
         let (_, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())

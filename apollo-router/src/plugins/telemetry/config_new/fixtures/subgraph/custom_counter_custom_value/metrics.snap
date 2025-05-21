@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Test server request body size metrics
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom_counter:
+            description: count of requests
+            type: counter
+            unit: unit
+            value:
+              request_header: count_header
+---
+- name: custom_counter
+  description: count of requests
+  unit: unit
+  data:
+    datapoints:
+      - value: 10
+        attributes: {}

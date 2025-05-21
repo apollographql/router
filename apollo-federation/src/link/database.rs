@@ -1,19 +1,43 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
-use apollo_compiler::Schema;
 
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
-use crate::link::DEFAULT_LINK_NAME;
+use crate::link::federation_spec_definition::fed1_link_imports;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
+use crate::subgraph::spec::FEDERATION_V2_ELEMENT_NAMES;
+
+fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
+    let federation_directives: HashSet<_> = FEDERATION_V2_DIRECTIVE_NAMES.into_iter().collect();
+    let federation_elements: HashSet<_> = FEDERATION_V2_ELEMENT_NAMES.into_iter().collect();
+
+    for imp in &link.imports {
+        if imp.is_directive && !federation_directives.contains(&imp.element) {
+            return Err(LinkError::InvalidImport(format!(
+                "Cannot import unknown federation directive \"@{}\".",
+                imp.element,
+            )));
+        } else if !imp.is_directive && !federation_elements.contains(&imp.element) {
+            return Err(LinkError::InvalidImport(format!(
+                "Cannot import unknown federation element \"{}\".",
+                imp.element,
+            )));
+        }
+    }
+    Ok(())
+}
 
 /// Extract @link metadata from a schema.
 pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkError> {
@@ -33,10 +57,10 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         return Err(LinkError::BootstrapError(format!(
             "the @link specification itself (\"{}\") is applied multiple times",
             extraneous_directive
-                .argument_by_name("url")
+                .specified_argument_by_name("url")
                 // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests in other projects,
                 // and should be removed when those are updated.
-                .or(extraneous_directive.argument_by_name("feature"))
+                .or(extraneous_directive.specified_argument_by_name("feature"))
                 .and_then(|value| value.as_str().map(Cow::Borrowed))
                 .unwrap_or_else(|| Cow::Owned(Identity::link_identity().to_string()))
         )));
@@ -46,23 +70,33 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     // all of the @link usages (starting with the bootstrapping one) and extract their metadata.
     let link_name_in_schema = &bootstrap_directive.name;
     let mut links = Vec::new();
-    let mut by_identity = HashMap::new();
-    let mut by_name_in_schema = HashMap::new();
-    let mut types_by_imported_name = HashMap::new();
-    let mut directives_by_imported_name = HashMap::new();
+    let mut by_identity = IndexMap::default();
+    let mut by_name_in_schema = IndexMap::default();
+    let mut types_by_imported_name = IndexMap::default();
+    let mut directives_by_imported_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives
         .iter()
         .filter(|d| d.name == *link_name_in_schema);
     for application in link_applications {
-        let link = Arc::new(Link::from_directive_application(application)?);
+        let mut link = Link::from_directive_application(application)?;
+        if link.url.identity == Identity::federation_identity() && link.url.version.major == 1 {
+            // add fake imports for the fed1 federation link.
+            if !link.imports.is_empty() {
+                return Err(LinkError::BootstrapError(format!(
+                    "fed1 @link should not have imports: {link}",
+                )));
+            }
+            link.imports = fed1_link_imports();
+        }
+        let link = Arc::new(link);
         links.push(Arc::clone(&link));
         if by_identity
             .insert(link.url.identity.clone(), Arc::clone(&link))
             .is_some()
         {
-            // TODO: we may want to lessen that limitation at some point. Including the same feature for 2 different major versions should be ok.
+            // XXX(Sylvain): We may want to loosen this limitation at some point. Including the same feature for 2 different major versions should be ok.
             return Err(LinkError::BootstrapError(format!(
                 "duplicate @link inclusion of specification \"{}\"",
                 link.url.identity
@@ -80,6 +114,10 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     // We do a 2nd pass to collect and validate all the imports (it's a separate path so we
     // know all the names of the spec linked in the schema).
     for link in &links {
+        if link.url.identity == Identity::federation_identity() {
+            validate_federation_imports(link)?;
+        }
+
         for import in &link.imports {
             let imported_name = import.imported_name();
             let element_map = if import.is_directive {
@@ -172,8 +210,7 @@ fn is_core_directive_definition(definition: &DirectiveDefinition) -> bool {
             })
         && definition
             .argument_by_name("as")
-            // Definition may be omitted in old graphs
-            .map_or(true, |argument| *argument.ty == ty!(String))
+            .is_none_or(|argument| *argument.ty == ty!(String))
 }
 
 /// Returns whether a given directive is the @link or @core directive that imports the @link or
@@ -184,16 +221,16 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
     };
     if is_link_directive_definition(definition) {
         if let Some(url) = directive
-            .argument_by_name("url")
+            .specified_argument_by_name("url")
             .and_then(|value| value.as_str())
         {
             let url = url.parse::<Url>();
             let default_link_name = DEFAULT_LINK_NAME;
             let expected_name = directive
-                .argument_by_name("as")
+                .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or(default_link_name.as_str());
-            return url.map_or(false, |url| {
+            return url.is_ok_and(|url| {
                 url.identity == Identity::link_identity() && directive.name == expected_name
             });
         }
@@ -201,15 +238,15 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
         // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
         // removed when those are updated.
         if let Some(url) = directive
-            .argument_by_name("feature")
+            .specified_argument_by_name("feature")
             .and_then(|value| value.as_str())
         {
             let url = url.parse::<Url>();
             let expected_name = directive
-                .argument_by_name("as")
+                .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or("core");
-            return url.map_or(false, |url| {
+            return url.is_ok_and(|url| {
                 url.identity == Identity::core_identity() && directive.name == expected_name
             });
         }
@@ -222,10 +259,10 @@ mod tests {
     use apollo_compiler::name;
 
     use super::*;
-    use crate::link::spec::Version;
-    use crate::link::spec::APOLLO_SPEC_DOMAIN;
     use crate::link::Import;
     use crate::link::Purpose;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+    use crate::link::spec::Version;
 
     #[test]
     fn explicit_root_directive_import() -> Result<(), LinkError> {
@@ -251,9 +288,10 @@ mod tests {
         let meta = links_metadata(&schema)?;
         let meta = meta.expect("should have metadata");
 
-        assert!(meta
-            .source_link_of_directive(&name!("inaccessible"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("inaccessible"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -280,9 +318,10 @@ mod tests {
         let schema = Schema::parse(schema, "lonk.graphqls").unwrap();
 
         let meta = links_metadata(&schema)?.expect("should have metadata");
-        assert!(meta
-            .source_link_of_directive(&name!("inaccessible"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("inaccessible"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -319,9 +358,10 @@ mod tests {
         let schema = Schema::parse(schema, "care.graphqls").unwrap();
 
         let meta = links_metadata(&schema)?.expect("should have metadata");
-        assert!(meta
-            .source_link_of_directive(&name!("join__graph"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("join__graph"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -358,9 +398,10 @@ mod tests {
         let meta = links_metadata(&schema)?;
         let meta = meta.expect("should have metadata");
 
-        assert!(meta
-            .source_link_of_directive(&name!("myDirective"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("myDirective"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -509,7 +550,7 @@ mod tests {
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
             // TODO Multiple errors
-            insta::assert_snapshot!(errors, @r###"Invalid use of @link in schema: invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: "<importedElement>", as: "<alias>" }."###);
+            insta::assert_snapshot!(errors, @r###"Invalid use of @link in schema: in "2", invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: "<importedElement>", as: "<alias>" }."###);
         }
 
         #[test]
@@ -534,11 +575,9 @@ mod tests {
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
             // TODO Multiple errors
-            insta::assert_snapshot!(errors, @"Invalid use of @link in schema: invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does");
+            insta::assert_snapshot!(errors, @r###"Invalid use of @link in schema: in "{name: "@key", as: "myKey"}", invalid alias 'myKey' for import name '@key': should start with '@' since the imported name does"###);
         }
 
-        // TODO Implement
-        /*
         #[test]
         fn errors_on_importing_unknown_elements_for_known_features() {
             let schema = r#"
@@ -557,8 +596,44 @@ mod tests {
 
             let schema = Schema::parse(schema, "testSchema").unwrap();
             let errors = links_metadata(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @"");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@foo\".");
+
+            // TODO Support multiple errors, in the meantime we'll just clone the code and run again
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [ "key", { name: "@sharable" } ]
+                )
+
+                type Query {
+                q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation element \"key\".");
+
+            let schema = r#"
+                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+                extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [ { name: "@sharable" } ]
+                )
+
+                type Query {
+                q: Int
+                }
+
+                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
+            "#;
+
+            let schema = Schema::parse(schema, "testSchema").unwrap();
+            let errors = links_metadata(&schema).expect_err("should error");
+            insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@sharable\".");
         }
-        */
     }
 }

@@ -1,0 +1,24 @@
+# This coprocessor doesn't point to anything
+coprocessor:
+  url: "<replace>"
+  router:
+    request:
+      body: true
+    response:
+      body: true
+  supergraph:
+    request:
+      body: true
+    response:
+      body: true
+  subgraph:
+    all:
+      request:
+        body: true
+      response:
+        body: true
+  execution:
+    request:
+      body: true
+    response:
+      body: true

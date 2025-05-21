@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: stats
+snapshot_kind: text
 ---
 context:
   client_name: ""
@@ -8,6 +9,8 @@ context:
   operation_type: query
   operation_subtype: ""
   result: ""
+  client_library_name: ""
+  client_library_version: ""
 query_latency_stats:
   latency_count: "[latency_count]"
   request_count: 1
@@ -441,6 +444,18 @@ per_type_stat:
           - 0
           - 0
           - 1
+extended_references: ~
 local_per_type_stat: {}
-limits_stats: ~
+limits_stats:
+  strategy: ""
+  cost_estimated:
+    - 0
+  max_cost_estimated: 0
+  cost_actual:
+    - 0
+  max_cost_actual: 0
+  depth: 4
+  height: 7
+  alias_count: 0
+  root_field_count: 1
 operation_count: 0

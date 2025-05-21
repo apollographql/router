@@ -3,9 +3,9 @@ use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::stream::select;
-use futures::stream::StreamExt;
 use futures::Stream;
+use futures::stream::StreamExt;
+use futures::stream::select;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio_stream::once;
@@ -37,6 +37,7 @@ struct SubscriptionPayload {
     errors: Vec<graphql::Error>,
 }
 
+#[derive(Debug)]
 enum MessageKind {
     Heartbeat,
     Message(graphql::Response),
@@ -228,7 +229,10 @@ mod tests {
             } else {
                 match curr_index {
                     0 => {
-                        assert_eq!(res, "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql");
+                        assert_eq!(
+                            res,
+                            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql"
+                        );
                     }
                     1 => {
                         assert_eq!(

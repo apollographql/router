@@ -1,0 +1,8 @@
+query UnderscoreQuery($arg2_: String, $_arg3_: String) {
+    underscoreQuery(arg_: "x", _arg2: $arg2_, _arg3_: $_arg3_) {
+        _
+        _name
+        _name_
+        name_
+    }
+}

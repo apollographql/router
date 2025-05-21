@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
 expression: aggregated_metrics
+snapshot_kind: text
 ---
 {
   "traces_per_query": {
@@ -13,7 +14,9 @@ expression: aggregated_metrics
             "client_version": "version_1",
             "operation_type": "",
             "operation_subtype": "",
-            "result": ""
+            "result": "",
+            "client_library_name": "library_name_1",
+            "client_library_version": "library_version_1"
           },
           {
             "context": {
@@ -21,7 +24,9 @@ expression: aggregated_metrics
               "client_version": "version_1",
               "operation_type": "",
               "operation_subtype": "",
-              "result": ""
+              "result": "",
+              "client_library_name": "library_name_1",
+              "client_library_version": "library_version_1"
             },
             "query_latency_stats": {
               "request_latencies": {
@@ -173,6 +178,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "persisted_query_hits": 2,
@@ -326,6 +332,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "root_error_stats": {
@@ -495,6 +502,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "private_cache_ttl_count": {
@@ -646,6 +654,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "registered_operation_count": 2,
@@ -809,6 +818,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   },
@@ -966,6 +976,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   }
@@ -1127,6 +1138,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   },
@@ -1284,6 +1296,149 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              }
+            },
+            "extended_references": {
+              "referenced_input_fields": {},
+              "referenced_enums": {}
+            },
+            "limits_stats": {
+              "strategy": "test",
+              "cost_estimated": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 10.0,
+                "total": 2.0
+              },
+              "cost_actual": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 7.0,
+                "total": 2.0
+              },
+              "depth": 2,
+              "height": 4,
+              "alias_count": 0,
+              "root_field_count": 1
+            },
+            "local_per_type_stat": {
+              "type1": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 20.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              },
+              "type2": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 21.0,
                       "total": 2.0
                     }
                   }
@@ -1301,7 +1456,8 @@ expression: aggregated_metrics
           ],
           "is_interface": false
         }
-      }
+      },
+      "query_metadata": null
     }
   },
   "licensed_operation_count_by_type": {
@@ -1310,5 +1466,9 @@ expression: aggregated_metrics
       "subtype": null,
       "licensed_operation_count": 2
     }
-  }
+  },
+  "router_features_enabled": [
+    "distributed_apq_cache",
+    "entity_cache"
+  ]
 }

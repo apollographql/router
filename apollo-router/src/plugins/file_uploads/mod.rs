@@ -2,15 +2,15 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
+use mediatype::MediaType;
+use mediatype::ReadParams;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::ReadParams;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -29,6 +29,7 @@ use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -41,8 +42,6 @@ mod rearrange_query_plan;
 
 type Result<T> = std::result::Result<T, error::FileUploadError>;
 
-// FIXME: check if we need to hide docs
-#[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
     enabled: bool,
     limits: MultipartRequestLimits,
@@ -67,7 +66,7 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         let limits = self.limits;
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: router::Request| {
+            .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match router_layer(req, limits).await {
@@ -82,6 +81,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -91,7 +91,7 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: supergraph::Request| {
+            .checkpoint_async(move |req: supergraph::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match supergraph_layer(req).await {
@@ -106,6 +106,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -140,12 +141,13 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: subgraph::Request| {
+            .checkpoint_async(|req: subgraph::Request| {
                 subgraph_layer(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -161,6 +163,11 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
+/// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
+/// pipeline can understand.
+///
+/// # Context
+/// Adds a [`MultipartRequest`] value to context.
 async fn router_layer(
     req: router::Request,
     limits: MultipartRequestLimits,
@@ -176,7 +183,9 @@ async fn router_layer(
         let mut multipart = MultipartRequest::new(request_body, boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
-        req.context.extensions().lock().insert(multipart);
+        req.context
+            .extensions()
+            .with_lock(|lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -188,7 +197,7 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = hyper::Body::wrap_stream(operations_stream);
+        let request_body = router::body::from_result_stream(operations_stream);
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,
@@ -198,13 +207,19 @@ async fn router_layer(
     Ok(req)
 }
 
+/// Patch up the variable values in file upload requests.
+///
+/// File uploads do something funky: They use *required* GraphQL field arguments (`file: Upload!`),
+/// but then pass `null` as the variable value. This is invalid GraphQL, but it is how the file
+/// uploads spec works.
+///
+/// To make all this work in the router, we stick some placeholder value in the variables used for
+/// file uploads, and then remove them before we pass on the files to subgraphs.
 async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Request> {
     let multipart = req
         .context
         .extensions()
-        .lock()
-        .get::<MultipartRequest>()
-        .cloned();
+        .with_lock(|lock| lock.get::<MultipartRequest>().cloned());
 
     if let Some(mut multipart) = multipart {
         let map_field = multipart.map_field().await?;
@@ -226,13 +241,12 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context
-            .extensions()
-            .lock()
-            .insert(SupergraphLayerResult {
+        req.context.extensions().with_lock(|lock| {
+            lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),
-            });
+            })
+        });
     }
     Ok(req)
 }
@@ -254,7 +268,9 @@ fn replace_value_at_path<'a>(
 
 // Removes value at path.
 fn remove_value_at_path<'a>(variables: &'a mut json_ext::Object, path: &'a [String]) {
-    let _ = get_value_at_path(variables, path).take();
+    if let Some(v) = get_value_at_path(variables, path) {
+        *v = serde_json_bytes::Value::Null;
+    }
 }
 
 fn get_value_at_path<'a>(
@@ -305,9 +321,7 @@ fn execution_layer(req: execution::Request) -> Result<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { map, .. } = supergraph_result;
 
@@ -321,9 +335,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 
@@ -350,8 +362,8 @@ static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-re
 static TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn http_request_wrapper(
-    mut req: http::Request<hyper::Body>,
-) -> http::Request<hyper::Body> {
+    mut req: http::Request<RouterBody>,
+) -> http::Request<RouterBody> {
     let form = req.extensions_mut().get::<MultipartFormData>().cloned();
     if let Some(form) = form {
         let (mut request_parts, operations) = req.into_parts();
@@ -363,8 +375,9 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        let body = hyper::Body::wrap_stream(form.into_stream(operations).await);
-        return http::Request::from_parts(request_parts, body);
+        let request_body = router::body::from_result_stream(form.into_stream(operations).await);
+
+        return http::Request::from_parts(request_parts, request_body);
     }
     req
 }

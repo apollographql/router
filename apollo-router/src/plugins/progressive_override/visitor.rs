@@ -11,8 +11,8 @@ use super::JOIN_FIELD_DIRECTIVE_NAME;
 use super::JOIN_SPEC_BASE_URL;
 use super::JOIN_SPEC_VERSION_RANGE;
 use super::OVERRIDE_LABEL_ARG_NAME;
-use crate::spec::query::traverse;
 use crate::spec::Schema;
+use crate::spec::query::traverse;
 
 impl<'a> OverrideLabelVisitor<'a> {
     pub(crate) fn new(schema: &'a schema::Schema) -> Option<Self> {
@@ -29,7 +29,7 @@ impl<'a> OverrideLabelVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for OverrideLabelVisitor<'a> {
+impl traverse::Visitor for OverrideLabelVisitor<'_> {
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
     }
@@ -77,9 +77,9 @@ pub(crate) struct OverrideLabelVisitor<'a> {
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::validation::Valid;
 
     use crate::plugins::progressive_override::visitor::OverrideLabelVisitor;
     use crate::spec::query::traverse;

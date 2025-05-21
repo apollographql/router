@@ -1,17 +1,19 @@
-use std::collections::HashSet;
+use std::sync::Arc;
 
-use apollo_compiler::ast::Name;
-use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
+use apollo_compiler::executable::VariableDefinition;
 
+use super::QueryPathElement;
+use super::conditions::ConditionKind;
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
+use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
-use crate::query_plan::conditions::Conditions;
-use crate::query_plan::fetch_dependency_graph::DeferredInfo;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::SelectionSet;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -21,6 +23,9 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::PrimaryDeferBlock;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::SequenceNode;
+use crate::query_plan::conditions::Conditions;
+use crate::query_plan::fetch_dependency_graph::DeferredInfo;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,
@@ -31,7 +36,7 @@ use crate::query_plan::SequenceNode;
 /// (see `selectionCost` method),
 /// this can be though of as saying that resolving a single field is in general
 /// a tiny fraction of the actual cost of doing a subgraph fetch.
-const FETCH_COST: QueryPlanCost = 1000;
+const FETCH_COST: QueryPlanCost = 1000.0;
 
 /// Constant used during query plan cost computation
 /// as a multiplier to the cost of fetches made in sequences.
@@ -42,14 +47,14 @@ const FETCH_COST: QueryPlanCost = 1000;
 /// The goal is to heavily favor query plans with the least amount of sequences,
 /// since this affect overall latency directly.
 /// The exact number is a tad  arbitrary however.
-const PIPELINING_COST: QueryPlanCost = 100;
+const PIPELINING_COST: QueryPlanCost = 100.0;
 
-#[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    variable_definitions: Vec<Node<VariableDefinition>>,
-    fragments: Option<RebasedFragments>,
+    variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+    operation_directives: DirectiveList,
+    operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<NodeStr>>,
+    assigned_defer_labels: IndexSet<String>,
     counter: u32,
 }
 
@@ -58,14 +63,14 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
 /// A plan is essentially some mix of sequences and parallels of fetches. And the plan cost
 /// is about minimizing both:
 ///  1. The expected total latency of executing the plan. Typically, doing 2 fetches in
-///    parallel will most likely have much better latency then executing those exact same
-///    fetches in sequence, and so the cost of the latter must be greater than that of
-///    the former.
+///     parallel will most likely have much better latency then executing those exact same
+///     fetches in sequence, and so the cost of the latter must be greater than that of
+///     the former.
 ///  2. The underlying use of resources. For instance, if we query 2 fields and we have
-///    the choice between getting those 2 fields from a single subgraph in 1 fetch, or
-///    get each from a different subgraph with 2 fetches in parallel, then we want to
-///    favor the former as just doing a fetch in and of itself has a cost in terms of
-///    resources consumed.
+///     the choice between getting those 2 fields from a single subgraph in 1 fetch, or
+///     get each from a different subgraph with 2 fetches in parallel, then we want to
+///     favor the former as just doing a fetch in and of itself has a cost in terms of
+///     resources consumed.
 ///
 /// Do note that at the moment, this cost is solely based on the "shape" of the plan and has
 /// to make some conservative assumption regarding concrete runtime behaviour. In particular,
@@ -162,7 +167,7 @@ impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
         node: &mut FetchDependencyGraphNode,
         _handled_conditions: &Conditions,
     ) -> Result<QueryPlanCost, FederationError> {
-        Ok(FETCH_COST + node.cost()?)
+        Ok(FETCH_COST + node.cost())
     }
 
     /// We don't take conditions into account in costing for now
@@ -237,20 +242,22 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
     values
         .into_iter()
         .enumerate()
-        .map(|(i, stage)| stage * 1.max(i as QueryPlanCost * PIPELINING_COST))
+        .map(|(i, stage)| stage * (1.0f64).max(i as QueryPlanCost * PIPELINING_COST))
         .sum()
 }
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        variable_definitions: Vec<Node<VariableDefinition>>,
-        fragments: Option<RebasedFragments>,
+        variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+        operation_directives: DirectiveList,
+        operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<NodeStr>>,
+        assigned_defer_labels: IndexSet<String>,
     ) -> Self {
         Self {
             variable_definitions,
-            fragments,
+            operation_directives,
+            operation_compression,
             operation_name,
             assigned_defer_labels,
             counter: 0,
@@ -271,13 +278,15 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             let counter = self.counter;
             self.counter += 1;
             let subgraph = to_valid_graphql_name(&node.subgraph_name).unwrap_or("".into());
-            format!("{name}__{subgraph}__{counter}").into()
+            // `name` was already a valid name so this concatenation should be too
+            Name::new(&format!("{name}__{subgraph}__{counter}")).unwrap()
         });
         node.to_plan_node(
             query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_mut(),
+            &self.operation_directives,
+            &mut self.operation_compression,
             op_name,
         )
     }
@@ -293,15 +302,14 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 // Note that currently `ConditionNode` only works for variables
                 // (`ConditionNode.condition` is expected to be a variable name and nothing else).
                 // We could change that, but really, why have a trivial `ConditionNode`
-                // when we can optimise things righ away.
+                // when we can optimise things right away.
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
-                for (name, negated) in variables.iter() {
-                    let (if_clause, else_clause) = if negated {
-                        (None, Some(Box::new(value)))
-                    } else {
-                        (Some(Box::new(value)), None)
+                for (name, kind) in variables.iter() {
+                    let (if_clause, else_clause) = match kind {
+                        ConditionKind::Skip => (None, Some(Box::new(value))),
+                        ConditionKind::Include => (Some(Box::new(value)), None),
                     };
                     value = PlanNode::from(ConditionNode {
                         condition_variable: name.clone(),
@@ -333,6 +341,23 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         defer_info: &DeferredInfo,
         node: Option<PlanNode>,
     ) -> Result<DeferredDeferBlock, FederationError> {
+        /// Produce a query path with only the relevant elements: fields and type conditions.
+        fn op_path_to_query_path(path: &[Arc<OpPathElement>]) -> Vec<QueryPathElement> {
+            path.iter()
+                .filter_map(|element| match &**element {
+                    OpPathElement::Field(field) => Some(QueryPathElement::Field {
+                        response_key: field.response_name().clone(),
+                    }),
+                    OpPathElement::InlineFragment(inline) => inline
+                        .type_condition_position
+                        .as_ref()
+                        .map(|cond| QueryPathElement::InlineFragment {
+                            type_condition: cond.type_name().clone(),
+                        }),
+                })
+                .collect()
+        }
+
         Ok(DeferredDeferBlock {
             depends: defer_info
                 .dependencies
@@ -340,25 +365,22 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 .cloned()
                 .map(|id| DeferredDependency { id })
                 .collect(),
-            label: if self
-                .assigned_defer_labels
-                .as_ref()
-                .is_some_and(|set| set.contains(&defer_info.label))
-            {
+            label: if self.assigned_defer_labels.contains(&defer_info.label) {
                 None
             } else {
                 Some(defer_info.label.clone())
             },
-            query_path: defer_info.path.full_path.as_ref().try_into()?,
+            query_path: op_path_to_query_path(&defer_info.path.full_path),
             // Note that if the deferred block has nested @defer,
             // then the `value` is going to be a `DeferNode`
             // and we'll use it's own `subselection`, so we don't need it here.
             sub_selection: if defer_info.deferred.is_empty() {
                 defer_info
                     .sub_selection
-                    .without_empty_branches()?
-                    .map(|filtered| filtered.as_ref().try_into())
+                    .without_empty_branches()
+                    .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
                     .transpose()?
+                    .map(|selection_set| selection_set.serialize().no_indent().to_string())
             } else {
                 None
             },
@@ -375,9 +397,10 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         Ok(Some(PlanNode::Defer(DeferNode {
             primary: PrimaryDeferBlock {
                 sub_selection: sub_selection
-                    .without_empty_branches()?
-                    .map(|filtered| filtered.as_ref().try_into())
-                    .transpose()?,
+                    .without_empty_branches()
+                    .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
+                    .transpose()?
+                    .map(|selection_set| selection_set.serialize().no_indent().to_string()),
                 node: main.map(Box::new),
             },
             deferred,
@@ -434,7 +457,7 @@ fn flat_wrap_nodes(
     let mut iter = nodes.into_iter().flatten();
     let first = iter.next()?;
     let Some(second) = iter.next() else {
-        return Some(first.clone());
+        return Some(first);
     };
     let mut nodes = Vec::new();
     for node in [first, second].into_iter().chain(iter) {

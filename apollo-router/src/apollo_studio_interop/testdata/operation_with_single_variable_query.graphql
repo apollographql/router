@@ -1,0 +1,5 @@
+query QueryWithVar($input_enum: SomeEnum) {
+    enumInputQuery(enumInput: $input_enum) {
+        listOfBools
+    }
+}

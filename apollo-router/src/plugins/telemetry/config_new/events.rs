@@ -1,32 +1,37 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-#[cfg(test)]
-use http::HeaderValue;
-use opentelemetry::Key;
-use parking_lot::Mutex;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tracing::Span;
+use tracing::info_span;
 
-use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
-use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
-use crate::services::router;
-use crate::services::subgraph;
-use crate::services::supergraph;
+use super::Stage;
+use super::router::events::RouterEvents;
+use super::subgraph::events::SubgraphEvents;
+use super::supergraph::events::SupergraphEvents;
 use crate::Context;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::router::events::RouterEventsConfig;
+use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventsConfig;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig;
+use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
+use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 
 /// Events are
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -38,6 +43,8 @@ pub(crate) struct Events {
     supergraph: Extendable<SupergraphEventsConfig, Event<SupergraphAttributes, SupergraphSelector>>,
     /// Supergraph service events
     subgraph: Extendable<SubgraphEventsConfig, Event<SubgraphAttributes, SubgraphSelector>>,
+    /// Connector events
+    connector: Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
 }
 
 impl Events {
@@ -46,23 +53,13 @@ impl Events {
             .router
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
-                }),
-            })
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         RouterEvents {
-            request: self.router.attributes.request,
-            response: self.router.attributes.response,
-            error: self.router.attributes.error,
+            request: StandardEvent::from_config(&self.router.attributes.request),
+            response: StandardEvent::from_config(&self.router.attributes.response),
+            error: StandardEvent::from_config(&self.router.attributes.error),
             custom: custom_events,
         }
     }
@@ -72,23 +69,13 @@ impl Events {
             .supergraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
-                }),
-            })
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         SupergraphEvents {
-            request: self.supergraph.attributes.request,
-            response: self.supergraph.attributes.response,
-            error: self.supergraph.attributes.error,
+            request: StandardEvent::from_config(&self.supergraph.attributes.request),
+            response: StandardEvent::from_config(&self.supergraph.attributes.response),
+            error: StandardEvent::from_config(&self.supergraph.attributes.error),
             custom: custom_events,
         }
     }
@@ -98,317 +85,164 @@ impl Events {
             .subgraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
-                }),
-            })
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         SubgraphEvents {
-            request: self.subgraph.attributes.request,
-            response: self.subgraph.attributes.response,
-            error: self.subgraph.attributes.error,
+            request: StandardEvent::from_config(&self.subgraph.attributes.request),
+            response: StandardEvent::from_config(&self.subgraph.attributes.response),
+            error: StandardEvent::from_config(&self.subgraph.attributes.error),
             custom: custom_events,
         }
     }
+
+    pub(crate) fn new_connector_events(&self) -> ConnectorEvents {
+        super::connector::events::new_connector_events(&self.connector)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.router
+            .attributes
+            .request
+            .validate(Some(Stage::Request))?;
+        self.router
+            .attributes
+            .response
+            .validate(Some(Stage::Response))?;
+        self.supergraph
+            .attributes
+            .request
+            .validate(Some(Stage::Request))?;
+        self.supergraph
+            .attributes
+            .response
+            .validate(Some(Stage::Response))?;
+        self.subgraph
+            .attributes
+            .request
+            .validate(Some(Stage::Request))?;
+        self.subgraph
+            .attributes
+            .response
+            .validate(Some(Stage::Response))?;
+        self.connector
+            .attributes
+            .request
+            .validate(Some(Stage::Request))?;
+        self.connector
+            .attributes
+            .response
+            .validate(Some(Stage::Response))?;
+        for (name, custom_event) in &self.router.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for router custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.supergraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for supergraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.subgraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for subgraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.connector.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for connector HTTP custom event {name:?}: {err}")
+            })?;
+        }
+
+        Ok(())
+    }
 }
 
-pub(crate) type RouterEvents =
-    CustomEvents<router::Request, router::Response, RouterAttributes, RouterSelector>;
-
-pub(crate) type SupergraphEvents = CustomEvents<
-    supergraph::Request,
-    supergraph::Response,
-    SupergraphAttributes,
-    SupergraphSelector,
->;
-
-pub(crate) type SubgraphEvents =
-    CustomEvents<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
-
-pub(crate) struct CustomEvents<Request, Response, Attributes, Sel>
+pub(crate) struct CustomEvents<Request, Response, EventResponse, Attributes, Sel>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
+    Attributes: Selectors<Request, Response, EventResponse> + Default,
     Sel: Selector<Request = Request, Response = Response> + Debug,
 {
-    request: EventLevel,
-    response: EventLevel,
-    error: EventLevel,
-    custom: Vec<CustomEvent<Request, Response, Attributes, Sel>>,
+    pub(super) request: Option<StandardEvent<Sel>>,
+    pub(super) response: Option<StandardEvent<Sel>>,
+    pub(super) error: Option<StandardEvent<Sel>>,
+    pub(super) custom: Vec<CustomEvent<Request, Response, EventResponse, Attributes, Sel>>,
 }
 
-impl Instrumented
-    for CustomEvents<router::Request, router::Response, RouterAttributes, RouterSelector>
-{
-    type Request = router::Request;
-    type Response = router::Response;
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(untagged)]
+pub(crate) enum StandardEventConfig<T> {
+    Level(EventLevelConfig),
+    Conditional {
+        level: EventLevelConfig,
+        condition: Condition<T>,
+    },
+}
 
-    fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
-                .router_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.router_request.headers();
-
-            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
-            attrs.insert(
-                "http.request.method".to_string(),
-                format!("{}", request.router_request.method()),
-            );
-            attrs.insert(
-                "http.request.uri".to_string(),
-                format!("{}", request.router_request.uri()),
-            );
-            attrs.insert(
-                "http.request.version".to_string(),
-                format!("{:?}", request.router_request.version()),
-            );
-            attrs.insert(
-                "http.request.body".to_string(),
-                format!("{:?}", request.router_request.body()),
-            );
-            log_event(self.request, "router.request", attrs, "");
-        }
-        for custom_event in &self.custom {
-            custom_event.on_request(request);
-        }
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        if self.response != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(4);
-
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = response
-                .response
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = response.response.headers();
-            attrs.insert(
-                "http.response.headers".to_string(),
-                format!("{:?}", headers),
-            );
-            attrs.insert(
-                "http.response.status".to_string(),
-                format!("{}", response.response.status()),
-            );
-            attrs.insert(
-                "http.response.version".to_string(),
-                format!("{:?}", response.response.version()),
-            );
-            attrs.insert(
-                "http.response.body".to_string(),
-                format!("{:?}", response.response.body()),
-            );
-            log_event(self.response, "router.response", attrs, "");
-        }
-        for custom_event in &self.custom {
-            custom_event.on_response(response);
-        }
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(1);
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "router.error", attrs, "");
-        }
-        for custom_event in &self.custom {
-            custom_event.on_error(error, ctx);
+impl<T: Selector> StandardEventConfig<T> {
+    fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+        if let Self::Conditional { condition, .. } = self {
+            condition.validate(restricted_stage)
+        } else {
+            Ok(())
         }
     }
 }
 
-impl Instrumented
-    for CustomEvents<
-        supergraph::Request,
-        supergraph::Response,
-        SupergraphAttributes,
-        SupergraphSelector,
-    >
-{
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-
-    fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
-                .supergraph_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.supergraph_request.headers();
-            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
-            attrs.insert(
-                "http.request.method".to_string(),
-                format!("{}", request.supergraph_request.method()),
-            );
-            attrs.insert(
-                "http.request.uri".to_string(),
-                format!("{}", request.supergraph_request.uri()),
-            );
-            attrs.insert(
-                "http.request.version".to_string(),
-                format!("{:?}", request.supergraph_request.version()),
-            );
-            attrs.insert(
-                "http.request.body".to_string(),
-                serde_json::to_string(request.supergraph_request.body()).unwrap_or_default(),
-            );
-            log_event(self.request, "supergraph.request", attrs, "");
-        }
-        if self.response != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .lock()
-                .insert(SupergraphEventResponseLevel(self.response));
-        }
-        for custom_event in &self.custom {
-            custom_event.on_request(request);
-        }
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        for custom_event in &self.custom {
-            custom_event.on_response(response);
-        }
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(1);
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "supergraph.error", attrs, "");
-        }
-        for custom_event in &self.custom {
-            custom_event.on_error(error, ctx);
-        }
+impl<T> Default for StandardEventConfig<T> {
+    fn default() -> Self {
+        Self::Level(EventLevelConfig::default())
     }
 }
 
-impl Instrumented
-    for CustomEvents<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>
-{
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-
-    fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .lock()
-                .insert(SubgraphEventRequestLevel(self.request));
-        }
-        if self.response != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .lock()
-                .insert(SubgraphEventResponseLevel(self.response));
-        }
-        for custom_event in &self.custom {
-            custom_event.on_request(request);
-        }
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        for custom_event in &self.custom {
-            custom_event.on_response(response);
-        }
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
-            let mut attrs = HashMap::with_capacity(1);
-
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "subgraph.error", attrs, "");
-        }
-        for custom_event in &self.custom {
-            custom_event.on_error(error, ctx);
-        }
-    }
+#[derive(Debug)]
+pub(crate) struct StandardEvent<T> {
+    pub(crate) level: EventLevel,
+    pub(crate) condition: Condition<T>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-struct RouterEventsConfig {
-    /// Log the router request
-    request: EventLevel,
-    /// Log the router response
-    response: EventLevel,
-    /// Log the router error
-    error: EventLevel,
-}
-
-#[derive(Clone)]
-pub(crate) struct SupergraphEventResponseLevel(pub(crate) EventLevel);
-#[derive(Clone)]
-pub(crate) struct SubgraphEventResponseLevel(pub(crate) EventLevel);
-#[derive(Clone)]
-pub(crate) struct SubgraphEventRequestLevel(pub(crate) EventLevel);
-
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-struct SupergraphEventsConfig {
-    /// Log the supergraph request
-    request: EventLevel,
-    /// Log the supergraph response
-    response: EventLevel,
-    /// Log the supergraph error
-    error: EventLevel,
-}
-
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-struct SubgraphEventsConfig {
-    /// Log the subgraph request
-    request: EventLevel,
-    /// Log the subgraph response
-    response: EventLevel,
-    /// Log the subgraph error
-    error: EventLevel,
+impl<T: Clone> StandardEvent<T> {
+    pub(crate) fn from_config(config: &StandardEventConfig<T>) -> Option<Self> {
+        match &config {
+            StandardEventConfig::Level(level) => EventLevel::from_config(level).map(|level| Self {
+                level,
+                condition: Condition::True,
+            }),
+            StandardEventConfig::Conditional { level, condition } => EventLevel::from_config(level)
+                .map(|level| Self {
+                    level,
+                    condition: condition.clone(),
+                }),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum EventLevel {
+pub(crate) enum EventLevelConfig {
     Info,
     Warn,
     Error,
     #[default]
     Off,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub(crate) enum EventLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl EventLevel {
+    pub(crate) fn from_config(config: &EventLevelConfig) -> Option<Self> {
+        match config {
+            EventLevelConfig::Off => None,
+            EventLevelConfig::Info => Some(EventLevel::Info),
+            EventLevelConfig::Warn => Some(EventLevel::Warn),
+            EventLevelConfig::Error => Some(EventLevel::Error),
+        }
+    }
 }
 
 /// An event that can be logged as part of a trace.
@@ -421,21 +255,34 @@ where
     E: Debug,
 {
     /// The log level of the event.
-    level: EventLevel,
+    pub(super) level: EventLevelConfig,
 
     /// The event message.
-    message: Arc<String>,
+    pub(super) message: Arc<String>,
 
     /// When to trigger the event.
-    on: EventOn,
+    pub(super) on: EventOn,
 
     /// The event attributes.
     #[serde(default = "Extendable::empty_arc::<A, E>")]
-    attributes: Arc<Extendable<A, E>>,
+    pub(super) attributes: Arc<Extendable<A, E>>,
 
     /// The event conditions.
     #[serde(default = "Condition::empty::<E>")]
-    condition: Condition<E>,
+    pub(super) condition: Condition<E>,
+}
+
+impl<A, E, Request, Response, EventResponse> Event<A, E>
+where
+    A: Selectors<Request, Response, EventResponse> + Default + Debug,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let stage = Some(self.on.into());
+        self.attributes.validate(stage)?;
+        self.condition.validate(stage)?;
+        Ok(())
+    }
 }
 
 /// When to trigger the event.
@@ -446,124 +293,118 @@ pub(crate) enum EventOn {
     Request,
     /// Log the event on response
     Response,
+    /// Log the event on every chunks in the response
+    EventResponse,
     /// Log the event on error
     Error,
 }
 
-pub(crate) struct CustomEvent<Request, Response, A, T>
+pub(crate) struct CustomEvent<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
+    A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomEventInner<Request, Response, A, T>>,
+    pub(super) name: String,
+    pub(super) level: EventLevel,
+    pub(super) event_on: EventOn,
+    pub(super) message: Arc<String>,
+    pub(super) selectors: Arc<Extendable<A, T>>,
+    pub(super) condition: Condition<T>,
+    pub(super) attributes: Vec<opentelemetry::KeyValue>,
+    pub(super) _phantom: PhantomData<EventResponse>,
 }
 
-struct CustomEventInner<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> CustomEvent<Request, Response, EventResponse, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug,
+    A: Selectors<Request, Response, EventResponse> + Default + Clone + Debug,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Debug
+        + Clone,
 {
-    name: String,
-    level: EventLevel,
-    event_on: EventOn,
-    message: Arc<String>,
-    selectors: Option<Arc<Extendable<A, T>>>,
-    condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
-}
+    pub(crate) fn from_config(name: &str, config: &Event<A, T>) -> Option<Self> {
+        EventLevel::from_config(&config.level).map(|level| Self {
+            name: name.to_owned(),
+            level,
+            event_on: config.on,
+            message: config.message.clone(),
+            selectors: config.attributes.clone(),
+            condition: config.condition.clone(),
+            attributes: Vec::new(),
+            _phantom: PhantomData,
+        })
+    }
 
-impl<A, T, Request, Response> Instrumented for CustomEvent<Request, Response, A, T>
-where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug + Debug,
-{
-    type Request = Request;
-    type Response = Response;
-
-    fn on_request(&self, request: &Self::Request) {
-        let mut inner = self.inner.lock();
-        if inner.condition.evaluate_request(request) != Some(true)
-            && inner.event_on == EventOn::Request
+    pub(crate) fn on_request(&mut self, request: &Request) {
+        if self.condition.evaluate_request(request) != Some(true)
+            && self.event_on == EventOn::Request
         {
             return;
         }
-        if let Some(selectors) = &inner.selectors {
-            inner.attributes = selectors.on_request(request);
-        }
+        self.attributes = self.selectors.on_request(request);
 
-        if inner.event_on == EventOn::Request
-            && inner.condition.evaluate_request(request) != Some(false)
-        {
-            inner.send_event();
+        if self.event_on == EventOn::Request {
+            let attrs = std::mem::take(&mut self.attributes);
+            log_event(self.level, &self.name, attrs, &self.message);
         }
     }
 
-    fn on_response(&self, response: &Self::Response) {
-        let mut inner = self.inner.lock();
-        if inner.event_on != EventOn::Response {
+    pub(crate) fn on_response(&mut self, response: &Response) {
+        if self.event_on != EventOn::Response {
             return;
         }
 
-        if !inner.condition.evaluate_response(response) {
+        if !self.condition.evaluate_response(response) {
             return;
         }
-        if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_response(response);
-            inner.attributes.append(&mut new_attributes);
-        }
+        let mut new_attributes = self.selectors.on_response(response);
+        self.attributes.append(&mut new_attributes);
 
-        inner.send_event();
+        let attrs = std::mem::take(&mut self.attributes);
+        log_event(self.level, &self.name, attrs, &self.message);
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
-        let mut inner = self.inner.lock();
-        if inner.event_on != EventOn::Error {
+    pub(crate) fn on_response_event(&self, response: &EventResponse, ctx: &Context) {
+        if self.event_on != EventOn::EventResponse {
             return;
         }
-        if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_error(error);
-            inner.attributes.append(&mut new_attributes);
+
+        if !self.condition.evaluate_event_response(response, ctx) {
+            return;
         }
-
-        inner.send_event();
+        let mut attributes = self.attributes.clone();
+        let mut new_attributes = self.selectors.on_response_event(response, ctx);
+        attributes.append(&mut new_attributes);
+        // Stub span to make sure the custom attributes are saved in current span extensions
+        // It won't be extracted or sampled at all
+        if Span::current().is_none() {
+            let span = info_span!("supergraph_event_send_event");
+            let _entered = span.enter();
+            log_event(self.level, &self.name, attributes, &self.message);
+        } else {
+            log_event(self.level, &self.name, attributes, &self.message);
+        }
     }
-}
 
-impl<A, T, Request, Response> CustomEventInner<Request, Response, A, T>
-where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug + Debug,
-{
-    #[inline]
-    fn send_event(&self) {
-        let attributes: HashMap<String, String> = self
-            .attributes
-            .iter()
-            .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-            .collect();
+    pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
+        if self.event_on != EventOn::Error {
+            return;
+        }
+        let mut new_attributes = self.selectors.on_error(error, ctx);
+        self.attributes.append(&mut new_attributes);
 
-        log_event(self.level, &self.name, attributes, &self.message);
+        let attrs = std::mem::take(&mut self.attributes);
+        log_event(self.level, &self.name, attrs, &self.message);
     }
 }
 
 #[inline]
-pub(crate) fn log_event(
-    level: EventLevel,
-    kind: &str,
-    attributes: HashMap<String, String>,
-    message: &str,
-) {
-    #[cfg(test)]
-    let mut attributes: indexmap::IndexMap<String, String> =
-        attributes.clone().into_iter().collect();
-    #[cfg(test)]
-    attributes.sort_keys();
+pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>, message: &str) {
     let span = Span::current();
-    span.set_event_dyn_attributes(
-        attributes
-            .into_iter()
-            .map(|(key, value)| Key::from(key).string(value)),
-    );
+    #[cfg(test)]
+    let mut attributes = attributes;
+    #[cfg(test)]
+    attributes.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap());
+    span.set_event_dyn_attributes(attributes);
 
     match level {
         EventLevel::Info => {
@@ -575,140 +416,5 @@ pub(crate) fn log_event(
         EventLevel::Error => {
             ::tracing::error!(%kind, "{}", message)
         }
-        EventLevel::Off => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use http::header::CONTENT_LENGTH;
-    use http::HeaderValue;
-    use tracing::instrument::WithSubscriber;
-
-    use super::*;
-    use crate::assert_snapshot_subscriber;
-    use crate::graphql;
-    use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::test::PluginTestHarness;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_router_events() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .config(include_str!("../testdata/custom_events.router.yaml"))
-            .build()
-            .await;
-
-        async {
-            test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header(CONTENT_LENGTH, "0")
-                        .header("custom-header", "val1")
-                        .header("x-log-request", HeaderValue::from_static("log"))
-                        .build()
-                        .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header(CONTENT_LENGTH, "25")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json_bytes::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-            // Without the header to enable custom event
-            test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header("custom-header", "val1")
-                        .build()
-                        .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json_bytes::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-        }
-        .with_subscriber(
-            assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
-        )
-        .await
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_supergraph_events() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .config(include_str!("../testdata/custom_events.router.yaml"))
-            .build()
-            .await;
-
-        async {
-            test_harness
-                .call_supergraph(
-                    supergraph::Request::fake_builder()
-                        .query("query { foo }")
-                        .header("x-log-request", HeaderValue::from_static("log"))
-                        .build()
-                        .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_events() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .config(include_str!("../testdata/custom_events.router.yaml"))
-            .build()
-            .await;
-
-        async {
-            let mut subgraph_req = http::Request::new(
-                graphql::Request::fake_builder()
-                    .query("query { foo }")
-                    .build(),
-            );
-            subgraph_req
-                .headers_mut()
-                .insert("x-log-request", HeaderValue::from_static("log"));
-            test_harness
-                .call_subgraph(
-                    subgraph::Request::fake_builder()
-                        .subgraph_name("subgraph")
-                        .subgraph_request(subgraph_req)
-                        .build(),
-                    |_r| {
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await
     }
 }

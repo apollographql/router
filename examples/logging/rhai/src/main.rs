@@ -59,7 +59,7 @@ mod tests {
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
+            .operation_name("TopProducts".to_string())
             .build()
             .unwrap();
 

@@ -1,0 +1,9 @@
+description: error.type attribute
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - router_error:
+        error: "router error"
