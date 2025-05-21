@@ -2,7 +2,8 @@ use std::string::FromUtf8Error;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
-use oci_client::{Client as ociClient, Client};
+use oci_client::Client as ociClient;
+use oci_client::Client;
 use oci_client::Reference;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
@@ -99,7 +100,7 @@ async fn pull_oci(
     // set of supported layers. Since we want to be able to add new layers for new features, we want the
     // client to have forwards compatibility.
     // To achieve that, we are going to fetch the manifest and then fetch the layers that this code cares about directly.
-    let (manifest, _) = client.pull_image_manifest( reference, auth ).await?;
+    let (manifest, _) = client.pull_image_manifest(reference, auth).await?;
 
     let schema_layer = manifest
         .layers
@@ -128,13 +129,23 @@ pub(crate) async fn fetch_oci(oci_config: OCIConfig) -> Result<OCIResult, Error>
 #[cfg(test)]
 mod tests {
     use futures::future::join_all;
-    use oci_client::client::{ClientConfig, ClientProtocol, ImageLayer};
-    use oci_client::manifest::{OciDescriptor, OciImageManifest, OciManifest, IMAGE_MANIFEST_MEDIA_TYPE, OCI_IMAGE_MEDIA_TYPE};
+    use oci_client::client::ClientConfig;
+    use oci_client::client::ClientProtocol;
+    use oci_client::client::ImageLayer;
+    use oci_client::manifest::IMAGE_MANIFEST_MEDIA_TYPE;
+    use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
+    use oci_client::manifest::OciDescriptor;
+    use oci_client::manifest::OciImageManifest;
+    use oci_client::manifest::OciManifest;
     use url::Url;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-    use wiremock::matchers::{method, path};
-    use crate::registry::Error::OCILayerMissingTitle;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
     use super::*;
+    use crate::registry::Error::OCILayerMissingTitle;
 
     #[test]
     fn test_build_auth_apollo_registry() {
@@ -183,12 +194,19 @@ mod tests {
 
         let layer_descriptors = join_all(layers.iter().map(async |layer| {
             let blob_digest = layer.sha256_digest();
-            let blob_url = Url::parse(&format!("{}/v2/{}/blobs/{}", mock_server.uri(), graph_id, blob_digest)).expect("url must be valid");
+            let blob_url = Url::parse(&format!(
+                "{}/v2/{}/blobs/{}",
+                mock_server.uri(),
+                graph_id,
+                blob_digest
+            ))
+            .expect("url must be valid");
             Mock::given(method("GET"))
                 .and(path(blob_url.path()))
-                .respond_with(ResponseTemplate::new(200)
-                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(layer.data.clone())
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                        .set_body_bytes(layer.data.clone()),
                 )
                 .mount(&mock_server)
                 .await;
@@ -199,10 +217,17 @@ mod tests {
                 urls: None,
                 annotations: None,
             }
-        })).await;
+        }))
+        .await;
 
-        let manifest_url = Url::parse(&format!("{}/v2/{}/manifests/{}", mock_server.uri(), graph_id, reference)).expect("url must be valid");
-        let oci_manifest = OciManifest::Image( OciImageManifest {
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+        let oci_manifest = OciManifest::Image(OciImageManifest {
             schema_version: 2,
             media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
             config: Default::default(),
@@ -216,13 +241,14 @@ mod tests {
             .respond_with(
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap())
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
             )
             .mount(&mock_server)
             .await;
 
-
-        format!("{}/{}:{}", mock_server.address(), graph_id, reference).parse::<Reference>().expect("url must be valid")
+        format!("{}/{}:{}", mock_server.address(), graph_id, reference)
+            .parse::<Reference>()
+            .expect("url must be valid")
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -238,7 +264,9 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect("Failed to fetch OCI bundle");
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
+            .await
+            .expect("Failed to fetch OCI bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -260,7 +288,9 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect("Failed to fetch OCI bundle");
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
+            .await
+            .expect("Failed to fetch OCI bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -277,7 +307,9 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference).await.expect_err("Expect can't fetch OCI bundle");
+        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
+            .await
+            .expect_err("Expect can't fetch OCI bundle");
         match result {
             OCILayerMissingTitle => {
                 // Expected error
