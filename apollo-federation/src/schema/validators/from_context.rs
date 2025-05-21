@@ -361,6 +361,7 @@ fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
         }
     }
 }
+<<<<<<< Updated upstream
 
 #[allow(dead_code)]
 fn validate_field_value_type_inner(
@@ -906,3 +907,5 @@ mod tests {
         // assert_eq!(result, None, "Mixed types should return None");
     }
 }
+=======
+>>>>>>> Stashed changes

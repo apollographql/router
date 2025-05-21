@@ -380,6 +380,8 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
+    use crate::error::FederationError;
+
     use super::SubgraphError;
     use super::typestate::Expanded;
     use super::typestate::Subgraph;
@@ -411,30 +413,28 @@ pub mod test_utils {
     }
 
     pub fn build_inner_expanded(
+        name: &str,
         schema_str: &str,
         build_option: BuildOption,
-    ) -> Result<Subgraph<Expanded>, SubgraphError> {
-        let name = "S";
+    ) -> Result<Subgraph<Expanded>, FederationError> {
         let subgraph =
-            Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
+            Subgraph::parse(name, &format!("http://{name}"), schema_str)?;
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
             subgraph
-                .into_fed2_subgraph()
-                .map_err(|e| SubgraphError::new(name, e))?
+                .into_fed2_subgraph()?
         } else {
             subgraph
         };
         subgraph
             .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
         build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
     }
 
-    pub fn build_and_expand(schema_str: &str) -> Subgraph<Expanded> {
-        build_inner_expanded(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
+    pub fn build_and_expand(name: &str, schema_str: &str) -> Result<Subgraph<Expanded>, FederationError> {
+        build_inner_expanded(name, schema_str, BuildOption::AsIs)
     }
 
     pub fn build_for_errors_with_option(
