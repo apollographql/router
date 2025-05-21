@@ -53,7 +53,7 @@ pub struct Location {
 /// as may be found in the `errors` field of a GraphQL [`Response`].
 ///
 /// Converted to (or from) JSON with serde.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Error {
@@ -178,23 +178,27 @@ impl Error {
                 reason: format!("invalid `path` within error: {}", err),
             })?;
         // TODO confirm camelcase key
-        let apollo_id = match extract_key_value_from_object!(object, "apolloId", Value::String(s) => s)
-        {
-            Ok(Some(s)) => Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
-                reason: format!("invalid `apolloId` within error: {}", err)
-            }),
-            Ok(None) => Ok(Uuid::new_v4()),
-            Err(err) => Err(MalformedResponseError {
+        let apollo_id: Option<Uuid> = extract_key_value_from_object!(
+            object,
+            "apolloId",
+            Value::String(s) => s
+        )
+        .map_err(|err| MalformedResponseError {
+            reason: format!("invalid `apolloId` within error: {}", err),
+        })?
+        .map(|s|
+            Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
                 reason: format!("invalid `apolloId` within error: {}", err),
-            }),
-        }?;
+            })
+        )
+        .transpose()?;
 
         Ok(Error {
             message,
             locations,
             path,
             extensions,
-            apollo_id
+            apollo_id: apollo_id.unwrap_or_else(Uuid::new_v4)
         })
     }
 
@@ -245,6 +249,20 @@ impl Error {
 
     pub fn apollo_id(&self) -> Uuid {
         self.apollo_id
+    }
+}
+
+
+impl Default for Error {
+    fn default() -> Self {
+        Error {
+            message: String::default(),
+            locations: Vec::default(),
+            path: None,
+            extensions: Object::default(),
+            // Always generate a new UUID
+            apollo_id: Uuid::new_v4(),
+        }
     }
 }
 
