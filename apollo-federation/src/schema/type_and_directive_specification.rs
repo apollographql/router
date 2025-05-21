@@ -516,9 +516,9 @@ pub(crate) struct DirectiveCompositionSpecification {
 pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
-    args: Vec<DirectiveArgumentSpecification>,
-    repeatable: bool,
-    locations: Vec<DirectiveLocation>,
+    pub(crate) args: Vec<DirectiveArgumentSpecification>,
+    pub(crate) repeatable: bool,
+    pub(crate) locations: Vec<DirectiveLocation>,
 }
 
 impl DirectiveSpecification {
@@ -916,7 +916,7 @@ fn ensure_same_fields(
 // The `existing_directive` is the definition that is defined in the schema.
 // And the rest of arguments are the expected directive definition from the specification.
 // The existing (= actual) definition must be compatible with the expected one.
-fn ensure_same_directive_structure(
+pub(crate) fn ensure_same_directive_structure(
     existing_directive: &DirectiveDefinition,
     name: &Name,
     args: &[ResolvedArgumentSpecification],

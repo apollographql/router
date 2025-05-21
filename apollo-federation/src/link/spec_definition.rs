@@ -204,6 +204,13 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.keys()
     }
 
+    pub(crate) fn latest(&self) -> &T {
+        self.definitions
+            .values()
+            .last()
+            .expect("All specifications must have at least one version")
+    }
+
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,
