@@ -169,6 +169,7 @@ impl Service<SupergraphRequest> for SupergraphService {
             let errors = vec![
                 crate::error::Error::builder()
                     .message(error.to_string())
+                    // TODO this doesn't precisely match previous behavior
                     .extension_code("INTERNAL_SERVER_ERROR")
                     .build()
             ];
