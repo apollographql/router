@@ -4,12 +4,13 @@ use std::hash::Hash;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use serde_json_bytes::Map as JSONMap;
-use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
+
+use super::safe_json::map::Map as JSONMap;
+use super::safe_json::value::Value as JSON;
 
 use super::helpers::json_merge;
 use super::helpers::json_type_name;
@@ -39,22 +40,28 @@ impl JSONSelection {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let safe_data: JSON = data.into();
+        let vars = vars
+            .iter()
+            .map(|(var_name, var_data)| (var_name, JSON::from(var_data)))
+            .collect::<IndexMap<&String, JSON>>();
+
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::default();
 
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
-        for (var_name, var_data) in vars {
+        for (var_name, var_data) in vars.iter() {
             vars_with_paths.insert(
                 KnownVariable::from_str(var_name.as_str()),
-                (var_data, InputPath::empty().append(json!(var_name))),
+                (var_data, InputPath::empty().append(json!(var_name).into())),
             );
         }
         // The $ variable initially refers to the root data value, but is
         // rebound by nested selection sets to refer to the root value the
         // selection set was applied to.
-        vars_with_paths.insert(KnownVariable::Dollar, (data, InputPath::empty()));
+        vars_with_paths.insert(KnownVariable::Dollar, (&safe_data, InputPath::empty()));
 
-        let (value, apply_errors) = self.apply_to_path(data, &vars_with_paths, &InputPath::empty());
+        let (value, apply_errors) = self.apply_to_path(&safe_data, &vars_with_paths, &InputPath::empty());
 
         // Since errors is an IndexSet, this line effectively deduplicates the
         // errors, in an attempt to make them less verbose. However, now that we
@@ -63,7 +70,7 @@ impl JSONSelection {
         // deduplicated, so we might consider sticking with a Vec<ApplyToError>.
         errors.extend(apply_errors);
 
-        (value, errors.into_iter().collect())
+        (value.map(|v| v.render()), errors.into_iter().collect())
     }
 
     pub fn shape(&self) -> Shape {
@@ -131,7 +138,7 @@ pub(super) trait ApplyToInternal {
         let mut errors = Vec::new();
 
         for (i, element) in data_array.iter().enumerate() {
-            let input_path_with_index = input_path.append(json!(i));
+            let input_path_with_index = input_path.append(json!(i).into());
             let (applied, apply_errors) = self.apply_to_path(element, vars, &input_path_with_index);
             errors.extend(apply_errors);
             // When building an Object, we can simply omit missing properties

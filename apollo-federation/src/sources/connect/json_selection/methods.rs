@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -36,6 +37,7 @@ pub(super) enum ArrowMethod {
     Entries,
     JsonStringify,
     JoinNotNull,
+    UrlSafe,
 
     // Future methods:
     TypeOf,
@@ -149,6 +151,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Entries => &public::EntriesMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
+            Self::UrlSafe => &public::UrlSafeMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -204,6 +207,7 @@ impl ArrowMethod {
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
+            "urlSafe" => Some(Self::UrlSafe),
             _ => None,
         };
 
@@ -229,6 +233,7 @@ impl ArrowMethod {
                 | Self::Entries
                 | Self::JsonStringify
                 | Self::JoinNotNull
+                | Self::UrlSafe
         )
     }
 }
