@@ -58,7 +58,6 @@ pub enum PlanNode {
     Defer(DeferNode),
     #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
-    Statistics(QueryPlanningStatistics),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -272,7 +271,6 @@ impl PlanNode {
             Self::Flatten(_) => "Flatten",
             Self::Defer(_) => "Defer",
             Self::Condition(_) => "Condition",
-            Self::Statistics(_) => "Statistics",
         }
     }
 }

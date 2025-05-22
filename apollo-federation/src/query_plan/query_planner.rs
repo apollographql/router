@@ -492,7 +492,6 @@ impl QueryPlanner {
         }?;
 
         let root_node = match root_node {
-            Some(PlanNode::Statistics(stats)) => Some(TopLevelPlanNode::Statistics(stats)),
             // If this is a subscription, we want to make sure that we return a SubscriptionNode rather than a PlanNode
             // We potentially will need to separate "primary" from "rest"
             // Note that if it is a subscription, we are guaranteed that nothing is deferred.

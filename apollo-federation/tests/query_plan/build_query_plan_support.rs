@@ -294,7 +294,6 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
                     visit_node(subgraph_name, fetch_nodes, inner.if_clause.as_deref());
                     visit_node(subgraph_name, fetch_nodes, inner.else_clause.as_deref());
                 }
-                PlanNode::Statistics(_) => {}
             }
         }
     }

@@ -60,20 +60,6 @@ impl PlanNode {
             Self::Flatten(node) => node.write_indented(state),
             Self::Defer(node) => node.write_indented(state),
             Self::Condition(node) => node.write_indented(state),
-            Self::Statistics(stats) => {
-                state.write("Statistics {")?;
-                state.indent()?;
-                state.write(format!(
-                    "evaluated_plan_count: {}",
-                    stats.evaluated_plan_count.get()
-                ))?;
-                state.write(format!(
-                    "evaluated_plan_paths: {}",
-                    stats.evaluated_plan_paths.get()
-                ))?;
-                state.dedent()?;
-                state.write("}")
-            }
         }
     }
 }

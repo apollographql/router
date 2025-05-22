@@ -236,7 +236,6 @@ fn interpret_plan_node(
             interpret_condition_node(context, state, conditions, condition)
         }
         PlanNode::Defer(defer) => interpret_defer_node(context, state, conditions, defer),
-        PlanNode::Statistics(stats) => interpret_statistics_node(context, state, stats),
     }
 }
 

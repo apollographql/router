@@ -39,7 +39,6 @@ impl From<&'_ next::PlanNode> for plan::PlanNode {
             next::PlanNode::Flatten(node) => node.into(),
             next::PlanNode::Defer(node) => node.into(),
             next::PlanNode::Condition(node) => node.as_ref().into(),
-            next::PlanNode::Statistics(stats) => stats.into(),
         }
     }
 }
