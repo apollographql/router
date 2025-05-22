@@ -32,7 +32,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
-use crate::registry::OCIConfig;
+use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -290,8 +290,8 @@ impl Opt {
         })
     }
 
-    pub(crate) fn oci_config(&self) -> Result<OCIConfig, anyhow::Error> {
-        Ok(OCIConfig {
+    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()

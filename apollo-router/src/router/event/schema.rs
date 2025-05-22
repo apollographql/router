@@ -8,7 +8,7 @@ use derive_more::From;
 use futures::prelude::*;
 use url::Url;
 
-use crate::registry::OCIConfig;
+use crate::registry::OciConfig;
 use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
@@ -55,7 +55,7 @@ pub enum SchemaSource {
     },
 
     #[display("Registry")]
-    OCI(OCIConfig),
+    OCI(OciConfig),
 }
 
 impl From<&'_ str> for SchemaSource {

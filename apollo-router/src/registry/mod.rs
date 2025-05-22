@@ -12,7 +12,7 @@ use thiserror::Error;
 /// Configuration for fetching an OCI Bundle
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
-pub struct OCIConfig {
+pub struct OciConfig {
     /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
     pub apollo_key: String,
 
@@ -21,41 +21,41 @@ pub struct OCIConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OCIResult {
+pub(crate) struct OciResult {
     pub schema: String,
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum Error {
+pub(crate) enum OciError {
     #[error("OCI layer does not have a title")]
-    OCILayerMissingTitle,
+    LayerMissingTitle,
     #[error("Oci Distribution error: {0}")]
-    OCIDistributionError(OciDistributionError),
+    Distribution(OciDistributionError),
     #[error("Oci Parsing error: {0}")]
-    OCIParseError(oci_client::ParseError),
+    Parse(oci_client::ParseError),
     #[error("Unable to parse layer: {0}")]
-    OCILayerParseError(FromUtf8Error),
+    LayerParse(FromUtf8Error),
 }
 
 const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 
-impl From<oci_client::ParseError> for Error {
+impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
-        Error::OCIParseError(value)
+        OciError::Parse(value)
     }
 }
 
-impl From<OciDistributionError> for Error {
+impl From<OciDistributionError> for OciError {
     fn from(value: OciDistributionError) -> Self {
-        Error::OCIDistributionError(value)
+        OciError::Distribution(value)
     }
 }
 
-impl From<FromUtf8Error> for Error {
+impl From<FromUtf8Error> for OciError {
     fn from(value: FromUtf8Error) -> Self {
-        Error::OCILayerParseError(value)
+        OciError::LayerParse(value)
     }
 }
 
@@ -72,10 +72,10 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
     }
 
     match docker_credential::get_credential(server) {
-        Err(CredentialRetrievalError::ConfigNotFound) => RegistryAuth::Anonymous,
-        Err(CredentialRetrievalError::NoCredentialConfigured) => RegistryAuth::Anonymous,
+        Err(CredentialRetrievalError::ConfigNotFound)
+        | Err(CredentialRetrievalError::NoCredentialConfigured) => RegistryAuth::Anonymous,
         Err(e) => {
-            tracing::warn!("Error handling docker configuration file: {}", e);
+            tracing::warn!("Error handling docker configuration file: {e}");
             RegistryAuth::Anonymous
         }
         Ok(DockerCredential::UsernamePassword(username, password)) => {
@@ -93,7 +93,7 @@ async fn pull_oci(
     client: &mut ociClient,
     auth: &RegistryAuth,
     reference: &Reference,
-) -> Result<OCIResult, Error> {
+) -> Result<OciResult, OciError> {
     tracing::debug!(?reference, "pulling oci bundle");
 
     // We aren't using the default `pull` function because that validates that all the layers are in the
@@ -106,7 +106,7 @@ async fn pull_oci(
         .layers
         .iter()
         .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
-        .ok_or(Error::OCILayerMissingTitle)?
+        .ok_or(OciError::LayerMissingTitle)?
         .clone();
 
     let mut schema = Vec::new();
@@ -114,13 +114,13 @@ async fn pull_oci(
         .pull_blob(reference, &schema_layer, &mut schema)
         .await?;
 
-    Ok(OCIResult {
+    Ok(OciResult {
         schema: String::from_utf8(schema)?,
     })
 }
 
 /// Fetch an OCI bundle
-pub(crate) async fn fetch_oci(oci_config: OCIConfig) -> Result<OCIResult, Error> {
+pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciResult, OciError> {
     let reference: Reference = oci_config.url.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     pull_oci(&mut Client::default(), &auth, &reference).await
@@ -145,7 +145,7 @@ mod tests {
     use wiremock::matchers::path;
 
     use super::*;
-    use crate::registry::Error::OCILayerMissingTitle;
+    use crate::registry::OciError::LayerMissingTitle;
 
     #[test]
     fn test_build_auth_apollo_registry() {
@@ -305,7 +305,7 @@ mod tests {
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
             .expect_err("Expect can't fetch OCI bundle");
-        if let OCILayerMissingTitle = result {
+        if let LayerMissingTitle = result {
             // Expected error
         } else {
             panic!("Expected OCILayerMissingTitle error, got {:?}", result);
