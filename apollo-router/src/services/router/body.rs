@@ -46,8 +46,7 @@ where
 }
 
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
-#[cfg(test)]
-pub(crate) async fn into_string<B>(input: B) -> Result<String, AxumError>
+pub async fn into_string<B>(input: B) -> Result<String, AxumError>
 where
     B: HttpBody,
     B::Error: Into<axum::BoxError>,

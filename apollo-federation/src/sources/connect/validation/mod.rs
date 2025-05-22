@@ -16,6 +16,7 @@
 
 mod connect;
 mod coordinates;
+mod errors;
 mod expression;
 mod graphql;
 mod http;
@@ -130,15 +131,23 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     }
 
     // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
-    // incorrect line/col info.
+    // incorrect line/col info if we mess this up
     if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
-        if let Some(replace_range) = schema_info.connect_link.directive().location() {
-            let mut new_link = schema_info.connect_link.clone();
-            new_link.set_spec(ConnectSpec::V0_2);
-            source_text.replace_range(
-                replace_range.offset()..replace_range.end_offset(),
-                &new_link.to_string(),
-            );
+        if let Some(version_range) =
+            schema_info
+                .connect_link
+                .directive()
+                .location()
+                .and_then(|link_range| {
+                    let version_offset = source_text
+                        .get(link_range.offset()..link_range.end_offset())?
+                        .find(ConnectSpec::V0_1.as_str())?;
+                    let start = link_range.offset() + version_offset;
+                    let end = start + ConnectSpec::V0_1.as_str().len();
+                    Some(start..end)
+                })
+        {
+            source_text.replace_range(version_range, ConnectSpec::V0_2.as_str());
         } else {
             messages.push(Message {
                 code: Code::UnknownConnectorsVersion,
@@ -265,6 +274,10 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `errors.message` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsMessage,
+    /// The `errors.extensions` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsExtensions,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
@@ -303,6 +316,8 @@ pub enum Code {
     ConnectOnRoot,
     /// Using both `$batch` and `$this` is not allowed
     ConnectBatchAndThis,
+    /// Invalid URL property
+    InvalidUrlProperty,
 }
 
 impl Code {
@@ -344,10 +359,10 @@ mod test_validate_source {
                 assert_snapshot!(format!("{:#?}", result.errors));
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
-                    diff::Result::Left(line) => Some(format!("- {line}")),
-                    diff::Result::Right(line) => Some(format!("+ {line}")),
-                    diff::Result::Both(_, _) => None,
-                }).join("\n"));
+                        diff::Result::Left(line) => Some(format!("- {line}")),
+                        diff::Result::Right(line) => Some(format!("+ {line}")),
+                        diff::Result::Both(_, _) => None,
+                    }).join("\n"));
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }

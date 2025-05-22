@@ -17,6 +17,11 @@ pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 
+pub(crate) const ERRORS_NAME_IN_SPEC: Name = name!("ConnectorErrors");
+pub(crate) const ERRORS_ARGUMENT_NAME: Name = name!("errors");
+pub(crate) const ERRORS_MESSAGE_ARGUMENT_NAME: Name = name!("message");
+pub(crate) const ERRORS_EXTENSIONS_ARGUMENT_NAME: Name = name!("extensions");
+
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
@@ -47,11 +52,14 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Common HTTP options
     pub(crate) http: SourceHTTPArguments,
+
+    /// Configure the error mapping functionality for this source
+    pub(crate) errors: Option<ErrorsArguments>,
 }
 
-/// Common HTTP options for a connector [SourceSpecDefinition]
+/// Common HTTP options for a connector `@source`
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct SourceHTTPArguments {
+pub struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
     pub(crate) base_url: Uri,
 
@@ -62,13 +70,14 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) query_params: Option<JSONSelection>,
 }
 
-/// Settings for the connector when it is doing a $batch entity resolver
+/// Configure the error mapping functionality for a source or connect
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectBatchArguments {
-    /// Set a maximum number of requests to be batched together.
-    ///
-    /// Over this maximum, will be split into multiple batch requests of max_size.
-    pub(crate) max_size: Option<usize>,
+pub(crate) struct ErrorsArguments {
+    /// Configure the mapping for the "message" portion of an error
+    pub(crate) message: Option<JSONSelection>,
+
+    /// Configure the mapping for the "extensions" portion of an error
+    pub(crate) extensions: Option<JSONSelection>,
 }
 
 /// Arguments to the `@connect` directive
@@ -104,11 +113,14 @@ pub(crate) struct ConnectDirectiveArguments {
 
     /// Settings for the connector when it is doing a $batch entity resolver
     pub(crate) batch: Option<ConnectBatchArguments>,
+
+    /// Configure the error mapping functionality for this connect
+    pub(crate) errors: Option<ErrorsArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectHTTPArguments {
+pub struct ConnectHTTPArguments {
     pub(crate) get: Option<String>,
     pub(crate) post: Option<String>,
     pub(crate) patch: Option<String>,
@@ -131,4 +143,13 @@ pub(crate) struct ConnectHTTPArguments {
     pub(crate) path: Option<JSONSelection>,
     /// A [`JSONSelection`] that should resolve to an object to convert to query params.
     pub(crate) query_params: Option<JSONSelection>,
+}
+
+/// Settings for the connector when it is doing a $batch entity resolver
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of max_size.
+    pub(crate) max_size: Option<usize>,
 }

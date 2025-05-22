@@ -453,7 +453,7 @@ fn authenticate(
         let failed = true;
         increment_jwt_counter_metric(failed);
 
-        tracing::error!(message = %error, "jwt authentication failure");
+        tracing::info!(message = %error, "jwt authentication failure");
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,

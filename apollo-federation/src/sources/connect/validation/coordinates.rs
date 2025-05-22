@@ -8,6 +8,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 
 use super::DirectiveName;
+use super::source::SourceName;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
@@ -29,8 +30,26 @@ impl Display for ConnectDirectiveCoordinate<'_> {
         let Self { directive, element } = self;
         write!(
             f,
-            "`@{connect_directive_name}` on `{element}`",
-            connect_directive_name = directive.name
+            "`@{directive_name}` on `{element}`",
+            directive_name = directive.name
+        )
+    }
+}
+
+/// The location of a `@source` directive.
+#[derive(Clone, Copy)]
+pub(super) struct SourceDirectiveCoordinate<'a> {
+    pub(crate) name: SourceName<'a>,
+    pub(super) directive: &'a Node<Directive>,
+}
+
+impl Display for SourceDirectiveCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self { name, directive } = self;
+        write!(
+            f,
+            "`@{directive_name}(name: \"{name}\")`",
+            directive_name = directive.name
         )
     }
 }
@@ -60,6 +79,8 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
 }
 
 /// The coordinate of an `HTTP` arg within a connect directive.
+
+#[derive(Clone)]
 pub(super) struct ConnectHTTPCoordinate<'a> {
     pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
 }

@@ -135,6 +135,17 @@ impl ConnectorPosition {
         }
     }
 
+    /// The "simple" name of a Connector position without directive index included.
+    /// This is useful for error messages where the index could be confusing to users.
+    pub(crate) fn simple_name(&self) -> String {
+        match self {
+            ConnectorPosition::Field(pos) => {
+                format!("{}.{}", pos.field.type_name(), pos.field.field_name(),)
+            }
+            ConnectorPosition::Type(pos) => format!("{}", pos.type_name),
+        }
+    }
+
     pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
         self.on_query_type(schema) || self.on_mutation_type(schema)
     }

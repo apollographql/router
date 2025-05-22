@@ -77,6 +77,18 @@ pub(crate) struct ScalarTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl ScalarTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.union_fields.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ObjectTypeReferencers {
     pub(crate) schema_roots: IndexSet<SchemaRootDefinitionPosition>,
@@ -127,12 +139,32 @@ pub(crate) struct EnumTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl EnumTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InputObjectTypeReferencers {
     pub(crate) object_field_arguments: IndexSet<ObjectFieldArgumentDefinitionPosition>,
     pub(crate) interface_field_arguments: IndexSet<InterfaceFieldArgumentDefinitionPosition>,
     pub(crate) input_object_fields: IndexSet<InputObjectFieldDefinitionPosition>,
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
+}
+
+impl InputObjectTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_field_arguments.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
