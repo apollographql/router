@@ -241,7 +241,7 @@ pub enum Code {
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
     InvalidUrlScheme,
-    /// The `source` argument used in a `@connect` directive doesn't match any named connecter
+    /// The `source` argument used in a `@connect` directive doesn't match any named connector
     /// sources created with `@source`.
     SourceNameMismatch,
     /// Connectors currently don't support subscription operations.
@@ -276,8 +276,6 @@ pub enum Code {
     InvalidBody,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
-    /// The `errors.extensions` provided in `@connect` or `@source` was not valid.
-    InvalidErrorsExtensions,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
@@ -298,18 +296,18 @@ pub enum Code {
     ConnectorsUnresolvedField,
     /// A field resolved by a connector has arguments defined.
     ConnectorsFieldWithArguments,
+    /// Connector batch key is not reflected in the output selection
+    ConnectorsBatchKeyNotInSelection,
+    /// Connector batch key is derived from a non-root variable such as `$this` or `$context`.
+    ConnectorsNonRootBatchKey,
     /// Part of the `@connect` refers to an `$args` which is not defined.
     UndefinedArgument,
     /// Part of the `@connect` refers to an `$this` which is not defined.
     UndefinedField,
     /// A type used in a variable is not yet supported (i.e., unions).
     UnsupportedVariableType,
-    /// A variable is nullable in a location which requires non-null at runtime.
-    NullabilityMismatch,
     /// The version set in the connectors `@link` URL is not recognized.
     UnknownConnectorsVersion,
-    /// Feature unavailable
-    FeatureUnavailable,
     /// When `@connect` is applied to a type, `entity` can't be set to `false`
     ConnectOnTypeMustBeEntity,
     /// `@connect` cannot be applied to a query, mutation, or subscription root type
@@ -323,7 +321,7 @@ pub enum Code {
 impl Code {
     pub fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
+            Self::NoSourceImport => Severity::Warning,
             _ => Severity::Error,
         }
     }
