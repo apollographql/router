@@ -462,6 +462,11 @@ impl PlanNode {
                     ))
                     .await
                 }
+                Self::Statistics { .. } => {
+                    // Statistics nodes don't affect the response shape, so we just return the parent value unchanged
+                    value = parent_value.clone();
+                    errors = Vec::new();
+                }
             }
 
             (value, errors)
