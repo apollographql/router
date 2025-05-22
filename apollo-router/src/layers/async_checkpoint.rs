@@ -14,8 +14,8 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use futures::Future;
+use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -412,9 +412,11 @@ mod async_checkpoint_tests {
 
         service_stack.ready().await.unwrap();
 
-        assert!(service_stack
-            .call(ExecutionRequest::fake_builder().build())
-            .await
-            .is_ok());
+        assert!(
+            service_stack
+                .call(ExecutionRequest::fake_builder().build())
+                .await
+                .is_ok()
+        );
     }
 }

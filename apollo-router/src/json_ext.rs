@@ -269,7 +269,7 @@ impl ValueExt for Value {
                         (Some((field_a, value_a)), Some((field_b, value_b)))
                             if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -286,7 +286,7 @@ impl ValueExt for Value {
                         (Some(value_a), Some(value_b))
                             if ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -425,7 +425,7 @@ impl ValueExt for Value {
                     _other => {
                         return Err(FetchError::ExecutionPathNotFound {
                             reason: "expected an array".to_string(),
-                        })
+                        });
                     }
                 },
                 PathElement::Key(k, type_conditions) => {
@@ -450,7 +450,7 @@ impl ValueExt for Value {
                         _other => {
                             return Err(FetchError::ExecutionPathNotFound {
                                 reason: "expected an object".to_string(),
-                            })
+                            });
                         }
                     }
                 }
@@ -536,7 +536,7 @@ impl ValueExt for Value {
             && self
                 .get(TYPENAME)
                 .and_then(|v| v.as_str())
-                .map_or(true, |typename| {
+                .is_none_or(|typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
     }
@@ -1392,7 +1392,9 @@ mod tests {
 
         // test objects nested
         assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
-        assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(
+            !json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}}))
+        );
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
 

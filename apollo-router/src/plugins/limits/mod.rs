@@ -13,6 +13,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -21,7 +22,6 @@ use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::router;
 use crate::services::router::BoxService;
-use crate::Context;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -242,8 +242,8 @@ mod test {
     use http::StatusCode;
     use tower::BoxError;
 
-    use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::LimitsPlugin;
+    use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
 
@@ -430,12 +430,11 @@ mod test {
     }
 
     async fn plugin() -> PluginTestHarness<LimitsPlugin> {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::new(
-            Some(include_str!("fixtures/content_length_limit.router.yaml")),
-            None,
-            None,
-        )
-        .await;
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(include_str!("fixtures/content_length_limit.router.yaml"))
+            .build()
+            .await
+            .expect("test harness");
         plugin
     }
 }

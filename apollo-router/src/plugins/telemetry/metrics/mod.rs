@@ -1,16 +1,16 @@
 use multimap::MultiMap;
-use opentelemetry_sdk::metrics::reader::AggregationSelector;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::reader::AggregationSelector;
 use tower::BoxError;
 
+use crate::ListenAddr;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::router_factory::Endpoint;
-use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;
@@ -20,6 +20,8 @@ pub(crate) mod prometheus;
 pub(crate) struct MetricsBuilder {
     pub(crate) public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
     pub(crate) apollo_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+    pub(crate) apollo_realtime_meter_provider_builder:
+        opentelemetry_sdk::metrics::MeterProviderBuilder,
     pub(crate) prometheus_meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
@@ -35,6 +37,8 @@ impl MetricsBuilder {
             public_meter_provider_builder: opentelemetry_sdk::metrics::SdkMeterProvider::builder()
                 .with_resource(resource.clone()),
             apollo_meter_provider_builder: opentelemetry_sdk::metrics::SdkMeterProvider::builder(),
+            apollo_realtime_meter_provider_builder:
+                opentelemetry_sdk::metrics::SdkMeterProvider::builder(),
             prometheus_meter_provider: None,
             custom_endpoints: MultiMap::new(),
             apollo_metrics_sender: Sender::default(),

@@ -1,21 +1,22 @@
 use derivative::Derivative;
+use futures::TryFutureExt;
 use futures::future;
 use futures::future::BoxFuture;
-use futures::TryFutureExt;
+use opentelemetry::InstrumentationLibrary;
+use opentelemetry::KeyValue;
+use opentelemetry::trace::Event;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry::InstrumentationLibrary;
-use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanEvents;
 use opentelemetry_sdk::trace::SpanLinks;
-use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
@@ -24,22 +25,22 @@ use tower::BoxError;
 use url::Url;
 
 use super::apollo::ErrorsConfiguration;
-use super::config_new::attributes::SUBGRAPH_NAME;
+use super::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
+use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
+use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
 use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
 use super::tracing::apollo_telemetry::extract_string;
-use super::tracing::apollo_telemetry::LightSpanData;
-use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
+use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::apollo::router_id;
-use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
+use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Derivative)]
@@ -157,6 +158,23 @@ impl ApolloOtlpExporter {
         }
     }
 
+    fn extract_span_events(span: &LightSpanData) -> SpanEvents {
+        let mut span_events = SpanEvents::default();
+        for light_event in &span.events {
+            span_events.events.push(Event::new(
+                light_event.name.clone(),
+                light_event.timestamp,
+                light_event
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+                    .collect(),
+                0,
+            ));
+        }
+        span_events
+    }
+
     fn base_prepare_span(&self, span: LightSpanData) -> SpanData {
         SpanData {
             span_context: SpanContext::new(
@@ -176,7 +194,7 @@ impl ApolloOtlpExporter {
                 .iter()
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
-            events: SpanEvents::default(),
+            events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status: span.status,
             instrumentation_lib: self.intrumentation_library.clone(),
@@ -229,7 +247,7 @@ impl ApolloOtlpExporter {
                 .iter()
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
-            events: SpanEvents::default(),
+            events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
             instrumentation_lib: self.intrumentation_library.clone(),

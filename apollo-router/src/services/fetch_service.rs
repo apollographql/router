@@ -1,7 +1,7 @@
 //! Tower fetcher for fetch node execution.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
@@ -9,35 +9,35 @@ use serde_json_bytes::Value;
 use tokio::sync::mpsc;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing::instrument::Instrumented;
 use tracing::Instrument;
+use tracing::instrument::Instrumented;
 
+use super::ConnectRequest;
+use super::FetchRequest;
+use super::SubgraphRequest;
+use super::SubscriptionTaskParams;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
 use super::fetch::BoxService;
 use super::fetch::SubscriptionRequest;
 use super::new_service::ServiceFactory;
-use super::ConnectRequest;
-use super::FetchRequest;
-use super::SubgraphRequest;
-use super::SubscriptionTaskParams;
 use crate::error::Error;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::query_planner::FETCH_SPAN_NAME;
+use crate::query_planner::OperationKind;
+use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::subscription::SubscriptionNode;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
-use crate::query_planner::OperationKind;
-use crate::query_planner::FETCH_SPAN_NAME;
-use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::query_planner::subscription::SubscriptionNode;
+use crate::services::FetchResponse;
+use crate::services::SubgraphServiceFactory;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
 use crate::services::subgraph::BoxGqlStream;
-use crate::services::FetchResponse;
-use crate::services::SubgraphServiceFactory;
 use crate::spec::Schema;
 
 /// The fetch service delegates to either the subgraph service or connector service depending
@@ -135,6 +135,14 @@ impl FetchService {
         let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
+            let connector = schema
+                .connectors
+                .as_ref()
+                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
+                .ok_or("no connector found for service")?;
+
+            let keys = connector.resolvable_key(schema.supergraph_schema())?;
+
             let (_parts, response) = match connector_service_factory
                 .create()
                 .oneshot(
@@ -144,11 +152,12 @@ impl FetchService {
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
+                        .and_keys(keys)
                         .build(),
                 )
                 .await
                 .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
-                .add_subgraph_name(subgraph_name.as_str())
+                .with_subgraph_name(subgraph_name.as_str())
             {
                 Err(e) => {
                     return Ok((Value::default(), vec![e]));
@@ -323,10 +332,12 @@ impl FetchService {
                 return Box::pin(async {
                     Ok((
                         Value::default(),
-                        vec![Error::builder()
-                            .message("can't open new subscription, limit reached")
-                            .extension_code("SUBSCRIPTION_MAX_LIMIT")
-                            .build()],
+                        vec![
+                            Error::builder()
+                                .message("can't open new subscription, limit reached")
+                                .extension_code("SUBSCRIPTION_MAX_LIMIT")
+                                .build(),
+                        ],
                     ))
                 });
             }
@@ -340,10 +351,12 @@ impl FetchService {
                 return Box::pin(async {
                     Ok((
                         Value::default(),
-                        vec![Error::builder()
-                            .message("subscription support is not enabled")
-                            .extension_code("SUBSCRIPTION_DISABLED")
-                            .build()],
+                        vec![
+                            Error::builder()
+                                .message("subscription support is not enabled")
+                                .extension_code("SUBSCRIPTION_DISABLED")
+                                .build(),
+                        ],
                     ))
                 });
             }
@@ -400,27 +413,29 @@ impl FetchService {
                         stream_rx: rx_handle.into(),
                     };
 
-                    let subscription_conf_tx =
-                        match subscription_handle.subscription_conf_tx.take() {
-                            Some(sc) => sc,
-                            None => {
-                                return Ok((
-                                    Value::default(),
-                                    vec![Error::builder()
+                    let subscription_conf_tx = match subscription_handle.subscription_conf_tx.take()
+                    {
+                        Some(sc) => sc,
+                        None => {
+                            return Ok((
+                                Value::default(),
+                                vec![Error::builder()
                                 .message("no subscription conf sender provided for a subscription")
                                 .extension_code("NO_SUBSCRIPTION_CONF_TX")
                                 .build()],
-                                ));
-                            }
-                        };
+                            ));
+                        }
+                    };
 
                     if let Err(err) = subscription_conf_tx.send(subscription_params).await {
                         return Ok((
                             Value::default(),
-                            vec![Error::builder()
-                                .message(format!("cannot send the subscription data: {err:?}"))
-                                .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
-                                .build()],
+                            vec![
+                                Error::builder()
+                                    .message(format!("cannot send the subscription data: {err:?}"))
+                                    .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
+                                    .build(),
+                            ],
                         ));
                     }
 
@@ -438,13 +453,15 @@ impl FetchService {
                     }
                 }
                 None => {
-                    vec![Error::builder()
-                        .message(format!(
-                            "subscription mode is not configured for subgraph {:?}",
-                            service_name
-                        ))
-                        .extension_code("INVALID_SUBSCRIPTION_MODE")
-                        .build()]
+                    vec![
+                        Error::builder()
+                            .message(format!(
+                                "subscription mode is not configured for subgraph {:?}",
+                                service_name
+                            ))
+                            .extension_code("INVALID_SUBSCRIPTION_MODE")
+                            .build(),
+                    ]
                 }
             };
             Ok((Value::default(), response))

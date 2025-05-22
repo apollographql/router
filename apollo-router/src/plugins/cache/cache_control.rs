@@ -3,10 +3,10 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use http::header::AGE;
-use http::header::CACHE_CONTROL;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::AGE;
+use http::header::CACHE_CONTROL;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;

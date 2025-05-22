@@ -34,7 +34,7 @@ pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 
     fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
-        self.range().map(|range| source_id.location(range.clone()))
+        self.range().map(|range| source_id.location(range))
     }
 }
 
@@ -137,12 +137,9 @@ pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange
 
 // Parser combinator that matches a &str and returns a WithRange<&str> with the
 // matched string and the range of the match.
-pub(super) fn ranged_span<'a, 'b>(
+pub(super) fn ranged_span<'a, 'b: 'a>(
     s: &'a str,
-) -> impl FnMut(Span<'b>) -> ParseResult<'b, WithRange<&'b str>> + 'a
-where
-    'b: 'a,
-{
+) -> impl FnMut(Span<'b>) -> ParseResult<'b, WithRange<&'b str>> {
     map(tag(s), |t: Span<'b>| {
         let start = t.location_offset();
         let range = Some(start..start + s.len());
@@ -160,7 +157,7 @@ pub(crate) mod strip_ranges {
     use super::WithRange;
 
     /// Including location information in the AST introduces unnecessary
-    /// varation in many tests. StripLoc is a test-only trait allowing
+    /// variation in many tests. StripLoc is a test-only trait allowing
     /// participating AST nodes to remove their own and their descendants'
     /// location information, thereby normalizing the AST for assert_eq!
     /// comparisons.
@@ -298,6 +295,9 @@ pub(crate) mod strip_ranges {
                         LitExpr::Array(new_vec)
                     }
                     LitExpr::Path(path) => LitExpr::Path(path.strip_ranges()),
+                    LitExpr::LitPath(literal, subpath) => {
+                        LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
+                    }
                 },
                 None,
             )
@@ -313,10 +313,9 @@ pub(crate) mod strip_ranges {
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-    use insta::assert_snapshot;
-
     use super::*;
+    use crate::assert_debug_snapshot;
+    use crate::assert_snapshot;
     use crate::sources::connect::JSONSelection;
 
     #[test]

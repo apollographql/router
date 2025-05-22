@@ -3,8 +3,8 @@ use itertools::Itertools as _;
 
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
-use crate::configuration::Apq;
 use crate::Configuration;
+use crate::configuration::Apq;
 
 pub(super) struct APQIncompatPlugin {
     config: Apq,

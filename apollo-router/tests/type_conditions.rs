@@ -3,12 +3,12 @@
 //!
 
 use apollo_compiler::ast::Document;
+use apollo_router::MockedSubgraphs;
+use apollo_router::TestHarness;
 use apollo_router::graphql::Request;
 use apollo_router::graphql::Response;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
-use apollo_router::MockedSubgraphs;
-use apollo_router::TestHarness;
 use serde::Deserialize;
 use serde_json::json;
 use serde_json_bytes::ByteString;
@@ -354,8 +354,6 @@ fn setup_from_mocks(
     configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],
 ) -> TestHarness<'static> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let mut mocked_subgraphs = MockedSubgraphs::default();
 
     for (name, m) in mocks {

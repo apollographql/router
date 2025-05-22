@@ -3,18 +3,18 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use apollo_federation::link::cost_spec_definition::CostDirective;
 use apollo_federation::link::cost_spec_definition::CostSpecDefinition;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective;
 use apollo_federation::schema::ValidFederationSchema;
 
-use crate::plugins::demand_control::cost_calculator::directives::RequiresDirective;
 use crate::plugins::demand_control::DemandControlError;
+use crate::plugins::demand_control::cost_calculator::directives::RequiresDirective;
 
 pub(in crate::plugins::demand_control) struct InputDefinition {
     name: Name,

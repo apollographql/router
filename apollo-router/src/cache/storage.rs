@@ -2,16 +2,16 @@ use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use lru::LruCache;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::KeyValue;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
@@ -80,7 +80,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
-                match RedisCacheStorage::new(config).await {
+                match RedisCacheStorage::new(config, caller).await {
                     Err(e) => {
                         tracing::error!(
                             cache = caller,

@@ -1,18 +1,18 @@
 use events::EventOn;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
 
 use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
+use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::Context;
 
 /// These modules contain a new config structure for telemetry that will progressively move to
 pub(crate) mod attributes;
@@ -25,10 +25,15 @@ pub(crate) mod cost;
 pub(crate) mod events;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
+pub(crate) mod http_common;
+pub(crate) mod http_server;
 pub(crate) mod instruments;
 pub(crate) mod logging;
+pub(crate) mod router;
 pub(crate) mod selectors;
 pub(crate) mod spans;
+pub(crate) mod subgraph;
+pub(crate) mod supergraph;
 
 pub(crate) trait Selectors<Request, Response, EventResponse> {
     fn on_request(&self, request: &Request) -> Vec<KeyValue>;
@@ -248,26 +253,26 @@ impl From<opentelemetry::Value> for AttributeValue {
 mod test {
     use std::sync::OnceLock;
 
+    use apollo_compiler::Node;
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::Field;
     use apollo_compiler::name;
-    use apollo_compiler::Node;
+    use opentelemetry::Context;
+    use opentelemetry::StringValue;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
-    use opentelemetry::StringValue;
     use serde_json::json;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
 
-    use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
+    use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::otel;
 
     pub(crate) fn field() -> &'static Field {

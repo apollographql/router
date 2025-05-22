@@ -4,15 +4,15 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
-use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
-use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::Context;
 
 const CONNECTOR_HTTP_METHOD: Key = Key::from_static_str("connector.http.method");
 const CONNECTOR_SOURCE_NAME: Key = Key::from_static_str("connector.source.name");

@@ -7,10 +7,10 @@ use std::time::Duration;
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
 use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -20,17 +20,18 @@ use opentelemetry::global;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
-#[cfg(unix)]
-use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+#[cfg(unix)]
+use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 
 use super::HttpRequest;
 use super::HttpResponse;
+use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
@@ -39,11 +40,10 @@ use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
-use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
+use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::Configuration;
 
 type HTTPClient = Decompression<
     hyper_util::client::legacy::Client<
@@ -99,13 +99,20 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    pub(crate) fn from_config(
+    pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
+        let default_client_cert_config = configuration
+            .tls
+            .subgraph
+            .all
+            .client_authentication
+            .as_ref();
+
         let tls_cert_store = configuration
             .tls
             .subgraph
@@ -122,12 +129,45 @@ impl HttpClientService {
             .get(&name)
             .as_ref()
             .and_then(|tls| tls.client_authentication.as_ref())
-            .or(configuration
-                .tls
-                .subgraph
-                .all
-                .client_authentication
-                .as_ref());
+            .or(default_client_cert_config);
+
+        let tls_client_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
+
+        HttpClientService::new(name, tls_client_config, client_config)
+    }
+
+    pub(crate) fn from_config_for_connector(
+        source_name: impl Into<String>,
+        configuration: &Configuration,
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let name: String = source_name.into();
+        let default_client_cert_config = configuration
+            .tls
+            .connector
+            .all
+            .client_authentication
+            .as_ref();
+
+        let tls_cert_store = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .unwrap_or_else(|| tls_root_store.clone());
+        let client_cert_config = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or(default_client_cert_config);
 
         let tls_client_config =
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
@@ -196,9 +236,6 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let tls_builder = rustls::ClientConfig::builder();
 
     Ok(match client_cert_config {

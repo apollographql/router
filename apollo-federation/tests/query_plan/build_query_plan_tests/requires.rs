@@ -122,7 +122,7 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
         "#,
 
 
-      // The main goal of this test is to show that the 2 @requires for `f` gets handled seemlessly
+      // The main goal of this test is to show that the 2 @requires for `f` gets handled seamlessly
       // into the same fetch group. But note that because the type for `f` differs, the 2nd instance
       // gets aliased (or the fetch would be invalid graphQL).
         @r###"
@@ -227,7 +227,7 @@ fn handles_multiple_requires_involving_different_nestedness() {
         "#,
 
 
-      // The main goal of this test is to show that the 2 @requires for `f` gets handled seemlessly
+      // The main goal of this test is to show that the 2 @requires for `f` gets handled seamlessly
       // into the same fetch group.
         @r###"
         QueryPlan {
@@ -444,7 +444,7 @@ fn it_handles_simple_require_chain() {
 
 #[test]
 fn it_handles_require_chain_not_ending_in_original_group() {
-    // This is somewhat simiar to the 'simple require chain' case, but the chain does not
+    // This is somewhat similar to the 'simple require chain' case, but the chain does not
     // end in the group in which the query start
     let planner = planner!(
         Subgraph1: r#"
@@ -1364,7 +1364,7 @@ fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
     // and `req2`, but `req1` is also a key to get `req2`. This dependency was
     // confusing a previous version of the code (which, when gathering the
     // "createdGroups" for `T.v` @requires, was using the group for `req1` twice
-    // separatly (instead of recognizing it was the same group), and this was
+    // separately (instead of recognizing it was the same group), and this was
     // confusing the rest of the code was wasn't expecting it.
     let planner = planner!(
         A: r#"

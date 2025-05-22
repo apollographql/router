@@ -8,29 +8,29 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::Stream;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::once;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing::event;
 use tracing::Instrument;
 use tracing::Span;
+use tracing::event;
 use tracing_core::Level;
 
-use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::apollo_studio_interop::ReferencedEnums;
+use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -39,23 +39,24 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::Telemetry;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
-use crate::services::execution;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::Plugins;
-use crate::spec::query::subselections::BooleanValues;
+use crate::services::execution;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+use crate::spec::query::subselections::BooleanValues;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
@@ -478,7 +479,7 @@ impl ExecutionService {
                     .extensions
                     .iter()
                     .map(|(key, value)| {
-                        if key.as_str() == "valueCompletion" {
+                        if key.as_str() == EXTENSIONS_VALUE_COMPLETION_KEY {
                             let value = match value.as_array() {
                                 None => Value::Null,
                                 Some(v) => Value::Array(

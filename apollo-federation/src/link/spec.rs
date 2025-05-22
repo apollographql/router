@@ -2,8 +2,8 @@
 use std::fmt;
 use std::str;
 
-use apollo_compiler::name;
 use apollo_compiler::Name;
+use apollo_compiler::name;
 use thiserror::Error;
 
 use crate::error::FederationError;
@@ -100,6 +100,13 @@ impl Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
             name: name!("context"),
+        }
+    }
+
+    pub fn tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("tag"),
         }
     }
 }

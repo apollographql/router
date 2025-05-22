@@ -7,11 +7,12 @@ use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
+use crate::router::Event::RhaiReload;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
-use crate::Configuration;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
@@ -24,17 +25,17 @@ pub enum ConfigurationSource {
     ///
     /// Can be created through `serde::Deserialize` from various formats,
     /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-    #[display(fmt = "Static")]
-    #[from(types(Configuration))]
+    #[display("Static")]
+    #[from(Configuration, Box<Configuration>)]
     Static(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] ConfigurationStream),
 
     /// A yaml file that may be watched for changes
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the configuration file.
         path: PathBuf,
@@ -79,7 +80,7 @@ impl ConfigurationSource {
                     match ConfigurationSource::read_config(&path) {
                         Ok(mut configuration) => {
                             if watch {
-                                crate::files::watch(&path)
+                                let config_watcher = crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
@@ -98,7 +99,33 @@ impl ConfigurationSource {
                                             }
                                         }
                                     })
-                                    .boxed()
+                                    .boxed();
+                                if let Some(rhai_plugin) =
+                                    configuration.apollo_plugins.plugins.get("rhai")
+                                {
+                                    let scripts_path = match rhai_plugin["scripts"].as_str() {
+                                        Some(path) => Path::new(path),
+                                        None => Path::new("rhai"),
+                                    };
+                                    // If our path is relative, add it to the current dir
+                                    let scripts_watch = if scripts_path.is_relative() {
+                                        let current_directory = std::env::current_dir();
+                                        if current_directory.is_err() {
+                                            tracing::error!("No current directory found",);
+                                            return stream::empty().boxed();
+                                        }
+                                        current_directory.unwrap().join(scripts_path)
+                                    } else {
+                                        scripts_path.into()
+                                    };
+                                    let rhai_watcher = crate::files::watch_rhai(&scripts_watch)
+                                        .filter_map(move |_| future::ready(Some(RhaiReload)))
+                                        .boxed();
+                                    // Select across both our streams
+                                    futures::stream::select(config_watcher, rhai_watcher).boxed()
+                                } else {
+                                    config_watcher
+                                }
                             } else {
                                 configuration.uplink = uplink_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(configuration)))
@@ -139,6 +166,8 @@ enum ReadConfigError {
 mod tests {
     use std::env::temp_dir;
 
+    use futures::StreamExt;
+
     use super::*;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
@@ -170,7 +199,7 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        let event = stream.into_future().now_or_never();
+        let event = StreamExt::into_future(stream).now_or_never();
         assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
     }
 

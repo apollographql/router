@@ -1,40 +1,67 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::ControlFlow;
 use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::time::Duration;
 
 use axum::handler::HandlerWithoutStateExt;
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use http::header::CONTENT_TYPE;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
+use http::StatusCode;
 use insta::assert_yaml_snapshot;
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::EncodingKey;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
+use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::CommonParameters;
+use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyType;
+use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::EncodingKey;
+use jsonwebtoken::jwk::KeyAlgorithm;
+use jsonwebtoken::jwk::KeyOperations;
+use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
+use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
+use tower::ServiceExt;
 use tracing::subscriber;
+use url::Url;
 
+use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use super::HEADER_TOKEN_TRUNCATED;
 use super::Header;
-use super::*;
+use super::JWT_CONTEXT_KEY;
+use super::JWTConf;
+use super::JwtStatus;
+use super::Source;
+use super::authenticate;
 use crate::assert_snapshot_subscriber;
+use crate::graphql;
 use crate::plugin::test;
+use crate::plugins::authentication::Issuers;
+use crate::plugins::authentication::jwks::JWTCriteria;
+use crate::plugins::authentication::jwks::JwksConfig;
+use crate::plugins::authentication::jwks::JwksManager;
 use crate::plugins::authentication::jwks::parse_jwks;
+use crate::plugins::authentication::jwks::search_jwks;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
-fn create_an_url(filename: &str) -> String {
+pub(crate) fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
 
     let jwks_path = jwks_base.join("fixtures").join(filename);
@@ -45,7 +72,7 @@ fn create_an_url(filename: &str) -> String {
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false, false).await
+    build_a_test_harness(None, None, false, false, false).await
 }
 
 async fn build_a_test_harness(
@@ -53,6 +80,7 @@ async fn build_a_test_harness(
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
     ignore_other_prefixes: bool,
+    continue_on_error: bool,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -123,13 +151,21 @@ async fn build_a_test_harness(
     config["authentication"]["router"]["jwt"]["ignore_other_prefixes"] =
         serde_json::Value::Bool(ignore_other_prefixes);
 
-    crate::TestHarness::builder()
+    if continue_on_error {
+        config["authentication"]["router"]["jwt"]["on_error"] =
+            serde_json::Value::String("Continue".to_string());
+    }
+
+    match crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await
-        .unwrap()
+    {
+        Ok(test_harness) => test_harness,
+        Err(e) => panic!("Failed to build test harness: {}", e),
+    }
 }
 
 #[tokio::test]
@@ -229,7 +265,10 @@ async fn it_rejects_when_auth_prefix_is_missing() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'")
+        .message(format!(
+            "Value of '{0}' JWT header should be prefixed with 'Bearer'",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -239,7 +278,7 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 }
 
 #[tokio::test]
-async fn it_rejects_when_auth_prefix_has_no_jwt() {
+async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     let test_harness = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
@@ -265,7 +304,10 @@ async fn it_rejects_when_auth_prefix_has_no_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
+        .message(format!(
+            "Value of '{0}' JWT header has only 'Bearer' prefix but no JWT token",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -430,7 +472,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-    let test_harness = build_a_test_harness(None, None, false, true).await;
+    let test_harness = build_a_test_harness(None, None, false, true, false).await;
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
@@ -464,7 +506,7 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true, false).await;
+    let test_harness = build_a_test_harness(None, None, true, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -503,7 +545,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
     let test_harness =
-        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false).await;
+        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -542,7 +584,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
     let test_harness =
-        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -580,7 +622,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false).await;
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -617,17 +659,210 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 }
 
 #[tokio::test]
+async fn it_inserts_success_jwt_status_into_context() {
+    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .header(
+            http::header::AUTHORIZATION,
+            "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let jwt_context = service_response
+        .context
+        .get::<_, JwtStatus>(JWT_CONTEXT_KEY)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    match jwt_context {
+        JwtStatus::Success { r#type, name } => {
+            assert_eq!(r#type, "header");
+            assert!(name.eq_ignore_ascii_case("Authorization"));
+        }
+        JwtStatus::Failure { .. } => panic!("expected a success but got {:?}", jwt_context),
+    }
+
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    assert_eq!(
+        jwt_claims,
+        serde_json::json!({
+            "exp": 10_000_000_000i64,
+            "another claim": "this is another claim"
+        })
+    );
+}
+
+#[tokio::test]
+async fn it_inserts_failure_jwt_status_into_context() {
+    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .header(
+            http::header::AUTHORIZATION,
+            "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let jwt_context = service_response
+        .context
+        .get::<_, JwtStatus>(JWT_CONTEXT_KEY)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    let error = jwt_context.error();
+    match error {
+        Some(err) => {
+            assert_eq!(err.code, "CANNOT_DECODE_JWT");
+            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+        }
+        None => panic!("expected an error"),
+    }
+
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    let expected_error = graphql::Error::builder()
+        .message("Cannot decode JWT: InvalidSignature")
+        .extension_code("AUTH_ERROR")
+        .build();
+
+    assert_eq!(response.errors, vec![expected_error]);
+
+    assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds");
+
+    assert!(
+        jwt_claims.is_none(),
+        "because the JWT was invalid, no claims should be set"
+    );
+}
+
+#[tokio::test]
+async fn it_moves_on_after_jwt_errors_when_configured() {
+    let test_harness = build_a_test_harness(None, None, false, false, true).await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .header(
+            http::header::AUTHORIZATION,
+            "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let jwt_context = service_response
+        .context
+        .get::<_, JwtStatus>(JWT_CONTEXT_KEY)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    let error = jwt_context.error();
+    match error {
+        Some(err) => {
+            assert_eq!(err.code, "CANNOT_DECODE_JWT");
+            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+        }
+        None => panic!("expected an error"),
+    }
+
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    // JWT decode failure should be ignored
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds");
+
+    assert!(
+        jwt_claims.is_none(),
+        "because the JWT was invalid, no claims should be set"
+    );
+}
+
+#[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
@@ -822,7 +1057,7 @@ async fn build_jwks_search_components() -> JwksManager {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -925,7 +1160,7 @@ struct Claims {
     iss: Option<String>,
 }
 
-fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
+fn make_manager(jwk: &Jwk, issuers: Option<Issuers>) -> JwksManager {
     let jwks = JwkSet {
         keys: vec![jwk.clone()],
     };
@@ -933,7 +1168,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let url = Url::from_str("file:///jwks.json").unwrap();
     let list = vec![JwksConfig {
         url: url.clone(),
-        issuer,
+        issuers,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
         headers: Vec::new(),
@@ -967,7 +1202,10 @@ async fn issuer_check() {
         }),
     };
 
-    let manager = make_manager(&jwk, Some("hello".to_string()));
+    let manager = make_manager(
+        &jwk,
+        Some(HashSet::from(["hello".to_string(), "goodbye".to_string()])),
+    );
 
     // No issuer
     let token = encode(
@@ -997,7 +1235,7 @@ async fn issuer_check() {
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
@@ -1032,11 +1270,11 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
@@ -1071,7 +1309,7 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'").build()]).build());
         }
         ControlFlow::Continue(_) => {
             panic!("issuer check should have failed")
@@ -1105,11 +1343,11 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
@@ -1132,7 +1370,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1164,7 +1402,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1173,7 +1411,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
 
     let jwks_manager = JwksManager::new(urls).await.unwrap();
 
-    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    // the JWT contains a HMAC key, but we configured a restriction to RSA signing
     let criteria = JWTCriteria {
         kid: None,
         alg: Algorithm::HS256,
@@ -1203,7 +1441,7 @@ async fn it_accepts_key_without_use_or_keyops() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1234,7 +1472,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1265,7 +1503,7 @@ async fn it_accepts_rsa_key_without_alg() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1306,7 +1544,7 @@ async fn jwks_send_headers() {
                 gh.store(true, Ordering::Release);
             }
             http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .header(http::header::CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
                 .version(http::Version::HTTP_11)
                 .body::<RouterBody>(router::body::from_bytes(include_str!("testdata/jwks.json")))
@@ -1320,7 +1558,7 @@ async fn jwks_send_headers() {
 
     let _jwks_manager = JwksManager::new(vec![JwksConfig {
         url,
-        issuer: None,
+        issuers: None,
         algorithms: Some(HashSet::from([Algorithm::RS256])),
         poll_interval: Duration::from_secs(60),
         headers: vec![Header {

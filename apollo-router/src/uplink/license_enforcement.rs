@@ -11,18 +11,14 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::ast;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
-use jsonwebtoken::decode;
-use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
+use jsonwebtoken::decode;
+use jsonwebtoken::jwk::JwkSet;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use serde::Deserialize;
@@ -30,14 +26,12 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use url::Url;
 
-use crate::plugins::authentication::convert_key_algorithm;
-use crate::spec::Schema;
-use crate::spec::LINK_AS_ARGUMENT;
-use crate::spec::LINK_DIRECTIVE_NAME;
-use crate::spec::LINK_URL_ARGUMENT;
+use super::parsed_link_spec::ParsedLinkSpec;
 use crate::Configuration;
+use crate::plugins::authentication::jwks::convert_key_algorithm;
+use crate::spec::LINK_DIRECTIVE_NAME;
+use crate::spec::Schema;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
@@ -105,104 +99,6 @@ where
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
     restricted_schema_in_use: Vec<SchemaViolation>,
-}
-
-#[derive(Debug)]
-struct ParsedLinkSpec {
-    spec_name: String,
-    version: semver::Version,
-    spec_url: String,
-    imported_as: Option<String>,
-    url: String,
-}
-
-impl ParsedLinkSpec {
-    fn from_link_directive(
-        link_directive: &Directive,
-    ) -> Option<Result<ParsedLinkSpec, url::ParseError>> {
-        link_directive
-            .specified_argument_by_name(LINK_URL_ARGUMENT)
-            .and_then(|value| {
-                let url_string = value.as_str();
-
-                let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
-
-                let mut segments = parsed_url.path_segments()?;
-                let spec_name = segments.next()?.to_string();
-                let spec_url = format!(
-                    "{}://{}/{}",
-                    parsed_url.scheme(),
-                    parsed_url.host()?,
-                    spec_name
-                );
-                let version_string = segments.next()?.strip_prefix('v')?;
-                let parsed_version =
-                    semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
-
-                let imported_as = link_directive
-                    .specified_argument_by_name(LINK_AS_ARGUMENT)
-                    .map(|as_arg| as_arg.as_str().unwrap_or_default().to_string());
-
-                Some(Ok(ParsedLinkSpec {
-                    spec_name,
-                    spec_url,
-                    version: parsed_version,
-                    imported_as,
-                    url: url_string?.to_string(),
-                }))
-            })
-    }
-
-    fn from_join_directive_args(
-        args: &[(Name, Node<ast::Value>)],
-    ) -> Option<Result<Self, url::ParseError>> {
-        let url_string = args
-            .iter()
-            .find(|(name, _)| name == &Name::new_unchecked(LINK_URL_ARGUMENT))
-            .and_then(|(_, value)| value.as_str());
-
-        let parsed_url = Url::parse(url_string.unwrap_or_default()).ok()?;
-
-        let mut segments = parsed_url.path_segments()?;
-        let spec_name = segments.next()?.to_string();
-        let spec_url = format!(
-            "{}://{}/{}",
-            parsed_url.scheme(),
-            parsed_url.host()?,
-            spec_name
-        );
-        let version_string = segments.next()?.strip_prefix('v')?;
-        let parsed_version =
-            semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
-
-        let imported_as = args
-            .iter()
-            .find(|(name, _)| name == &Name::new_unchecked(LINK_AS_ARGUMENT))
-            .and_then(|(_, value)| value.as_str())
-            .map(|s| s.to_string());
-
-        Some(Ok(ParsedLinkSpec {
-            spec_name,
-            spec_url,
-            version: parsed_version,
-            imported_as,
-            url: url_string?.to_string(),
-        }))
-    }
-
-    // Implements directive name construction logic for link directives.
-    // 1. If the link directive has an `as` argument, use that as the prefix.
-    // 2. If the link directive's spec name is the same as the default name, use the default name with no prefix.
-    // 3. Otherwise, use the spec name as the prefix.
-    fn directive_name(&self, default_name: &str) -> String {
-        if let Some(imported_as) = &self.imported_as {
-            format!("{}__{}", imported_as, default_name)
-        } else if self.spec_name == default_name {
-            default_name.to_string()
-        } else {
-            format!("{}__{}", self.spec_name, default_name)
-        }
-    }
 }
 
 impl LicenseEnforcementReport {
@@ -507,13 +403,7 @@ impl LicenseEnforcementReport {
                 name: "connect".to_string(),
                 spec_url: "https://specs.apollo.dev/connect".to_string(),
                 version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
+                    comparators: vec![], // all versions
                 },
             },
             SchemaRestriction::Spec {
@@ -657,6 +547,15 @@ impl LicenseState {
             | LicenseState::LicensedWarn { limits }
             | LicenseState::LicensedHalt { limits } => limits.as_ref(),
             _ => None,
+        }
+    }
+
+    pub(crate) fn get_name(&self) -> &'static str {
+        match self {
+            Self::Licensed { limits: _ } => "Licensed",
+            Self::LicensedWarn { limits: _ } => "LicensedWarn",
+            Self::LicensedHalt { limits: _ } => "LicensedHalt",
+            Self::Unlicensed => "Unlicensed",
         }
     }
 }
@@ -813,6 +712,7 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
@@ -820,7 +720,6 @@ mod test {
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
-    use crate::Configuration;
 
     #[track_caller]
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {

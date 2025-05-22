@@ -3,12 +3,12 @@
 //! For more information on APQ see:
 //! <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header::CACHE_CONTROL;
 use serde::Deserialize;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -250,13 +250,13 @@ mod apq_tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::error::Error;
-    use crate::graphql::Response;
-    use crate::services::router::service::from_supergraph_mock_callback;
-    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
-    use crate::services::router::ClientRequestAccepts;
     use crate::Configuration;
     use crate::Context;
+    use crate::error::Error;
+    use crate::graphql::Response;
+    use crate::plugins::content_negotiation::ClientRequestAccepts;
+    use crate::services::router::service::from_supergraph_mock_callback;
+    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 
     #[tokio::test]
     async fn it_works() {
@@ -352,11 +352,13 @@ mod apq_tests {
             .unwrap();
 
         // the cache control header shouldn't have been tampered with
-        assert!(full_response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .is_none());
+        assert!(
+            full_response
+                .response
+                .headers()
+                .get(CACHE_CONTROL)
+                .is_none()
+        );
 
         // We need to yield here to make sure the router
         // runs the Drop implementation of the deduplicating cache Entry.

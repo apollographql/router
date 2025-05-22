@@ -3,13 +3,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]

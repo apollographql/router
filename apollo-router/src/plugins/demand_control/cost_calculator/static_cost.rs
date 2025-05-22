@@ -11,18 +11,18 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
+use super::DemandControlError;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
 use super::schema::InputDefinition;
-use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -51,16 +51,16 @@ fn score_argument(
     match (argument, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-            format!(
-                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                argument_definition.name(),
-                argument_definition.ty().name()
-            )
-        )),
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(format!(
+            "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
+            argument_definition.name(),
+            argument_definition.ty().name()
+        ))),
 
         (ast::Value::Object(inner_args), ExtendedType::InputObject(_)) => {
-            let mut cost = argument_definition.cost_directive().map_or(1.0, |cost| cost.weight());
+            let mut cost = argument_definition
+                .cost_directive()
+                .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
                 let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
@@ -74,7 +74,9 @@ fn score_argument(
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
-            let mut cost = argument_definition.cost_directive().map_or(0.0, |cost| cost.weight());
+            let mut cost = argument_definition
+                .cost_directive()
+                .map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
                 cost += score_argument(arg_val, argument_definition, schema, variables)?;
             }
@@ -90,7 +92,9 @@ fn score_argument(
             }
         }
         (ast::Value::Null, _) => Ok(0.0),
-        _ => Ok(argument_definition.cost_directive().map_or(0.0, |cost| cost.weight()))
+        _ => Ok(argument_definition
+            .cost_directive()
+            .map_or(0.0, |cost| cost.weight())),
     }
 }
 
@@ -102,16 +106,16 @@ fn score_variable(
     match (variable, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
-        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-            format!(
-                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
-                argument_definition.name(),
-                argument_definition.ty().name()
-            )
-        )),
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(format!(
+            "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
+            argument_definition.name(),
+            argument_definition.ty().name()
+        ))),
 
         (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
-            let mut cost = argument_definition.cost_directive().map_or(1.0, |cost| cost.weight());
+            let mut cost = argument_definition
+                .cost_directive()
+                .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
                 let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
@@ -125,14 +129,18 @@ fn score_variable(
             Ok(cost)
         }
         (Value::Array(inner_args), _) => {
-            let mut cost = argument_definition.cost_directive().map_or(0.0, |cost| cost.weight());
+            let mut cost = argument_definition
+                .cost_directive()
+                .map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
                 cost += score_variable(arg_val, argument_definition, schema)?;
             }
             Ok(cost)
         }
         (Value::Null, _) => Ok(0.0),
-        _ => Ok(argument_definition.cost_directive().map_or(0.0, |cost| cost.weight()))
+        _ => Ok(argument_definition
+            .cost_directive()
+            .map_or(0.0, |cost| cost.weight())),
     }
 }
 
@@ -414,7 +422,7 @@ impl StaticCostCalculator {
     fn estimated_cost_of_operation(
         &self,
         subgraph: &str,
-        operation: &SubgraphOperation,
+        operation: &SerializableDocument,
         variables: &Object,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
@@ -633,17 +641,17 @@ mod tests {
     use tracing::instrument::WithSubscriber;
 
     use super::*;
+    use crate::Configuration;
+    use crate::Context;
     use crate::assert_snapshot_subscriber;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::query_planner::PlanOptions;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
+    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_planner::PlanOptions;
     use crate::spec;
     use crate::spec::Query;
-    use crate::Configuration;
-    use crate::Context;
 
     impl StaticCostCalculator {
         fn rust_planned(
@@ -811,7 +819,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
@@ -839,7 +847,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)

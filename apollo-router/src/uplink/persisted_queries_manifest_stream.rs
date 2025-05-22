@@ -5,11 +5,11 @@
 
 use graphql_client::GraphQLQuery;
 
+use crate::uplink::UplinkRequest;
+use crate::uplink::UplinkResponse;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::FetchErrorCode;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::PersistedQueriesManifestQueryPersistedQueries;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::PersistedQueriesManifestQueryPersistedQueriesOnPersistedQueriesResultChunks;
-use crate::uplink::UplinkRequest;
-use crate::uplink::UplinkResponse;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -114,12 +114,12 @@ mod test {
     use futures::stream::StreamExt;
     use url::Url;
 
+    use crate::uplink::Endpoints;
+    use crate::uplink::GCP_URL;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
     use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::Endpoints;
-    use crate::uplink::UplinkConfig;
-    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
@@ -136,7 +136,7 @@ mod test {
                     apollo_key: apollo_key.clone(),
                     apollo_graph_ref: apollo_graph_ref.clone(),
                     endpoints: Some(Endpoints::fallback(vec![
-                        Url::from_str(url).expect("url must be valid")
+                        Url::from_str(url).expect("url must be valid"),
                     ])),
                     poll_interval: Duration::from_secs(1),
                     timeout: Duration::from_secs(5),

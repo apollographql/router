@@ -11,10 +11,10 @@ use url::Url;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
+use crate::uplink::UplinkConfig;
 use crate::uplink::schema::SchemaState;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::UplinkConfig;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -24,15 +24,15 @@ type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 #[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
-    #[display(fmt = "String")]
+    #[display("String")]
     Static { schema_sdl: String },
 
     /// A stream of schema.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] SchemaStream),
 
     /// A YAML file that may be watched for changes.
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the schema file.
         path: PathBuf,
@@ -42,11 +42,11 @@ pub enum SchemaSource {
     },
 
     /// Apollo managed federation.
-    #[display(fmt = "Registry")]
+    #[display("Registry")]
     Registry(UplinkConfig),
 
     /// A list of URLs to fetch the schema from.
-    #[display(fmt = "URLs")]
+    #[display("URLs")]
     URLs {
         /// The URLs to fetch the schema from.
         urls: Vec<Url>,
@@ -220,11 +220,11 @@ mod tests {
 
     use test_log::test;
     use tracing_futures::WithSubscriber;
-    use wiremock::matchers::method;
-    use wiremock::matchers::path;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
 
     use super::*;
     use crate::assert_snapshot_subscriber;

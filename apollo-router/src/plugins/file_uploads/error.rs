@@ -28,7 +28,9 @@ pub(super) enum FileUploadError {
     #[error("Invalid path '{0}' found inside 'map' field, missing name of variable.")]
     MissingVariableNameInsideMapField(String),
 
-    #[error("Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field.")]
+    #[error(
+        "Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field."
+    )]
     InputValueNotFound(String),
 
     #[error("Missing files in the request: {0}.")]
@@ -40,7 +42,9 @@ pub(super) enum FileUploadError {
     #[error("Variables containing files are forbidden inside subscription: {0}.")]
     VariablesForbiddenInsideSubscription(String),
 
-    #[error("References to variables containing files are ordered in the way that prevent streaming of files.")]
+    #[error(
+        "References to variables containing files are ordered in the way that prevent streaming of files."
+    )]
     MisorderedVariables,
 
     #[error("Variables use mutiple time in the way that prevent streaming of files: {0}.")]

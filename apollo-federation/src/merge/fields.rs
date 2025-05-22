@@ -1,7 +1,7 @@
 use std::slice::Iter;
 
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::Node;
+use apollo_compiler::ast::InputValueDefinition;
 
 use crate::merge::DirectiveNames;
 use crate::merge::Merger;

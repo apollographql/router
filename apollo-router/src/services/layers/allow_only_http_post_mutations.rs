@@ -4,10 +4,10 @@ use std::ops::ControlFlow;
 
 use apollo_compiler::ast::OperationType;
 use futures::future::BoxFuture;
-use http::header::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::HeaderName;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -16,8 +16,8 @@ use tower::ServiceBuilder;
 use super::query_analysis::ParsedDocument;
 use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -63,10 +63,12 @@ where
                             // We shouldn't ever reach here unless the pipeline was set up
                             // improperly (i.e. programmer error), but do something better than
                             // panicking just in case.
-                            let errors = vec![Error::builder()
-                                .message("Cannot find executable document".to_string())
-                                .extension_code("MISSING_EXECUTABLE_DOCUMENT")
-                                .build()];
+                            let errors = vec![
+                                Error::builder()
+                                    .message("Cannot find executable document".to_string())
+                                    .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                                    .build(),
+                            ];
                             let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
@@ -88,10 +90,12 @@ where
                         Err(_) => {
                             // We shouldn't end up here if the request is valid, and validation
                             // should happen well before this, but do something just in case.
-                            let errors = vec![Error::builder()
-                                .message("Cannot find operation".to_string())
-                                .extension_code("MISSING_OPERATION")
-                                .build()];
+                            let errors = vec![
+                                Error::builder()
+                                    .message("Cannot find operation".to_string())
+                                    .extension_code("MISSING_OPERATION")
+                                    .build(),
+                            ];
                             let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
                                 .extensions(Object::default())
@@ -103,12 +107,14 @@ where
                         }
                         Ok(op) => {
                             if op.operation_type == OperationType::Mutation {
-                                let errors = vec![Error::builder()
-                                    .message(
-                                        "Mutations can only be sent over HTTP POST".to_string(),
-                                    )
-                                    .extension_code("MUTATION_FORBIDDEN")
-                                    .build()];
+                                let errors = vec![
+                                    Error::builder()
+                                        .message(
+                                            "Mutations can only be sent over HTTP POST".to_string(),
+                                        )
+                                        .extension_code("MUTATION_FORBIDDEN")
+                                        .build(),
+                                ];
                                 let mut res = SupergraphResponse::builder()
                                     .errors(errors)
                                     .extensions(Object::default())
@@ -143,12 +149,12 @@ mod forbid_http_get_mutations_tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::Context;
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
-    use crate::Context;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {

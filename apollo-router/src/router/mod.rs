@@ -14,13 +14,13 @@ pub use event::LicenseSource;
 pub(crate) use event::ReloadSource;
 pub use event::SchemaSource;
 pub use event::ShutdownSource;
+use futures::FutureExt;
 #[cfg(test)]
 use futures::channel::mpsc;
 #[cfg(test)]
 use futures::channel::mpsc::SendError;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use futures::FutureExt;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::RwLock;
@@ -346,6 +346,7 @@ mod tests {
     use serde_json::to_string_pretty;
 
     use super::*;
+    use crate::Configuration;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::router::Event::UpdateConfiguration;
@@ -353,7 +354,6 @@ mod tests {
     use crate::router::Event::UpdateSchema;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::schema::SchemaState;
-    use crate::Configuration;
 
     fn init_with_server() -> RouterHttpServer {
         let configuration =

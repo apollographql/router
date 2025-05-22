@@ -7,25 +7,26 @@ use std::marker::PhantomData;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing::field;
-use tracing_core::span::Id;
-use tracing_core::span::Record;
 use tracing_core::Event;
 use tracing_core::Field;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
-use tracing_subscriber::Layer;
 
 use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
-use super::formatters::EventFormatter;
 use super::formatters::EXCLUDED_ATTRIBUTES;
+use super::formatters::EventFormatter;
 use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
+use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -147,6 +148,12 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+        event.record(&mut visitor);
+        if visitor.omit_from_logs {
+            return;
+        }
+
         thread_local! {
             static BUF: RefCell<String> = const { RefCell::new(String::new()) };
         }
@@ -180,6 +187,7 @@ where
 pub(crate) struct FieldsVisitor<'a, 'b> {
     pub(crate) values: HashMap<&'a str, serde_json::Value>,
     excluded_attributes: &'b HashSet<&'static str>,
+    omit_from_logs: bool,
 }
 
 impl<'b> FieldsVisitor<'_, 'b> {
@@ -187,6 +195,7 @@ impl<'b> FieldsVisitor<'_, 'b> {
         Self {
             values: HashMap::with_capacity(0),
             excluded_attributes,
+            omit_from_logs: false,
         }
     }
 }
@@ -214,6 +223,10 @@ impl field::Visit for FieldsVisitor<'_, '_> {
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.values
             .insert(field.name(), serde_json::Value::from(value));
+
+        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
+            self.omit_from_logs = true;
+        }
     }
 
     /// Visit a string value.
@@ -253,15 +266,14 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
-    use http::header::CONTENT_LENGTH;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderValue;
+    use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
-    use tests::events::RouterResponseBodyExtensionType;
+    use tests::events::EventLevel;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -275,18 +287,17 @@ mod tests {
     use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
-    use crate::plugins::telemetry::config_new::events::EventLevel;
-    use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
+    use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
-    use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -306,7 +317,7 @@ router:
     on: request
     attributes:
       http.request.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -317,7 +328,7 @@ router:
     on: response
     attributes:
       http.response.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -333,7 +344,7 @@ supergraph:
     message: "my event message"
     level: info
     on: request
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -714,7 +725,7 @@ connector:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -732,7 +743,7 @@ connector:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -748,7 +759,7 @@ connector:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -773,7 +784,7 @@ connector:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -799,7 +810,7 @@ connector:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -817,11 +828,8 @@ connector:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
-                        connect_template: URLTemplate::from_str("/test").unwrap(),
-                        method: HTTPMethod::Get,
-                        headers: Default::default(),
-                        body: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
+                        ..Default::default()
                     },
                     selection: JSONSelection::empty(),
                     config: None,
@@ -830,6 +838,10 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
+                    error_settings: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -859,8 +871,9 @@ connector:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
-                let connector_events = event_config.new_connector_events();
+                let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
@@ -947,9 +960,9 @@ subgraph:
                 let test_span = info_span!("test");
                 let _enter = test_span.enter();
 
-                let router_events = event_config.new_router_events();
-                let supergraph_events = event_config.new_supergraph_events();
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut router_events = event_config.new_router_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
 
                 // In: Router -> Supergraph -> Subgraphs
                 let router_req = router::Request::fake_builder().build().unwrap();
@@ -1059,7 +1072,7 @@ subgraph:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -1083,7 +1096,7 @@ subgraph:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -1099,7 +1112,7 @@ subgraph:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -1124,7 +1137,7 @@ subgraph:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -1150,7 +1163,7 @@ subgraph:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1168,11 +1181,8 @@ subgraph:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
-                        connect_template: URLTemplate::from_str("/test").unwrap(),
-                        method: HTTPMethod::Get,
-                        headers: Default::default(),
-                        body: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
+                        ..Default::default()
                     },
                     selection: JSONSelection::empty(),
                     config: None,
@@ -1181,6 +1191,10 @@ subgraph:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
+                    error_settings: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1210,8 +1224,9 @@ subgraph:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
-                let connector_events = event_config.new_connector_events();
+                let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {

@@ -1,10 +1,12 @@
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
@@ -14,8 +16,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
@@ -25,13 +25,12 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
-use super::query_planner::SubgraphOperationCompression;
 use super::FetchDataKeyRenamer;
+use super::query_planner::SubgraphOperationCompression;
 use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -44,27 +43,30 @@ use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
-use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
-use crate::query_graph::graph_path::concat_op_paths;
-use crate::query_graph::graph_path::concat_paths_in_parents;
+use crate::operation::VariableCollector;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::concat_op_paths;
+use crate::query_graph::graph_path::concat_paths_in_parents;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::path_tree::PathTreeChild;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::conditions::remove_conditions_from_selection_set;
-use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
-use crate::query_plan::conditions::Conditions;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::conditions::Conditions;
+use crate::query_plan::conditions::remove_conditions_from_selection_set;
+use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::requires_selection;
+use crate::query_plan::serializable_document::SerializableDocument;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -72,7 +74,6 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::PositionLookupError;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
@@ -821,7 +822,7 @@ impl FetchDependencyGraph {
         // 1. is for the same subgraph
         // 2. has the same merge_at
         // 3. is for the same entity type (we don't reuse nodes for different entities just yet,
-        //    as this can create unecessary dependencies that gets in the way of some optimizations;
+        //    as this can create unnecessary dependencies that gets in the way of some optimizations;
         //    the final optimizations in `reduceAndOptimize` will however later merge nodes
         //    on the same subgraph and mergeAt when possible).
         // 4. is not part of our conditions or our conditions ancestors
@@ -914,7 +915,7 @@ impl FetchDependencyGraph {
             parent_node_id,
             child_id,
             Arc::new(FetchDependencyGraphEdge {
-                path: path_in_parent.clone(),
+                path: path_in_parent,
             }),
         );
     }
@@ -939,7 +940,7 @@ impl FetchDependencyGraph {
             return true;
         }
 
-        // No risk of inifite loop as the graph is acyclic:
+        // No risk of infinite loop as the graph is acyclic:
         let mut to_check = haystack.clone();
         while let Some(next) = to_check.pop() {
             for parent in self.parents_of(next) {
@@ -1019,7 +1020,7 @@ impl FetchDependencyGraph {
         Ok(parent_inputs.contains(node_inputs))
     }
 
-    fn children_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+    fn children_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> {
         self.graph
             .neighbors_directed(node_id, petgraph::Direction::Outgoing)
     }
@@ -1033,15 +1034,12 @@ impl FetchDependencyGraph {
             .find(|p| p.parent_node_id == maybe_parent_id)
     }
 
-    fn parents_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+    fn parents_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> {
         self.graph
             .neighbors_directed(node_id, petgraph::Direction::Incoming)
     }
 
-    fn parents_relations_of(
-        &self,
-        node_id: NodeIndex,
-    ) -> impl Iterator<Item = ParentRelation> + '_ {
+    fn parents_relations_of(&self, node_id: NodeIndex) -> impl Iterator<Item = ParentRelation> {
         self.graph
             .edges_directed(node_id, petgraph::Direction::Incoming)
             .map(|edge| ParentRelation {
@@ -1065,9 +1063,7 @@ impl FetchDependencyGraph {
     /// largest ID is the last node that was created. Due to the above, sorting by node IDs may still
     /// result in different iteration order than the JS code, but in practice might be enough to
     /// ensure correct plans.
-    fn sorted_nodes<'graph>(
-        nodes: impl Iterator<Item = NodeIndex> + 'graph,
-    ) -> impl Iterator<Item = NodeIndex> + 'graph {
+    fn sorted_nodes(nodes: impl Iterator<Item = NodeIndex>) -> impl Iterator<Item = NodeIndex> {
         nodes.sorted_by_key(|n| n.index())
     }
 
@@ -1342,10 +1338,6 @@ impl FetchDependencyGraph {
         // Some helper functions
 
         let try_get_type_condition = |selection: &Selection| match selection {
-            Selection::FragmentSpread(fragment) => {
-                Some(fragment.spread.type_condition_position.clone())
-            }
-
             Selection::InlineFragment(inline) => {
                 inline.inline_fragment.type_condition_position.clone()
             }
@@ -2572,11 +2564,11 @@ impl FetchDependencyGraphNode {
         }
     }
 
-    pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&mut self) -> QueryPlanCost {
         if self.cached_cost.is_none() {
-            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0)?)
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0))
         }
-        Ok(self.cached_cost.unwrap())
+        self.cached_cost.unwrap()
     }
 
     pub(crate) fn to_plan_node(
@@ -2661,43 +2653,33 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation = operation_compression.compress(operation)?;
-        let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
-                diagnostics,
-            }) => internal_error!(
-                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            ),
-            _ => err,
-        })?;
+        let operation_document = operation_compression.compress(operation)?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
         fn trim_requires_selection_set(
             selection_set: &executable::SelectionSet,
-        ) -> Vec<executable::Selection> {
+        ) -> Vec<requires_selection::Selection> {
             selection_set
                 .selections
                 .iter()
                 .filter_map(|s| match s {
-                    executable::Selection::Field(field) => Some(executable::Selection::from(
-                        executable::Field::new(field.name.clone(), field.definition.clone())
-                            .with_selections(trim_requires_selection_set(&field.selection_set)),
-                    )),
+                    executable::Selection::Field(field) => Some(
+                        requires_selection::Selection::Field(requires_selection::Field {
+                            alias: None,
+                            name: field.name.clone(),
+                            selections: trim_requires_selection_set(&field.selection_set),
+                        }),
+                    ),
                     executable::Selection::InlineFragment(inline_fragment) => {
-                        let new_fragment = inline_fragment
-                            .type_condition
-                            .clone()
-                            .map(executable::InlineFragment::with_type_condition)
-                            .unwrap_or_else(|| {
-                                executable::InlineFragment::without_type_condition(
-                                    inline_fragment.selection_set.ty.clone(),
-                                )
-                            })
-                            .with_selections(trim_requires_selection_set(
-                                &inline_fragment.selection_set,
-                            ));
-                        Some(executable::Selection::from(new_fragment))
+                        Some(requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: inline_fragment.type_condition.clone(),
+                                selections: trim_requires_selection_set(
+                                    &inline_fragment.selection_set,
+                                ),
+                            },
+                        ))
                     }
                     executable::Selection::FragmentSpread(_) => None,
                 })
@@ -2711,8 +2693,9 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| trim_requires_selection_set(&selection_set)),
-            operation_document,
+                .map(|selection_set| trim_requires_selection_set(&selection_set))
+                .unwrap_or_default(),
+            operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
@@ -2774,7 +2757,7 @@ impl FetchDependencyGraphNode {
 
     /// Return a concise display for this node. The node index in the graph
     /// must be passed in externally.
-    fn display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+    fn display(&self, index: NodeIndex) -> impl std::fmt::Display {
         use std::fmt;
         use std::fmt::Display;
         use std::fmt::Formatter;
@@ -2845,7 +2828,7 @@ impl FetchDependencyGraphNode {
 
     // A variation of `fn display` with multiline output, which is more suitable for
     // GraphViz output.
-    pub(crate) fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+    pub(crate) fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display {
         use std::fmt;
         use std::fmt::Display;
         use std::fmt::Formatter;
@@ -2994,9 +2977,6 @@ impl FetchDependencyGraphNode {
                         )?;
                     }
                 }
-                Selection::FragmentSpread(_) => {
-                    bail!("Contexts shouldn't contain named fragment spreads");
-                }
                 Selection::InlineFragment(inline_fragment_selection) => {
                     if let Some(type_condition) = &inline_fragment_selection
                         .inline_fragment
@@ -3039,7 +3019,7 @@ fn operation_for_entities_fetch(
             return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
             }
-            .into())
+            .into());
         }
     };
 
@@ -3054,7 +3034,7 @@ fn operation_for_entities_fetch(
         .into());
     }
 
-    let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
+    let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY));
 
     let entities_call = Selection::from_element(
         OpPathElement::Field(Field {
@@ -3091,7 +3071,6 @@ fn operation_for_entities_fetch(
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3110,7 +3089,6 @@ fn operation_for_query_fetch(
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3133,7 +3111,7 @@ fn representations_variable_definition(
 }
 
 impl SelectionSet {
-    pub(crate) fn cost(&self, depth: QueryPlanCost) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&self, depth: QueryPlanCost) -> QueryPlanCost {
         // The cost is essentially the number of elements in the selection,
         // but we make deep element cost a tiny bit more,
         // mostly to make things a tad more deterministic
@@ -3142,22 +3120,17 @@ impl SelectionSet {
         // and one that doesn't, and both will be almost identical,
         // except that the type-exploded field will be a different depth;
         // by favoring lesser depth in that case, we favor not type-exploding).
-        self.selections.values().try_fold(0.0, |sum, selection| {
+        self.selections.values().fold(0.0, |sum, selection| {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "unexpected fragment spread in FetchDependencyGraphNode",
-                    ))
-                }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
-                selection_set.cost(depth + 1.0)?
+                selection_set.cost(depth + 1.0)
             } else {
                 0.0
             };
-            Ok(sum + depth + subselections_cost)
+            sum + depth + subselections_cost
         })
     }
 }
@@ -3493,6 +3466,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_node_path: FetchDependencyGraphNodePath,
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
     snapshot!("OpPathTree", initial_tree.to_string(), "path_tree");
     let mut stack = vec![ComputeNodesStackItem {
@@ -3505,6 +3479,7 @@ pub(crate) fn compute_nodes_for_tree(
     }];
     let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
+        check_cancellation()?;
         let node =
             FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
         for selection_set in &stack_item.tree.local_selection_sets {
@@ -3550,6 +3525,7 @@ pub(crate) fn compute_nodes_for_tree(
                                 edge_id,
                                 new_context,
                                 &mut created_nodes,
+                                check_cancellation,
                             )?);
                         }
                         QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
@@ -3566,7 +3542,7 @@ pub(crate) fn compute_nodes_for_tree(
                         _ => {
                             return Err(FederationError::internal(format!(
                                 "Unexpected non-collecting edge {edge}"
-                            )))
+                            )));
                         }
                     }
                 }
@@ -3577,6 +3553,7 @@ pub(crate) fn compute_nodes_for_tree(
                         child,
                         operation,
                         &mut created_nodes,
+                        check_cancellation,
                     )?);
                 }
             }
@@ -3601,6 +3578,7 @@ fn compute_nodes_for_key_resolution<'a>(
     edge_id: EdgeIndex,
     new_context: &'a OpGraphPathContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let edge = stack_item.tree.graph.edge_weight(edge_id)?;
     let Some(conditions) = &child.conditions else {
@@ -3616,6 +3594,7 @@ fn compute_nodes_for_key_resolution<'a>(
         stack_item.node_path.clone(),
         stack_item.defer_context.for_conditions(),
         &Default::default(),
+        check_cancellation,
     )?;
     created_nodes.extend(conditions_nodes.iter().copied());
     // Then we can "take the edge", creating a new node.
@@ -3854,6 +3833,7 @@ fn compute_nodes_for_op_path_element<'a>(
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
         // A null edge means that the operation does nothing
@@ -3871,7 +3851,7 @@ fn compute_nodes_for_op_path_element<'a>(
         // If the operation contains other directives or a non-trivial type condition,
         // we need to preserve it and so we add operation.
         // Otherwise, we just skip it as a minor optimization (it makes the subgraph query
-        // slighly smaller and on complex queries, it might also deduplicate similar selections).
+        // slightly smaller and on complex queries, it might also deduplicate similar selections).
         return Ok(ComputeNodesStackItem {
             tree: &child.tree,
             node_id: stack_item.node_id,
@@ -3960,6 +3940,7 @@ fn compute_nodes_for_op_path_element<'a>(
             },
             &updated.defer_context,
             created_nodes,
+            check_cancellation,
         )?;
 
         if let Some(matching_context_ids) = &child.matching_context_ids {
@@ -4252,7 +4233,7 @@ fn wrap_selection_with_type_and_conditions<T>(
             InlineFragment {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
-                type_condition_position: Some(type_condition.clone()),
+                type_condition_position: Some(type_condition),
                 directives: Default::default(), // None
                 selection_id: SelectionId::new(),
             },
@@ -4269,11 +4250,13 @@ fn wrap_selection_with_type_and_conditions<T>(
     context.iter().fold(initial, |acc, cond| {
         let directive = Directive {
             name: cond.kind.name(),
-            arguments: vec![Argument {
-                name: name!("if"),
-                value: cond.value.clone().into(),
-            }
-            .into()],
+            arguments: vec![
+                Argument {
+                    name: name!("if"),
+                    value: cond.value.clone().into(),
+                }
+                .into(),
+            ],
         };
         wrap_in_fragment(
             InlineFragment {
@@ -4437,6 +4420,7 @@ fn handle_conditions_tree(
     query_graph_edge_id_if_typename_needed: Option<EdgeIndex>,
     defer_context: &DeferContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ConditionsNodeData, FederationError> {
     // In many cases, we can optimize conditions by merging the fields into previously existing
     // nodes. However, we only do this when the current node has only a single parent (it's hard to
@@ -4477,7 +4461,7 @@ fn handle_conditions_tree(
                 };
                 let defer_ref = fetch_node.defer_ref.clone();
                 let copied_node_id =
-                    dependency_graph.new_key_node(&subgraph_name, merge_at, defer_ref.clone())?;
+                    dependency_graph.new_key_node(&subgraph_name, merge_at, defer_ref)?;
                 dependency_graph.add_parent(copied_node_id, parent.clone());
                 dependency_graph.copy_inputs(copied_node_id, fetch_node_id)?;
                 Some((copied_node_id, parent))
@@ -4520,6 +4504,7 @@ fn handle_conditions_tree(
         fetch_node_path.clone(),
         defer_context.for_conditions(),
         &OpGraphPathContext::default(),
+        check_cancellation,
     )?;
 
     if newly_created_node_ids.is_empty() {
@@ -4753,7 +4738,7 @@ fn create_post_requires_node(
             // should already have a key in its inputs, so we don't need to add that).
             let inputs = inputs_for_require(
                 dependency_graph,
-                entity_type_position.clone(),
+                entity_type_position,
                 entity_type_schema,
                 query_graph_edge_id,
                 context,
@@ -4831,7 +4816,7 @@ fn create_post_requires_node(
         created_nodes.insert(post_requires_node_id);
         let initial_fetch_path = create_fetch_initial_path(
             &dependency_graph.supergraph_schema,
-            &entity_type_position.clone().into(),
+            &entity_type_position.into(),
             context,
         )?;
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
@@ -4889,7 +4874,7 @@ fn create_post_requires_node(
         created_nodes.insert(post_requires_node_id);
         let initial_fetch_path = create_fetch_initial_path(
             &dependency_graph.supergraph_schema,
-            &entity_type_position.clone().into(),
+            &entity_type_position.into(),
             context,
         )?;
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
@@ -5133,7 +5118,7 @@ mod tests {
         )
         .unwrap();
 
-        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
         let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
@@ -5195,7 +5180,7 @@ mod tests {
         )
         .unwrap();
 
-        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
         let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));

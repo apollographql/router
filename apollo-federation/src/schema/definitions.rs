@@ -1,6 +1,6 @@
+use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -36,7 +36,7 @@ pub(crate) fn types_can_be_merged(
         }
         (Type::List(inner1), Type::List(inner2))
         | (Type::NonNullList(inner1), Type::NonNullList(inner2)) => {
-            return types_can_be_merged(inner1, inner2, schema)
+            return types_can_be_merged(inner1, inner2, schema);
         }
         _ => return Ok(false),
     };

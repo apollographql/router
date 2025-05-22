@@ -3,14 +3,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use aws_credential_types::provider::error::CredentialsError;
-use aws_credential_types::provider::ProvideCredentials;
+use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
-use aws_sigv4::http_request::sign;
+use aws_credential_types::provider::ProvideCredentials;
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
+use aws_sigv4::http_request::sign;
+use aws_smithy_async::rt::sleep::TokioSleep;
+use aws_smithy_async::time::SystemTimeSource;
+use aws_smithy_http_client::tls::Provider;
+use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
 use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
@@ -26,9 +31,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::services::SubgraphRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
@@ -117,9 +122,7 @@ impl AWSSigV4Config {
 
         match self {
             Self::DefaultChain(config) => {
-                let aws_config =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .region(region.clone());
+                let aws_config = credentials_chain_builder().region(region.clone());
 
                 let aws_config = if let Some(profile_name) = &config.profile_name {
                     aws_config.profile_name(profile_name.as_str())
@@ -135,10 +138,7 @@ impl AWSSigV4Config {
                 }
             }
             Self::Hardcoded(config) => {
-                let chain =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .build()
-                        .await;
+                let chain = credentials_chain_builder().build().await;
                 if let Some(assume_role_provider) = role_provider_builder {
                     Arc::new(assume_role_provider.build_from_provider(chain).await)
                 } else {
@@ -169,6 +169,19 @@ impl AWSSigV4Config {
             Self::Hardcoded(config) => config.assume_role.clone(),
         }
     }
+}
+
+fn credentials_chain_builder() -> aws_config::default_provider::credentials::Builder {
+    aws_config::default_provider::credentials::DefaultCredentialsChain::builder().configure(
+        ProviderConfig::default()
+            .with_http_client(
+                aws_smithy_http_client::Builder::new()
+                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .build_https(),
+            )
+            .with_sleep_impl(TokioSleep::new())
+            .with_time_source(SystemTimeSource::new()),
+    )
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
@@ -496,9 +509,9 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
 
     use http::header::CONTENT_LENGTH;
     use http::header::CONTENT_TYPE;
@@ -507,13 +520,13 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::Context;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Context;
+    use crate::services::subgraph::SubgraphRequestId;
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
         let params: SigningParamsConfig = make_signing_params(

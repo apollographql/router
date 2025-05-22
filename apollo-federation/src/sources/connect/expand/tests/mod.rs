@@ -4,9 +4,9 @@ use insta::assert_debug_snapshot;
 use insta::assert_snapshot;
 use insta::glob;
 
-use crate::sources::connect::expand::expand_connectors;
-use crate::sources::connect::expand::ExpansionResult;
 use crate::ApiSchemaOptions;
+use crate::sources::connect::expand::ExpansionResult;
+use crate::sources::connect::expand::expand_connectors;
 
 #[test]
 fn it_expand_supergraph() {
@@ -22,9 +22,9 @@ fn it_expand_supergraph() {
                 panic!("expected expansion to actually expand subgraphs for {path:?}");
             };
 
-            assert_snapshot!(api_schema);
-            assert_debug_snapshot!(connectors.by_service_name);
-            assert_snapshot!(raw_sdl);
+            assert_snapshot!("api", api_schema);
+            assert_debug_snapshot!("connectors", connectors.by_service_name);
+            assert_snapshot!("supergraph", raw_sdl);
         });
     });
 }

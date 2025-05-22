@@ -1,17 +1,18 @@
 use std::path::Path;
 use std::time::Duration;
 
+use apollo_router::Context;
+use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
-use apollo_router::Context;
-use apollo_router::TestHarness;
 use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -23,6 +24,7 @@ use tower::ServiceExt;
 use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
 const BROKEN_PLUGIN_CONFIG: &str = include_str!("fixtures/broken_plugin.router.yaml");
@@ -451,4 +453,104 @@ fn test_plugin_ordering_push_trace(context: &Context, entry: String) {
             },
         )
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_multi_pipelines() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus.router.yaml"))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = router.execute_default_query();
+    // Long running request 1
+    let _h1 = tokio::task::spawn(query);
+    router
+        .update_config(include_str!("fixtures/prometheus_updated.router.yaml"))
+        .await;
+
+    router.assert_reloaded().await;
+    // Long running request 2
+    let query = router.execute_default_query();
+    let _h2 = tokio::task::spawn(query);
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics");
+
+    // There should be two instances of the pipeline metrics
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
+
+    // There should be at least two connections, one active and one terminating.
+    // There may be more than one in each category because reqwest does connection pooling.
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
+    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    let active =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+    assert_eq!(active.captures_iter(&metrics).count(), 1);
+}
+
+/// This test ensures that the router will not leave pipelines hanging around
+/// It has early cancel set to true in the config so that when we look at the pipelines after connection
+/// termination they are removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_forced_connection_shutdown() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/small_connection_shutdown_timeout.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = router.execute_default_query();
+    // Long running request 1
+    let _h1 = tokio::task::spawn(query);
+    router
+        .update_config(include_str!(
+            "fixtures/small_connection_shutdown_timeout_updated.router.yaml"
+        ))
+        .await;
+
+    router.assert_reloaded().await;
+    // Long running request 2
+    let query = router.execute_default_query();
+    let _h2 = tokio::task::spawn(query);
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // There should be two instances of the pipeline metrics
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    assert_eq!(pipelines.captures_iter(&metrics).count(), 1);
+
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    router.read_logs();
+    router.assert_log_contained("connection shutdown exceeded, forcing close");
 }

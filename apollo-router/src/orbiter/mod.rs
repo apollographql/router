@@ -17,16 +17,16 @@ use serde_json::Value;
 use tower::BoxError;
 use uuid::Uuid;
 
+use crate::Configuration;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::router::service::RouterCreator;
 use crate::services::HasSchema;
+use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
 /// This session id is created once when the router starts. It persists between config reloads and supergraph schema changes.
 static SESSION_ID: OnceCell<Uuid> = OnceCell::new();
@@ -313,14 +313,14 @@ mod test {
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
-    use serde_json::json;
     use serde_json::Value;
+    use serde_json::json;
 
+    use crate::Configuration;
     use crate::configuration::ConfigurationError;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
-    use crate::Configuration;
 
     #[test]
     fn test_visit_args() {

@@ -4,29 +4,26 @@ use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::URLTemplate;
-use displaydoc::Display;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
+use apollo_federation::sources::connect::MakeUriError;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use thiserror::Error;
-use url::Url;
 
 use super::form_encoding::encode_json_as_form;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::plugin::debug::serialize_request;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::SelectionData;
+use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
-use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::TransportRequest;
-use crate::services::router;
+use crate::services::connector::request_service::transport::http::HttpRequest;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
@@ -34,15 +31,12 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = make_uri(
-        transport.source_url.as_ref(),
-        &transport.connect_template,
-        &inputs,
-    )?;
+    let uri = transport.make_uri(&inputs)?;
 
+    let method = transport.method;
     let request = http::Request::builder()
         .method(transport.method.as_str())
-        .uri(uri.as_str());
+        .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
     let (mut request, content_type) = add_headers(
@@ -64,22 +58,23 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (router::body::from_bytes(encoded), len)
+                    (encoded, len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (router::body::from_bytes(bytes), len)
+                    let body_string = serde_json::to_string(json_body)?;
+                    (body_string, len)
                 }
             } else {
-                (router::body::empty(), 0)
+                ("".into(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, router::body::empty(), 0, vec![])
+            (None, None, "".into(), 0, vec![])
         };
 
-    match transport.method {
+    match method {
         HTTPMethod::Post | HTTPMethod::Patch | HTTPMethod::Put => {
             request = request.header(CONTENT_LENGTH, content_length);
         }
@@ -131,36 +126,6 @@ pub(crate) fn make_request(
     ))
 }
 
-fn make_uri(
-    source_url: Option<&Url>,
-    template: &URLTemplate,
-    inputs: &IndexMap<String, Value>,
-) -> Result<Url, HttpJsonTransportError> {
-    let mut url = source_url
-        .or(template.base.as_ref())
-        .ok_or(HttpJsonTransportError::NoBaseUrl)?
-        .clone();
-
-    url.path_segments_mut()
-        .map_err(|_| {
-            HttpJsonTransportError::InvalidUrl(url::ParseError::RelativeUrlWithCannotBeABaseBase)
-        })?
-        .pop_if_empty()
-        .extend(
-            template
-                .interpolate_path(inputs)
-                .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?,
-        );
-
-    let query_params = template
-        .interpolate_query(inputs)
-        .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?;
-    if !query_params.is_empty() {
-        url.query_pairs_mut().extend_pairs(query_params);
-    }
-    Ok(url)
-}
-
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
 fn add_headers(
     mut request: http::request::Builder,
@@ -204,408 +169,16 @@ fn add_headers(
     )
 }
 
-#[derive(Error, Display, Debug)]
+#[derive(Error, Debug)]
 pub(crate) enum HttpJsonTransportError {
-    /// Error building URI: {0:?}
-    NewUriError(#[from] Option<http::uri::InvalidUri>),
-    /// Could not generate HTTP request: {0}
+    #[error("Could not generate HTTP request: {0}")]
     InvalidNewRequest(#[source] http::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     JsonBodySerialization(#[from] serde_json::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     FormBodySerialization(&'static str),
-    /// Error building URI: {0:?}
-    InvalidUrl(url::ParseError),
-    /// Could not generate URI from inputs: {0}
-    TemplateGenerationError(String),
-    /// Either a source or a fully qualified URL must be provided to `@connect`
-    NoBaseUrl,
-}
-
-#[cfg(test)]
-mod test_make_uri {
-    use insta::assert_snapshot;
-    use pretty_assertions::assert_eq;
-    use serde_json_bytes::json;
-
-    use super::*;
-
-    macro_rules! this {
-        ($($value:tt)*) => {{
-            let mut map = IndexMap::with_capacity_and_hasher(1, Default::default());
-            map.insert("$this".to_string(), json!({ $($value)* }));
-            map
-        }};
-    }
-
-    #[test]
-    fn append_path() {
-        assert_eq!(
-            make_uri(
-                Some(&Url::parse("https://localhost:8080/v1").unwrap()),
-                &"/hello/42".parse().unwrap(),
-                &Default::default(),
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42"
-        );
-    }
-
-    #[test]
-    fn append_path_with_trailing_slash() {
-        assert_eq!(
-            make_uri(
-                Some(&Url::parse("https://localhost:8080/").unwrap()),
-                &"/hello/42".parse().unwrap(),
-                &Default::default(),
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/hello/42"
-        );
-    }
-
-    #[test]
-    fn append_path_test_with_trailing_slash_and_base_path() {
-        assert_eq!(
-            make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! { "id": 42 },
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42?id=42"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_params() {
-        assert_eq!(
-            make_uri(
-                Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! {"id": 42 },
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
-        assert_eq!(
-            make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! {"id": 42 },
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-        );
-    }
-
-    #[test]
-    fn path_cases() {
-        let template = "http://localhost/users/{$this.user_id}?a={$this.b}&e={$this.f.g}"
-            .parse()
-            .unwrap();
-
-        assert_snapshot!(
-            make_uri(None, &template, &Default::default())
-                .unwrap()
-                .as_str(),
-            @"http://localhost/users/?a=&e="
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "user_id": 123,
-                    "b": "456",
-                    "f": {"g": "abc"}
-                }
-            )
-            .unwrap()
-            .to_string(),
-            @"http://localhost/users/123?a=456&e=abc"
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "user_id": 123,
-                    "f": "not an object"
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/users/123?a=&e="
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    // The order of the variables should not matter.
-                    "b": "456",
-                    "user_id": "123"
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/users/123?a=456&e="
-        );
-
-        assert_eq!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "user_id": "123",
-                    "b": "a",
-                    "f": {"g": "e"},
-                    // Extra variables should be ignored.
-                    "extra": "ignored"
-                }
-            )
-            .unwrap()
-            .to_string(),
-            "http://localhost/users/123?a=a&e=e",
-        );
-    }
-
-    #[test]
-    fn multi_variable_parameter_values() {
-        let template =
-            "http://localhost/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e},{$this.f}]"
-                .parse()
-                .unwrap();
-
-        assert_eq!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "x": 1,
-                    "y": 2,
-                    "z": 3,
-                    "b": 4,
-                    "c": 5,
-                    "d": 6,
-                    "e": 7,
-                    "f": 8,
-                }
-            )
-            .unwrap()
-            .as_str(),
-            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C8%5D"
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "x": 1,
-                    "y": 2,
-                    "z": 3,
-                    "b": 4,
-                    "c": 5,
-                    "d": 6,
-                    "e": 7
-                    // "f": 8,
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C%5D",
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "x": 1,
-                    "y": 2,
-                    "z": 3,
-                    "b": 4,
-                    "c": 5,
-                    "d": 6,
-                    // "e": 7,
-                    "f": 8
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C8%5D",
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "x": 1,
-                    "y": 2,
-                    "z": 3,
-                    "b": 4,
-                    "c": 5,
-                    "d": 6
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C%5D",
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    // "x": 1,
-                    "y": 2,
-                    "z": 3
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(,2,3)?required=%2C%3B&optional=%5B%2C%5D",
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "x": 1,
-                    "y": 2
-                    // "z": 3,
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,)?required=%2C%3B&optional=%5B%2C%5D"
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &template,
-                &this! {
-                    "b": 4,
-                    // "c": 5,
-                    "d": 6,
-                    "x": 1,
-                    "y": 2,
-                    "z": 3
-                }
-            )
-            .unwrap()
-            .to_string(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C%3B6&optional=%5B%2C%5D"
-        );
-
-        let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
-            .parse()
-            .unwrap();
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &line_template,
-                &this! {
-                    "p1": {
-                        "x": 1,
-                        "y": 2,
-                        "z": 3,
-                    },
-                    "p2": {
-                        "x": 4,
-                        "y": 5,
-                        "z": 6,
-                    }
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/line/1,2,3/4,5,6"
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &line_template,
-            &this! {
-                "p1": {
-                    "x": 1,
-                    "y": 2,
-                    "z": 3,
-                },
-                "p2": {
-                    "x": 4,
-                    "y": 5,
-                    // "z": 6,
-                }
-            }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/line/1,2,3/4,5,"
-        );
-
-        assert_snapshot!(
-            make_uri(
-                None,
-                &line_template,
-                &this! {
-                    "p1": {
-                        "x": 1,
-                        // "y": 2,
-                        "z": 3,
-                    },
-                    "p2": {
-                        "x": 4,
-                        "y": 5,
-                        "z": 6,
-                    }
-                }
-            )
-            .unwrap()
-            .as_str(),
-            @"http://localhost/line/1,,3/4,5,6"
-        );
-    }
-
-    /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
-    /// no nested query params, etc. When we expand values, we have to make sure they're safe.
-    #[test]
-    fn parameter_encoding() {
-        let vars = &this! {
-            "path": "/some/path",
-            "question_mark": "a?b",
-            "ampersand": "a&b=b",
-            "hash": "a#b",
-        };
-
-        let template = "http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}"
-            .parse()
-            .expect("Failed to parse URL template");
-        let url = make_uri(None, &template, vars).expect("Failed to generate URL");
-
-        assert_eq!(
-            url.as_str(),
-            "http://localhost/%2Fsome%2Fpath/a%3Fb?a=a%26b%3Db&c=a%23b"
-        );
-    }
+    #[error(transparent)]
+    MakeUri(#[from] MakeUriError),
 }
 
 #[cfg(test)]
@@ -617,14 +190,15 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
-    use http::header::CONTENT_ENCODING;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::header::CONTENT_ENCODING;
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::services::router::body;
     use crate::Context;
+    use crate::services::router::body;
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -694,10 +268,10 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
-                headers: Default::default(),
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {
@@ -706,12 +280,13 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -723,14 +298,14 @@ mod tests {
                             "content-type": "application/json",
                             "content-length": "8",
                         },
-                        body: UnsyncBoxBody,
+                        body: "{\"a\":42}",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
@@ -752,10 +327,11 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {
@@ -764,12 +340,13 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -781,14 +358,14 @@ mod tests {
                             "content-type": "application/x-www-form-urlencoded",
                             "content-length": "4",
                         },
-                        body: UnsyncBoxBody,
+                        body: "a=42",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();

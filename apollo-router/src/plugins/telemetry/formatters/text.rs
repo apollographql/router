@@ -21,10 +21,10 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::TextFormat;

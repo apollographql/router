@@ -10,19 +10,19 @@ use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tower::limit::RateLimitLayer;
-use tower::load_shed::error::Overloaded;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::limit::RateLimitLayer;
+use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::services::router;
 use crate::services::RouterResponse;
+use crate::services::router;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -38,7 +38,7 @@ pub(crate) struct LicenseEnforcement {
 pub(crate) struct TpsLimitConf {
     /// The number of operations allowed during a certain interval
     pub(crate) capacity: NonZeroU64,
-    /// The interval as specied in the user's license; this is in milliseconds
+    /// The interval as specified in the user's license; this is in milliseconds
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub(crate) interval: Duration,
@@ -127,8 +127,11 @@ mod test {
             }),
         };
 
-        let test_harness: PluginTestHarness<LicenseEnforcement> =
-            PluginTestHarness::builder().license(license).build().await;
+        let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
+            .license(license)
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -159,9 +162,10 @@ mod test {
 
         assert!(r1.is_ok_and(|resp| resp.response.status().is_success()));
         assert!(r2.is_ok_and(|resp| resp.response.status() == StatusCode::SERVICE_UNAVAILABLE));
-        assert!(r3
-            .await
-            .is_ok_and(|resp| resp.response.status().is_success()));
+        assert!(
+            r3.await
+                .is_ok_and(|resp| resp.response.status().is_success())
+        );
     }
 
     #[tokio::test]
@@ -179,8 +183,11 @@ mod test {
                 }),
             };
 
-            let test_harness: PluginTestHarness<LicenseEnforcement> =
-                PluginTestHarness::builder().license(license).build().await;
+            let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
+                .license(license)
+                .build()
+                .await
+                .expect("test harness");
 
             let service = test_harness.router_service(|_req| async {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;

@@ -1,11 +1,12 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::fmt::Display;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Instant;
 
+use axum::Router;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,14 +14,13 @@ use axum::middleware;
 use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
-use axum::Router;
 use futures::channel::oneshot;
 use futures::future::join_all;
 use futures::prelude::*;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
@@ -32,19 +32,20 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
-use tower::layer::layer_fn;
 use tower::ServiceExt;
+use tower::layer::layer_fn;
 use tower_http::trace::TraceLayer;
-use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
+use tracing::instrument::WithSubscriber;
 
+use super::ENDPOINT_CALLBACK;
+use super::ListenAddrAndRouter;
+use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
-use super::listeners::ListenersAndRouters;
 use super::utils::PropagatingMakeSpan;
-use super::ListenAddrAndRouter;
-use super::ENDPOINT_CALLBACK;
+use crate::Context;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
@@ -60,10 +61,9 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
-use crate::Context;
+use crate::uplink::license_enforcement::LicenseState;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -160,6 +160,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: RouterFactory,
     {
         Box::pin(async move {
+            let pipeline_ref = service_factory.pipeline_ref().clone();
             let all_routers =
                 make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
@@ -218,10 +219,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                pipeline_ref.clone(),
+                actual_main_listen_address.clone(),
                 main_listener,
+                configuration.supergraph.connection_shutdown_timeout,
                 all_routers.main.1,
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
+                configuration.server.http.header_read_timeout,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -257,10 +262,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            pipeline_ref.clone(),
+                            listen_addr.clone(),
                             listener,
+                            configuration.supergraph.connection_shutdown_timeout,
                             router,
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
+                            configuration.server.http.header_read_timeout,
                             all_connections_stopped_sender.clone(),
                         );
                         (
@@ -418,7 +427,7 @@ async fn license_handler(
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
         // If not successful some other thread will have logged.
         let last_elapsed_seconds = delta.load(Ordering::SeqCst);
         let elapsed_seconds = start.elapsed().as_secs();

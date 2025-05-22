@@ -1,13 +1,14 @@
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use super::OperationKind;
 use super::fetch::SubgraphSchemas;
 use super::rewrites;
-use super::OperationKind;
 use crate::error::ValidationErrors;
 use crate::services::SubscriptionTaskParams;
 
@@ -49,7 +50,7 @@ pub(crate) struct SubscriptionNode {
     pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the subscription.
-    pub(crate) operation: super::fetch::SubgraphOperation,
+    pub(crate) operation: SerializableDocument,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<Arc<str>>,

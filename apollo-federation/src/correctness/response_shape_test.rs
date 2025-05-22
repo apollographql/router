@@ -1,5 +1,5 @@
-use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::schema::Schema;
 
 use super::*;
 use crate::ValidFederationSchema;

@@ -7,8 +7,8 @@ use opentelemetry::trace::TraceContextExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
-use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Registry;
+use tracing_subscriber::registry::LookupSpan;
 
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::IsSampled;
@@ -87,8 +87,8 @@ mod test {
     use once_cell::sync::Lazy;
     use opentelemetry::trace::TracerProvider;
     use parking_lot::Mutex;
-    use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
+    use tracing_subscriber::layer::SubscriberExt;
 
     use super::TraceId;
     use crate::plugins::telemetry::otel;

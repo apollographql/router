@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use apollo_compiler::name;
+use apollo_federation::query_plan::requires_selection;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use futures::StreamExt;
 use http::Method;
 use serde_json_bytes::json;
@@ -17,6 +19,10 @@ use super::OperationKind;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlan;
+use crate::Configuration;
+use crate::Context;
+use crate::MockedSubgraphs;
+use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -25,19 +31,14 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphOperation;
+use crate::services::SubgraphResponse;
+use crate::services::SubgraphServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
-use crate::services::SubgraphResponse;
-use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Configuration;
-use crate::Context;
-use crate::MockedSubgraphs;
-use crate::TestHarness;
 
 macro_rules! test_query_plan {
     () => {
@@ -83,11 +84,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         formatted_query_plan: Default::default(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         estimated_size: Default::default(),
     };
 
@@ -144,11 +141,7 @@ async fn fetch_includes_operation_name() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -213,11 +206,7 @@ async fn fetch_makes_post_requests() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -292,7 +281,7 @@ async fn defer() {
                         service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
                         operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".into()),
@@ -314,29 +303,29 @@ async fn defer() {
                         path: Path(vec![PathElement::Key("t".to_string(), None)]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
                             service_name: "Y".into(),
-                            requires: vec![query_planner::selection::Selection::InlineFragment(
-                                query_planner::selection::InlineFragment {
+                            requires: vec![requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
                                     type_condition: Some(name!("T")),
                                     selections: vec![
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("id"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("__typename"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
                                     ],
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: SubgraphOperation::from_string(
+                            operation: SerializableDocument::from_string(
                                 "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
                             ),
                             operation_name: None,
@@ -351,10 +340,7 @@ async fn defer() {
                     }))),
                 }],
             }.into(),
-            usage_reporting: UsageReporting {
-                stats_report_key: "this is a test report key".to_string(),
-                referenced_fields_by_type: Default::default(),
-            }.into(),
+            usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
             query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
@@ -479,11 +465,7 @@ async fn defer_if_condition() {
 
     let query_plan = QueryPlan {
         root,
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(
             Query::parse(
                 query,
@@ -652,11 +634,7 @@ async fn dependent_mutations() {
             }"#,
         )
         .unwrap(),
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -1866,7 +1844,7 @@ fn broken_plan_does_not_panic() {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
-            operation: SubgraphOperation::from_string(operation),
+            operation: SerializableDocument::from_string(operation),
             operation_name: Some("t".into()),
             operation_kind: OperationKind::Query,
             id: Some("fetch1".into()),
@@ -1878,11 +1856,7 @@ fn broken_plan_does_not_panic() {
         })
         .into(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting {
-            stats_report_key: "this is a test report key".to_string(),
-            referenced_fields_by_type: Default::default(),
-        }
-        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),

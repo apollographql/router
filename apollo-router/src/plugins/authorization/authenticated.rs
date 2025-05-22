@@ -2,21 +2,21 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-use crate::spec::Schema;
-use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
@@ -225,7 +225,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -523,24 +523,24 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ast;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast;
     use multimap::MultiMap;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
+    use crate::Context;
+    use crate::MockedSubgraphs;
+    use crate::TestHarness;
     use crate::http_ext::TryIntoHeaderName;
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
     use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-    use crate::services::router::ClientRequestAccepts;
+    use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
+    use crate::plugins::content_negotiation::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
-    use crate::Context;
-    use crate::MockedSubgraphs;
-    use crate::TestHarness;
 
     static BASIC_SCHEMA: &str = r#"
 

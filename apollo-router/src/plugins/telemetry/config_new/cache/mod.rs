@@ -8,16 +8,16 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
-use super::selectors::SubgraphSelector;
+use super::subgraph::selectors::SubgraphSelector;
 use crate::plugins::cache::entity::CacheHitMiss;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
 

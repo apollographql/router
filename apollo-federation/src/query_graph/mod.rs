@@ -3,18 +3,18 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::schema::Type;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
+use petgraph::Direction;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -22,6 +22,7 @@ use crate::internal_error;
 use crate::operation::Field;
 use crate::operation::InlineFragment;
 use crate::operation::SelectionSet;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -30,7 +31,6 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 
 pub mod build_query_graph;
@@ -48,8 +48,9 @@ use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
@@ -201,7 +202,7 @@ impl QueryGraphEdge {
         conditions_to_check: &EnabledOverrideConditions,
     ) -> bool {
         if let Some(override_condition) = &self.override_condition {
-            override_condition.condition == conditions_to_check.contains(&override_condition.label)
+            override_condition.check(conditions_to_check)
         } else {
             true
         }
@@ -236,6 +237,12 @@ impl Display for QueryGraphEdge {
 pub(crate) struct OverrideCondition {
     pub(crate) label: String,
     pub(crate) condition: bool,
+}
+
+impl OverrideCondition {
+    pub(crate) fn check(&self, enabled_conditions: &EnabledOverrideConditions) -> bool {
+        self.condition == enabled_conditions.contains(&self.label)
+    }
 }
 
 impl Display for OverrideCondition {
@@ -405,6 +412,9 @@ pub struct QueryGraph {
     /// argument coordinates). This identifier is called the "context ID".
     arguments_to_context_ids_by_source:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
+    /// To speed up the estimation of counting non-local selections, we precompute specific metadata
+    /// about the query graph and store that here.
+    non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
 }
 
 impl QueryGraph {
@@ -500,7 +510,7 @@ impl QueryGraph {
         self.types_to_nodes_by_source(&self.current_source)
     }
 
-    fn types_to_nodes_by_source(
+    pub(super) fn types_to_nodes_by_source(
         &self,
         source: &str,
     ) -> Result<&IndexMap<NamedType, IndexSet<NodeIndex>>, FederationError> {
@@ -580,6 +590,12 @@ impl QueryGraph {
 
     pub(crate) fn is_context_used(&self) -> bool {
         !self.arguments_to_context_ids_by_source.is_empty()
+    }
+
+    pub(crate) fn non_local_selection_metadata(
+        &self,
+    ) -> &non_local_selections_estimation::QueryGraphMetadata {
+        &self.non_local_selection_metadata
     }
 
     /// All outward edges from the given node (including self-key and self-root-type-resolution
@@ -690,7 +706,9 @@ impl QueryGraph {
     ) -> Result<Option<SelectionSet>, FederationError> {
         let edge_head = self.edge_head_weight(edge_index)?;
         let QueryGraphNodeType::SchemaType(type_position) = &edge_head.type_ else {
-            return Err(FederationError::internal("Unable to compute locally_satisfiable_key. Edge head was unexpectedly pointing to a federated root type"));
+            return Err(FederationError::internal(
+                "Unable to compute locally_satisfiable_key. Edge head was unexpectedly pointing to a federated root type",
+            ));
         };
         let Some(subgraph_schema) = self.sources.get(&edge_head.source) else {
             return Err(FederationError::internal(format!(
@@ -724,6 +742,7 @@ impl QueryGraph {
                     subgraph_schema,
                     composite_type_position.type_name().clone(),
                     key_value.fields,
+                    true,
                 )
             })
             .find_ok(|selection| !external_metadata.selects_any_external_field(selection))
@@ -961,7 +980,7 @@ impl QueryGraph {
                 key.specified_argument_by_name("fields")
                     .and_then(|arg| arg.as_str())
             })
-            .map(|value| parse_field_set(schema, ty.name().clone(), value))
+            .map(|value| parse_field_set(schema, ty.name().clone(), value, true))
             .find_ok(|selection| {
                 !metadata
                     .external_metadata()

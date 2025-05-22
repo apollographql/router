@@ -3,8 +3,8 @@ use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test]
 async fn simple() {
@@ -144,7 +144,7 @@ async fn operation_name_error() {
         {
           "message": "Unknown operation named \"NonExistentOp\"",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "GRAPHQL_UNKNOWN_OPERATION_NAME"
           }
         }
       ]

@@ -8,12 +8,12 @@ use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {

@@ -174,9 +174,11 @@ mod tests {
 
             // No metrics should be emitted for success case
             let metrics = crate::metrics::collect_metrics();
-            assert!(metrics
-                .find("apollo.router.telemetry.batch_processor.errors")
-                .is_none());
+            assert!(
+                metrics
+                    .find("apollo.router.telemetry.batch_processor.errors")
+                    .is_none()
+            );
         }
         .with_metrics()
         .await;

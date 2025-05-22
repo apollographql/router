@@ -65,25 +65,31 @@ async fn main() {
     assert!(request!(125).is_ok());
 
     // JSON parser recursion limit in serde_json::Deserializier
-    assert!(request!(126)
-        .unwrap_err()
-        .contains("service 'subgraph_1' response was malformed: recursion limit exceeded"));
+    assert!(
+        request!(126)
+            .unwrap_err()
+            .contains("service 'subgraph_1' response was malformed: recursion limit exceeded")
+    );
 
     // Stack overflow: the router process aborts before it can send a response
     //
     // As of commit 6e426ddf2fe9480210dfa74c85040db498c780a2 (Router 1.33.2+),
     // with Rust 1.72.0 on aarch64-apple-darwin, this happens starting at ~2400 nesting levels.
-    assert!(request!(3000)
-        .unwrap_err()
-        .contains("connection closed before message completed"));
+    assert!(
+        request!(3000)
+            .unwrap_err()
+            .contains("connection closed before message completed")
+    );
 
     let graphql_recursion_limit = 500;
     let _router = spawn_router(graphql_recursion_limit).await;
 
     // GraphQL parser recursion limit in apollo-parser
-    assert!(request!(500)
-        .unwrap_err()
-        .contains("Error: parser recursion limit reached"));
+    assert!(
+        request!(500)
+            .unwrap_err()
+            .contains("Error: parser recursion limit reached")
+    );
 }
 
 async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
@@ -213,7 +219,7 @@ async fn subgraph(
         .unwrap()
         .parse::<usize>()
         .unwrap();
-    // Read the request body and prompty ignore it
+    // Read the request body and promptly ignore it
     request
         .into_body()
         .collect()

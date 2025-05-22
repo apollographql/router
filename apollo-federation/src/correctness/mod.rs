@@ -1,29 +1,35 @@
 pub mod query_plan_analysis;
 #[cfg(test)]
 pub mod query_plan_analysis_test;
+mod query_plan_soundness;
+#[cfg(test)]
+pub mod query_plan_soundness_test;
 pub mod response_shape;
 pub mod response_shape_compare;
+#[cfg(test)]
+pub mod response_shape_compare_test;
 #[cfg(test)]
 pub mod response_shape_test;
 mod subgraph_constraint;
 
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
+use query_plan_analysis::AnalysisContext;
 
+use crate::FederationError;
 use crate::compat::coerce_executable_values;
-use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::correctness::response_shape_compare::ComparisonError;
+use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::query_plan::QueryPlan;
 use crate::schema::ValidFederationSchema;
-use crate::FederationError;
 
 //==================================================================================================
 // Public API
 
-#[derive(derive_more::From)]
+#[derive(derive_more::From, Debug)]
 pub enum CorrectnessError {
     /// Correctness checker's own error
     FederationError(FederationError),
@@ -67,8 +73,9 @@ pub fn check_plan(
 
     let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;
-    let plan_rs = query_plan_analysis::interpret_query_plan(supergraph_schema, &root_type, plan)
-        .map_err(|e| {
+    let context = AnalysisContext::new(supergraph_schema.clone(), subgraphs_by_name);
+    let plan_rs =
+        query_plan_analysis::interpret_query_plan(&context, &root_type, plan).map_err(|e| {
             ComparisonError::new(format!(
                 "Failed to compute the response shape from query plan:\n{e}"
             ))
@@ -78,6 +85,11 @@ pub fn check_plan(
     );
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
-    compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs)?;
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs).map_err(|e| {
+        ComparisonError::new(format!(
+            "Response shape from query plan does not match response shape from input operation:\n{e}"
+        ))
+    })?;
     Ok(())
 }

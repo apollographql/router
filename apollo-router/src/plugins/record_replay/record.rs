@@ -2,8 +2,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::stream::once;
 use futures::StreamExt;
+use futures::stream::once;
 use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;

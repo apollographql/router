@@ -11,6 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use futures::FutureExt as _;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
@@ -20,12 +21,12 @@ use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 
 #[path = "./common.rs"]
 pub(crate) mod common;
@@ -151,14 +152,25 @@ fn test(path: &PathBuf, plan: Plan) -> Result<(), Failed> {
     let rt = Runtime::new()?;
 
     // Spawn the root task
-    rt.block_on(async {
-        let mut execution = TestExecution::new();
-        for action in plan.actions {
-            execution.execute_action(&action, path, &mut out).await?;
-        }
+    let caught = rt.block_on(
+        std::panic::AssertUnwindSafe(async {
+            let mut execution = TestExecution::new();
+            for action in plan.actions {
+                execution.execute_action(&action, path, &mut out).await?;
+            }
 
-        Ok(())
-    })
+            Ok(())
+        })
+        .catch_unwind(),
+    );
+
+    match caught {
+        Ok(result) => result,
+        Err(any) => {
+            print!("{out}");
+            std::panic::resume_unwind(any);
+        }
+    }
 }
 
 struct TestExecution {
@@ -362,9 +374,9 @@ impl TestExecution {
                 {
                     use std::str::FromStr;
 
+                    use http::Uri;
                     use http::header::CONTENT_LENGTH;
                     use http::header::CONTENT_TYPE;
-                    use http::Uri;
 
                     let snapshot_server = apollo_router::SnapshotServer::spawn(
                         &path.join(&snapshot.path),

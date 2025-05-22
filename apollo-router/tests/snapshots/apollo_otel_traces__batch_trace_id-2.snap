@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_otel_traces.rs
 expression: report
+snapshot_kind: text
 ---
 resourceSpans:
   - resource:
@@ -64,7 +65,7 @@ resourceSpans:
                   stringValue: POST
               - key: http.response.status_code
                 value:
-                  intValue: 200
+                  intValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -114,7 +115,79 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: parse_query
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
@@ -145,16 +218,16 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
-                  intValue: 0
+                  intValue: "0"
               - key: apollo_private.query.depth
                 value:
-                  intValue: 4
+                  intValue: "4"
               - key: apollo_private.query.height
                 value:
-                  intValue: 7
+                  intValue: "7"
               - key: apollo_private.query.root_fields
                 value:
-                  intValue: 1
+                  intValue: "1"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -187,6 +260,42 @@ resourceSpans:
             parentSpanId: "[span_id]"
             flags: 1
             name: query_planning
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
@@ -631,16 +740,16 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
-                  intValue: 0
+                  intValue: "0"
               - key: apollo_private.query.depth
                 value:
-                  intValue: 4
+                  intValue: "4"
               - key: apollo_private.query.height
                 value:
-                  intValue: 7
+                  intValue: "7"
               - key: apollo_private.query.root_fields
                 value:
-                  intValue: 1
+                  intValue: "1"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -673,6 +782,42 @@ resourceSpans:
             parentSpanId: "[span_id]"
             flags: 1
             name: query_planning
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"

@@ -18,11 +18,11 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
 use super::APOLLO_CONNECTOR_PREFIX;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
@@ -357,7 +357,7 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
     if let Some(root_span) = root.next() {
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
-        if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
+        if let Some(otel_data) = ext.get::<OtelData>() {
             if let Some(attributes) = otel_data.builder.attributes.as_ref() {
                 if let Some(kv) = attributes
                     .iter()
@@ -464,7 +464,7 @@ impl io::Write for WriteAdaptor<'_> {
             .write_str(s)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        Ok(s.as_bytes().len())
+        Ok(s.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -483,11 +483,11 @@ mod test {
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
-    use tracing_subscriber::Layer;
-    use tracing_subscriber::Registry;
 
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;

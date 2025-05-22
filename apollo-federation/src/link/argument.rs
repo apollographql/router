@@ -1,9 +1,9 @@
 use std::ops::Deref;
 
-use apollo_compiler::ast::Value;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Directive;
 
 use crate::bail;
 use crate::error::FederationError;

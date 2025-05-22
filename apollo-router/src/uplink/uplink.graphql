@@ -1,3 +1,5 @@
+"Long type"
+scalar Long
 """
 ISO 8601, extended format with nanoseconds, Zulu (or "[+-]seconds" as a string or number relative to now)
 """
@@ -50,6 +52,10 @@ type Query {
     ref: String!
   ): PersistedQueriesResponse!
 }
+type RateLimit {
+  count: Long!
+  durationMs: Long!
+}
 type RouterConfigResult {
   "Variant-unique identifier."
   id: ID!
@@ -70,6 +76,8 @@ type RouterEntitlement {
   haltAt: Timestamp
   "Router should warn users after this time if commercial features are in use."
   warnAt: Timestamp
+  "Router should service requests only till the throughput limits specified in this map."
+  throughputLimit: RateLimit
 }
 type RouterEntitlementsResult {
   "Unique identifier for this result, to be passed in as `entitlements(unlessId:)`."

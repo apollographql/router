@@ -1,7 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_source_http_headers.graphql
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/headers/invalid_source_http_headers.graphql
 ---
 [
     Message {
@@ -46,13 +46,6 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         message: "In `@source(http.headers:)` the value `<Invalid-Header>` is an invalid HTTP header name",
         locations: [
             19:41..19:59,
-        ],
-    },
-    Message {
-        code: InvalidHeader,
-        message: "In `@source(http.headers:)` invalid value `  Value with 😊 emoji and newline  \n `",
-        locations: [
-            22:19..22:56,
         ],
     },
     Message {

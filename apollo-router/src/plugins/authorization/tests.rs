@@ -4,18 +4,18 @@ use http::header::CONTENT_TYPE;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
+use crate::Context;
+use crate::MockedSubgraphs;
+use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
-use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::Context;
-use crate::MockedSubgraphs;
-use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 

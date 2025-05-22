@@ -3,22 +3,22 @@
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
-use mediatype::names::HTML;
-use mediatype::names::TEXT;
+use http::header::CONTENT_TYPE;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use mediatype::names::HTML;
+use mediatype::names::TEXT;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::Configuration;
 use crate::configuration::Homepage;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
-use crate::Configuration;
 
 /// A layer that serves a static page for all requests that accept a `text/html` response
 /// (typically a user navigating to a page in the browser).

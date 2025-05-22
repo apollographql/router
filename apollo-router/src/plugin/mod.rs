@@ -27,22 +27,24 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
-use apollo_compiler::validation::Valid;
+use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use tower::buffer::future::ResponseFuture;
-use tower::buffer::Buffer;
+use schemars::r#gen::SchemaGenerator;
+use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::buffer::Buffer;
+use tower::buffer::future::ResponseFuture;
 
+use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
@@ -52,7 +54,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::ListenAddr;
 
 type InstanceFactory =
     fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
@@ -85,6 +86,11 @@ pub struct PluginInit<T> {
 
     /// User's license's state, including any limits of use
     pub(crate) license: LicenseState,
+
+    /// The full router configuration json for use by the telemetry plugin ONLY.
+    /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
+    /// configuration subset.
+    pub(crate) full_config: Option<Value>,
 }
 
 impl<T> PluginInit<T>
@@ -119,7 +125,6 @@ where
 {
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     /// Build a new PluginInit for the supplied configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -132,6 +137,7 @@ where
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
@@ -142,11 +148,11 @@ where
             launch_id: launch_id.flatten(),
             notify,
             license,
+            full_config,
         }
     }
 
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -160,6 +166,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        full_config: Option<Value>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -171,12 +178,12 @@ where
             launch_id,
             notify,
             license,
+            full_config,
         })
     }
 
     /// Create a new PluginInit builder
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
@@ -186,6 +193,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<LicenseState>,
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
@@ -197,6 +205,7 @@ where
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
+            full_config,
         }
     }
 }
@@ -215,6 +224,7 @@ impl PluginInit<serde_json::Value> {
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
             .license(self.license)
+            .and_full_config(self.full_config)
             .build()
     }
 }
@@ -223,6 +233,7 @@ impl PluginInit<serde_json::Value> {
 #[derive(Clone)]
 pub struct PluginFactory {
     pub(crate) name: String,
+    pub(crate) hidden_from_config_json_schema: bool,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -252,6 +263,7 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
+            hidden_from_config_json_schema: false,
             instance_factory: |init| {
                 Box::pin(async move {
                     let init = init.with_deserialized_config()?;
@@ -259,13 +271,12 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as PluginUnstable>::Config>(),
+            schema_factory: |generator| generator.subschema_for::<<P as PluginUnstable>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
 
     /// Create a plugin factory.
-    #[allow(dead_code)]
     pub(crate) fn new_private<P: PluginPrivate>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
             name.to_string()
@@ -275,6 +286,7 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
+            hidden_from_config_json_schema: P::HIDDEN_FROM_CONFIG_JSON_SCHEMA,
             instance_factory: |init| {
                 Box::pin(async move {
                     let init = init.with_deserialized_config()?;
@@ -282,7 +294,7 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as PluginPrivate>::Config>(),
+            schema_factory: |generator| generator.subschema_for::<<P as PluginPrivate>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
@@ -307,8 +319,11 @@ impl PluginFactory {
         .await
     }
 
-    pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
-        (self.schema_factory)(gen)
+    pub(crate) fn create_schema(
+        &self,
+        generator: &mut SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        (self.schema_factory)(generator)
     }
 }
 
@@ -538,6 +553,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
     type Config: JsonSchema + DeserializeOwned + Send;
 
+    const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
+
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -591,6 +608,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
+        _source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
         service
     }
@@ -709,6 +727,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
+        source_name: String,
     ) -> crate::services::connector::request_service::BoxService;
 
     /// Return the name of the plugin.
@@ -722,6 +741,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// Support downcasting
     #[cfg(test)]
+    #[allow(dead_code)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
     /// The point of no return, this plugin is about to go live
@@ -762,8 +782,9 @@ where
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
+        source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
-        self.connector_request_service(service)
+        self.connector_request_service(service, source_name)
     }
 
     fn name(&self) -> &'static str {
@@ -806,9 +827,9 @@ macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -821,9 +842,9 @@ macro_rules! register_plugin {
     ($group: literal, $name: expr, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -841,9 +862,9 @@ macro_rules! register_private_plugin {
     ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -856,9 +877,9 @@ macro_rules! register_private_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]

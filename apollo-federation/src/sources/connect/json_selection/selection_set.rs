@@ -16,36 +16,67 @@
     )
 )]
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
+use apollo_compiler::validation::Valid;
 use multimap::MultiMap;
 
+use super::JSONSelectionParseError;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
 use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
-use crate::sources::connect::json_selection::Alias;
-use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::Alias;
+use crate::sources::connect::json_selection::NamedSelection;
+
+impl TryFrom<Valid<FieldSet>> for JSONSelection {
+    type Error = JSONSelectionParseError;
+
+    fn try_from(field_set: Valid<FieldSet>) -> Result<Self, Self::Error> {
+        Self::parse(&field_set.serialize().no_indent().to_string())
+    }
+}
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
+    ///
+    /// Operations from the query planner will never contain key fields (because
+    /// it already has them from a previous fetch) but we might need those
+    /// fields for things like sorting entities in a batch. If the optional
+    /// `required_keys` is provided, we'll merge those fields into the selection
+    /// set before applying it to the JSONSelection.
     pub fn apply_selection_set(
         &self,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
+        required_keys: Option<&FieldSet>,
     ) -> Self {
+        let selection_set = required_keys.map_or_else(
+            || selection_set.clone(),
+            |keys| {
+                keys.selection_set.selections.iter().cloned().fold(
+                    selection_set.clone(),
+                    |mut acc, selection| {
+                        acc.push(selection);
+                        acc
+                    },
+                )
+            },
+        );
+
         match self {
-            Self::Named(sub) => Self::Named(sub.apply_selection_set(document, selection_set)),
-            Self::Path(path) => Self::Path(path.apply_selection_set(document, selection_set)),
+            Self::Named(sub) => Self::Named(sub.apply_selection_set(document, &selection_set)),
+            Self::Path(path) => Self::Path(path.apply_selection_set(document, &selection_set)),
         }
     }
 }
@@ -272,11 +303,15 @@ fn map_fields_by_name_impl<'a>(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::executable::FieldSet;
+    use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::name;
+    use apollo_compiler::validation::Valid;
     use pretty_assertions::assert_eq;
+
+    use crate::assert_snapshot;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {
         let document = ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();
@@ -339,7 +374,7 @@ mod tests {
             "{ t { z: a, y: b, x: d, w: h v: k { u: l t: m } } }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -413,7 +448,7 @@ mod tests {
             "{ t { a b_alias c { e: e_alias h group { j } } path_to_f } }",
         );
 
-        let transformed = json_selection.apply_selection_set(&document, &selection_set);
+        let transformed = json_selection.apply_selection_set(&document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -507,7 +542,7 @@ mod tests {
 
         let (document, selection_set) = selection_set(&schema, "{ t { a { b { renamed } } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -575,7 +610,7 @@ mod tests {
         let (document, selection_set) =
             selection_set(&schema, "{ t { id __typename author { __typename id } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -653,7 +688,7 @@ mod tests {
             }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"reviews: result {
@@ -668,5 +703,54 @@ mod tests {
   }
 }"###
         );
+    }
+
+    #[test]
+    fn test_ensuring_key_fields() {
+        let json = super::JSONSelection::parse(
+            r###"
+            id
+            store { id }
+            name
+            price
+            "###,
+        )
+        .unwrap();
+
+        let schema = Schema::parse_and_validate(
+            r###"
+        type Query {
+            product: Product
+        }
+
+        type Product {
+            id: ID!
+            store: Store!
+            name: String!
+            price: String
+        }
+
+        type Store {
+          id: ID!
+        }
+        "###,
+            "./",
+        )
+        .unwrap();
+
+        let (document, selection_set) = selection_set(&schema, "{ product { name price } }");
+
+        let keys =
+            FieldSet::parse_and_validate(&schema, name!(Product), "id store { id }", "").unwrap();
+
+        let transformed = json.apply_selection_set(&document, &selection_set, Some(&keys));
+        assert_snapshot!(transformed.to_string(), @r"
+        id
+        store {
+          id
+        }
+        name
+        price
+        ");
     }
 }

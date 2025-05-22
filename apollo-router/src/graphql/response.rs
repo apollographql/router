@@ -3,17 +3,24 @@ use std::time::Instant;
 
 use apollo_compiler::response::ExecutionResponse;
 use bytes::Bytes;
+use displaydoc::Display;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+
+#[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
+#[error("GraphQL response was malformed: {reason}")]
+pub(crate) struct MalformedResponseError {
+    /// The reason the deserialization failed.
+    pub(crate) reason: String,
+}
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
@@ -59,7 +66,6 @@ pub struct Response {
 impl Response {
     /// Constructor
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -98,63 +104,50 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub(crate) fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
-        let value =
-            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            })?;
-        let object =
-            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            })?;
-        Response::from_object(service_name, object)
+    pub(crate) fn from_bytes(b: Bytes) -> Result<Response, MalformedResponseError> {
+        let value = Value::from_bytes(b).map_err(|error| MalformedResponseError {
+            reason: error.to_string(),
+        })?;
+        Response::from_value(value)
     }
 
-    pub(crate) fn from_object(
-        service_name: &str,
-        mut object: Object,
-    ) -> Result<Response, FetchError> {
+    pub(crate) fn from_value(value: Value) -> Result<Response, MalformedResponseError> {
+        let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
+            reason: error.to_string(),
+        })?;
         let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
+            .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
             .into_iter()
             .flatten()
-            .map(|v| Error::from_value(service_name, v))
-            .collect::<Result<Vec<Error>, FetchError>>()?;
+            .map(Error::from_value)
+            .collect::<Result<Vec<Error>, MalformedResponseError>>()?;
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(|err| FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
+                .map_err(|err| MalformedResponseError {
                     reason: err.to_string(),
                 })?
                 .unwrap_or_default();
         let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
+            .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
             .map(|s| s.as_str().to_string());
         let path = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
+            .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?;
         let has_next = extract_key_value_from_object!(object, "hasNext", Value::Bool(b) => b)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
+            .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?;
         let incremental =
             extract_key_value_from_object!(object, "incremental", Value::Array(a) => a).map_err(
-                |err| FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
+                |err| MalformedResponseError {
                     reason: err.to_string(),
                 },
             )?;
@@ -163,8 +156,7 @@ impl Response {
                 .into_iter()
                 .map(serde_json_bytes::from_value)
                 .collect::<Result<Vec<IncrementalResponse>, _>>()
-                .map_err(|err| FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
+                .map_err(|err| MalformedResponseError {
                     reason: err.to_string(),
                 })?,
             None => vec![],
@@ -173,8 +165,7 @@ impl Response {
         // If the data entry in the response is not present, the errors entry in the response must not be empty.
         // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
         if data.is_none() && errors.is_empty() {
-            return Err(FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
+            return Err(MalformedResponseError {
                 reason: "graphql response without data must contain at least one error".to_string(),
             });
         }
@@ -482,13 +473,21 @@ mod tests {
 
     #[test]
     fn test_no_data_and_no_errors() {
-        let response = Response::from_bytes("test", "{\"errors\":null}".into());
+        let response = Response::from_bytes("{\"errors\":null}".into());
         assert_eq!(
             response.expect_err("no data and no errors"),
-            FetchError::SubrequestMalformedResponse {
-                service: "test".to_string(),
+            MalformedResponseError {
                 reason: "graphql response without data must contain at least one error".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn test_data_null() {
+        let response = Response::from_bytes("{\"data\":null}".into()).unwrap();
+        assert_eq!(
+            response,
+            Response::builder().data(Some(Value::Null)).build(),
         );
     }
 }

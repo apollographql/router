@@ -1,6 +1,9 @@
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -21,19 +24,16 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
-use apollo_compiler::InvalidNameError;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use thiserror::Error;
 
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
-use crate::link::spec::Version;
-use crate::link::Import;
-use crate::link::Link;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::link::Import;
+use crate::link::Link;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
 use crate::subgraph::spec::FederationSpecError::UnsupportedFederationDirective;
 use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 
@@ -85,7 +85,8 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     TAG_DIRECTIVE_NAME,
 ];
 
-pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 1] = [FIELDSET_SCALAR_NAME];
+pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
+    [FIELDSET_SCALAR_NAME, CONTEXTFIELDVALUE_SCALAR_NAME];
 
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.
@@ -348,14 +349,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(COMPOSE_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("name"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: true,
             locations: vec![DirectiveLocation::Schema],
         }
@@ -366,14 +369,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(CONTEXT_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("name"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: true,
             locations: vec![
                 DirectiveLocation::Interface,
@@ -432,7 +437,7 @@ impl FederationSpecDefinitions {
         }
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.
@@ -442,15 +447,19 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(FROM_CONTEXT_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("field"),
-                ty: Type::Named(self.namespaced_type_name(&CONTEXTFIELDVALUE_SCALAR_NAME, false))
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("field"),
+                    ty: Type::Named(
+                        self.namespaced_type_name(&CONTEXTFIELDVALUE_SCALAR_NAME, false),
+                    )
                     .into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: false,
             locations: vec![DirectiveLocation::ArgumentDefinition],
         }
@@ -504,14 +513,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(OVERRIDE_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("from"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("from"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: false,
             locations: vec![DirectiveLocation::FieldDefinition],
         }
@@ -574,14 +585,16 @@ impl FederationSpecDefinitions {
         DirectiveDefinition {
             description: None,
             name: alias.clone().unwrap_or(TAG_DIRECTIVE_NAME),
-            arguments: vec![InputValueDefinition {
-                description: None,
-                name: name!("name"),
-                ty: ty!(String!).into(),
-                default_value: None,
-                directives: Default::default(),
-            }
-            .into()],
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("name"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
             repeatable: true,
             locations: vec![
                 DirectiveLocation::ArgumentDefinition,
@@ -790,8 +803,8 @@ impl Default for LinkSpecDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link::spec::Identity;
     use crate::link::spec::APOLLO_SPEC_DOMAIN;
+    use crate::link::spec::Identity;
 
     // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
     // to define the ground work for that in `apollo-at-link` first.

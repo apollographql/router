@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::expand::Connectors;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::KeyValue;
 
 use crate::metrics::meter_provider;
 
@@ -45,17 +45,17 @@ fn connect_spec_counts(connectors: &Connectors) -> HashMap<String, u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::expand::Connectors;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use url::Url;
+    use apollo_federation::sources::connect::expand::Connectors;
+    use http::Uri;
 
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
@@ -75,11 +75,9 @@ mod tests {
                 "label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -87,6 +85,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            error_settings: Default::default(),
         };
 
         let connectors = Connectors {
@@ -99,6 +101,7 @@ mod tests {
                 .into(),
             ),
             labels_by_service_name: Default::default(),
+            source_config_keys: Default::default(),
         };
 
         assert_eq!(

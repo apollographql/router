@@ -5,29 +5,32 @@ use std::collections::HashSet;
 use axum_extra::headers::HeaderName;
 use derivative::Derivative;
 use num_traits::ToPrimitive;
-use opentelemetry::metrics::MetricsError;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::new_view;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::new_view;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
 use super::*;
+use crate::Configuration;
 use crate::plugin::serde::deserialize_option_header_name;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
+    #[error(
+        "field level instrumentation sampler must sample less frequently than tracing level sampler"
+    )]
     InvalidFieldLevelInstrumentationSampler,
 }
 
@@ -40,16 +43,6 @@ where
             return apply(self, option);
         }
         self
-    }
-    fn try_with<B>(
-        self,
-        option: &Option<B>,
-        apply: fn(Self, &B) -> Result<Self, BoxError>,
-    ) -> Result<Self, BoxError> {
-        if let Some(option) = option {
-            return apply(self, option);
-        }
-        Ok(self)
     }
 }
 
@@ -428,7 +421,8 @@ fn default_max_attributes_per_link() -> u32 {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
-pub(crate) enum AttributeValue {
+#[allow(missing_docs)] // only public-but-hidden for tests
+pub enum AttributeValue {
     /// bool values
     Bool(bool),
     /// i64 values
@@ -438,6 +432,7 @@ pub(crate) enum AttributeValue {
     /// String values
     String(String),
     /// Array of homogeneous values
+    #[allow(private_interfaces)]
     Array(AttributeArray),
 }
 
@@ -693,7 +688,7 @@ fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
-        // Because when datadog is enabled the global sampling is overriden to always_on
+        // Because when Datadog is enabled the global sampling is overridden to always_on
         if self
             .exporters
             .tracing
@@ -785,6 +780,18 @@ impl Conf {
                 }
             }
             _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
+    }
+
+    pub(crate) fn apollo(configuration: &Configuration) -> ApolloTelemetryConfig {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo,
+                    _ => ApolloTelemetryConfig::default(),
+                }
+            }
+            _ => ApolloTelemetryConfig::default(),
         }
     }
 }

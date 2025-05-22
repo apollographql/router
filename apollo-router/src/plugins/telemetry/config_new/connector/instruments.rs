@@ -8,30 +8,30 @@ use serde::Deserialize;
 use tokio::time::Instant;
 use tower::BoxError;
 
+use crate::Context;
 use crate::metrics;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
-use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
-use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::instruments::Increment;
-use crate::plugins::telemetry::config_new::instruments::Instrument;
-use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_DURATION_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC;
+use crate::plugins::telemetry::config_new::instruments::Increment;
+use crate::plugins::telemetry::config_new::instruments::Instrument;
+use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::Context;
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]

@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 
 fn second_operation(plan: &QueryPlan) -> String {
     let Some(TopLevelPlanNode::Sequence(node)) = &plan.node else {
@@ -243,10 +243,11 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
     schema.push_str("\n      }\n");
     operation.push_str("\n  }\n}\n");
 
-    let (api_schema, planner) = planner!(
+    let planner = planner!(
         S1: &schema,
         S2: &schema,
     );
+    let api_schema = planner.api_schema();
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         api_schema.schema(),
         operation,
@@ -265,9 +266,10 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
         panic!()
     };
     assert_eq!(fetch.subgraph_name.as_ref(), "S1");
-    assert!(fetch.requires.is_none());
-    assert!(fetch.operation_document.fragments.is_empty());
-    let mut operations = fetch.operation_document.operations.iter();
+    assert!(fetch.requires.is_empty());
+    let doc = fetch.operation_document.as_parsed().unwrap();
+    assert!(doc.fragments.is_empty());
+    let mut operations = doc.operations.iter();
     let operation = operations.next().unwrap();
     assert!(operations.next().is_none());
     // operation is essentially:

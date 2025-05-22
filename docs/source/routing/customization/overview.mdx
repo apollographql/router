@@ -112,8 +112,8 @@ The router makes several values available in the request context, which is share
 - `apollo::progressive_override::unresolved_labels`: used in progressive override, contains the list of unresolved labels
 - `apollo::supergraph::first_event`: false if the current response chunk is not the first response in the stream, nonexistent otherwise
 - `apollo::supergraph::operation_id`: contains the usage reporting stats report key
-- `apollo::supergraph::operation_kind`: can be `Query`, `Mutation` or `Subscription`
-- `apollo::supergraph::operation_name`: name of the operation (according to the query and the operation_name field in the request)
+- `apollo::supergraph::operation_kind`: can be `query`, `mutation` or `subscription`
+- `apollo::supergraph::operation_name`: name of the operation being executed (according to the query and the `operation_name` field in the request)
 - `apollo::telemetry::client_name`: client name extracted from the client name header
 - `apollo::telemetry::client_version`: client version extracted from the client version header
 - `apollo::telemetry::contains_graphql_error`: true if the response contains at least one error

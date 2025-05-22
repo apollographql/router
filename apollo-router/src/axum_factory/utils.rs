@@ -8,11 +8,11 @@ use tower_http::trace::MakeSpan;
 use tower_service::Service;
 use tracing::Span;
 
+use crate::plugins::telemetry::SpanMode;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
-use crate::plugins::telemetry::SpanMode;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LicenseState;
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {

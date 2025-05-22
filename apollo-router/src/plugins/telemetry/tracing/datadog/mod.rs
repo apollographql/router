@@ -12,16 +12,16 @@ use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
 use http::Uri;
-use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanKind;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::trace::Builder;
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -43,11 +43,11 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
-use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::datadog_exporter;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -141,12 +141,12 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
+        let endpoint = &self
+            .endpoint
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
         let exporter = datadog_exporter::new_pipeline()
-            .with(
-                &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
-                |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),
-            )
+            .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {

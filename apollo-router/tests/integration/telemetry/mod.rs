@@ -5,6 +5,7 @@ use opentelemetry::trace::TraceId;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod datadog;
+mod events;
 mod logging;
 mod metrics;
 mod otlp;
@@ -24,11 +25,11 @@ struct TraceSpec {
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
     resources: HashMap<&'static str, &'static str>,
+    attributes: HashMap<&'static str, &'static str>,
 }
 
 #[buildstructor::buildstructor]
 impl TraceSpec {
-    #[allow(clippy::too_many_arguments)]
     #[builder]
     pub fn new(
         operation_name: Option<String>,
@@ -41,6 +42,7 @@ impl TraceSpec {
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
         resources: HashMap<&'static str, &'static str>,
+        attributes: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
             operation_name,
@@ -53,6 +55,7 @@ impl TraceSpec {
             subgraph_sampled,
             trace_id,
             resources,
+            attributes,
         }
     }
 }

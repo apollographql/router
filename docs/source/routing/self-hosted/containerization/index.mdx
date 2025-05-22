@@ -1,5 +1,5 @@
 ---
-title: Containerizing the GraphOS Router
+title: Containerizing an Apollo Router
 subtitle: Run router images in containers
 description: Containerize the Apollo GraphOS Router for portability and scalability. Choose from default or debug images. Deploy in Kubernetes or run in Docker.
 ---
@@ -19,16 +19,20 @@ Each release of the router includes both default (production) and debug images. 
 A router image has the following layout:
 
 * A `/dist` directory containing the router executable and licensing details
-* A `dist/config` directory containing a default configuration file, `router.yaml`
+* A `/dist/config` directory containing a default configuration file, `router.yaml`
 * A `/dist/schema` directory for conveniently mounting a locally defined supergraph schema
 
 ## Next steps
 
-The default behavior of a router image is suitable for a basic deployment or development scenario.
+While the default behavior of a router image is largely suitable for a basic deployment or development scenario, running a containerized router usually requires configuring the router's HTTP endpoint (and optional health check endpoint) to listen on a non-localhost address.
 
-For examples of customizing and deploying router images in specific environments, see the guides for: 
-* [Deploying in Kubernetes](/router/containerization/kubernetes/).
-* [Running in Docker](/router/containerization/docker/)
+To learn from examples of customizing and deploying router images in specific environments, see the deployment guides for:
+
+* [Docker](/router/containerization/docker/)
+* [AWS](/graphos/routing/self-hosted/containerization/aws) 
+* [Azure](/graphos/routing/self-hosted/containerization/azure)
+* [GCP](/graphos/routing/self-hosted/containerization/gcp)
+* [Kubernetes](/router/containerization/kubernetes/)
 
 See the Apollo Solutions [example Cloud Foundry deployment](https://github.com/apollosolutions/example-pcf-deployment) for a minimal router configuration and Cloud Foundry manifest file.
 

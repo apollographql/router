@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -8,102 +7,85 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::TryFutureExt;
+use futures::future::BoxFuture;
 use futures::future::join_all;
 use futures::future::ready;
-use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
-use http::request::Parts;
-use http::HeaderMap;
+use futures::stream::once;
 use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
+use http::request::Parts;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use tower::buffer::Buffer;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Instrument;
 
 use super::Body;
-use super::ClientRequestAccepts;
+use crate::Configuration;
+use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::metrics::count_graphql_error;
+use crate::layers::ServiceBuilderExt;
+use crate::metrics::count_operation_error_codes;
+use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::telemetry::apollo::OtlpErrorMetricsMode;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
+use crate::plugins::content_negotiation::invalid_accept_header_response;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
+use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::events::DisplayRouterRequest;
-use crate::plugins::telemetry::config_new::events::DisplayRouterResponse;
-use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionType;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
+use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::content_negotiation;
-use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::layers::static_page::StaticPageLayer;
-use crate::services::new_service::ServiceFactory;
-use crate::services::router;
-use crate::services::supergraph;
 use crate::services::HasPlugins;
-#[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
-use crate::Configuration;
-use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::static_page::StaticPageLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::supergraph;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
-pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
-pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
 static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
-static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -115,7 +97,7 @@ pub(crate) struct RouterService {
     // instance
     batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
-    oltp_error_metrics_mode: OtlpErrorMetricsMode,
+    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
@@ -125,7 +107,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        oltp_error_metrics_mode: OtlpErrorMetricsMode,
+        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
@@ -136,7 +118,7 @@ impl RouterService {
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
             supergraph_service,
-            oltp_error_metrics_mode,
+            apollo_telemetry_config,
         }
     }
 }
@@ -144,10 +126,10 @@ impl RouterService {
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -185,10 +167,10 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -280,7 +262,7 @@ impl RouterService {
                     Err(response) => response,
                     Ok(request) => {
                         // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are un-ready by default, so this
+                        // in RouterService::poll_ready. Clones are unready by default, so this
                         // self.supergraph_service is actually not ready, which is why we need to
                         // oneshot it here. That technically breaks backpressure, but because we are
                         // still readying the supergraph service before calling into the router
@@ -295,9 +277,6 @@ impl RouterService {
             },
         };
 
-        // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
-        // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
-        // or the other, and absolutely not do it inline here.
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
@@ -308,14 +287,7 @@ impl RouterService {
             .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
 
-        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-        let display_router_response: DisplayRouterResponse = context
-            .extensions()
-            .with_lock(|lock| lock.get().cloned())
-            .unwrap_or_default();
-
         let (mut parts, mut body) = response.into_parts();
-        process_vary_header(&mut parts.headers);
 
         if context
             .extensions()
@@ -344,51 +316,52 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
+                        );
+                    }
+                    if let Some(value_completion) =
+                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
+                    {
+                        Self::count_value_completion_errors(
+                            value_completion,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
 
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;
                             Ok(body)
                         });
                     let body = body?;
+                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                    let display_router_response = context
+                        .extensions()
+                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
-                    if display_router_response.0 {
-                        context.extensions().with_lock(|ext| {
-                            ext.insert(RouterResponseBodyExtensionType(body.clone()));
-                        });
-                    }
-
-                    Ok(router::Response {
-                        response: http::Response::from_parts(parts, router::body::from_bytes(body)),
+                    let mut res = router::Response {
+                        response: Response::from_parts(
+                            parts,
+                            router::body::from_bytes(body.clone()),
+                        ),
                         context,
-                    })
-                } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
+                    };
+
+                    if display_router_response {
+                        res.stash_the_body_in_extensions(body);
                     }
 
+                    Ok(res)
+                } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
 
@@ -397,49 +370,41 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let response = match response.subscribed {
-                        Some(true) => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                body,
-                                ProtocolMode::Subscription,
-                            )),
-                        ),
-                        _ => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                once(ready(response)).chain(body),
-                                ProtocolMode::Defer,
-                            )),
-                        ),
+
+                    // NB: here is where we decide what kind of streaming response we're going to
+                    //  send. insert it into the extensions so that the content negotiation plugin
+                    //  can read it.
+                    let protocol_mode = if matches!(response.subscribed, Some(true)) {
+                        ProtocolMode::Subscription
+                    } else {
+                        ProtocolMode::Defer
                     };
+                    context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(protocol_mode));
+
+                    let response_multipart = match protocol_mode {
+                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
+                        ProtocolMode::Defer => {
+                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
+                        }
+                    };
+
+                    let response = http::Response::from_parts(
+                        parts,
+                        router::body::from_result_stream(response_multipart),
+                    );
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    Self::count_error_codes(
-                        vec!["INVALID_ACCEPT_HEADER"],
+                    count_operation_error_codes(
+                        &["INVALID_ACCEPT_HEADER"],
                         &context,
-                        &self.oltp_error_metrics_mode,
+                        &self.apollo_telemetry_config.errors,
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
-                    Ok(router::Response::error_builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-                                        APPLICATION_JSON.essence_str(),
-                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_ACCEPT,
-                                        MULTIPART_SUBSCRIPTION_ACCEPT,
-                                    ))
-                                    .extension_code("INVALID_ACCEPT_HEADER")
-                                    .build(),
-                            )
-                            .status_code(StatusCode::NOT_ACCEPTABLE)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .context(context)
-                            .build()?)
+                    Ok(invalid_accept_header_response().into())
                 }
             }
         }
@@ -672,6 +637,19 @@ impl RouterService {
                 }
             }
         };
+
+        if is_batch && self.batching.exceeds_batch_size(&result) {
+            return Err(TranslateError {
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                extension_details: format!(
+                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                    result.len(),
+                    self.batching.maximum_size.unwrap_or_default()
+                ),
+            });
+        }
+
         Ok((result, is_batch))
     }
 
@@ -796,137 +774,74 @@ impl RouterService {
         parts: &Parts,
         body: Body,
     ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
-        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> =
-            if parts.method == Method::GET {
-                self.translate_query_request(parts).await
-            } else {
-                let bytes = router::body::into_bytes(body)
-                    .instrument(tracing::debug_span!("receive_body"))
-                    .await?;
-                if let Some(level) = context
-                    .extensions()
-                    .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
-                    .map(|d| d.0)
-                {
-                    let mut attrs = Vec::with_capacity(5);
-                    #[cfg(test)]
-                    let mut headers: indexmap::IndexMap<String, HeaderValue> = parts
-                        .headers
-                        .clone()
-                        .into_iter()
-                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                        .collect();
-                    #[cfg(test)]
-                    headers.sort_keys();
-                    #[cfg(not(test))]
-                    let headers = &parts.headers;
+        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
+            .method
+            == Method::GET
+        {
+            self.translate_query_request(parts).await
+        } else {
+            let bytes = router::body::into_bytes(body)
+                .instrument(tracing::debug_span!("receive_body"))
+                .await?;
+            if let Some(level) = context
+                .extensions()
+                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                .map(|d| d.0)
+            {
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                    .headers
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = &parts.headers;
 
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_HEADERS,
-                        opentelemetry::Value::String(format!("{:?}", headers).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_METHOD,
-                        opentelemetry::Value::String(format!("{}", parts.method).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_URI,
-                        opentelemetry::Value::String(format!("{}", parts.uri).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_VERSION,
-                        opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_BODY,
-                        opentelemetry::Value::String(
-                            format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
-                        ),
-                    ));
-                    log_event(level, "router.request", attrs, "");
-                }
-                self.translate_bytes_request(&bytes)
-            };
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(format!("{}", parts.method).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                    ),
+                ));
+                log_event(level, "router.request", attrs, "");
+            }
+            self.translate_bytes_request(&bytes)
+        };
         Ok(graphql_requests)
     }
 
-    fn count_errors(
-        errors: &Vec<graphql::Error>,
+    fn count_value_completion_errors(
+        value_completion: &Value,
         context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+        errors_config: &ErrorsConfiguration,
     ) {
-        let unwrap_context_string = |context_key: &str| -> String {
-            context
-                .get::<_, String>(context_key)
-                .unwrap_or_default()
-                .unwrap_or_default()
-        };
-
-        let operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
-        let operation_name = unwrap_context_string(OPERATION_NAME);
-        let operation_kind = unwrap_context_string(OPERATION_KIND);
-        let client_name = unwrap_context_string(CLIENT_NAME);
-        let client_version = unwrap_context_string(CLIENT_VERSION);
-
-        let mut map = HashMap::new();
-        for error in errors {
-            let code = error.extensions.get("code").and_then(|c| c.as_str());
-            let service = error
-                .extensions
-                .get("service")
-                .and_then(|s| s.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let path = match &error.path {
-                None => "".into(),
-                Some(path) => path.to_string(),
-            };
-            let entry = map.entry(code).or_insert(0u64);
-            *entry += 1;
-
-            if matches!(oltp_error_metrics_mode, OtlpErrorMetricsMode::Enabled) {
-                let code_str = code.unwrap_or_default().to_string();
-                u64_counter!(
-                    "apollo.router.operations.error",
-                    "Number of errors returned by operation",
-                    1,
-                    "apollo.operation.id" = operation_id.clone(),
-                    "graphql.operation.name" = operation_name.clone(),
-                    "graphql.operation.type" = operation_kind.clone(),
-                    "apollo.client.name" = client_name.clone(),
-                    "apollo.client.version" = client_version.clone(),
-                    "graphql.error.extensions.code" = code_str,
-                    "graphql.error.path" = path,
-                    "apollo.router.error.service" = service
-                );
-            }
+        if let Some(vc_array) = value_completion.as_array() {
+            let errors: Vec<graphql::Error> = vc_array
+                .iter()
+                .filter_map(graphql::Error::from_value_completion_value)
+                .collect();
+            count_operation_errors(&errors, context, errors_config);
         }
-
-        for (code, count) in map {
-            count_graphql_error(count, code);
-        }
-    }
-
-    fn count_error_codes(
-        codes: Vec<&str>,
-        context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
-    ) {
-        let errors = codes
-            .iter()
-            .map(|c| {
-                let mut extensions = Object::new();
-                extensions.insert("code", Value::String((*c).into()));
-                graphql::Error {
-                    message: "".into(),
-                    locations: vec![],
-                    path: None,
-                    extensions,
-                }
-            })
-            .collect();
-
-        Self::count_errors(&errors, context, oltp_error_metrics_mode);
     }
 }
 
@@ -937,19 +852,12 @@ struct TranslateError {
     extension_details: String,
 }
 
-// Process the headers to make sure that `VARY` is set correctly
-pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).is_none() {
-        // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, ORIGIN_HEADER_VALUE.clone());
-    }
-}
-
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -973,6 +881,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
     }
 }
 
@@ -1001,25 +913,25 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
-        let oltp_error_metrics_mode: OtlpErrorMetricsMode =
-            match configuration.apollo_plugins.plugins.get("telemetry") {
-                Some(telemetry_config) => {
-                    match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                        Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
-                        _ => OtlpErrorMetricsMode::default(),
-                    }
-                }
-                _ => OtlpErrorMetricsMode::default(),
-            };
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the use to see if pipelines are being hung onto.
+        let schema_id = supergraph_creator.schema().schema_id.to_string();
+        let launch_id = supergraph_creator
+            .schema()
+            .launch_id
+            .as_ref()
+            .map(|launch_id| launch_id.to_string());
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
+        let router_service = RouterService::new(
             supergraph_creator.create(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
-            oltp_error_metrics_mode,
-        ));
+            TelemetryConfig::apollo(&configuration),
+        );
 
         // NOTE: This is the start of the router pipeline (router_service)
         let sb = Buffer::new(
@@ -1039,6 +951,7 @@ impl RouterCreator {
         Ok(Self {
             supergraph_creator,
             sb,
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 
@@ -1049,7 +962,8 @@ impl RouterCreator {
         Response = router::Response,
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
-    > + Send {
+    > + Send
+    + use<> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use apollo_federation::sources::connect::Connector;
 use indexmap::IndexMap;
 
-use crate::query_planner::PlanNode;
 use crate::Context;
+use crate::query_planner::PlanNode;
 
 type ConnectorsByServiceName = Arc<IndexMap<Arc<str>, Connector>>;
 

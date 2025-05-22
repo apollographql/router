@@ -2,13 +2,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use axum::response::*;
 use axum::Router;
+use axum::response::*;
 use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -19,19 +19,22 @@ use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tokio::sync::mpsc;
+use tokio_util::time::FutureExt;
 use tower_service::Service;
 
+use crate::ListenAddr;
+use crate::axum_factory::ENDPOINT_CALLBACK;
+use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
-use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::ListenAddr;
+use crate::services::router::pipeline_handle::PipelineRef;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
@@ -199,6 +202,50 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
+// This macro unifies the logic tht deals with connections.
+// Ideally this would be a function, but the generics proved too difficult to figure out.
+macro_rules! handle_connection {
+    ($connection:expr, $connection_handle:expr, $connection_shutdown:expr, $connection_shutdown_timeout:expr, $received_first_request:expr) => {
+        let connection = $connection;
+        let mut connection_handle = $connection_handle;
+        let connection_shutdown = $connection_shutdown;
+        let connection_shutdown_timeout = $connection_shutdown_timeout;
+        let received_first_request = $received_first_request;
+        tokio::pin!(connection);
+        tokio::select! {
+            // the connection finished first
+            _res = &mut connection => {
+            }
+            // the shutdown receiver was triggered first,
+            // so we tell the connection to do a graceful shutdown
+            // on the next request, then we wait for it to finish
+            _ = connection_shutdown.notified() => {
+                connection_handle.shutdown();
+                connection.as_mut().graceful_shutdown();
+                // Only wait for the connection to close gracfully if we recieved a request.
+                // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
+                if received_first_request.load(Ordering::Relaxed) {
+                    // The connection may still not shutdown so we apply a timeout from the configuration
+                    // Connections stuck terminating will keep the pipeline and everything related to that pipeline
+                    // in memory.
+
+                    if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
+                        tracing::warn!(
+                            timeout = connection_shutdown_timeout.as_secs(),
+                            server.address = connection_handle.connection_ref.address.to_string(),
+                            schema.id = connection_handle.connection_ref.pipeline_ref.schema_id,
+                            config.hash = connection_handle.connection_ref.pipeline_ref.config_hash,
+                            launch.id = connection_handle.connection_ref.pipeline_ref.launch_id,
+                            "connection shutdown exceeded, forcing close",
+                        );
+                    }
+                }
+            }
+        }
+    };
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn process_error(io_error: std::io::Error) {
     match io_error.kind() {
         // this is already handled by mio and tokio
@@ -264,11 +311,16 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
+    pipeline_ref: Arc<PipelineRef>,
+    address: ListenAddr,
     mut listener: Listener,
+    connection_shutdown_timeout: Duration,
     router: axum::Router,
     opt_max_headers: Option<usize>,
     opt_max_buf_size: Option<ByteSize>,
+    header_read_timeout: Duration,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -291,6 +343,8 @@ pub(super) fn serve_router_on_listen_addr(
                     let app = router.clone();
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
+                    let address = address.clone();
+                    let pipeline_ref = pipeline_ref.clone();
 
                     match res {
                         Ok(res) => {
@@ -302,6 +356,7 @@ pub(super) fn serve_router_on_listen_addr(
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
+                                let connection_handle = ConnectionHandle::new(pipeline_ref, address);
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
@@ -327,7 +382,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
@@ -335,28 +390,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         if let Some(max_buf_size) = opt_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
-
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
-
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
-                                                }
-                                            }
-                                        }
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -371,7 +406,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
@@ -380,27 +415,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
-
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
-                                                }
-                                            }
-                                        }
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
@@ -425,7 +440,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(Duration::from_secs(10));
+                                                         .header_read_timeout(header_read_timeout);
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
@@ -435,27 +450,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         }
                                         let connection = http_config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
-
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
-                                                }
-                                            }
-                                        }
                                     }
                                 }
                             });
@@ -518,8 +514,8 @@ mod tests {
     use std::str::FromStr;
 
     use axum::BoxError;
-    use tower::service_fn;
     use tower::ServiceExt;
+    use tower::service_fn;
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;

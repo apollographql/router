@@ -8,8 +8,8 @@ macro_rules! schemar_fn {
     };
 
     ($name:ident, $ty:ty, $default:expr, $description:expr) => {
-        fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-            let schema = <$ty>::json_schema(gen);
+        fn $name(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+            let schema = <$ty>::json_schema(generator);
             let mut schema = schema.into_object();
             let mut metadata = schemars::schema::Metadata::default();
             metadata.description = Some($description.to_string());
@@ -24,9 +24,11 @@ pub(crate) mod authentication;
 pub(crate) mod authorization;
 pub(crate) mod cache;
 pub(crate) mod connectors;
+pub(crate) mod content_negotiation;
 mod coprocessor;
 pub(crate) mod csrf;
 pub(crate) mod demand_control;
+pub(crate) mod enhanced_client_awareness;
 pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
@@ -36,6 +38,7 @@ pub(crate) mod healthcheck;
 mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
 pub(crate) mod limits;
+mod mock_subgraphs;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;

@@ -56,23 +56,23 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::Path as AxumPath;
 use axum::extract::RawQuery;
 use axum::extract::State;
 use axum::routing::any;
-use axum::Router;
 use base64::Engine;
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
+use http::Method;
+use http::Uri;
 use http::header::CONNECTION;
 use http::header::CONTENT_LENGTH;
 use http::header::HOST;
 use http::header::TRAILER;
 use http::header::TRANSFER_ENCODING;
 use http::header::UPGRADE;
-use http::HeaderMap;
-use http::HeaderName;
-use http::HeaderValue;
-use http::Method;
-use http::Uri;
 use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use indexmap::IndexMap;
@@ -80,8 +80,8 @@ use parking_lot::Mutex;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use tower::ServiceExt;
 use tracing::debug;
 use tracing::error;
@@ -482,7 +482,9 @@ impl SnapshotServer {
             }
             Err(e) => {
                 if offline {
-                    warn!("Unable to load snapshot file in offline mode - all requests will fail: {e}");
+                    warn!(
+                        "Unable to load snapshot file in offline mode - all requests will fail: {e}"
+                    );
                 } else {
                     warn!("Unable to load snapshot file - new snapshot file will be recorded: {e}");
                 }
@@ -496,8 +498,6 @@ impl SnapshotServer {
                 (snapshots_by_key, snapshots_by_regex)
             }
         };
-
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let http_service = HttpClientService::new(
             "test",

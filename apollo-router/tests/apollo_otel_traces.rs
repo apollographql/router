@@ -16,14 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::routing::post;
 use bytes::Bytes;
 use http::header::ACCEPT;
 use http_body_util::BodyExt as _;
@@ -48,8 +48,8 @@ async fn config(
     batch: bool,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -65,10 +65,12 @@ async fn config(
     });
 
     let mut config: serde_json::Value = if batch {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports_batch.router.yaml"))
-            .expect("apollo_reports.router.yaml was invalid")
+        serde_yaml::from_str(include_str!(
+            "fixtures/reports/apollo_reports_batch.router.yaml"
+        ))
+        .expect("apollo_reports.router.yaml was invalid")
     } else {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
+        serde_yaml::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
             .expect("apollo_reports.router.yaml was invalid")
     };
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
@@ -107,11 +109,38 @@ async fn get_router_service(
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(use_legacy_request_span, false, reports).await;
+
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
         .schema(include_str!("fixtures/supergraph.graphql"));
+    let builder = if mocked {
+        builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
+    } else {
+        builder.with_subgraph_network_requests()
+    };
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
+async fn get_connector_router_service(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    use_legacy_request_span: bool,
+    mocked: bool,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config(use_legacy_request_span, false, reports).await;
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph_connect.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
     } else {
@@ -172,6 +201,7 @@ macro_rules! assert_report {
                                 "apollo_private.http.response_headers",
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
+                                "graphql.error.path",
                             ];
                             if $batch {
                                 redacted_attributes.append(&mut vec![
@@ -196,6 +226,7 @@ macro_rules! assert_report {
                         ".**.parentSpanId" => "[span_id]",
                         ".**.startTimeUnixNano" => "[start_time]",
                         ".**.endTimeUnixNano" => "[end_time]",
+                        ".**.timeUnixNano" => "[time]",
                     });
                 });
         }
@@ -266,6 +297,31 @@ async fn get_trace_report(
     .await
 }
 
+async fn get_connector_trace_report(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        get_connector_router_service,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
 async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
@@ -305,7 +361,6 @@ async fn get_traces<
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
@@ -351,6 +406,34 @@ where
     found_report
         .expect("failed to get report")
         .expect("failed to find report")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector_error() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title forceError}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -8,8 +8,8 @@ mod selection;
 
 use std::collections::VecDeque;
 
-use apollo_compiler::ast::Directive;
 use apollo_compiler::Name;
+use apollo_compiler::ast::Directive;
 use indexmap::IndexSet;
 
 use crate::schema::FederationSchema;
@@ -115,7 +115,7 @@ where
     /// Walk through the `Group`, visiting each output key. If at any point, one of the
     /// visitor methods returns an error, then the walk will be stopped and the error will be
     /// returned.
-    fn walk(mut self, entry: Group) -> Result<(), <Self as FieldVisitor<Field>>::Error> {
+    fn walk(mut self, entry: Group) -> Result<Self, <Self as FieldVisitor<Field>>::Error> {
         // Start visiting each of the fields
         let mut to_visit =
             VecDeque::from_iter(self.enter_group(&entry)?.into_iter().map(|n| (0i32, n)));
@@ -148,7 +148,7 @@ where
             self.exit_group()?;
         }
 
-        Ok(())
+        Ok(self)
     }
 }
 
@@ -178,7 +178,7 @@ impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
         original_schema: &'a ValidFederationSchema,
         to_schema: &'a mut FederationSchema,
         directive_deny_list: &'a IndexSet<Name>,
-    ) -> SchemaVisitor<'a, Group, GroupType> {
+    ) -> Self {
         SchemaVisitor {
             directive_deny_list,
             original_schema,
@@ -194,11 +194,11 @@ mod tests {
     use itertools::Itertools;
 
     use crate::error::FederationError;
+    use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::SubSelection;
     use crate::sources::connect::expand::visitors::FieldVisitor;
     use crate::sources::connect::expand::visitors::GroupVisitor;
     use crate::sources::connect::json_selection::NamedSelection;
-    use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::SubSelection;
 
     /// Visitor for tests.
     ///

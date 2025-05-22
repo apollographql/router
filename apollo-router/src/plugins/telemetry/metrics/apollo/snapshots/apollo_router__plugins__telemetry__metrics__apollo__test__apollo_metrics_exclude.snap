@@ -1,6 +1,7 @@
 ---
-source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
+source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
 expression: results
+snapshot_kind: text
 ---
 [
   {
@@ -10,6 +11,7 @@ expression: results
       "type": "query",
       "subtype": null,
       "licensed_operation_count": 1
-    }
+    },
+    "router_features_enabled": []
   }
 ]

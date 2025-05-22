@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,18 +22,18 @@ use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;
-use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -239,7 +240,6 @@ impl Response {
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a Response.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -270,7 +270,7 @@ impl Response {
         *response.headers_mut() = headers.unwrap_or_default();
 
         // Warning: the id argument for this builder is an Option to make that a non breaking change
-        // but this means that if a subgraph response is created explicitely without an id, it will
+        // but this means that if a subgraph response is created explicitly without an id, it will
         // be generated here and not match the id from the subgraph request
         let id = id.unwrap_or_default();
 
@@ -288,7 +288,6 @@ impl Response {
     /// Response. It's usually enough for testing, when a fully constructed Response is
     /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -323,7 +322,6 @@ impl Response {
     /// Response. It's usually enough for testing, when a fully constructed Response is
     /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn fake2_new(
         label: Option<String>,
         data: Option<Value>,
@@ -378,8 +376,7 @@ impl Response {
 }
 
 impl Request {
-    #[allow(dead_code)]
-    pub(crate) fn to_sha256(&self) -> String {
+    pub(crate) fn to_sha256(&self, ignored_headers: &HashSet<String>) -> String {
         let mut hasher = Sha256::new();
         let http_req = &self.subgraph_request;
         hasher.update(http_req.method().as_str().as_bytes());
@@ -406,7 +403,11 @@ impl Request {
         }
 
         // this assumes headers are in the same order
-        for (name, value) in http_req.headers() {
+        for (name, value) in http_req
+            .headers()
+            .iter()
+            .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
+        {
             hasher.update(name.as_str().as_bytes());
             hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
         }
@@ -425,15 +426,70 @@ impl Request {
         }
         for (var_name, var_value) in &body.variables {
             hasher.update(var_name.inner());
-            // TODO implement to_bytes() for value in serde_json_bytes
-            hasher.update(var_value.to_string().as_bytes());
+            hasher.update(var_value.to_bytes());
         }
         for (name, val) in &body.extensions {
             hasher.update(name.inner());
-            // TODO implement to_bytes() for value in serde_json_bytes
-            hasher.update(val.to_string().as_bytes());
+            hasher.update(val.to_bytes());
         }
 
         hex::encode(hasher.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_subgraph_request_hash() {
+        let subgraph_req_1 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let subgraph_req_2 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value_bis")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let mut ignored_headers = HashSet::new();
+        ignored_headers.insert("public_header".to_string());
+        assert_eq!(
+            subgraph_req_1.to_sha256(&ignored_headers),
+            subgraph_req_2.to_sha256(&ignored_headers)
+        );
+
+        let subgraph_req_1 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let subgraph_req_2 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value_bis")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            subgraph_req_1.to_sha256(&ignored_headers),
+            subgraph_req_2.to_sha256(&ignored_headers)
+        );
     }
 }

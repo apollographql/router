@@ -2,9 +2,9 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use http::header;
 use http::HeaderMap;
 use http::StatusCode;
+use http::header;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -349,7 +349,8 @@ mod csrf_tests {
         let plugin = PluginTestHarness::<Csrf>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let router_service =
             plugin.router_service(|_r| async { router::Response::fake_builder().build() });
         let mut resp = router_service
@@ -372,7 +373,8 @@ mod csrf_tests {
         let plugin = PluginTestHarness::<Csrf>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let router_service =
             plugin.router_service(|_r| async { router::Response::fake_builder().build() });
         let mut resp = router_service

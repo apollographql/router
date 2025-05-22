@@ -2,22 +2,22 @@ use std::fmt;
 use std::str;
 use std::sync::Arc;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::InvalidNameError;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
@@ -32,6 +32,7 @@ pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
+pub(crate) mod tag_spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
@@ -59,7 +60,7 @@ impl From<LinkError> for FederationError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Purpose {
     SECURITY,
     EXECUTION,
@@ -206,7 +207,7 @@ impl Import {
         }
     }
 
-    pub fn element_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn element_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: &self.element,
             is_directive: self.is_directive,
@@ -217,7 +218,7 @@ impl Import {
         self.alias.as_ref().unwrap_or(&self.element)
     }
 
-    pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn imported_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: self.imported_name(),
             is_directive: self.is_directive,
@@ -255,7 +256,7 @@ impl fmt::Display for Import {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
     pub spec_alias: Option<Name>,
@@ -404,7 +405,7 @@ pub struct LinkedElement {
     pub import: Option<Arc<Import>>,
 }
 
-#[derive(Default, Eq, PartialEq, Debug)]
+#[derive(Clone, Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
@@ -414,6 +415,7 @@ pub struct LinksMetadata {
 }
 
 impl LinksMetadata {
+    // PORT_NOTE: Call this as a replacement for `CoreFeatures.coreItself` from JS.
     pub(crate) fn link_spec_definition(
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {

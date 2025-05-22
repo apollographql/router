@@ -1,9 +1,9 @@
 use apollo_compiler::ExecutableDocument;
 
+use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::test::TestError;
 use crate::plugins::demand_control::test::TestStage;
-use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution::Request;
 use crate::services::subgraph::Response;
 

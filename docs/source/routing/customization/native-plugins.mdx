@@ -280,7 +280,11 @@ use tracing::info_span;
 info_span!("my_span");
 ```
 
-## Plugin Lifecycle
+### Accessing operation IDs
+
+When writing plugins, you can access [GraphOS Studio operation IDs](/graphos/platform/insights/operation-signatures) by reading the value of `apollo::supergraph::operation_id` from [`context`](#5-define-necessary-context).
+
+## Plugin lifecycle
 
 Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the router's execution.
 

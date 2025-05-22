@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 mod max_evaluated_plans;
 

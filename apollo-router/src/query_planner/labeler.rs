@@ -1,18 +1,18 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
-use apollo_compiler::ast;
-use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast;
+use apollo_compiler::name;
 use tower::BoxError;
 
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform;
-use crate::spec::query::transform::document;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::transform::Visitor;
+use crate::spec::query::transform::document;
 
 const LABEL_NAME: Name = name!("label");
 

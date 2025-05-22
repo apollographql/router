@@ -26,6 +26,8 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 use uuid::Uuid;
 
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::context::Context;
 use crate::graphql;
 use crate::graphql::Response;
@@ -41,8 +43,6 @@ use crate::register_plugin;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
@@ -68,13 +68,34 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
-    /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
-    /// (default: true)
-    pub(crate) enable_deduplication: bool,
+    /// Configure subgraph subscription deduplication
+    pub(crate) deduplication: DeduplicationConfig,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+}
+
+/// Subscription deduplication configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeduplicationConfig {
+    /// Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.
+    /// (default: true)
+    pub(crate) enabled: bool,
+    /// List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical.
+    /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
+    /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
+    pub(crate) ignored_headers: HashSet<String>,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ignored_headers: Default::default(),
+        }
+    }
 }
 
 impl Default for SubscriptionConfig {
@@ -82,7 +103,7 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -720,20 +741,20 @@ mod tests {
 
     use futures::StreamExt;
     use serde_json::Value;
-    use tower::util::BoxService;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxService;
 
     use super::*;
+    use crate::Notify;
     use crate::graphql::Request;
     use crate::http_ext;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
-    use crate::services::router::body;
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::router::body;
     use crate::uplink::license_enforcement::LicenseState;
-    use crate::Notify;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
@@ -1080,10 +1101,12 @@ mod tests {
             serde_json::to_vec(&CallbackPayload::Subscription(
                 SubscriptionPayload::Complete {
                     id: new_sub_id.clone(),
-                    errors: Some(vec![graphql::Error::builder()
-                        .message("cannot complete the subscription")
-                        .extension_code("SUBSCRIPTION_ERROR")
-                        .build()]),
+                    errors: Some(vec![
+                        graphql::Error::builder()
+                            .message("cannot complete the subscription")
+                            .extension_code("SUBSCRIPTION_ERROR")
+                            .build(),
+                    ]),
                     verifier: verifier.clone(),
                 },
             ))
@@ -1097,10 +1120,12 @@ mod tests {
         assert_eq!(
             msg,
             graphql::Response::builder()
-                .errors(vec![graphql::Error::builder()
-                    .message("cannot complete the subscription")
-                    .extension_code("SUBSCRIPTION_ERROR")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("cannot complete the subscription")
+                        .extension_code("SUBSCRIPTION_ERROR")
+                        .build()
+                ])
                 .build()
         );
 
@@ -1174,7 +1199,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(subgraph_response.response.body(), &graphql::Response::builder().data(serde_json_bytes::Value::Null).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build());
+        assert_eq!(
+            subgraph_response.response.body(),
+            &graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "cannot execute a subscription if it's not enabled in the configuration"
+                        )
+                        .extension_code("SUBSCRIPTION_DISABLED")
+                        .build()
+                )
+                .extensions(Object::default())
+                .build()
+        );
     }
 
     #[test]
@@ -1408,7 +1447,7 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.enable_deduplication);
+        assert!(sub_config.deduplication.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
     }

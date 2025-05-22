@@ -6,19 +6,19 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::Context;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::Stage;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::TransportResponse;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -300,10 +300,9 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderValue;
     use http::StatusCode;
     use opentelemetry::Array;
@@ -313,19 +312,18 @@ mod tests {
     use super::ConnectorSelector;
     use super::ConnectorSource;
     use super::MappingProblems;
+    use crate::Context;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::mapping::Problem;
-    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::services::connector::request_service::transport;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
     use crate::services::router::body;
-    use crate::services::router::body::RouterBody;
-    use crate::Context;
 
     const TEST_SUBGRAPH_NAME: &str = "test_subgraph_name";
     const TEST_SOURCE_NAME: &str = "test_source_name";
@@ -350,10 +348,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: None,
+                connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
+                ..Default::default()
             },
             selection: JSONSelection::empty(),
             config: None,
@@ -362,6 +358,10 @@ mod tests {
             spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            error_settings: Default::default(),
         }
     }
 
@@ -373,12 +373,12 @@ mod tests {
         }
     }
 
-    fn http_request() -> http::Request<RouterBody> {
-        http::Request::builder().body(body::empty()).unwrap()
+    fn http_request() -> http::Request<String> {
+        http::Request::builder().body("".into()).unwrap()
     }
 
-    fn http_request_with_header() -> http::Request<RouterBody> {
-        let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+    fn http_request_with_header() -> http::Request<String> {
+        let mut http_request = http::Request::builder().body("".into()).unwrap();
         http_request.headers_mut().insert(
             TEST_HEADER_NAME,
             HeaderValue::from_static(TEST_HEADER_VALUE),
@@ -386,12 +386,12 @@ mod tests {
         http_request
     }
 
-    fn connector_request(http_request: http::Request<RouterBody>) -> Request {
+    fn connector_request(http_request: http::Request<String>) -> Request {
         connector_request_with_mapping_problems(http_request, vec![])
     }
 
     fn connector_request_with_mapping_problems(
-        http_request: http::Request<RouterBody>,
+        http_request: http::Request<String>,
         mapping_problems: Vec<Problem>,
     ) -> Request {
         Request {
@@ -404,6 +404,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

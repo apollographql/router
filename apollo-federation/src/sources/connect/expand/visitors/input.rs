@@ -1,17 +1,17 @@
 use std::ops::Deref;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
-use apollo_compiler::Node;
 use indexmap::IndexMap;
 
-use super::filter_directives;
-use super::try_insert;
-use super::try_pre_insert;
 use super::FieldVisitor;
 use super::GroupVisitor;
 use super::SchemaVisitor;
+use super::filter_directives;
+use super::try_insert;
+use super::try_pre_insert;
 use crate::error::FederationError;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
@@ -23,9 +23,9 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
     type Error = FederationError;
 
     fn visit<'a>(&mut self, field: InputObjectFieldDefinitionPosition) -> Result<(), Self::Error> {
-        let (_, r#type) = self.type_stack.last_mut().ok_or(FederationError::internal(
-            "tried to visit a field in a group not yet visited",
-        ))?;
+        let (_, r#type) = self.type_stack.last_mut().ok_or_else(|| {
+            FederationError::internal("tried to visit a field in a group not yet visited")
+        })?;
 
         // Extract the node info
         let field_def = field.get(self.original_schema.schema())?;
@@ -65,9 +65,9 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
 
         if let Some(old_field) = r#type.fields.get(&field.field_name) {
             if *old_field.deref().deref() != new_field {
-                return Err(FederationError::internal(
-                   format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
-                ));
+                return Err(FederationError::internal(format!(
+                    "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
+                )));
             }
         } else {
             r#type
@@ -122,9 +122,10 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {
-        let (definition, r#type) = self.type_stack.pop().ok_or(FederationError::internal(
-            "tried to exit a group not yet visited",
-        ))?;
+        let (definition, r#type) = self
+            .type_stack
+            .pop()
+            .ok_or_else(|| FederationError::internal("tried to exit a group not yet visited"))?;
 
         // Now actually consolidate the object into our schema
         try_insert!(self.to_schema, definition, Node::new(r#type))

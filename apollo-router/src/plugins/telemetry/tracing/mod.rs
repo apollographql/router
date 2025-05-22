@@ -2,15 +2,15 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
+use opentelemetry::trace::TraceResult;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
-use opentelemetry_sdk::Resource;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
