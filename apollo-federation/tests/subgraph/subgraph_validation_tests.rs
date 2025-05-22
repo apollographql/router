@@ -1251,7 +1251,6 @@ type Query {
             // sure we still accept definition where it's mandatory.
             r#"
                 extend schema
-                  @link(url: "https://specs.apollo.dev/link/v1.0")
                   @link(
                     url: "https://specs.apollo.dev/federation/v2.0"
                     import: ["@key"]
@@ -2009,6 +2008,78 @@ mod list_size_tests {
             [(
                 "LIST_SIZE_APPLIED_TO_NON_LIST",
                 r#"[S] Sized field "A.notList" is not a list"#
+            )]
+        );
+    }
+}
+
+mod tag_tests {
+    use super::*;
+
+    #[test]
+    fn errors_on_tag_missing_required_argument() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag on FIELD_DEFINITION
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": Missing required argument "name""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_unknown_argument() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: String!, foo: Int) repeatable on FIELD_DEFINITION | OBJECT
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": unknown/unsupported argument "foo""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_wrong_argument_type() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: Int!) repeatable on FIELD_DEFINITION | OBJECT
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": argument "name" should have type "String!" but found type "Int!""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_wrong_locations() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | SCHEMA
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": "@tag" should have locations FIELD_DEFINITION, OBJECT, INTERFACE, UNION, ARGUMENT_DEFINITION, SCALAR, ENUM, ENUM_VALUE, INPUT_OBJECT, INPUT_FIELD_DEFINITION, but found (non-subset) FIELD_DEFINITION, OBJECT, SCHEMA"#
             )]
         );
     }

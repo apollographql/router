@@ -49,7 +49,7 @@ fn validate_shareable_not_repeated_on_same_type_declaration(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     for pos in shareable_referencers.object_types.iter() {
-        let shareable_applications = pos.get_applied_directives(schema, &directive_name);
+        let shareable_applications = pos.get_applied_directives(schema, directive_name);
         let count_by_extension = shareable_applications
             .iter()
             .counts_by(|x| x.origin.extension_id());
@@ -72,7 +72,7 @@ fn validate_shareable_not_repeated_on_same_field_declaration(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     for pos in shareable_referencers.object_fields.iter() {
-        let shareable_applications = pos.get_applied_directives(schema, &directive_name);
+        let shareable_applications = pos.get_applied_directives(schema, directive_name);
         if shareable_applications.len() > 1 {
             errors.push(
                 SingleFederationError::InvalidShareableUsage {
@@ -92,7 +92,7 @@ fn validate_shareable_not_applied_to_interface_fields(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     for pos in shareable_referencers.interface_fields.iter() {
-        let shareable_applications = pos.get_applied_directives(schema, &directive_name);
+        let shareable_applications = pos.get_applied_directives(schema, directive_name);
         if !shareable_applications.is_empty() {
             errors.push(
                 SingleFederationError::InvalidShareableUsage {
