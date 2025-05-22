@@ -17,11 +17,11 @@ pub struct SafeBuffer(String);
 
 impl SafeBuffer {
     pub fn new(s: ByteString) -> Self {
-        Self(percent_encode(&s.inner(), &percent_encoding::NON_ALPHANUMERIC).to_string())
+        Self(percent_encode(s.inner(), percent_encoding::NON_ALPHANUMERIC).to_string())
     }
 
     fn new_from_string(s: String) -> Self {
-        Self(percent_encode(&s.as_bytes(), &percent_encoding::NON_ALPHANUMERIC).to_string())
+        Self(percent_encode(s.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string())
     }
 
     pub fn new_url_safe(s: ByteString) -> Self {
@@ -29,7 +29,7 @@ impl SafeBuffer {
     }
 
     pub fn from_str(s: &str) -> Self {
-        Self(percent_encode(s.as_bytes(), &percent_encoding::NON_ALPHANUMERIC).to_string())
+        Self(percent_encode(s.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string())
     }
 
     pub fn from_str_url_safe(s: &str) -> Self {
@@ -46,7 +46,7 @@ impl SafeBuffer {
 
     pub fn push_str(&mut self, s: &str) {
         self.0.push_str(
-            &percent_encode(s.as_bytes(), &percent_encoding::NON_ALPHANUMERIC).to_string(),
+            &percent_encode(s.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string(),
         );
     }
 
@@ -107,7 +107,7 @@ where
         for s in iter {
             result.push_str(separator);
             result.push_str(
-                percent_encode(s.as_bytes(), &percent_encoding::NON_ALPHANUMERIC)
+                percent_encode(s.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
                     .to_string()
                     .as_str(),
             );

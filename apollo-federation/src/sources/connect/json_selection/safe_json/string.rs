@@ -31,10 +31,10 @@ impl SafeString {
     }
 }
 
-impl Add for SafeString {
+impl Add<&SafeString> for SafeString {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self::Output {
+    fn add(self, other: &Self) -> Self::Output {
         use SafeString::*;
         match (self, other) {
             (Safe(s1), Safe(s2)) => {
@@ -109,8 +109,8 @@ where
 
         let mut result = first;
         for s in iter {
-            result = result + separator.clone();
-            result = result + s;
+            result = result + separator;
+            result = result + &s;
         }
         result
     }

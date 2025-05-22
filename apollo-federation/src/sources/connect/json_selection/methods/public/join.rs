@@ -1,9 +1,13 @@
+use std::str::FromStr;
+
 use apollo_compiler::collections::IndexMap;
+use serde_json_bytes::ByteString;
 // use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
 use crate::impl_arrow_method;
+use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -39,42 +43,27 @@ fn join_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
-    let (resolved_separator, _) = method_args
-        .unwrap()
-        .args
-        .first()
-        .unwrap()
-        .apply_to_path(data, vars, input_path);
+    let Some((resolved_separator, _)) = method_args
+        .and_then(|args| args.args.first())
+        .take_if(|lit| matches!(lit.clone().take(), LitExpr::String(_)))
+        .map(|arg| arg.apply_to_path(data, vars, input_path))
+        else {
+            warnings.push(ApplyToError::new(
+            format!(
+                "Method ->{} requires a string argument",
+                method_name.as_ref()
+            ),
+            input_path.to_vec(),
+                method_name.range(),
+            ));
+            return (None, warnings);
+        };
 
-    let separator = match resolved_separator {
-        Some(v) => match v {
-            JSON::Null => todo!(),
-            JSON::Bool(_) => todo!(),
-            JSON::Number(number) => todo!(),
-            JSON::String(safe_string) => safe_string,
-            JSON::Array(values) => todo!(),
-            JSON::Object(map) => todo!(),
-        },
-        None => todo!(),
+    let separator = if let Some(JSON::String(safe_string)) = resolved_separator {
+        safe_string
+    } else {
+        SafeString::Safe("".into())
     };
-
-    // let Some(separator) = method_args
-    //     .and_then(|args| args.args.first())
-    //     .and_then(|s| match &**s {
-    //         LitExpr::String(s) => Some(s),
-    //         _ => None,
-    //     })
-    // else {
-    //     warnings.push(ApplyToError::new(
-    //         format!(
-    //             "Method ->{} requires a string argument",
-    //             method_name.as_ref()
-    //         ),
-    //         input_path.to_vec(),
-    //         method_name.range(),
-    //     ));
-    //     return (None, warnings);
-    // };
 
     fn to_string(value: &JSON) -> (SafeString, Option<String>) {
         match value {
@@ -111,8 +100,8 @@ fn join_method(
 
             let mut result = first;
             for s in iter {
-                result = result + separator.clone();
-                result = result + s;
+                result = result + &separator;
+                result = result + &s;
             }
             result
         }
@@ -130,7 +119,7 @@ fn join_method(
         }
     };
 
-    (Some(JSON::String(joined.into())), warnings)
+    (Some(JSON::String(joined)), warnings)
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn join_shape(

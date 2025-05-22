@@ -12,7 +12,6 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::hash::RandomState;
-use std::mem;
 use std::ops;
 
 // use serde::de;
@@ -129,7 +128,7 @@ impl Map<SafeString, Value> {
         SafeString: Borrow<Q>,
         Q: ?Sized + Ord + Eq + Hash,
     {
-        return self.map.swap_remove(key);
+        self.map.swap_remove(key)
     }
 
     /// Removes a key from the map, returning the stored key and value if the
@@ -142,13 +141,13 @@ impl Map<SafeString, Value> {
         SafeString: Borrow<Q>,
         Q: ?Sized + Ord + Eq + Hash,
     {
-        return self.map.swap_remove_entry(key);
+        self.map.swap_remove_entry(key)
     }
 
     /// Moves all elements from other into Self, leaving other empty.
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
-        for (k, v) in mem::replace(&mut other.map, MapImpl::default()) {
+        for (k, v) in std::mem::take(&mut other.map) {
             self.map.insert(k, v);
         }
     }
@@ -748,7 +747,7 @@ impl<'a> OccupiedEntry<'a> {
     /// ```
     #[inline]
     pub fn remove(self) -> Value {
-        return self.occupied.swap_remove();
+        self.occupied.swap_remove()
     }
 }
 

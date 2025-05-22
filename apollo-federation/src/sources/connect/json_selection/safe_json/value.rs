@@ -75,7 +75,7 @@ impl From<&serde_json_bytes::Value> for Value {
             serde_json_bytes::Value::Number(n) => Value::Number(n.clone()),
             serde_json_bytes::Value::String(s) => Value::String(SafeString::Unsafe(s.clone())),
             serde_json_bytes::Value::Array(arr) => {
-                Value::Array(arr.into_iter().map(Value::from).collect())
+                Value::Array(arr.iter().map(Value::from).collect())
             }
             serde_json_bytes::Value::Object(obj) => Value::Object(
                 obj.into_iter()

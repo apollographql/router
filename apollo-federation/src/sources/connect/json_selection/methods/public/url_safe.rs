@@ -34,16 +34,13 @@ fn url_safe_method(
     _vars: &VarsWithPathsMap,
     _input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    match data {
-        JSON::String(safe_string) => {
-            let s = match safe_string {
-                SafeString::Safe(byte_string) => byte_string,
-                SafeString::Unsafe(byte_string) => byte_string,
-            };
-            let s = Some(JSON::String(SafeString::Safe(s.clone())));
-            return (s, vec![]);
-        }
-        _ => {}
+    if let JSON::String(safe_string) = data {
+        let s = match safe_string {
+            SafeString::Safe(byte_string) => byte_string,
+            SafeString::Unsafe(byte_string) => byte_string,
+        };
+        let s = Some(JSON::String(SafeString::Safe(s.to_owned())));
+        return (s, vec![]);
     }
 
     (Some(data.clone()), vec![])
