@@ -180,11 +180,8 @@ mod tests {
         let auth = build_auth(&reference, &apollo_key);
 
         // Check that it doesn't return the Apollo registry auth
-        match auth {
-            RegistryAuth::Basic(username, _) => {
-                assert_ne!(username, "apollo_registry");
-            }
-            _ => {} // Any other type is fine for this test
+        if let RegistryAuth::Basic(username, _) = auth {
+            assert_ne!(username, "apollo_registry");
         }
     }
 
@@ -195,10 +192,8 @@ mod tests {
         let layer_descriptors = join_all(layers.iter().map(async |layer| {
             let blob_digest = layer.sha256_digest();
             let blob_url = Url::parse(&format!(
-                "{}/v2/{}/blobs/{}",
-                mock_server.uri(),
-                graph_id,
-                blob_digest
+                "{}/v2/{graph_id}/blobs/{blob_digest}",
+                mock_server.uri()
             ))
             .expect("url must be valid");
             Mock::given(method("GET"))
@@ -246,7 +241,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        format!("{}/{}:{}", mock_server.address(), graph_id, reference)
+        format!("{}/{graph_id}:{reference}", mock_server.address())
             .parse::<Reference>()
             .expect("url must be valid")
     }
@@ -278,12 +273,12 @@ mod tests {
             ..Default::default()
         });
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
         let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes(),
+            data: "foo_bar".into(),
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
@@ -310,13 +305,10 @@ mod tests {
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
             .expect_err("Expect can't fetch OCI bundle");
-        match result {
-            OCILayerMissingTitle => {
-                // Expected error
-            }
-            _ => {
-                panic!("Expected OCILayerMissingTitle error, got {:?}", result);
-            }
+        if let OCILayerMissingTitle = result {
+            // Expected error
+        } else {
+            panic!("Expected OCILayerMissingTitle error, got {:?}", result);
         }
     }
 }
