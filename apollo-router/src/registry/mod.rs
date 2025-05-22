@@ -21,7 +21,7 @@ pub struct OciConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OciResult {
+pub(crate) struct OciContent {
     pub schema: String,
 }
 
@@ -93,7 +93,7 @@ async fn pull_oci(
     client: &mut ociClient,
     auth: &RegistryAuth,
     reference: &Reference,
-) -> Result<OciResult, OciError> {
+) -> Result<OciContent, OciError> {
     tracing::debug!(?reference, "pulling oci bundle");
 
     // We aren't using the default `pull` function because that validates that all the layers are in the
@@ -114,13 +114,13 @@ async fn pull_oci(
         .pull_blob(reference, &schema_layer, &mut schema)
         .await?;
 
-    Ok(OciResult {
+    Ok(OciContent {
         schema: String::from_utf8(schema)?,
     })
 }
 
 /// Fetch an OCI bundle
-pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciResult, OciError> {
+pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.url.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     pull_oci(&mut Client::default(), &auth, &reference).await
