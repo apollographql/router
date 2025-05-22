@@ -15,6 +15,7 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::sources::connect::Connector;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -119,16 +120,21 @@ impl fmt::Debug for EntityKeyChecker<'_> {
 
 pub(crate) fn field_set_error(
     variables: &[VariableReference<Namespace>],
-    type_name: &str,
+    connector: &Connector,
+    schema: &Schema,
 ) -> Message {
     Message {
         code: Code::GraphQLError,
         message: format!(
-            "Variables used in connector (`{}`) for `{}` cannot be used to create a valid `@key` directive.",
+            "Variables used in connector (`{}`) on type `{}` cannot be used to create a valid `@key` directive.",
             variables.iter().join("`, `"),
-            type_name
+            connector.id.directive.simple_name()
         ),
-        locations: Vec::new(),
+        locations: connector
+            .name()
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
     }
 }
 
