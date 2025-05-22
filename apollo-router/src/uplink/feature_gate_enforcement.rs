@@ -48,19 +48,9 @@ impl FeatureGateEnforcementReport {
             .supergraph_schema()
             .schema_definition
             .directives
-            .get_all("join__directive")
-            .filter(|join| {
-                join.specified_argument_by_name("name")
-                    .and_then(|name| name.as_str())
-                    .map(|name| name == LINK_DIRECTIVE_NAME)
-                    .unwrap_or_default()
-            })
-            .filter_map(|join| {
-                join.specified_argument_by_name("args")
-                    .and_then(|arg| arg.as_object())
-            })
+            .get_all(LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
-                ParsedLinkSpec::from_join_directive_args(link).map(|maybe_spec| {
+                ParsedLinkSpec::from_link_directive(link).map(|maybe_spec| {
                     maybe_spec.ok().map(|spec| (spec.spec_url.to_owned(), spec))
                 })?
             })
@@ -113,27 +103,27 @@ impl FeatureGateEnforcementReport {
     }
 
     fn schema_restrictions() -> Vec<FeatureRestriction> {
-        // @link(url: "https://specs.apollo.dev/connect/v0.2") requires `connectors.preview_connect_v0_2: true`
+        // @link(url: "https://specs.apollo.dev/connect/v0.3") requires `connectors.preview_connect_v0_3: true`
         // This uses join__directives to find specs because the we're looking
         // at links within individual subgraphs.
         vec![FeatureRestriction::SpecInJoinDirective {
-            name: "Connect v0.2".to_string(),
+            name: "Connect v0.3".to_string(),
             spec_url: "https://specs.apollo.dev/connect".to_string(),
             version_req: semver::VersionReq {
                 comparators: vec![semver::Comparator {
                     op: semver::Op::Exact,
                     major: 0,
-                    minor: 2.into(),
+                    minor: 3.into(),
                     patch: 0.into(),
                     pre: semver::Prerelease::EMPTY,
                 }],
             },
-            feature_gate_configuration_path: "$.connectors.preview_connect_v0_2".to_string(),
+            feature_gate_configuration_path: "$.connectors.preview_connect_v0_3".to_string(),
             expected_value: Value::Bool(true),
             to_enable: "  connectors:
-    preview_connect_v0_2: true"
+    preview_connect_v0_3: true"
                 .to_string(),
-            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.2\") is in preview. See https://go.apollo.dev/connectors/preview-v0.2 for more information.".to_string())
+            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.3\") is in preview. See https://go.apollo.dev/connectors/preview-v0.3 for more information.".to_string())
         }]
     }
 }
@@ -212,10 +202,10 @@ mod test {
     }
 
     #[test]
-    fn feature_gate_connectors_v0_2() {
+    fn feature_gate_connectors_v0_3() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/feature_enforcement_connect_v0_2.graphql"),
+            include_str!("testdata/feature_enforcement_connect_v0_3.graphql"),
         );
 
         assert_eq!(
@@ -225,35 +215,35 @@ mod test {
         );
         let FeatureGateViolation::Spec { url, name, .. } = &report.gated_features_in_use[0];
 
-        assert_eq!("https://specs.apollo.dev/connect/v0.2", url);
-        assert_eq!("Connect v0.2", name);
+        assert_eq!("https://specs.apollo.dev/connect/v0.3", url);
+        assert_eq!("Connect v0.3", name);
     }
 
     #[test]
-    fn feature_gate_connectors_v0_2_enabled() {
+    fn feature_gate_connectors_v0_3_enabled() {
         let report = check(
-            include_str!("testdata/connectv0_2.router.yaml"),
+            include_str!("testdata/connectv0_3.router.yaml"),
+            include_str!("testdata/feature_enforcement_connect_v0_3.graphql"),
+        );
+
+        assert_eq!(
+            0,
+            report.gated_features_in_use.len(),
+            "should not have found restricted connect feature"
+        );
+    }
+
+    #[test]
+    fn feature_gate_connectors_v0_2_noop() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/feature_enforcement_connect_v0_2.graphql"),
         );
 
         assert_eq!(
             0,
             report.gated_features_in_use.len(),
-            "should have found restricted connect feature"
-        );
-    }
-
-    #[test]
-    fn feature_gate_connectors_v0_1_noop() {
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/feature_enforcement_connect_v0_1.graphql"),
-        );
-
-        assert_eq!(
-            0,
-            report.gated_features_in_use.len(),
-            "should have found restricted connect feature"
+            "should not have found restricted connect feature"
         );
     }
 }

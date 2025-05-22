@@ -7,10 +7,11 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value;
 
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
 
 #[derive(Clone, Debug)]
-pub struct HeaderValue(StringTemplate<http::HeaderValue>);
+pub struct HeaderValue(StringTemplate);
 
 impl HeaderValue {
     /// Evaluate expressions in the header value.
@@ -19,17 +20,15 @@ impl HeaderValue {
     ///
     /// Returns an error any expression can't be evaluated, or evaluates to an unsupported type.
     pub fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<http::HeaderValue, String> {
-        let mut result = Vec::new();
-        for part in &self.parts {
-            let value = part.interpolate(vars).map_err(|err| err.message)?;
-            result.extend(value.as_bytes());
-        }
-        http::HeaderValue::from_bytes(&result).map_err(|e| e.to_string())
+        self.0
+            .interpolate(vars)
+            .map_err(|e| e.to_string())
+            .and_then(|s| http::HeaderValue::from_str(&s).map_err(|e| e.to_string()))
     }
 }
 
 impl Deref for HeaderValue {
-    type Target = StringTemplate<http::HeaderValue>;
+    type Target = StringTemplate;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -40,7 +39,18 @@ impl FromStr for HeaderValue {
     type Err = string_template::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        StringTemplate::parse(s, 0).map(HeaderValue)
+        let template = StringTemplate::from_str(s)?;
+        // Validate that any constant parts are valid header values.
+        for part in &template.parts {
+            let Part::Constant(constant) = part else {
+                continue;
+            };
+            http::HeaderValue::from_str(&constant.value).map_err(|_| string_template::Error {
+                message: format!("invalid value `{}`", constant.value),
+                location: constant.location.clone(),
+            })?;
+        }
+        Ok(Self(template))
     }
 }
 
@@ -204,6 +214,21 @@ mod test_header_value_parse {
     }
 
     #[test]
+    fn invalid_header_values() {
+        assert_debug_snapshot!(
+            HeaderValue::from_str("\x7f"),
+            @r###"
+        Err(
+            Error {
+                message: "invalid value `\u{7f}`",
+                location: 0..1,
+            },
+        )
+        "###
+        )
+    }
+
+    #[test]
     fn expressions_with_nested_braces() {
         assert_debug_snapshot!(
             HeaderValue::from_str("const{$config.one { two { three } }}another-const"),
@@ -316,21 +341,6 @@ mod test_header_value_parse {
     }
 
     #[test]
-    fn invalid_header_values() {
-        assert_debug_snapshot!(
-            HeaderValue::from_str("\n"),
-            @r###"
-        Err(
-            Error {
-                message: "invalid value `\n`",
-                location: 0..1,
-            },
-        )
-        "###
-        )
-    }
-
-    #[test]
     fn missing_closing_braces() {
         assert_debug_snapshot!(
             HeaderValue::from_str("{$config.one"),
@@ -381,7 +391,7 @@ mod test_interpolate {
         vars.insert("$config".to_string(), json!({"one": ["one", "two"]}));
         assert_eq!(
             header_value.interpolate(&vars),
-            Err("Expressions can't evaluate to arrays or objects.".to_string())
+            Err("Expression is not allowed to evaluate to arrays or objects.".to_string())
         );
     }
 
@@ -427,7 +437,7 @@ mod test_interpolate {
             header_value.interpolate(&vars),
             @r###"
         Err(
-            "Expressions can't evaluate to arrays or objects.",
+            "Expression is not allowed to evaluate to arrays or objects.",
         )
         "###
         );

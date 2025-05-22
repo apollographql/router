@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
 {
     "connectors_Query_ts_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET ",
+            label: "connectors.example http: GET /",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -21,30 +21,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [],
-                query: [],
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/",
+                            location: 0..1,
+                        },
+                    ),
+                ],
             },
             method: Get,
             headers: {},
             body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -152,5 +147,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

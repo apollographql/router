@@ -17,5 +17,12 @@ subgraphs:
 
         type Query {
           user(id: ID!): User
-            @connect(http: { GET: "http://localhost/users/{$$args.id}" }, selection: "id name")
+            @connect(http: { 
+              GET: """
+              http://localhost/
+              users/
+              {$$args.id}
+              """ 
+            }, 
+            selection: "id name")
         }

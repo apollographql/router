@@ -34,7 +34,7 @@ pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 
     fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
-        self.range().map(|range| source_id.location(range.clone()))
+        self.range().map(|range| source_id.location(range))
     }
 }
 
@@ -295,6 +295,9 @@ pub(crate) mod strip_ranges {
                         LitExpr::Array(new_vec)
                     }
                     LitExpr::Path(path) => LitExpr::Path(path.strip_ranges()),
+                    LitExpr::LitPath(literal, subpath) => {
+                        LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
+                    }
                 },
                 None,
             )
@@ -310,10 +313,9 @@ pub(crate) mod strip_ranges {
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-    use insta::assert_snapshot;
-
     use super::*;
+    use crate::assert_debug_snapshot;
+    use crate::assert_snapshot;
     use crate::sources::connect::JSONSelection;
 
     #[test]

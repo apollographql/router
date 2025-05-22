@@ -730,8 +730,7 @@ mod tests {
             (&path1, Some(&selection_set)),
             (&path2, Some(&selection_set)),
         ];
-        let path_tree =
-            OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
+        let path_tree = OpPathTree::from_op_paths(query_graph, NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();
         let expected = r#"Query(Test):
  -> [3] t = T(Test):

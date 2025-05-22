@@ -17,7 +17,6 @@
 mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
-pub(crate) mod versions;
 
 use std::fmt::Display;
 
@@ -25,13 +24,12 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
-pub(crate) use schema::ConnectHTTPArguments;
-pub(crate) use schema::SourceHTTPArguments;
+pub use schema::ConnectHTTPArguments;
+pub use schema::SourceHTTPArguments;
 use strum_macros::EnumIter;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -50,6 +48,15 @@ use crate::schema::FederationSchema;
 pub enum ConnectSpec {
     V0_1,
     V0_2,
+    V0_3,
+}
+
+impl PartialOrd for ConnectSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_version: Version = (*self).into();
+        let other_version: Version = (*other).into();
+        self_version.partial_cmp(&other_version)
+    }
 }
 
 impl ConnectSpec {
@@ -57,6 +64,7 @@ impl ConnectSpec {
         match self {
             Self::V0_1 => "0.1",
             Self::V0_2 => "0.2",
+            Self::V0_3 => "0.3",
         }
     }
 
@@ -110,9 +118,7 @@ impl ConnectSpec {
             return Ok(());
         };
 
-        let spec = Self::try_from(&link.url.version)?;
-
-        type_and_directive_specifications::check_or_add(&link, &spec, schema)
+        type_and_directive_specifications::check_or_add(&link, schema)
     }
 
     pub(crate) fn source_directive_name(link: &Link) -> Name {
@@ -129,7 +135,7 @@ impl ConnectSpec {
             arguments: vec![
                 Argument {
                     name: name!("graphs"),
-                    value: Value::List(vec![]).into(),
+                    value: Value::List(Vec::new()).into(),
                 }
                 .into(),
                 Argument {
@@ -149,21 +155,6 @@ impl ConnectSpec {
             ],
         }
     }
-
-    pub(crate) fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
-        match self {
-            ConnectSpec::V0_1 => CONNECT_V0_1_LOCATIONS,
-            ConnectSpec::V0_2 => CONNECT_V0_2_LOCATIONS,
-        }
-    }
-
-    pub(crate) const fn available() -> &'static [ConnectSpec] {
-        if cfg!(any(feature = "connect_v0.2", test)) {
-            &[ConnectSpec::V0_1, ConnectSpec::V0_2]
-        } else {
-            &[ConnectSpec::V0_1]
-        }
-    }
 }
 
 impl TryFrom<&Version> for ConnectSpec {
@@ -171,8 +162,8 @@ impl TryFrom<&Version> for ConnectSpec {
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
-            #[cfg(any(feature = "connect_v0.2", test))]
             (0, 2) => Ok(Self::V0_2),
+            (0, 3) => Ok(Self::V0_3),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),
             }),
@@ -191,12 +182,7 @@ impl From<ConnectSpec> for Version {
         match spec {
             ConnectSpec::V0_1 => Version { major: 0, minor: 1 },
             ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
+            ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
         }
     }
 }
-
-const CONNECT_V0_1_LOCATIONS: &[DirectiveLocation] = &[DirectiveLocation::FieldDefinition];
-const CONNECT_V0_2_LOCATIONS: &[DirectiveLocation] = &[
-    DirectiveLocation::FieldDefinition,
-    DirectiveLocation::Object,
-];
