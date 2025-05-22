@@ -16,7 +16,7 @@
       {
         "ordinal": 2,
         "name": "data",
-        "type_info": "Jsonb"
+        "type_info": "Text"
       },
       {
         "ordinal": 3,
