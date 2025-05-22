@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::ops::Deref;
@@ -9,10 +10,12 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
 
 use super::ConditionNode;
+use super::QueryPlanCost;
 use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
@@ -30,8 +33,6 @@ use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
-use crate::query_plan::QueryPlanCost;
-use crate::query_plan::QueryPlanningStatistics;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
@@ -164,6 +165,13 @@ impl Default for QueryPlannerDebugConfig {
             paths_limit: None,
         }
     }
+}
+
+// PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
+#[derive(Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct QueryPlanningStatistics {
+    pub evaluated_plan_count: Cell<usize>,
+    pub evaluated_plan_paths: Cell<usize>,
 }
 
 #[derive(Clone)]

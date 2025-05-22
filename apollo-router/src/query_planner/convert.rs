@@ -25,7 +25,6 @@ impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
             next::TopLevelPlanNode::Flatten(node) => node.into(),
             next::TopLevelPlanNode::Defer(node) => node.into(),
             next::TopLevelPlanNode::Condition(node) => node.as_ref().into(),
-            next::TopLevelPlanNode::Statistics(stats) => stats.into(),
         }
     }
 }
@@ -267,15 +266,6 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
             ),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
             next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
-        }
-    }
-}
-
-impl From<&'_ next::QueryPlanningStatistics> for plan::PlanNode {
-    fn from(value: &'_ next::QueryPlanningStatistics) -> Self {
-        plan::PlanNode::Statistics {
-            evaluated_plan_count: value.evaluated_plan_count.get(),
-            evaluated_plan_paths: value.evaluated_plan_paths.get(),
         }
     }
 }

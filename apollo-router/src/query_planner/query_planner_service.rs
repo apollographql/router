@@ -969,8 +969,8 @@ mod tests {
                                     .keys()
                                     .any(|k| k.defer_label.as_deref() == deferred.label.as_deref()),
                                 "Missing key: '{}' '{:?}' '{}'",
-                                deferred.label.as_deref().unwrap_or(""),
                                 path,
+                                deferred.label,
                                 subselection
                             );
                         }
@@ -979,21 +979,18 @@ mod tests {
                                 node,
                                 deferred.label.as_deref(),
                                 subselections,
-                            );
+                            )
                         }
-                    }
-                    if let Some(node) = &primary.node {
-                        check_query_plan_coverage(node, parent_label, subselections);
                     }
                 }
                 PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                     for node in nodes {
-                        check_query_plan_coverage(node, parent_label, subselections);
+                        check_query_plan_coverage(node, parent_label, subselections)
                     }
                 }
                 PlanNode::Fetch(_) => {}
                 PlanNode::Flatten(flatten) => {
-                    check_query_plan_coverage(&flatten.node, parent_label, subselections);
+                    check_query_plan_coverage(&flatten.node, parent_label, subselections)
                 }
                 PlanNode::Condition {
                     condition: _,
@@ -1001,18 +998,17 @@ mod tests {
                     else_clause,
                 } => {
                     if let Some(node) = if_clause {
-                        check_query_plan_coverage(node, parent_label, subselections);
+                        check_query_plan_coverage(node, parent_label, subselections)
                     }
                     if let Some(node) = else_clause {
-                        check_query_plan_coverage(node, parent_label, subselections);
+                        check_query_plan_coverage(node, parent_label, subselections)
                     }
                 }
                 PlanNode::Subscription { rest, .. } => {
                     if let Some(node) = rest {
-                        check_query_plan_coverage(node, parent_label, subselections);
+                        check_query_plan_coverage(node, parent_label, subselections)
                     }
                 }
-                &PlanNode::Statistics { .. } => {}
             }
         }
 

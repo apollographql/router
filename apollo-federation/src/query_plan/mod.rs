@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -6,6 +5,8 @@ use apollo_compiler::Name;
 use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
+
+use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
 pub(crate) mod display;
@@ -38,7 +39,6 @@ pub enum TopLevelPlanNode {
     Defer(DeferNode),
     #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
-    Statistics(QueryPlanningStatistics),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -187,11 +187,6 @@ pub struct ConditionNode {
     pub else_clause: Option<Box<PlanNode>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StatisticsNode {
-    pub statistics: QueryPlanningStatistics,
-}
-
 /// The type of rewrites currently supported on the input/output data of fetches.
 ///
 /// A rewrite usually identifies some sub-part of the data and some action to perform on that
@@ -253,12 +248,6 @@ pub type Conditions = Vec<Name>;
 pub enum QueryPathElement {
     Field { response_key: Name },
     InlineFragment { type_condition: Name },
-}
-
-#[derive(Debug, PartialEq, Default, Serialize, Deserialize, Clone)]
-pub struct QueryPlanningStatistics {
-    pub evaluated_plan_count: Cell<usize>,
-    pub evaluated_plan_paths: Cell<usize>,
 }
 
 impl PlanNode {

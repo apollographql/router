@@ -34,7 +34,6 @@ use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirect
 use crate::query_graph::graph_path::operation::create_initial_options;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
-use crate::query_plan::QueryPlanningStatistics;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
@@ -44,6 +43,7 @@ use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
+use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -1357,8 +1357,14 @@ fn test_prune_and_reorder_first_branch() {
         &["abcD", "fgh", "ijk", "lmn", "op"],
         &["abc", "fgh", "ijk", "lmn", "op"],
     );
-    assert(&["abcD", "fgh"], &["abc", "fgh"]);
-    assert(&["abcD"], &["abc"]);
+    assert(
+        &["abcD", "fgh", "ijk", "lmn", "op"],
+        &["abc", "fgh", "ijk", "lmn", "op"],
+    );
+    assert(
+        &["abcD", "fgh", "ijk", "lmn"],
+        &["abc", "fgh", "ijk", "lmn"],
+    );
 
     // … or, removing exactly one option from the first branch causes it
     // to now have one less option (in this example: two options)

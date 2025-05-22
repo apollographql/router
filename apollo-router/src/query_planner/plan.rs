@@ -139,12 +139,6 @@ pub(crate) enum PlanNode {
         if_clause: Option<Box<PlanNode>>,
         else_clause: Option<Box<PlanNode>>,
     },
-
-    /// Statistics about the query planning process.
-    Statistics {
-        evaluated_plan_count: usize,
-        evaluated_plan_paths: usize,
-    },
 }
 
 impl PlanNode {
@@ -177,7 +171,6 @@ impl PlanNode {
                 }
                 false
             }
-            Self::Statistics { .. } => false,
         }
     }
 
@@ -214,7 +207,6 @@ impl PlanNode {
 
                 false
             }
-            Self::Statistics { .. } => false,
         }
     }
 
@@ -289,9 +281,6 @@ impl PlanNode {
                             new_targets.push(node);
                         }
                     }
-                    Self::Statistics { .. } => {
-                        // Statistics node, no further processing needed
-                    }
                 }
             }
         }
@@ -330,7 +319,6 @@ impl PlanNode {
                     .map(|n| n.subgraph_fetches())
                     .unwrap_or(0),
             ),
-            Self::Statistics { .. } => 0,
         }
     }
 
@@ -390,7 +378,6 @@ impl PlanNode {
                 }
                 Ok(())
             }
-            Self::Statistics { .. } => Ok(()),
         }
     }
 
@@ -401,25 +388,21 @@ impl PlanNode {
         match self {
             PlanNode::Fetch(fetch_node) => {
                 fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
-                Ok(())
             }
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
-                Ok(())
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
-                Ok(())
             }
             PlanNode::Flatten(flatten) => {
                 flatten
                     .node
                     .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
-                Ok(())
             }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
@@ -428,16 +411,14 @@ impl PlanNode {
                 for deferred_node in deferred {
                     if let Some(node) = &mut deferred_node.node {
                         Arc::make_mut(node)
-                            .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
+                            .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?
                     }
                 }
-                Ok(())
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
-                Ok(())
             }
             PlanNode::Condition {
                 condition: _,
@@ -450,10 +431,9 @@ impl PlanNode {
                 if let Some(node) = else_clause.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
-                Ok(())
             }
-            Self::Statistics { .. } => Ok(()),
         }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -502,7 +482,6 @@ impl PlanNode {
                     Box::new(if_node.service_usage().chain(else_node.service_usage()))
                 }
             },
-            Self::Statistics { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -545,9 +524,6 @@ impl PlanNode {
                     if let Some(else_clause) = else_clause {
                         stack.push(else_clause);
                     }
-                }
-                Self::Statistics { .. } => {
-                    // Statistics node, no further processing needed
                 }
             }
         }
@@ -603,9 +579,6 @@ impl PlanNode {
                 if let Some(node) = else_clause.as_mut() {
                     node.extract_authorization_metadata(schema, key);
                 }
-            }
-            Self::Statistics { .. } => {
-                // Statistics node, no further processing needed
             }
         }
     }

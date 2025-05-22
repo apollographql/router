@@ -32,7 +32,6 @@ use crate::query_plan::FlattenNode;
 use crate::query_plan::ParallelNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
-use crate::query_plan::QueryPlanningStatistics;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::ValidFederationSchema;
@@ -209,7 +208,6 @@ fn interpret_top_level_plan_node(
             interpret_condition_node(context, state, &conditions, condition)
         }
         TopLevelPlanNode::Defer(defer) => interpret_defer_node(context, state, &conditions, defer),
-        TopLevelPlanNode::Statistics(stats) => interpret_statistics_node(context, state, stats),
         TopLevelPlanNode::Subscription(subscription) => {
             interpret_subscription_node(context, state, &conditions, subscription)
         }
@@ -576,15 +574,6 @@ fn append_literal(conditions: &[Literal], literal: Literal) -> Vec<Literal> {
     let mut result = conditions.to_vec();
     result.push(literal);
     result
-}
-
-fn interpret_statistics_node(
-    _context: &AnalysisContext,
-    state: &ResponseShape,
-    _statistics: &QueryPlanningStatistics,
-) -> Result<ResponseShape, String> {
-    // Statistics nodes don't affect the response shape, so we just return the state unchanged
-    Ok(state.clone())
 }
 
 fn interpret_condition_node(

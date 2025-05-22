@@ -257,7 +257,6 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
                     inner.else_clause.as_deref(),
                 );
             }
-            TopLevelPlanNode::Statistics(_) => {}
         }
         fn visit_node<'plan>(
             subgraph_name: &str,
