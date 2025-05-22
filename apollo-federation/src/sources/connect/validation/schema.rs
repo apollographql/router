@@ -393,7 +393,7 @@ impl From<ShapeVisitorError<'_>> for Message {
     fn from(value: ShapeVisitorError) -> Self {
         match &value {
             ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { .. } => Message {
-                code: Code::ConnectorsUnresolvedField,
+                code: Code::ConnectorsBatchKeyNotInSelection,
                 message: value.to_string(),
                 locations: Vec::new(),
             },
@@ -403,7 +403,7 @@ impl From<ShapeVisitorError<'_>> for Message {
                 locations: Vec::new(),
             },
             ShapeVisitorError::NonRootBatch => Message {
-                code: Code::ConnectBatchAndThis,
+                code: Code::ConnectorsNonRootBatchKey,
                 message: value.to_string(),
                 locations: Vec::new(),
             },

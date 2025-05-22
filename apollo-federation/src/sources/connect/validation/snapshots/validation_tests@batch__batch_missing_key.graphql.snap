@@ -5,7 +5,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch/bat
 ---
 [
     Message {
-        code: ConnectorsUnresolvedField,
+        code: ConnectorsBatchKeyNotInSelection,
         message: "The `@connect` directive on `User` specifies a `$batch` entity resolver, but the field `id` could not be found in `@connect(selection: ...)`",
         locations: [],
     },
