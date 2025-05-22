@@ -113,6 +113,7 @@ common_job_environment: &common_job_environment
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
   JEMALLOC_SYS_WITH_LG_PAGE: 16
+  MISE_VERSION: v2025.5.8
 commands:
 
   setup_environment:
@@ -259,7 +260,7 @@ commands:
             - run:
                 name: Install mise
                 command: |
-                  scoop install mise
+                  scoop install mise@${MISE_VERSION#v}
                   # --raw disables the terminal timer/progress bars, so if mise gets stuck,
                   # it will not continue to produce output preventing CCI from timing it out
                   mise install --yes --raw
