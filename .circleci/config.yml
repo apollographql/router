@@ -240,7 +240,7 @@ commands:
             - run:
                 name: Install mise
                 command: |
-                  curl https://mise.jdx.dev/install.sh | MISE_VERSION= sh
+                  curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
                   # --raw disables the terminal timer/progress bars, so if mise gets stuck,
                   # it will not continue to produce output preventing CCI from timing it out
