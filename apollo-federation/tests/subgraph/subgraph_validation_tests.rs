@@ -1571,6 +1571,8 @@ mod federation_1_schema_tests {
 }
 
 mod shareable_tests {
+    use apollo_federation::subgraph::test_utils::build_inner;
+
     use super::*;
 
     #[test]
@@ -1641,6 +1643,21 @@ mod shareable_tests {
                 r#"[S] Invalid duplicate application of @shareable on field "E.a": @shareable is only repeatable on types so it can be used simultaneously on a type definition and its extensions, but it should not be duplicated on the same definition/extension declaration"#
             )]
         );
+    }
+
+    #[test]
+    fn allows_shareable_on_declaration_and_extension_of_same_type() {
+        let doc = r#"
+            type E @shareable {
+                id: ID!
+                a: Int
+            }
+
+            extend type E @shareable {
+                b: Int
+            }
+        "#;
+        assert!(build_inner(doc, BuildOption::AsFed2).is_ok());
     }
 }
 
