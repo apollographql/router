@@ -135,7 +135,6 @@ change for customers. Ideally this will be accomplished in router 3.
 Examples of Prometheus metric renaming; note that annotations are not appended to the metric names:
 
 ```rust
-u64_counter!("apollo.test", "test description", 1); // apollo_test
 u64_counter_with_unit!("apollo.test.requests", "test description", "{request}", 1); // apollo_test_requests
 f64_counter_with_unit!("apollo.test.total_duration", "test description", "s", 1); // apollo_test_total_duration_seconds
 ```
@@ -148,7 +147,7 @@ When using the macro in a test you will need a different pattern depending on if
    #[test]
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
-        u64_counter!("test", "test description", 1, "attr" => "val");
+        u64_counter_with_unit!("test", "test description", 1, "attr" => "val");
         assert_counter!("test", 1, "attr" => "val");
     }
 ```
@@ -261,15 +260,14 @@ Metrics should be named in a way that is consistent with the rest of the metrics
 * `<feature>.<feature-specific-attribute>` - Are always prefixed with the feature name unless they are standard metrics from the [otel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/). 
 
 ### Static metrics
-When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature and users cannot turn them off.
+When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature, they can suppress these via views, but feature usage will always be sent to Apollo.
 These metrics must be low cardinality and not leak any sensitive information. Users cannot change the attributes that are attached to these metrics.
 These metrics are transmitted to Apollo unless explicitly disabled.
 
 When adding new static metrics and attributes make sure to:
 * Include them in your design document.
 * Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) 
-* Notify `#proj-router-analytics` channel in Slack.
-* Add the metrics to the spreadsheet linked in the `#proj-router-analytics` channel in Slack.
+* Engage with other developers to ensure that the metrics are right. Metrics form part of our public API and can only be removed in a major release.
 
 To define a static metric us a macro:
 ```rust
