@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::cell::Cell;
+use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;

@@ -34,6 +34,7 @@ use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirect
 use crate::query_graph::graph_path::operation::create_initial_options;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::QueryPlanningStatistics;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
@@ -43,7 +44,6 @@ use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
-use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -910,7 +910,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                         Ok(max_so_far.max(path.subgraph_jumps()?))
                     })
                     .unwrap_or_else(|err: FederationError| {
-                        // There’s no way to abort `sort_by_key` from this callback.
+                        // There's no way to abort `sort_by_key` from this callback.
                         // Store the error to be returned later and return an dummy values
                         result = Err(err);
                         0
@@ -1220,8 +1220,8 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
             &mut updated_graph,
             &tree,
             self.parameters.config.type_conditioned_fetching,
-        )
-        .map(|_| PlanInfo {
+        )?;
+        Ok(PlanInfo {
             fetch_dependency_graph: updated_graph,
             path_tree: plan_info.path_tree.merge(&tree),
         })
