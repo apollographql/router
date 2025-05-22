@@ -48,6 +48,13 @@ pub struct CacheEntryJson {
     pub expires_at: DateTime<Utc>,
 }
 
+pub struct BatchDocument {
+    pub cache_key: String,
+    pub data: String,
+    pub invalidation_keys: Vec<String>,
+    pub expire: Expire,
+}
+
 impl TryFrom<CacheEntry> for CacheEntryJson {
     type Error = serde_json::Error;
 
@@ -126,6 +133,94 @@ impl Cache {
         }
 
         transaction.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn insert_hash_document_in_batch(
+        &self,
+        batch_docs: Vec<BatchDocument>,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.client.acquire().await?;
+
+        let batch_docs = batch_docs.chunks(100);
+        for batch_docs in batch_docs {
+            let mut transaction = conn.begin().await?;
+            let tx = &mut transaction;
+            let cache_keys = batch_docs
+                .iter()
+                .map(|b| b.cache_key.clone())
+                .collect::<Vec<String>>();
+
+            let data = batch_docs
+                .iter()
+                .map(|b| b.data.clone())
+                .collect::<Vec<String>>();
+            let expires = batch_docs
+                .iter()
+                .map(|b| match b.expire {
+                    Expire::In { seconds } => Utc::now() + Duration::from_secs(seconds as u64),
+                    Expire::At { timestamp } => DateTime::from_timestamp(timestamp, 0).unwrap(),
+                })
+                .collect::<Vec<DateTime<Utc>>>();
+            let resp = sqlx::query!(
+                r#"
+                INSERT INTO cache
+                ( cache_key, data, expires_at ) SELECT * FROM UNNEST(
+                    $1::VARCHAR(1024)[],
+                    $2::TEXT[],
+                    $3::TIMESTAMP WITH TIME ZONE[]
+                ) RETURNING id
+                "#,
+                &cache_keys,
+                &data,
+                &expires,
+            )
+            .fetch_all(&mut **tx)
+            .await?;
+
+            let invalidation_keys: Vec<(i64, String)> = resp
+                .iter()
+                .enumerate()
+                .flat_map(|(idx, resp)| {
+                    let cache_key_id = resp.id;
+                    batch_docs
+                        .get(idx)
+                        .unwrap()
+                        .invalidation_keys
+                        .iter()
+                        .map(move |k| (cache_key_id, k.clone()))
+                })
+                .collect();
+
+            let cache_key_ids: Vec<i64> = invalidation_keys.iter().map(|(idx, _)| *idx).collect();
+
+            let subgraph_names: Vec<String> = invalidation_keys
+                .iter()
+                .map(|_| "xxx".to_string())
+                .collect();
+            let invalidation_keys: Vec<String> = invalidation_keys
+                .into_iter()
+                .map(|(_, invalidation_key)| invalidation_key)
+                .collect();
+            sqlx::query!(
+                r#"
+                INSERT INTO invalidation_key (cache_key_id, invalidation_key, subgraph_name)
+                SELECT * FROM UNNEST(
+                    $1::BIGINT[],
+                    $2::VARCHAR(255)[],
+                    $3::VARCHAR(255)[]
+                )
+                "#,
+                &cache_key_ids,
+                &invalidation_keys,
+                &subgraph_names,
+            )
+            .execute(&mut **tx)
+            .await?;
+
+            transaction.commit().await?;
+        }
 
         Ok(())
     }

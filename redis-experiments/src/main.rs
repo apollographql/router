@@ -16,6 +16,8 @@ async fn cache() -> Cache {
         .unwrap_or_default();
     let client = Builder::from_config(config)
         .with_connection_config(|config| {
+            config.connection_timeout = std::time::Duration::from_secs(6000);
+            config.internal_command_timeout = std::time::Duration::from_secs(6000);
             config.tcp = TcpConfig {
                 nodelay: Some(true),
                 keepalive: Some(TcpKeepalive::new().with_time(Duration::from_secs(600))),
@@ -47,6 +49,8 @@ async fn main() {
     test_few().await;
     // test_weird_keys().await;
     test_many().await;
+    test_many_average_payload().await;
+    test_many_big_payload().await;
     println!("Done!")
 }
 
@@ -165,6 +169,84 @@ async fn test_many() {
                     expire,
                     AsciiWhitespaceSeparated("key1 key2"),
                     [("data", "A")],
+                )
+                .await
+                .unwrap();
+        }
+        let duration = start.elapsed();
+        println!("… inserted (one by one) in {} ms", duration.as_millis());
+
+        let start = Instant::now();
+        let deleted = cache
+            .invalidate(AsciiWhitespaceSeparated("key2"))
+            .await
+            .unwrap();
+        let duration = start.elapsed();
+        println!("… invalidated (in batch) in {} ms", duration.as_millis());
+        println!();
+        assert_eq!(deleted, count)
+    }
+    // cache.drop_index(true).await.unwrap();
+}
+
+async fn test_many_average_payload() {
+    println!("test_many_average_payload");
+
+    let cache = cache().await;
+    cache.create_index().await.unwrap();
+    let expire = Expire::In { seconds: 600 };
+    let start = Instant::now();
+    let data = (0..150_000)
+        .map(|c| c.to_string())
+        .collect::<Vec<String>>()
+        .join("");
+    for count in [100, 1_000, 10_000] {
+        println!("{count} entries…");
+        for i in 0..count {
+            cache
+                .insert_hash_document(
+                    &format!("doc{i}"),
+                    expire,
+                    AsciiWhitespaceSeparated("key1 key2"),
+                    [("data", data.clone())],
+                )
+                .await
+                .unwrap();
+        }
+        let duration = start.elapsed();
+        println!("… inserted (one by one) in {} ms", duration.as_millis());
+
+        let start = Instant::now();
+        let deleted = cache
+            .invalidate(AsciiWhitespaceSeparated("key2"))
+            .await
+            .unwrap();
+        let duration = start.elapsed();
+        println!("… invalidated (in batch) in {} ms", duration.as_millis());
+        println!();
+        assert_eq!(deleted, count)
+    }
+    // cache.drop_index(true).await.unwrap();
+}
+
+async fn test_many_big_payload() {
+    let cache = cache().await;
+    cache.create_index().await.unwrap();
+    let expire = Expire::In { seconds: 600 };
+    let start = Instant::now();
+    let data = (0..1_000_000)
+        .map(|c| c.to_string())
+        .collect::<Vec<String>>()
+        .join("");
+    for count in [100, 1_000, 10_000] {
+        println!("{count} entries…");
+        for i in 0..count {
+            cache
+                .insert_hash_document(
+                    &format!("doc{i}"),
+                    expire,
+                    AsciiWhitespaceSeparated("key1 key2"),
+                    [("data", data.clone())],
                 )
                 .await
                 .unwrap();
