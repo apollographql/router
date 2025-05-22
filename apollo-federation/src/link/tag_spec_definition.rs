@@ -56,7 +56,7 @@ impl TagSpecDefinition {
         locations
     }
 
-    pub(crate) fn tag_directive_specification(&self) -> Box<DirectiveSpecification> {
+    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
         Box::new(DirectiveSpecification::new(
             FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
@@ -82,7 +82,7 @@ impl SpecDefinition for TagSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![self.tag_directive_specification()]
+        vec![self.directive_specification()]
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {

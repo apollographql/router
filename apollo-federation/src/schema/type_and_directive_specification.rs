@@ -516,9 +516,9 @@ pub(crate) struct DirectiveCompositionSpecification {
 pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
-    pub(crate) args: Vec<DirectiveArgumentSpecification>,
-    pub(crate) repeatable: bool,
-    pub(crate) locations: Vec<DirectiveLocation>,
+    args: Vec<DirectiveArgumentSpecification>,
+    repeatable: bool,
+    locations: Vec<DirectiveLocation>,
 }
 
 impl DirectiveSpecification {
