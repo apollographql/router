@@ -7,6 +7,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch/bat
     Message {
         code: ConnectorsNonRootBatchKey,
         message: "`$batch` fields must be mapped from the API response body. Variables such as `$context` and `$this` are not supported",
-        locations: [],
+        locations: [
+            12:4..12:11,
+        ],
     },
 ]
