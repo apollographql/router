@@ -24,15 +24,15 @@ type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 #[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
-    #[display(fmt = "String")]
+    #[display("String")]
     Static { schema_sdl: String },
 
     /// A stream of schema.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] SchemaStream),
 
     /// A YAML file that may be watched for changes.
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the schema file.
         path: PathBuf,
@@ -42,11 +42,11 @@ pub enum SchemaSource {
     },
 
     /// Apollo managed federation.
-    #[display(fmt = "Registry")]
+    #[display("Registry")]
     Registry(UplinkConfig),
 
     /// A list of URLs to fetch the schema from.
-    #[display(fmt = "URLs")]
+    #[display("URLs")]
     URLs {
         /// The URLs to fetch the schema from.
         urls: Vec<Url>,

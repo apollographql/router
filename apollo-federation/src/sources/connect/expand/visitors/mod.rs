@@ -178,7 +178,7 @@ impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
         original_schema: &'a ValidFederationSchema,
         to_schema: &'a mut FederationSchema,
         directive_deny_list: &'a IndexSet<Name>,
-    ) -> SchemaVisitor<'a, Group, GroupType> {
+    ) -> Self {
         SchemaVisitor {
             directive_deny_list,
             original_schema,

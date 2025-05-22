@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1343,8 +1342,8 @@ snapshot_kind: text
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1384,6 +1383,26 @@ snapshot_kind: text
     },
     "Config10": {
       "additionalProperties": false,
+      "description": "Configuration for exposing errors that originate from subgraphs",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ErrorMode",
+          "description": "#/definitions/ErrorMode"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphConfig2",
+            "description": "#/definitions/SubgraphConfig2"
+          },
+          "default": {},
+          "description": "Overrides global configuration on a per-subgraph basis",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config11": {
+      "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
@@ -1415,11 +1434,11 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config11": {
+    "Config12": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config12": {
+    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1495,7 +1514,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Config13": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1532,7 +1551,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config15": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1553,7 +1572,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Config15": {
+    "Config16": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1574,7 +1593,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config16": {
+    "Config17": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1633,7 +1652,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config17": {
+    "Config18": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1819,6 +1838,9 @@ snapshot_kind: text
       "type": "object"
     },
     "Config8": {
+      "type": "object"
+    },
+    "Config9": {
       "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
@@ -1837,26 +1859,6 @@ snapshot_kind: text
             "description": "#/definitions/HeadersLocation"
           },
           "description": "Rules to specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config9": {
-      "additionalProperties": false,
-      "description": "Configuration for exposing errors that originate from subgraphs",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/ErrorMode",
-          "description": "#/definitions/ErrorMode"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConfig",
-            "description": "#/definitions/SubgraphConfig"
-          },
-          "default": {},
-          "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
         }
       },
@@ -2205,7 +2207,14 @@ snapshot_kind: text
         },
         "preview_connect_v0_2": {
           "default": null,
-          "description": "Feature gate for connect spec v0.2. Set to `true` to enable the using the v0.2 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Enables Connect spec v0.2 during the preview.",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "preview_connect_v0_3": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using the v0.3 spec during the preview phase.",
           "nullable": true,
           "type": "boolean"
         },
@@ -2364,6 +2373,27 @@ snapshot_kind: text
           "type": "string"
         }
       ]
+    },
+    "DeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Subscription deduplication configuration",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode. (default: true)",
+          "type": "boolean"
+        },
+        "ignored_headers": {
+          "default": [],
+          "description": "List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical. For example, if you forward the \"User-Agent\" header, but the subgraph doesn't depend on the value of that header, adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
     },
     "DefaultAttributeRequirementLevel": {
       "oneOf": [
@@ -4368,12 +4398,12 @@ snapshot_kind: text
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config14",
           "description": "#/definitions/Config14"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         }
       },
       "type": "object"
@@ -5452,8 +5482,7 @@ snapshot_kind: text
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_RouterSelector",
-          "description": "#/definitions/Condition_for_RouterSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_RouterSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -5479,157 +5508,6 @@ snapshot_kind: text
     },
     "RouterSelector": {
       "anyOf": [
-        {
-          "additionalProperties": false,
-          "description": "A header from the request",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "request_header": {
-              "description": "The name of the request header.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request_header"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The request method.",
-          "properties": {
-            "request_method": {
-              "description": "The request method enabled or not",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "request_method"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A value from context.",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "request_context": {
-              "description": "The request context key.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request_context"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A header from the response",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "response_header": {
-              "description": "The name of the request header.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "response_header"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A status from the response",
-          "properties": {
-            "response_status": {
-              "$ref": "#/definitions/ResponseStatus",
-              "description": "#/definitions/ResponseStatus"
-            }
-          },
-          "required": [
-            "response_status"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The trace ID of the request.",
-          "properties": {
-            "trace_id": {
-              "$ref": "#/definitions/TraceIdFormat",
-              "description": "#/definitions/TraceIdFormat"
-            }
-          },
-          "required": [
-            "trace_id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Apollo Studio operation id",
-          "properties": {
-            "studio_operation_id": {
-              "description": "Apollo Studio operation id",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "studio_operation_id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A value from context.",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "response_context": {
-              "description": "The response context key.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "response_context"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The operation name from the query.",
-          "properties": {
-            "default": {
-              "description": "Optional default value.",
-              "nullable": true,
-              "type": "string"
-            },
-            "operation_name": {
-              "$ref": "#/definitions/OperationName",
-              "description": "#/definitions/OperationName"
-            }
-          },
-          "required": [
-            "operation_name"
-          ],
-          "type": "object"
-        },
         {
           "additionalProperties": false,
           "description": "A value from baggage.",
@@ -5669,6 +5547,170 @@ snapshot_kind: text
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "description": "Critical error if it happens",
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Boolean set to true if the response body contains graphql error",
+          "properties": {
+            "on_graphql_error": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on_graphql_error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operation name from the query.",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the request",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request method.",
+          "properties": {
+            "request_method": {
+              "description": "The request method enabled or not",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "request_method"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The body of the response",
+          "properties": {
+            "response_body": {
+              "description": "The response body enabled or not",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "response_body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the response",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value from context.",
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_context": {
+              "description": "The response context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A status from the response",
+          "properties": {
+            "response_status": {
+              "$ref": "#/definitions/ResponseStatus",
+              "description": "#/definitions/ResponseStatus"
+            }
+          },
+          "required": [
+            "response_status"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
@@ -5687,27 +5729,29 @@ snapshot_kind: text
         },
         {
           "additionalProperties": false,
+          "description": "Apollo Studio operation id",
           "properties": {
-            "on_graphql_error": {
-              "description": "Boolean set to true if the response body contains graphql error",
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
               "type": "boolean"
             }
           },
           "required": [
-            "on_graphql_error"
+            "studio_operation_id"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
+          "description": "The trace ID of the request.",
           "properties": {
-            "error": {
-              "$ref": "#/definitions/ErrorRepr",
-              "description": "#/definitions/ErrorRepr"
+            "trace_id": {
+              "$ref": "#/definitions/TraceIdFormat",
+              "description": "#/definitions/TraceIdFormat"
             }
           },
           "required": [
-            "error"
+            "trace_id"
           ],
           "type": "object"
         }
@@ -6322,6 +6366,41 @@ snapshot_kind: text
       "type": "object"
     },
     "SubgraphConfig": {
+      "description": "Configuration for one subgraph for the `mock_subgraphs` plugin",
+      "properties": {
+        "entities": {
+          "default": [],
+          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers for the subgraph response",
+          "type": "object"
+        },
+        "mutation": {
+          "additionalProperties": true,
+          "default": null,
+          "description": "Data for `mutation` operations",
+          "nullable": true,
+          "type": "object"
+        },
+        "query": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConfig2": {
       "anyOf": [
         {
           "description": "Enable or disable error redaction for a subgraph",
@@ -6616,8 +6695,7 @@ snapshot_kind: text
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
-          "description": "#/definitions/Condition_for_SubgraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -6662,8 +6740,7 @@ snapshot_kind: text
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
-          "description": "#/definitions/Condition_for_SubgraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -7186,10 +7263,9 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Subscriptions configuration",
       "properties": {
-        "enable_deduplication": {
-          "default": true,
-          "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "type": "boolean"
+        "deduplication": {
+          "$ref": "#/definitions/DeduplicationConfig",
+          "description": "#/definitions/DeduplicationConfig"
         },
         "enabled": {
           "default": true,
@@ -7377,8 +7453,7 @@ snapshot_kind: text
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
-          "description": "#/definitions/Condition_for_SupergraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -7413,8 +7488,7 @@ snapshot_kind: text
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
-          "description": "#/definitions/Condition_for_SupergraphSelector",
-          "nullable": true
+          "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "context": {
           "$ref": "#/definitions/ContextConf",
@@ -7945,24 +8019,24 @@ snapshot_kind: text
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config16",
-          "description": "#/definitions/Config16"
+          "$ref": "#/definitions/Config17",
+          "description": "#/definitions/Config17"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config15",
-          "description": "#/definitions/Config15"
+          "$ref": "#/definitions/Config16",
+          "description": "#/definitions/Config16"
         }
       },
       "type": "object"
@@ -9066,6 +9140,15 @@ snapshot_kind: text
     }
   },
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
+  "patternProperties": {
+    "^experimental_mock_subgraphs$": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SubgraphConfig",
+        "description": "#/definitions/SubgraphConfig"
+      },
+      "type": "object"
+    }
+  },
   "properties": {
     "apq": {
       "$ref": "#/definitions/Apq",
@@ -9087,6 +9170,10 @@ snapshot_kind: text
       "$ref": "#/definitions/ConnectorsConfig",
       "description": "#/definitions/ConnectorsConfig"
     },
+    "content_negotiation": {
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
+    },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
       "description": "#/definitions/Conf4"
@@ -9104,8 +9191,8 @@ snapshot_kind: text
       "description": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
@@ -9125,8 +9212,8 @@ snapshot_kind: text
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -9137,8 +9224,8 @@ snapshot_kind: text
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config9",
-      "description": "#/definitions/Config9"
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
@@ -9161,16 +9248,16 @@ snapshot_kind: text
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config10",
-      "description": "#/definitions/Config10"
+      "$ref": "#/definitions/Config11",
+      "description": "#/definitions/Config11"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config11",
-      "description": "#/definitions/Config11"
+      "$ref": "#/definitions/Config12",
+      "description": "#/definitions/Config12"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -9201,8 +9288,8 @@ snapshot_kind: text
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config17",
-      "description": "#/definitions/Config17"
+      "$ref": "#/definitions/Config18",
+      "description": "#/definitions/Config18"
     }
   },
   "title": "Configuration",

@@ -1,11 +1,16 @@
+use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
+use encoding_rs::Encoding;
+use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use itertools::Itertools;
+use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -91,15 +96,16 @@ impl RawResponse {
                 parts,
                 debug_request,
             } => {
-                let inputs = key.inputs().merge(
-                    &connector.response_variables,
-                    &connector.response_headers,
-                    connector.config.as_ref(),
-                    context,
-                    Some(parts.status.as_u16()),
-                    supergraph_request,
-                    Some(&parts),
-                );
+                let inputs = key
+                    .inputs()
+                    .clone()
+                    .merger(&connector.response_variables)
+                    .config(connector.config.as_ref())
+                    .context(context)
+                    .status(parts.status.as_u16())
+                    .request(&connector.response_headers, &supergraph_request)
+                    .response(&connector.response_headers, Some(&parts))
+                    .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
@@ -138,15 +144,13 @@ impl RawResponse {
     /// Returns a `MappedResponse` with a GraphQL error.
     ///
     /// As a side effect, this will also write to the debug context.
-    // TODO: This is where we'd map the response to a top-level GraphQL error
-    // once we have an error mapping. For now, it just creates a basic top-level
-    // error with the status code.
     fn map_error(
         self,
         result: Result<TransportResponse, Error>,
         connector: Arc<Connector>,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     ) -> connector::request_service::Response {
         use serde_json_bytes::*;
 
@@ -158,10 +162,38 @@ impl RawResponse {
                 debug_request,
                 data,
             } => {
-                let error = graphql::Error::builder()
-                    .message("Request failed".to_string())
-                    .extension_code("CONNECTOR_FETCH")
-                    .extension("service", connector.id.subgraph_name.clone())
+                let inputs = LazyCell::new(|| {
+                    key.inputs()
+                        .clone()
+                        .merger(&connector.response_variables)
+                        .config(connector.config.as_ref())
+                        .context(context)
+                        .status(parts.status.as_u16())
+                        .request(&connector.response_headers, &supergraph_request)
+                        .response(&connector.response_headers, Some(&parts))
+                        .merge()
+                });
+
+                // Do we have a error message mapping set for this connector?
+                let message = if let Some(message_selection) = &connector.error_settings.message {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
+
+                    res.as_ref()
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                } else {
+                    "Request failed".to_string()
+                };
+
+                // Now we can create the error object using either the default message or the message calculated by the JSONSelection
+                let mut error = graphql::Error::builder()
+                    .message(message)
+                    .path::<Path>((&key).into());
+
+                // First, we will apply defaults... these may get overwritten below by user configured extensions
+                error = error
                     .extension(
                         "http",
                         Value::Object(Map::from_iter([(
@@ -175,10 +207,63 @@ impl RawResponse {
                             "coordinate".into(),
                             Value::String(connector.id.coordinate().into()),
                         )])),
-                    )
-                    .path::<Path>((&key).into())
+                    );
+
+                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
+                // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
+                // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
+                // can't make sense of it in the if/else due to how the builder is constructed.
+                let mut extension_code = "CONNECTOR_FETCH".to_string();
+                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) =
+                        extensions_selection.apply_with_vars(&data, &inputs);
+
+                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+                    let extensions = res
+                        .and_then(|e| match e {
+                            Value::Object(map) => Some(map),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+
+                    if let Some(code) = extensions.get("code") {
+                        extension_code = code.as_str().unwrap_or_default().to_string();
+                    }
+
+                    for (key, value) in extensions {
+                        error = error.extension(key.clone(), value.clone());
+                    }
+                }
+
+                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) =
+                        extensions_selection.apply_with_vars(&data, &inputs);
+
+                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+                    let extensions = res
+                        .and_then(|e| match e {
+                            Value::Object(map) => Some(map),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+
+                    if let Some(code) = extensions.get("code") {
+                        extension_code = code.as_str().unwrap_or_default().to_string();
+                    }
+
+                    for (key, value) in extensions {
+                        error = error.extension(key.clone(), value.clone());
+                    }
+                }
+
+                // Now we can finally build the actual error!
+                let error = error
+                    .extension_code(extension_code)
                     .build()
-                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    // Always set the subgraph name and if required, it will get filtered out by the include_subgraph_errors plugin
+                    .with_subgraph_name(&connector.id.subgraph_name);
 
                 if let Some(debug) = debug_context {
                     debug
@@ -196,7 +281,11 @@ impl RawResponse {
         } = mapped_response
         {
             if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
-                emit_error_event(error_code.as_str(), "Connector error occurred");
+                emit_error_event(
+                    error_code.as_str(),
+                    &mapped_error.message,
+                    mapped_error.path.clone(),
+                );
             }
         }
 
@@ -368,7 +457,13 @@ pub(crate) async fn process_response<T: HttpBody>(
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            raw.map_error(Err(error), connector, context, debug_context)
+            raw.map_error(
+                Err(error),
+                connector,
+                context,
+                debug_context,
+                supergraph_request,
+            )
         }
         Ok(response) => {
             let (parts, body) = response.into_parts();
@@ -417,7 +512,13 @@ pub(crate) async fn process_response<T: HttpBody>(
                 )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                raw.map_error(result, connector, context, debug_context)
+                raw.map_error(
+                    result,
+                    connector,
+                    context,
+                    debug_context,
+                    supergraph_request,
+                )
             }
         }
     }
@@ -477,8 +578,8 @@ async fn deserialize_response<T: HttpBody>(
 
     let make_err = |path: Path| {
         graphql::Error::builder()
-            .message("Request failed".to_string())
-            .extension_code("CONNECTOR_FETCH")
+            .message("The server returned data in an unexpected format.".to_string())
+            .extension_code("CONNECTOR_RESPONSE_INVALID")
             .extension("service", connector.id.subgraph_name.clone())
             .extension(
                 "http",
@@ -597,17 +698,54 @@ async fn deserialize_response<T: HttpBody>(
         }
     }
 
-    match serde_json::from_slice::<Value>(body) {
-        Ok(json_data) => Ok(json_data),
-        Err(_) => {
+    let content_type = parts
+        .headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
+
+    if content_type.is_none()
+        || content_type
+            .as_ref()
+            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
+    {
+        // Treat any JSON-y like content types as JSON
+        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
+        match serde_json::from_slice::<Value>(body) {
+            Ok(json_data) => Ok(json_data),
+            Err(_) => {
+                if let Some(debug_context) = debug_context {
+                    debug_context
+                        .lock()
+                        .push_invalid_response(debug_request.clone(), parts, body);
+                }
+                Err(make_err(path))
+            }
+        }
+    } else if content_type
+        .as_ref()
+        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
+    {
+        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
+        // Before we can do that, we need to figure out the charset and attempt to decode the string
+        let encoding = content_type
+            .as_ref()
+            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
+            .unwrap_or(UTF_8);
+        let (decoded_body, _, had_errors) = encoding.decode(body);
+
+        if had_errors {
             if let Some(debug_context) = debug_context {
                 debug_context
                     .lock()
                     .push_invalid_response(debug_request.clone(), parts, body);
             }
-
-            Err(make_err(path))
+            return Err(make_err(path));
         }
+
+        Ok(Value::String(decoded_body.into_owned().into()))
+    } else {
+        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
+        Ok(Value::Null)
     }
 }
 
@@ -663,6 +801,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -772,6 +911,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -888,6 +1028,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let keys = connector
@@ -1011,6 +1152,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1136,6 +1278,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1230,7 +1373,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1255,7 +1398,7 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "Request failed",
+                            message: "The server returned data in an unexpected format.",
                             locations: [],
                             path: Some(
                                 Path(
@@ -1283,7 +1426,7 @@ mod tests {
                                     ),
                                 }),
                                 "code": String(
-                                    "CONNECTOR_FETCH",
+                                    "CONNECTOR_RESPONSE_INVALID",
                                 ),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
@@ -1307,9 +1450,6 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(404),
                                 }),
@@ -1343,9 +1483,6 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(500),
                                 }),
@@ -1371,7 +1508,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
@@ -1404,6 +1541,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()

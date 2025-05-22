@@ -193,6 +193,7 @@ mod tests {
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
+                error_settings: Default::default(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -278,6 +279,7 @@ mod tests {
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
+                error_settings: Default::default(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),

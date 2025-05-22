@@ -1,5 +1,5 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
 
 type Query {
   resources: [String!]!
@@ -17,8 +17,8 @@ type Query {
           { name: "<Invalid-Header>", value: "invalid.header.name" }
           { name: "x-invalid-from", from: "<Invalid-Header>" }
           {
-            name: "x-invalid-value"
-            value: "  Value with 😊 emoji and newline  \n "
+            name: "x-emoji-value"
+            value: "  Value with 😊 emoji  "
           }
           { name: "Content-Length", value: "Is a reserved header" }
           { name: "Content-Type", from: "Cant-Be-Dynamic" }

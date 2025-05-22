@@ -7,6 +7,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use itertools::Itertools;
+use strum::IntoEnumIterator;
 
 use crate::link::Link;
 use crate::sources::connect::ConnectSpec;
@@ -15,11 +16,11 @@ use crate::sources::connect::validation::Message;
 
 /// The `@link` in a subgraph which enables connectors
 #[derive(Clone, Debug)]
-pub(super) struct ConnectLink<'schema> {
-    pub(crate) spec: ConnectSpec,
-    pub(crate) source_directive_name: Name,
-    pub(crate) connect_directive_name: Name,
-    pub(crate) directive: &'schema Component<Directive>,
+pub(crate) struct ConnectLink<'schema> {
+    spec: ConnectSpec,
+    source_directive_name: Name,
+    connect_directive_name: Name,
+    directive: &'schema Component<Directive>,
     link: Link,
 }
 
@@ -35,21 +36,10 @@ impl<'schema> ConnectLink<'schema> {
 
         let spec = match ConnectSpec::try_from(&link.url.version) {
             Err(err) => {
-                let available_versions = ConnectSpec::available();
-                let message = if available_versions.len() == 1 {
-                    // TODO: No need to branch here once multiple spec versions are available
-                    format!("{err}; should be {version}.", version = ConnectSpec::V0_1)
-                } else {
-                    // This won't happen today, but it's prepping for 0.2 so we don't forget
-                    format!(
-                        "{err}; should be one of {available_versions}.",
-                        available_versions = available_versions
-                            .iter()
-                            .copied()
-                            .map(ConnectSpec::as_str)
-                            .join(", "),
-                    )
-                };
+                let message = format!(
+                    "{err}; should be one of {available_versions}.",
+                    available_versions = ConnectSpec::iter().map(ConnectSpec::as_str).join(", "),
+                );
                 return Some(Err(Message {
                     code: Code::UnknownConnectorsVersion,
                     message,
@@ -71,10 +61,26 @@ impl<'schema> ConnectLink<'schema> {
             link,
         }))
     }
+
+    pub(super) fn spec(&self) -> ConnectSpec {
+        self.spec
+    }
+
+    pub(super) fn source_directive_name(&self) -> &Name {
+        &self.source_directive_name
+    }
+
+    pub(super) fn connect_directive_name(&self) -> &Name {
+        &self.connect_directive_name
+    }
+
+    pub(super) fn directive(&self) -> &Component<Directive> {
+        self.directive
+    }
 }
 
 impl Display for ConnectLink<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "@link(url: \"{}\")", self.link.url)
+        write!(f, "{}", self.link)
     }
 }

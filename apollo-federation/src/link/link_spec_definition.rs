@@ -4,11 +4,13 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -17,13 +19,17 @@ use crate::error::MultiTryAll;
 use crate::error::SingleFederationError;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::link::Import;
 use crate::link::Link;
+use crate::link::argument::directive_optional_list_argument;
+use crate::link::argument::directive_optional_string_argument;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
@@ -41,12 +47,18 @@ pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); 
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl LinkSpecDefinition {
-    pub(crate) fn new(version: Version, identity: Identity) -> Self {
+    pub(crate) fn new(
+        version: Version,
+        identity: Identity,
+        minimum_federation_version: Version,
+    ) -> Self {
         Self {
             url: Url { identity, version },
+            minimum_federation_version,
         }
     }
 
@@ -132,7 +144,7 @@ impl LinkSpecDefinition {
         schema: &mut FederationSchema,
         alias: Option<Name>,
     ) -> Result<(), FederationError> {
-        self.add_definitions_to_schema(schema, alias.clone())?;
+        self.add_definitions_to_schema(schema, alias.clone(), vec![])?;
 
         // This adds `@link(url: "https://specs.apollo.dev/link/v1.0")` to the "schema" definition.
         // And we have a choice to add it either the main definition, or to an `extend schema`.
@@ -159,9 +171,10 @@ impl LinkSpecDefinition {
         //
         // So instead, we put the directive on the schema definition unless some extensions exists
         // but no definition does (that is, no non-extension elements are populated).
+        //
+        // Side-note: this test must be done _before_ we call `insert_directive`, otherwise it
+        // would take it into account.
 
-        // TODO: complete porting - used by `onDirectiveDefinitionAndSchemaParsed` in JS (FED-428)
-        // - need to port`SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
         let name = alias.as_ref().unwrap_or(&self.url.identity.name).clone();
         let mut arguments = vec![Node::new(ast::Argument {
             name: self.url_arg_name(),
@@ -173,16 +186,55 @@ impl LinkSpecDefinition {
                 value: alias.to_string().into(),
             }));
         }
-        SchemaDefinitionPosition
-            .insert_directive(schema, Component::new(ast::Directive { name, arguments }))?;
+
+        let schema_definition = SchemaDefinitionPosition.get(schema.schema());
+        SchemaDefinitionPosition.insert_directive_at(
+            schema,
+            Component {
+                origin: schema_definition.origin_to_use(),
+                node: Node::new(Directive { name, arguments }),
+            },
+            0, // @link to link spec should be first
+        )?;
         Ok(())
+    }
+
+    pub(crate) fn extract_alias_and_imports_on_missing_link_directive_definition(
+        application: &Node<Directive>,
+    ) -> Result<(Option<Name>, Vec<Arc<Import>>), FederationError> {
+        // PORT_NOTE: This is really logic encapsulated from onMissingDirectiveDefinition() in the
+        // JS codebase's FederationBlueprint, but moved here since it's all link-specific. The logic
+        // itself has a lot of problems, but we're porting it as-is for now, and we'll address the
+        // problems with it in a later version bump.
+        let url =
+            directive_optional_string_argument(application, &LINK_DIRECTIVE_URL_ARGUMENT_NAME)?;
+        if let Some(url) = url {
+            if url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string()) {
+                let alias = directive_optional_string_argument(
+                    application,
+                    &LINK_DIRECTIVE_AS_ARGUMENT_NAME,
+                )?
+                .map(Name::new)
+                .transpose()?;
+                let imports = directive_optional_list_argument(
+                    application,
+                    &LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                )?
+                .into_iter()
+                .flatten()
+                .map(|value| Ok::<_, FederationError>(Arc::new(Import::from_value(value)?)))
+                .process_results(|r| r.collect::<Vec<_>>())?;
+                return Ok((alias, imports));
+            }
+        }
+        Ok((None, vec![]))
     }
 
     pub(crate) fn add_definitions_to_schema(
         &self,
         schema: &mut FederationSchema,
         alias: Option<Name>,
-        // imports: Vec<Import>, // Used by `onMissingDirectiveDefinition` in JS (FED-428)
+        imports: Vec<Arc<Import>>,
     ) -> Result<(), FederationError> {
         if let Some(metadata) = schema.metadata() {
             let link_spec_def = metadata.link_spec_definition()?;
@@ -207,7 +259,7 @@ impl LinkSpecDefinition {
         let mock_link = Arc::new(Link {
             url: self.url.clone(),
             spec_alias: alias,
-            imports: vec![], // TODO (FED-428)
+            imports,
             purpose: None,
         });
         Ok(())
@@ -220,6 +272,7 @@ impl LinkSpecDefinition {
             )
     }
 
+    #[allow(unused)]
     pub(crate) fn fed1_latest() -> &'static Self {
         // Note: The `unwrap()` calls won't panic, since `CORE_VERSIONS` will always have at
         // least one version.
@@ -262,6 +315,10 @@ impl SpecDefinition for LinkSpecDefinition {
             specs.push(Box::new(create_link_import_type_spec()))
         }
         specs
+    }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
     }
 
     fn add_elements_to_schema(
@@ -307,10 +364,12 @@ pub(crate) static CORE_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
             Identity::core_identity(),
+            Version { major: 1, minor: 0 },
         ));
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 2 },
             Identity::core_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });
@@ -320,6 +379,7 @@ pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Identity::link_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });

@@ -10,10 +10,12 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -42,6 +44,8 @@ use self::subgraph::FederationSubgraph;
 use self::subgraph::FederationSubgraphs;
 pub use self::subgraph::ValidFederationSubgraph;
 pub use self::subgraph::ValidFederationSubgraphs;
+use crate::ApiSchemaOptions;
+use crate::api_schema;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -58,6 +62,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -81,6 +86,79 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::utils::FallibleIterator;
+
+#[derive(Debug)]
+#[allow(unused)]
+pub struct Supergraph<S> {
+    pub state: S,
+}
+
+impl Supergraph<Merged> {
+    pub fn new(schema: Valid<Schema>) -> Self {
+        Self {
+            state: Merged { schema },
+        }
+    }
+
+    pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        Ok(Self::new(schema))
+    }
+
+    pub fn assume_satisfiable(self) -> Supergraph<Satisfiable> {
+        todo!("unimplemented")
+    }
+
+    pub fn schema(&self) -> &Valid<Schema> {
+        &self.state.schema
+    }
+}
+
+impl Supergraph<Satisfiable> {
+    /// Generates an API Schema from this supergraph schema. The API Schema represents the combined
+    /// API of the supergraph that's visible to end users.
+    pub fn to_api_schema(
+        &self,
+        options: ApiSchemaOptions,
+    ) -> Result<ValidFederationSchema, FederationError> {
+        api_schema::to_api_schema(self.state.schema.clone(), options)
+    }
+}
+
+#[derive(Clone, Debug)]
+#[allow(unused)]
+pub struct Merged {
+    schema: Valid<Schema>,
+}
+
+#[derive(Clone, Debug)]
+#[allow(unused)]
+pub struct Satisfiable {
+    schema: ValidFederationSchema,
+    metadata: SupergraphMetadata,
+    hints: Vec<CompositionHint>,
+}
+
+#[derive(Clone, Debug)]
+#[allow(unused)]
+#[allow(unreachable_pub)]
+pub struct SupergraphMetadata {
+    /// A set of the names of interface types for which at least one subgraph use an
+    /// @interfaceObject to abstract that interface.
+    interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    /// A set of the names of interface or union types that have inconsistent "runtime types" across
+    /// subgraphs.
+    abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
+}
+
+// TODO this should be expanded as needed
+//  @see apollo-federation-types BuildMessage for what is currently used by rover
+#[derive(Clone, Debug)]
+#[allow(unused)]
+#[allow(unreachable_pub)]
+pub struct CompositionHint {
+    message: String,
+}
 
 /// Assumes the given schema has been validated.
 ///
@@ -913,7 +991,7 @@ fn extract_interface_type_content(
                     ),
                 }
             })?;
-            Ok(match subgraph.schema.get_type(type_name.clone())? {
+            Ok(match subgraph.schema.get_type(type_name)? {
                 TypeDefinitionPosition::Object(pos) => {
                     if !is_interface_object {
                         return Err(
@@ -1772,7 +1850,7 @@ fn add_federation_operations(
 
     // `Query._service`
     ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
+        type_name: query_root_type_name,
         field_name: FEDERATION_SERVICE_FIELD_NAME,
     }
     .insert(
@@ -1928,12 +2006,20 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
         )?;
+
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
             } else {
-                let fields = fields.serialize().no_indent().to_string();
+                let fields = FieldSet {
+                    sources: Default::default(),
+                    selection_set: fields,
+                }
+                .serialize()
+                .no_indent()
+                .to_string();
+
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {
                         federation_spec_definition.provides_directive(schema, fields)?

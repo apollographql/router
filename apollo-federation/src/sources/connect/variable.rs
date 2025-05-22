@@ -8,6 +8,7 @@ use std::str::FromStr;
 use itertools::Itertools;
 
 use super::id::ConnectedElement;
+use super::json_selection::SelectionTrie;
 use crate::sources::connect::validation::Code;
 
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
@@ -22,7 +23,7 @@ pub(crate) struct VariableContext<'schema> {
 }
 
 impl<'schema> VariableContext<'schema> {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         element: &'schema ConnectedElement<'schema>,
         phase: Phase,
         target: Target,
@@ -61,7 +62,7 @@ impl<'schema> VariableContext<'schema> {
     }
 
     /// Get the error code for this context
-    pub(crate) fn error_code(&self) -> Code {
+    pub(crate) const fn error_code(&self) -> Code {
         match self.target {
             Target::Body => Code::InvalidSelection,
         }
@@ -97,7 +98,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Args => "$args",
             Self::Config => "$config",
@@ -144,24 +145,23 @@ impl Display for Namespace {
 /// A variable reference. Consists of a namespace starting with a `$` and an optional path
 /// separated by '.' characters.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub struct VariableReference<'a, N: FromStr + ToString> {
+pub struct VariableReference<N: FromStr + ToString> {
     /// The namespace of the variable - `$this`, `$args`, `$status`, etc.
     pub namespace: VariableNamespace<N>,
 
     /// The path elements of this reference. For example, the reference `$this.a.b.c`
     /// has path elements `a`, `b`, `c`. May be empty in some cases, as in the reference `$status`.
-    pub(crate) path: Vec<VariablePathPart<'a>>,
+    pub(crate) selection: SelectionTrie,
 
     /// The location of the reference within the original text.
-    pub(crate) location: Range<usize>,
+    pub(crate) location: Option<Range<usize>>,
 }
 
-impl<N: FromStr + ToString> Display for VariableReference<'_, N> {
+impl<N: FromStr + ToString> Display for VariableReference<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.namespace.namespace.to_string().as_str())?;
-        for part in &self.path {
-            f.write_str(".")?;
-            f.write_str(part.as_str())?;
+        if !self.selection.is_empty() {
+            write!(f, " {{ {} }}", self.selection)?;
         }
         Ok(())
     }
@@ -171,25 +171,5 @@ impl<N: FromStr + ToString> Display for VariableReference<'_, N> {
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct VariableNamespace<N: FromStr + ToString> {
     pub namespace: N,
-    pub(crate) location: Range<usize>,
-}
-
-/// Part of a variable path, like `a` in `$this.a.b.c`
-#[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct VariablePathPart<'a> {
-    pub(crate) part: &'a str,
-    pub(crate) location: Range<usize>,
-}
-
-impl VariablePathPart<'_> {
-    pub(crate) fn as_str(&self) -> &str {
-        self.part
-    }
-}
-
-impl Display for VariablePathPart<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.part.to_string().as_str())?;
-        Ok(())
-    }
+    pub(crate) location: Option<Range<usize>>,
 }

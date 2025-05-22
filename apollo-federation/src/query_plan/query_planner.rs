@@ -900,13 +900,14 @@ impl SubgraphOperationCompression {
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
-                let operation_document = operation.try_into().map_err(|err| match err {
-                    FederationError::SingleFederationError(
-                        SingleFederationError::InvalidGraphQL { diagnostics },
-                    ) => internal_error!(
-                        "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-                    ),
-                    _ => err,
+                let operation_document = operation.try_into().map_err(|err: FederationError| {
+                    if err.has_invalid_graphql_error() {
+                        internal_error!(
+                            "Query planning produced an invalid subgraph operation.\n{err}"
+                        )
+                    } else {
+                        err
+                    }
                 })?;
                 Ok(operation_document)
             }

@@ -291,6 +291,11 @@ pub(crate) type GraphPathItem<'path, TTrigger, TEdge> = (
 // codebase is replaced with this one.
 pub(crate) type OpGraphPath = GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>;
 
+/// A `GraphPath` whose triggers are query graph transitions in some other query graph (essentially
+/// meaning that the path has been guided by a walk through that other query graph).
+#[allow(dead_code)]
+pub(crate) type TransitionGraphPath = GraphPath<QueryGraphEdgeTransition, EdgeIndex>;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpGraphPathTrigger {
     OpPathElement(OpPathElement),
@@ -738,19 +743,30 @@ impl Default for ExcludedConditions {
     }
 }
 
-#[derive(Clone, serde::Serialize)]
-pub(crate) struct IndirectPaths<TTrigger, TEdge>
+#[derive(serde::Serialize)]
+pub(crate) struct IndirectPaths<TTrigger, TEdge, TDeadEnds>
 where
     TTrigger: Eq + Hash,
     Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
+    UnadvanceableClosures: Into<TDeadEnds>,
 {
     paths: Arc<Vec<Arc<GraphPath<TTrigger, TEdge>>>>,
-    dead_ends: Arc<Unadvanceables>,
+    #[serde(skip_serializing)]
+    dead_ends: TDeadEnds,
 }
 
-type OpIndirectPaths = IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>>;
+type OpIndirectPaths = IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>, ()>;
+
+impl Clone for OpIndirectPaths {
+    fn clone(&self) -> Self {
+        Self {
+            paths: self.paths.clone(),
+            dead_ends: (),
+        }
+    }
+}
 
 impl std::fmt::Debug for OpIndirectPaths {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -807,14 +823,23 @@ impl OpIndirectPaths {
         } else {
             OpIndirectPaths {
                 paths: Arc::new(filtered),
-                dead_ends: self.dead_ends.clone(),
+                dead_ends: (),
             }
         })
     }
 }
 
+#[allow(dead_code)]
+pub(crate) struct UnadvanceableClosures(Vec<UnadvanceableClosure>);
+
+impl From<UnadvanceableClosures> for () {
+    fn from(_: UnadvanceableClosures) -> Self {}
+}
+
+pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Unadvanceables>;
+
 #[derive(Debug, Clone, serde::Serialize)]
-struct Unadvanceables(Vec<Unadvanceable>);
+pub(crate) struct Unadvanceables(Vec<Unadvanceable>);
 
 impl Display for Unadvanceables {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -832,7 +857,7 @@ impl Display for Unadvanceables {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-struct Unadvanceable {
+pub(crate) struct Unadvanceable {
     reason: UnadvanceableReason,
     from_subgraph: Arc<str>,
     to_subgraph: Arc<str>,
@@ -850,8 +875,16 @@ impl Display for Unadvanceable {
 }
 
 #[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
-// PORT_NOTE: This is only used by composition, which is not ported to Rust yet.
-enum UnadvanceableReason {}
+#[allow(dead_code)]
+pub(crate) enum UnadvanceableReason {
+    UnsatisfiableKeyCondition,
+    UnsatisfiableRequiresCondition,
+    UnresolvableInterfaceObject,
+    NoMatchingTransition,
+    UnreachableType,
+    IgnoredIndirectPath,
+    UnsatisfiableOverrideCondition,
+}
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
 /// there is an optimization here, in that if some ending section of the path within the GraphQL
@@ -1958,7 +1991,7 @@ where
         tracing::instrument(skip_all, level = "trace")
     )]
     #[allow(clippy::too_many_arguments)]
-    fn advance_with_non_collecting_and_type_preserving_transitions(
+    fn advance_with_non_collecting_and_type_preserving_transitions<TDeadEnds>(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
@@ -1976,7 +2009,10 @@ where
             &EnabledOverrideConditions,
         ) -> Option<TEdge>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
-    ) -> Result<IndirectPaths<TTrigger, TEdge>, FederationError> {
+    ) -> Result<IndirectPaths<TTrigger, TEdge, TDeadEnds>, FederationError>
+    where
+        UnadvanceableClosures: Into<TDeadEnds>,
+    {
         // If we're asked for indirect paths after an "@interfaceObject fake down cast" but that
         // down cast comes just after non-collecting edge(s), then we can ignore the ask (skip
         // indirect paths from there). The reason is that the presence of the non-collecting edges
@@ -1987,7 +2023,7 @@ where
         if self.last_edge_is_interface_object_fake_down_cast_after_entering_subgraph()? {
             return Ok(IndirectPaths {
                 paths: Arc::new(vec![]),
-                dead_ends: Arc::new(Unadvanceables(vec![])),
+                dead_ends: UnadvanceableClosures(vec![]).into(),
             });
         }
 
@@ -2371,7 +2407,7 @@ where
                     .map(|p| p.0)
                     .collect(),
             ),
-            dead_ends: Arc::new(Unadvanceables(dead_ends)),
+            dead_ends: UnadvanceableClosures(dead_ends).into(),
         })
     }
 
@@ -3572,7 +3608,7 @@ impl OpGraphPath {
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos {
                             if supergraph_schema
-                                .possible_runtime_types(type_condition_pos.clone().into())?
+                                .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
                             {
                                 debug!("Type is a super-type of the current type. No edge to take");

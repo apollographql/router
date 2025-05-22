@@ -34,187 +34,177 @@ fn get_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let Some(index_literal) = args.first() {
-            match index_literal.apply_to_path(data, vars, input_path) {
-                (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
-                    (JSON::Array(array), Some(i)) => {
-                        // Negative indices count from the end of the array
-                        if let Some(element) = array.get(if i < 0 {
-                            (array.len() as i64 + i) as usize
-                        } else {
-                            i as usize
-                        }) {
-                            (Some(element.clone()), index_errors)
-                        } else {
-                            (
-                                None,
-                                vec_push(
-                                    index_errors,
-                                    ApplyToError::new(
-                                        format!(
-                                            "Method ->{}({}) index out of bounds",
-                                            method_name.as_ref(),
-                                            i,
-                                        ),
-                                        input_path.to_vec(),
-                                        index_literal.range(),
-                                    ),
-                                ),
-                            )
-                        }
-                    }
-
-                    (JSON::String(s), Some(i)) => {
-                        let s_str = s.as_str();
-                        let ilen = s_str.len() as i64;
-                        // Negative indices count from the end of the array
-                        let index = if i < 0 { ilen + i } else { i };
-                        if index >= 0 && index < ilen {
-                            let uindex = index as usize;
-                            let single_char_string = s_str[uindex..uindex + 1].to_string();
-                            (Some(JSON::String(single_char_string.into())), index_errors)
-                        } else {
-                            (
-                                None,
-                                vec_push(
-                                    index_errors,
-                                    ApplyToError::new(
-                                        format!(
-                                            "Method ->{}({}) index out of bounds",
-                                            method_name.as_ref(),
-                                            i,
-                                        ),
-                                        input_path.to_vec(),
-                                        index_literal.range(),
-                                    ),
-                                ),
-                            )
-                        }
-                    }
-
-                    (_, None) => (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{} requires an integer index",
-                                    method_name.as_ref()
-                                ),
-                                input_path.to_vec(),
-                                index_literal.range(),
-                            ),
-                        ),
-                    ),
-                    _ => (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{} requires an array or string input, not {}",
-                                    method_name.as_ref(),
-                                    json_type_name(data),
-                                ),
-                                input_path.to_vec(),
-                                method_name.range(),
-                            ),
-                        ),
-                    ),
-                },
-                (Some(ref key @ JSON::String(ref s)), index_errors) => match data {
-                    JSON::Object(map) => {
-                        if let Some(value) = map.get(s.as_str()) {
-                            (Some(value.clone()), index_errors)
-                        } else {
-                            (
-                                None,
-                                vec_push(
-                                    index_errors,
-                                    ApplyToError::new(
-                                        format!(
-                                            "Method ->{}({}) object key not found",
-                                            method_name.as_ref(),
-                                            key
-                                        ),
-                                        input_path.to_vec(),
-                                        index_literal.range(),
-                                    ),
-                                ),
-                            )
-                        }
-                    }
-                    _ => (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) requires an object input",
-                                    method_name.as_ref(),
-                                    key
-                                ),
-                                input_path.to_vec(),
-                                merge_ranges(
-                                    method_name.range(),
-                                    method_args.and_then(|args| args.range()),
-                                ),
-                            ),
-                        ),
-                    ),
-                },
-                (Some(value), index_errors) => (
-                    None,
-                    vec_push(
-                        index_errors,
-                        ApplyToError::new(
-                            format!(
-                                "Method ->{}({}) requires an integer or string argument",
-                                method_name.as_ref(),
-                                value,
-                            ),
-                            input_path.to_vec(),
-                            index_literal.range(),
-                        ),
-                    ),
-                ),
-                (None, index_errors) => (
-                    None,
-                    vec_push(
-                        index_errors,
-                        ApplyToError::new(
-                            format!(
-                                "Method ->{} received undefined argument",
-                                method_name.as_ref()
-                            ),
-                            input_path.to_vec(),
-                            index_literal.range(),
-                        ),
-                    ),
-                ),
-            }
-        } else {
-            (
-                None,
-                vec![ApplyToError::new(
-                    format!("Method ->{} requires an argument", method_name.as_ref()),
-                    input_path.to_vec(),
-                    method_name.range(),
-                )],
-            )
-        }
-    } else {
-        (
+    let Some(index_literal) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
+        return (
             None,
             vec![ApplyToError::new(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
             )],
-        )
+        );
+    };
+
+    match index_literal.apply_to_path(data, vars, input_path) {
+        (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
+            (JSON::Array(array), Some(i)) => {
+                // Negative indices count from the end of the array
+                if let Some(element) = array.get(if i < 0 {
+                    (array.len() as i64 + i) as usize
+                } else {
+                    i as usize
+                }) {
+                    (Some(element.clone()), index_errors)
+                } else {
+                    (
+                        None,
+                        vec_push(
+                            index_errors,
+                            ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) index out of bounds",
+                                    method_name.as_ref(),
+                                    i,
+                                ),
+                                input_path.to_vec(),
+                                index_literal.range(),
+                            ),
+                        ),
+                    )
+                }
+            }
+
+            (JSON::String(s), Some(i)) => {
+                let s_str = s.as_str();
+                let ilen = s_str.len() as i64;
+                // Negative indices count from the end of the array
+                let index = if i < 0 { ilen + i } else { i };
+                if index >= 0 && index < ilen {
+                    let uindex = index as usize;
+                    let single_char_string = s_str[uindex..uindex + 1].to_string();
+                    (Some(JSON::String(single_char_string.into())), index_errors)
+                } else {
+                    (
+                        None,
+                        vec_push(
+                            index_errors,
+                            ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) index out of bounds",
+                                    method_name.as_ref(),
+                                    i,
+                                ),
+                                input_path.to_vec(),
+                                index_literal.range(),
+                            ),
+                        ),
+                    )
+                }
+            }
+
+            (_, None) => (
+                None,
+                vec_push(
+                    index_errors,
+                    ApplyToError::new(
+                        format!(
+                            "Method ->{} requires an integer index",
+                            method_name.as_ref()
+                        ),
+                        input_path.to_vec(),
+                        index_literal.range(),
+                    ),
+                ),
+            ),
+            _ => (
+                None,
+                vec_push(
+                    index_errors,
+                    ApplyToError::new(
+                        format!(
+                            "Method ->{} requires an array or string input, not {}",
+                            method_name.as_ref(),
+                            json_type_name(data),
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    ),
+                ),
+            ),
+        },
+        (Some(ref key @ JSON::String(ref s)), index_errors) => match data {
+            JSON::Object(map) => {
+                if let Some(value) = map.get(s.as_str()) {
+                    (Some(value.clone()), index_errors)
+                } else {
+                    (
+                        None,
+                        vec_push(
+                            index_errors,
+                            ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) object key not found",
+                                    method_name.as_ref(),
+                                    key
+                                ),
+                                input_path.to_vec(),
+                                index_literal.range(),
+                            ),
+                        ),
+                    )
+                }
+            }
+            _ => (
+                None,
+                vec_push(
+                    index_errors,
+                    ApplyToError::new(
+                        format!(
+                            "Method ->{}({}) requires an object input",
+                            method_name.as_ref(),
+                            key
+                        ),
+                        input_path.to_vec(),
+                        merge_ranges(
+                            method_name.range(),
+                            method_args.and_then(|args| args.range()),
+                        ),
+                    ),
+                ),
+            ),
+        },
+        (Some(value), index_errors) => (
+            None,
+            vec_push(
+                index_errors,
+                ApplyToError::new(
+                    format!(
+                        "Method ->{}({}) requires an integer or string argument",
+                        method_name.as_ref(),
+                        value,
+                    ),
+                    input_path.to_vec(),
+                    index_literal.range(),
+                ),
+            ),
+        ),
+        (None, index_errors) => (
+            None,
+            vec_push(
+                index_errors,
+                ApplyToError::new(
+                    format!(
+                        "Method ->{} received undefined argument",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    index_literal.range(),
+                ),
+            ),
+        ),
     }
 }
+
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
     method_name: &WithRange<String>,
@@ -228,7 +218,7 @@ fn get_shape(
         if let Some(index_literal) = args.first() {
             let index_shape = index_literal.compute_output_shape(
                 input_shape.clone(),
-                dollar_shape.clone(),
+                dollar_shape,
                 named_var_shapes,
                 source_id,
             );
@@ -282,15 +272,17 @@ fn get_shape(
                         }
 
                         ShapeCase::String(Some(s)) => {
-                            if let Some(index) = value_opt {
-                                let index = *index as usize;
-                                if index < s.len() {
-                                    Shape::string_value(&s[index..index + 1], empty())
-                                } else {
-                                    Shape::none()
-                                }
+                            let Some(index) = value_opt else {
+                                return Shape::one(
+                                    [Shape::string(empty()), Shape::none()],
+                                    empty(),
+                                );
+                            };
+                            let index = *index as usize;
+                            if index < s.len() {
+                                Shape::string_value(&s[index..index + 1], empty())
                             } else {
-                                Shape::one([Shape::string(empty()), Shape::none()], empty())
+                                Shape::none()
                             }
                         }
                         ShapeCase::String(None) => {
@@ -333,10 +325,10 @@ fn get_shape(
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
     use serde_json_bytes::json;
 
     use super::*;
+    use crate::assert_debug_snapshot;
     use crate::selection;
 
     #[test]
@@ -471,13 +463,13 @@ mod tests {
         );
         assert_eq!(
             selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
-            expected.clone(),
+            expected,
         );
         assert_eq!(
             // The extra spaces here should not affect the error.range, as long
             // as we don't accidentally capture trailing spaces in the range.
             selection!("$->get($->echo(-5)->mul(2)  )").apply_to(&json!("oyez")),
-            expected.clone(),
+            expected,
         );
     }
 

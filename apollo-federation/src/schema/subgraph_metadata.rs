@@ -12,13 +12,13 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::query_graph::build_query_graph::parse_context;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::validators::from_context::parse_context;
 
 fn unwrap_schema(fed_schema: &FederationSchema) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -53,8 +53,7 @@ impl SubgraphMetadata {
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
         let shareable_fields = if federation_spec_definition.is_fed1() {
-            // TODO (FED-428): Currently, `@shareable` is not used in Fed 1 schemas. But, the
-            // comments in the `collect_shareable_fields` function suggests that it may be used.
+            // `@shareable` is not used in Fed 1 schemas.
             Default::default()
         } else {
             Self::collect_shareable_fields(schema, federation_spec_definition)?
@@ -173,7 +172,7 @@ impl SubgraphMetadata {
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
             required_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
-                requires_directive.target.type_name.clone(),
+                requires_directive.target.type_name().clone(),
                 requires_directive.arguments.fields,
                 false,
             )?);
@@ -186,6 +185,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut shareable_fields = IndexSet::default();
+        // PORT_NOTE: The comment below is from the JS code. It doesn't seem to apply to the Rust code.
         // @shareable is only available on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
@@ -250,7 +250,11 @@ impl SubgraphMetadata {
             .into_iter()
             .filter_map(|d| d.ok())
         {
-            let (context, selection) = parse_context(from_context_directive.arguments.field)?;
+            let (Some(context), Some(selection)) =
+                parse_context(from_context_directive.arguments.field)
+            else {
+                continue;
+            };
             if let Some(entry_point) = entry_points.get(context.as_str()) {
                 for context_type in entry_point {
                     used_context_fields.extend(collect_target_fields_from_field_set(

@@ -43,7 +43,6 @@ use uuid::Uuid;
 use super::Plugins;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
-use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
 use crate::Configuration;
@@ -61,6 +60,7 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
@@ -183,9 +183,6 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let tls_builder = rustls::ClientConfig::builder();
     Ok(match (tls_cert_store, client_cert_config) {
         (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
@@ -235,8 +232,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     });
                 }
             };
-            if subscription_config.enable_deduplication {
-                request.to_sha256()
+            if subscription_config.deduplication.enabled {
+                request.to_sha256(&subscription_config.deduplication.ignored_headers)
             } else {
                 Uuid::new_v4().to_string()
             }
@@ -1457,7 +1454,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
             "{}; expected content-type: {} or content-type: {}",
             reason,
             APPLICATION_JSON.essence_str(),
-            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
+            APPLICATION_GRAPHQL_JSON
         ),
     })
 }
@@ -1684,6 +1681,8 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
+    use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -1706,7 +1705,6 @@ mod tests {
 
         // Not sure this is the *right* place to do it, because it's actually clients that
         // use crypto, not the server.
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         loop {
             let (stream, _) = listener.accept().await?;
@@ -1813,7 +1811,10 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
+                )
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1839,7 +1840,10 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
+                )
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())
@@ -2345,7 +2349,7 @@ mod tests {
                     .into(),
                 }),
             },
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }

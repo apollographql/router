@@ -25,17 +25,17 @@ pub enum ConfigurationSource {
     ///
     /// Can be created through `serde::Deserialize` from various formats,
     /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-    #[display(fmt = "Static")]
-    #[from(types(Configuration))]
+    #[display("Static")]
+    #[from(Configuration, Box<Configuration>)]
     Static(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] ConfigurationStream),
 
     /// A yaml file that may be watched for changes
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the configuration file.
         path: PathBuf,
