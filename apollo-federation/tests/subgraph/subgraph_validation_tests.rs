@@ -2083,4 +2083,17 @@ mod tag_tests {
             )]
         );
     }
+
+    #[test]
+    fn allows_tag_with_valid_subset_of_locations() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            type T @tag(name: "foo") { x: Int }
+
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE
+        "#;
+        let _ = build_and_validate(doc);
+    }
 }
