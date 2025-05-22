@@ -33,10 +33,12 @@ async fn main() {
     cache.migrate().await.unwrap();
     test_few().await;
     test_many().await;
+    test_many_big_payload().await;
     println!("Done!");
 }
 
 async fn test_few() {
+    println!("test_few");
     let cache = cache().await;
     cache.truncate().await.unwrap();
     let expire = Expire::In { seconds: 600 };
@@ -84,6 +86,7 @@ async fn test_few() {
 }
 
 async fn test_many() {
+    println!("test_many");
     let cache = cache().await;
     let expire = Expire::In { seconds: 600 };
     let start = Instant::now();
@@ -98,6 +101,43 @@ async fn test_many() {
                     expire,
                     vec!["key1".to_string(), "key2".to_string()],
                     serde_json::json!({"data": "A"}),
+                )
+                .await
+                .unwrap();
+        }
+        let duration = start.elapsed();
+        println!("… inserted (one by one) in {} ms", duration.as_millis());
+
+        let start = Instant::now();
+        let deleted = cache.invalidate(vec!["key2".to_string()]).await.unwrap();
+        let duration = start.elapsed();
+        println!("… invalidated (in batch) in {} ms", duration.as_millis());
+        println!();
+        assert_eq!(deleted, count)
+    }
+    // cache.drop_index(true).await.unwrap();
+}
+
+async fn test_many_big_payload() {
+    println!("test_many_big_payload");
+    let cache = cache().await;
+    let expire = Expire::In { seconds: 600 };
+    let start = Instant::now();
+    let data = (0..1_000_000)
+        .map(|c| c.to_string())
+        .collect::<Vec<String>>()
+        .join("");
+    for count in [100, 1_000, 10_000] {
+        println!("truncate");
+        cache.truncate().await.unwrap();
+        println!("{count} entries…");
+        for i in 0..count {
+            cache
+                .insert_hash_document(
+                    &format!("doc{i}"),
+                    expire,
+                    vec!["key1".to_string(), "key2".to_string()],
+                    serde_json::json!({"data": data}),
                 )
                 .await
                 .unwrap();

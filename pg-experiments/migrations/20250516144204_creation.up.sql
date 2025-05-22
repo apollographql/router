@@ -53,8 +53,8 @@ end;
 $$ LANGUAGE plpgsql;
 
 
-CREATE UNLOGGED TABLE IF NOT EXISTS "invalidation_key" (cache_key_id BIGSERIAL NOT NULL, invalidation_key VARCHAR(255) NOT NULL, PRIMARY KEY(cache_key_id, invalidation_key));
-CREATE UNLOGGED TABLE IF NOT EXISTS "cache" (id BIGSERIAL PRIMARY KEY, cache_key VARCHAR(1024) NOT NULL, data JSONB NOT NULL, expires_at TIMESTAMP WITH TIME ZONE NOT NULL);
+CREATE UNLOGGED TABLE IF NOT EXISTS "invalidation_key" (cache_key_id BIGSERIAL NOT NULL, invalidation_key VARCHAR(255) NOT NULL, subgraph_name VARCHAR(255) NOT NULL, PRIMARY KEY(cache_key_id, invalidation_key, subgraph_name));
+CREATE UNLOGGED TABLE IF NOT EXISTS "cache" (id BIGSERIAL PRIMARY KEY, cache_key VARCHAR(1024) NOT NULL, data TEXT NOT NULL, expires_at TIMESTAMP WITH TIME ZONE NOT NULL);
 
 ALTER TABLE invalidation_key ADD CONSTRAINT FK_INVALIDATION_KEY_CACHE FOREIGN KEY (cache_key_id) references cache (id) ON delete cascade;
 SELECT create_unique_index('cache', 'cache_key_idx', 'cache_key');

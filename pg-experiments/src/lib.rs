@@ -1,4 +1,3 @@
-use sqlx::types::Json;
 use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 use sqlx::{Acquire, Pool, Postgres};
@@ -37,8 +36,30 @@ impl CacheConfig {
 pub struct CacheEntry {
     pub id: i64,
     pub cache_key: String,
-    pub data: sqlx::types::JsonValue,
+    pub data: String,
     pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheEntryJson {
+    pub id: i64,
+    pub cache_key: String,
+    pub data: serde_json::Value,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl TryFrom<CacheEntry> for CacheEntryJson {
+    type Error = serde_json::Error;
+
+    fn try_from(value: CacheEntry) -> Result<Self, Self::Error> {
+        let data = serde_json::from_str(&value.data)?;
+        Ok(Self {
+            id: value.id,
+            cache_key: value.cache_key,
+            data,
+            expires_at: value.expires_at,
+        })
+    }
 }
 
 impl Cache {
@@ -79,6 +100,7 @@ impl Cache {
             Expire::In { seconds } => Utc::now() + Duration::from_secs(seconds as u64),
             Expire::At { timestamp } => DateTime::from_timestamp(timestamp, 0).unwrap(),
         };
+        let value_str = serde_json::to_string(&value)?;
         let rec = sqlx::query!(
             r#"
         INSERT INTO cache ( cache_key, data, expires_at )
@@ -86,7 +108,7 @@ impl Cache {
         RETURNING id
                 "#,
             &self.document_id(document_id),
-            Json(value) as _,
+            value_str,
             expired_at
         )
         .fetch_one(&mut **tx)
@@ -94,9 +116,10 @@ impl Cache {
 
         for invalidation_key in invalidation_keys {
             sqlx::query!(
-                r#"INSERT into invalidation_key (cache_key_id, invalidation_key) VALUES ($1, $2)"#,
+                r#"INSERT into invalidation_key (cache_key_id, invalidation_key, subgraph_name) VALUES ($1, $2, $3)"#,
                 rec.id,
-                &self.document_id(&invalidation_key)
+                &self.document_id(&invalidation_key),
+                "xxx"
             )
             .execute(&mut **tx)
             .await?;
@@ -107,8 +130,7 @@ impl Cache {
         Ok(())
     }
 
-    pub async fn get_hash_document(&self, document_id: &str) -> anyhow::Result<CacheEntry> {
-        // let conn = self.client.acquire().await?;
+    pub async fn get_hash_document(&self, document_id: &str) -> anyhow::Result<CacheEntryJson> {
         let resp = sqlx::query_as!(
             CacheEntry,
             "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
@@ -117,7 +139,9 @@ impl Cache {
         .fetch_one(&self.client)
         .await?;
 
-        Ok(resp)
+        let cache_entry_json = resp.try_into()?;
+
+        Ok(cache_entry_json)
     }
 
     /// Deletes all documents that have one (or more) of the keys
@@ -131,10 +155,11 @@ impl Cache {
                 FROM cache
                 USING invalidation_key
                 WHERE invalidation_key.invalidation_key = ANY($1::text[])
-                    AND invalidation_key.cache_key_id = cache.id RETURNING cache.cache_key
+                    AND invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = $2 RETURNING cache.cache_key
             )
         SELECT COUNT(*) AS count FROM deleted"#,
-            &invalidation_keys
+            &invalidation_keys,
+            "xxx"
         )
         .fetch_one(&self.client)
         .await?;
@@ -149,20 +174,4 @@ impl Cache {
             id.into()
         }
     }
-}
-
-/// Unfortunately docs are woefully misleading:
-///
-/// https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/query_syntax/#tag-filters
-/// > The following characters in tags should be escaped with a backslash (\): $, {, }, \, and |.
-///
-/// In testing with Redis 8.0.0, all ASCII punctuation except `_`
-/// cause either a syntax error or a search mismatch.
-pub fn escape_redisearch_tag_filter(searched_tag: &str) -> std::borrow::Cow<'_, str> {
-    // We use Rust raw string syntax to avoid one level of escaping there,
-    // but the '\', '-', '[', and ']' are still significant in regex syntax and need to be escaped
-    static TO_ESCAPE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r##"[!"#$%&'()*+,\-./:;<=>?@\[\\\]^`{|}~]"##).unwrap()
-    });
-    TO_ESCAPE.replace_all(searched_tag, r"\$0")
 }
