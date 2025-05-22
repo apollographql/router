@@ -1575,7 +1575,6 @@ mod shareable_tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn can_only_be_applied_to_fields_of_object_types() {
         let doc = r#"
             interface I {
@@ -1592,7 +1591,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_duplicate_shareable_on_the_same_definition_declaration() {
         let doc = r#"
             type E @shareable @key(fields: "id") @shareable {
@@ -1610,7 +1608,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_the_same_extension_declaration() {
         let doc = r#"
             type E @shareable {
@@ -1632,7 +1629,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_a_field() {
         let doc = r#"
             type E {
