@@ -216,7 +216,7 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
             )?
-            .unwrap_or(false),
+            .unwrap_or(true),
         })
     }
 

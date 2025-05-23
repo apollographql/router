@@ -1700,7 +1700,6 @@ mod interface_object_and_key_on_interfaces_validation_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn key_on_interfaces_with_key_on_some_implementation_non_resolvable() {
         let doc = r#"
             interface I @key(fields: "id1") {

@@ -115,7 +115,7 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
                 error_collector.errors.push(
                         SingleFederationError::InterfaceKeyNotOnImplementation {
                             message: format!(
-                                "Key {} on interface type \"{}\" should be resolvable on all implementation types, but is declared with argument \"@key(resolvable:)\" set to false in {}",
+                                "Key {} on interface type \"{}\" should be resolvable on all implementation types, but is declared with argument \"@key(resolvable:)\" set to false in {}.",
                                 application.serialize(),
                                 type_pos,
                                 types_list,
