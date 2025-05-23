@@ -10,7 +10,6 @@ use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
-use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
@@ -32,16 +31,20 @@ fn join_not_null_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    _vars: &VarsWithPathsMap,
+    vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
     let Some(separator) = method_args
         .and_then(|args| args.args.first())
-        .and_then(|s| match &**s {
-            LitExpr::String(s) => Some(s),
-            _ => None,
+        .map(|arg| {
+            println!("ARG: {arg:?}");
+            arg.resolve_lit_path_safety().apply_to_path(data, vars, input_path)
+        })
+        .and_then(|(s, w)| {
+            warnings.extend_from_slice(&w);
+            s
         })
     else {
         warnings.push(ApplyToError::new(
@@ -85,7 +88,7 @@ fn join_not_null_method(
                     }
                 }
             }
-            joined.join(separator.as_str())
+            joined.join(separator.as_str().unwrap_or_default())
         }
         // Single values are emitted as strings with no separator
         _ => match to_string(data, method_name) {
@@ -194,7 +197,7 @@ mod tests {
     use serde_json_bytes::json;
 
     use super::*;
-    use crate::selection;
+    use crate::{selection, sources::connect::json_selection::lit_expr::LitExpr};
 
     #[rstest::rstest]
     #[case(json!(["a","b","c"]), ", ", json!("a, b, c"))]

@@ -17,6 +17,9 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 
+use crate::sources::connect::json_selection::NamedSelection;
+use crate::sources::connect::SubSelection;
+
 use super::ExternalVarPaths;
 use super::ParseResult;
 use super::PathList;
@@ -56,7 +59,44 @@ pub(crate) enum LitExpr {
     LitPath(WithRange<LitExpr>, WithRange<PathList>),
 }
 
+impl WithRange<LitExpr> {
+     pub(crate) fn resolve_lit_path_safety(&self) -> Self {
+        let range = self.range();
+        let lit_expr = self.inner_resolve_lit_path_safety();
+        WithRange::new(lit_expr, range)
+    }
+
+    fn encode(self) -> Self {
+        let range = self.range();
+        let lit_expr = if let LitExpr::String(s) = (*self).clone() {
+                LitExpr::String(
+                    percent_encoding::percent_encode(s.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string()
+                )
+        } else {
+            (*self).clone()
+        };
+        WithRange::new(lit_expr, range)
+    }
+}
 impl LitExpr {
+    fn inner_resolve_lit_path_safety(&self) -> Self {
+        let value = self.clone();
+        if let Self::LitPath(lit_expr, path_list) = value {
+            if let Some(name) = path_list.as_ref().next_subselection().and_then(|subselection| subselection.selections.first()).and_then(|name| name.names().first().cloned()) {
+                println!("Name {name}");
+                if name == "urlSafe" {
+                    Self::LitPath(lit_expr, path_list)
+                } else {
+                    Self::LitPath(lit_expr.encode(), path_list)
+                }
+            } else {
+                Self::LitPath(lit_expr.encode(), path_list)
+            }
+        } else {
+            value
+        }
+    }
+
     // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
