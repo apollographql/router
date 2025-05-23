@@ -1,7 +1,7 @@
 ---
-title: Jaeger exporter (via OTLP)
-subtitle: Configure the Jaeger exporter for tracing
-description: Configure the Jaeger exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo GraphOS Router or Apollo Router Core.
+title: Jaeger configuration of OTLP exporter
+subtitle: Configure the OTLP trace exporter for Jaeger
+description: Configure the OpenTelemetry Protocol (OTLP) trace exporter for Jaeger in the Apollo GraphOS Router or Apollo Router Core.
 context:
   - telemetry
 ---
@@ -9,7 +9,7 @@ context:
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-Enable and configure the [Jaeger exporter](https://www.jaegertracing.io/) for tracing in the GraphOS Router or Apollo Router Core.
+This tracing exporter is a configuration of the [OTLP exporter](/graphos/routing/observability/trace-exporters/otlp) to use with [Jaeger](https://www.jaegertracing.io/).
 
 For general tracing configuration, refer to [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
 

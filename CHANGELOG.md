@@ -4,6 +4,153 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.6] - 2025-05-06
+
+## 🐛 Fixes
+
+### Fix JWT metrics discrepancy ([PR #7258](https://github.com/apollographql/router/pull/7258))
+
+This fixes the `apollo.router.operations.authentication.jwt` counter metric to behave [as documented](https://www.apollographql.com/docs/graphos/routing/security/jwt#observability): emitted for every request that uses JWT, with the `authentication.jwt.failed` attribute set to true or false for failed or successful authentication.
+
+Previously, it was only used for failed authentication.
+
+The attribute-less and accidentally-differently-named `apollo.router.operations.jwt` counter was and is only emitted for successful authentication, but is deprecated now.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7258
+
+### Fix Redis connection leak ([PR #7319](https://github.com/apollographql/router/pull/7319))
+
+The router performs a 'hot reload' whenever it detects a schema update. During this reload, it effectively instantiates a new internal router, warms it up (optional), redirects all traffic to this new router, and drops the old internal router.
+
+This change fixes a bug in that drop process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections, which eats up memory.
+
+It also adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`). 
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7319
+
+### Fix Parsing of Coprocessor GraphQL Responses ([PR #7141](https://github.com/apollographql/router/pull/7141))
+
+Previously Router ignored `data: null` property inside GraphQL response returned by coprocessor.
+According to [GraphQL Spectification](https://spec.graphql.org/draft/#sel-FAPHLJCAACEBxlY):
+
+> If an error was raised during the execution that prevented a valid response, the "data" entry in the response should be null.
+
+That means if coprocessor returned valid execution error, for example:
+
+```json
+{
+  "data": null,
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+Router violated above restriction from GraphQL Specification by returning following response to client:
+
+```json
+{
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+This fix ensures full compliance with the GraphQL specification by preserving the complete structure of error responses from coprocessors.
+
+Contributed by [@IvanGoncharov](https://github.com/IvanGoncharov) in [#7141](https://github.com/apollographql/router/pull/7141)
+
+### Avoid fractional decimals when generating `apollo.router.operations.batching.size` metrics for GraphQL request batch sizes ([PR #7306](https://github.com/apollographql/router/pull/7306))
+
+Correct the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7306
+
+## 📃 Configuration
+
+### Add configurable server header read timeout ([PR #7262](https://github.com/apollographql/router/pull/7262))
+
+This change exposes the server's header read timeout as the `server.http.header_read_timeout` configuration option.
+
+By default, the `server.http.header_read_timeout` is set to previously hard-coded 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` option.
+
+```yaml title="router.yaml"
+server:
+  http:
+    header_read_timeout: 30s
+```
+
+By [@gwardwell ](https://github.com/gwardwell) in https://github.com/apollographql/router/pull/7262
+
+## 🛠 Maintenance
+
+### Reject `@skip`/`@include` on subscription root fields in validation ([PR #7338](https://github.com/apollographql/router/pull/7338))
+
+This implements a [GraphQL spec RFC](https://github.com/graphql/graphql-spec/pull/860), rejecting subscriptions in validation that can be invalid during execution.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7338
+
+
+
+# [1.61.5] - 2025-04-28
+
+## 🔍 Debuggability
+
+### Add compute job pool spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to 
+resource contention within the compute job pool.
+
+* `compute_job`:
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
+* `compute_job.execution`
+  - `job.age`: `P1`-`P8`
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
+
+Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing 
+at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher 
+priority jobs also in the queue.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
+
+### Add compute job pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+When this pool becomes saturated it is difficult for users to see why so that they can take action.
+This change adds new metrics to help users understand how long jobs are waiting to be processed.  
+
+New metrics:
+- `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
+- `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+  - `job.outcome`: (`executed_ok`, `executed_error`, `channel_error`, `rejected_queue_full`, `abandoned`)
+- `apollo.router.compute_jobs.queue.wait.duration` - A histogram of time spent in the compute queue by the job.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.execution.duration` - A histogram of time spent to execute job (excludes time spent in the queue).
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7184
+
+## 🐛 Fixes
+
+### Fix hanging requests when compute job queue is full ([PR #7273](https://github.com/apollographql/router/pull/7273))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
+
+When the compute job queue was full, requests could hang until timeout. Now, the router immediately returns a `SERVICE_UNAVAILABLE` response to the user.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7273
+
+### Increase compute job pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
+
+We previously set this queue size to 20 (per thread). However, this may be too small on resource constrained environments.
+
+This patch increases the queue size to 1,000 jobs per thread. For reference, in older router versions before the introduction of the compute job worker pool, the equivalent queue size was *1,000*.
+
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7205
+
 # [1.61.4] - 2025-04-16
 
 ## 🐛 Fixes
@@ -127,7 +274,7 @@ By [@sachindshinde](https://github.com/sachindshinde) and [@goto-bus-stop](https
 >
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
-## 🚀 Features
+## 🔍 Debuggability
 
 ### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
 
@@ -157,6 +304,8 @@ To help users to diagnose when connections are keeping pipelines hanging around,
 You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
+
+## 🔒 Security
 
 ### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
 

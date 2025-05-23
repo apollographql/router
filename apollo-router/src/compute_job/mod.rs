@@ -60,6 +60,7 @@ fn thread_pool_size() -> usize {
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,

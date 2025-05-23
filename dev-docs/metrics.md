@@ -154,6 +154,32 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
     }
 ```
 
+Note: this relies on metrics being updated within the same thread. Metrics that are updated from multiple threads will
+not be collected correctly.
+
+```rust
+#[tokio::test]
+async fn test_spawned_metric_resolution() {
+    async {
+        u64_counter!("apollo.router.test", "metric", 1);
+        assert_counter!("apollo.router.test", 1);
+
+        tokio::spawn(async move {
+            u64_counter!("apollo.router.test", "metric", 2);
+        })
+        .await
+        .unwrap();
+
+        // In real operations, this metric resolves to a total of 3!
+        // However, in testing, it will resolve to 1, because the second incrementation happens in another thread.
+        // assert_counter!("apollo.router.test", 3);
+        assert_counter!("apollo.router.test", 1);
+    }
+    .with_metrics()
+    .await;
+}
+```
+
 ## Callsite instrument caching
 
 When using the new metrics macros a reference to an instrument is cached to ensure that the meter provider does not have to be queried over and over.
