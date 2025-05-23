@@ -100,7 +100,6 @@ impl ContextValidator for DenyInvalidContextName {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::test_utils::build_and_expand;
 
     #[test]
     fn deny_underscore_in_context_name() {

@@ -468,15 +468,15 @@ impl SchemaUpgrader {
                     if subgraph_name == upgrade_metadata.subgraph_name.as_str() {
                         continue;
                     }
-                    let Some(other_subgraph) = self.get_subgraph_by_name(subgraph_name) else {
+                    let Some(other_schema) = self.get_subgraph_by_name(subgraph_name) else {
                         continue;
                     };
                     let keys_in_other = info.pos.get_applied_directives(
-                        other_subgraph.schema(),
+                        other_schema.schema(),
                         &info
                             .metadata
                             .federation_spec_definition()
-                            .key_directive_definition(other_subgraph.schema())?
+                            .key_directive_definition(other_schema.schema())?
                             .name,
                     );
                     if keys_in_other.is_empty() {
@@ -487,7 +487,7 @@ impl SchemaUpgrader {
                         .federation_spec_definition()
                         .key_directive_arguments(directive)?;
                     for field in collect_target_fields_from_field_set(
-                        Valid::assume_valid_ref(other_subgraph.schema().schema()),
+                        Valid::assume_valid_ref(other_schema.schema().schema()),
                         ty.type_name().clone(),
                         args.fields,
                         false,
@@ -1575,70 +1575,4 @@ mod tests {
                 .is_some_and(|s| !s.directives().has("shareable"))
         );
     }
-
-    // use apollo_compiler::collections::IndexMap;
-    // use std::fs::{self, File};
-    // use std::io::Read;
-    // use std::time::Instant;
-    // use crate::error::FederationError;
-    // use crate::subgraph::test_utils::build_and_expand;
-
-    // /// Reads all .graphql files in the specified directory and creates a subgraph for each one.
-    // /// The subgraph name is derived from the filename.
-    // ///
-    // /// Returns a HashMap mapping subgraph names to their SubgraphDefinition objects.
-    // pub fn create_subgraphs_from_directory(
-    //     directory_path: &str,
-    // ) -> Result<IndexMap<String, Subgraph<Expanded>>, FederationError> {
-    //     let mut subgraphs: IndexMap<String, Subgraph<Expanded>> = Default::default();
-
-    //     // Read the directory contents
-    //     let entries = fs::read_dir(directory_path)
-    //         .map_err(|e| SingleFederationError::Internal { message: format!("Failed to read directory: {}", e )})?;
-
-    //     // Process each .graphql file
-    //     for entry in entries {
-    //         let entry =
-    //             entry.map_err(|e| SingleFederationError::Internal { message: format!("Failed to read entry: {}", e) })?;
-    //         let path = entry.path();
-
-    //         // Only process .graphql files
-    //         if path.extension().map_or(false, |ext| ext == "graphql") {
-    //             // Extract the filename without extension as the subgraph name
-    //             let subgraph_name = path
-    //                 .file_stem()
-    //                 .and_then(|name| name.to_str())
-    //                 .ok_or_else(|| SingleFederationError::Internal { message: format!("Invalid filename: {}", path.display()) })?
-    //                 .to_string();
-    //             // Read the file content
-    //             let mut file = File::open(&path).map_err(|e| {
-    //                 SingleFederationError::Internal { message: format!("Failed to open file {}: {}", path.display(), e) }
-    //             })?;
-    //             let mut schema_str = String::new();
-    //             file.read_to_string(&mut schema_str).map_err(|e| {
-    //                 SingleFederationError::Internal { message: format!("Failed to read file {}: {}", path.display(), e) }
-    //             })?;
-    //             // Build the subgraph
-    //             // dbg!(&subgraph_name);
-    //             let subgraph = build_and_expand(&subgraph_name, &schema_str)?;
-    //             subgraphs.insert(subgraph_name, subgraph);
-    //         }
-    //     }
-
-    //     Ok(subgraphs)
-    // }
-
-    // #[test]
-    // fn upgrade_a_bunch_of_schemas() -> Result<(), FederationError> {
-    //     let directory_path =
-    //         "/Users/clenfest/src/federation/composition-js/src/__tests__/schemas_07222024";
-    //     let subgraphs = create_subgraphs_from_directory(directory_path)?;
-
-    //     let subgraphs: Vec<_> = subgraphs.into_values().collect();
-    //     let start_time = Instant::now();
-    //     let upgraded_subgraphs = upgrade_subgraphs_if_necessary(subgraphs)?;
-    //     let end_time = Instant::now();
-    //     println!("Time taken to upgrade {} subgraphs: {:?}", upgraded_subgraphs.len(), end_time - start_time);
-    //     Ok(())
-    // }
 }

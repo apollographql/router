@@ -55,7 +55,6 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
@@ -63,7 +62,7 @@ pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
-pub mod schema_upgrader;
+pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 pub(crate) mod validators;
 
