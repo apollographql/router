@@ -15,6 +15,7 @@ use std::time::Duration;
 use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
+use itertools::Either;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
@@ -576,11 +577,20 @@ impl FromStr for Configuration {
     }
 }
 
-fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
+fn gen_schema(
+    plugins: schemars::Map<String, Schema>,
+    hidden_plugins: Option<schemars::Map<String, Schema>>,
+) -> Schema {
     let plugins_object = SchemaObject {
         object: Some(Box::new(ObjectValidation {
             properties: plugins,
             additional_properties: Option::Some(Box::new(Schema::Bool(false))),
+            pattern_properties: hidden_plugins
+                .unwrap_or_default()
+                .into_iter()
+                // Wrap plugin name with regex start/end to enforce exact match
+                .map(|(k, v)| (format!("^{}$", k), v))
+                .collect(),
             ..Default::default()
         })),
         ..Default::default()
@@ -609,20 +619,23 @@ impl JsonSchema for ApolloPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = crate::plugin::plugins()
+        let (plugin_entries, hidden_plugin_entries): (Vec<_>, Vec<_>) = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
-            .filter(|factory| {
-                factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
-                    && !factory.hidden_from_config_json_schema
-            })
-            .map(|factory| {
-                (
-                    factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
-                    factory.create_schema(generator),
-                )
-            })
-            .collect::<schemars::Map<String, Schema>>();
-        gen_schema(plugins)
+            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .partition_map(|factory| {
+                let key = factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string();
+                let schema = factory.create_schema(generator);
+                // Separate any plugins we're hiding
+                if factory.hidden_from_config_json_schema {
+                    Either::Right((key, schema))
+                } else {
+                    Either::Left((key, schema))
+                }
+            });
+        gen_schema(
+            plugin_entries.into_iter().collect(),
+            Some(hidden_plugin_entries.into_iter().collect()),
+        )
     }
 }
 
@@ -650,7 +663,7 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect::<schemars::Map<String, Schema>>();
-        gen_schema(plugins)
+        gen_schema(plugins, None)
     }
 }
 

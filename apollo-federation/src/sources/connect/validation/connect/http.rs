@@ -6,7 +6,6 @@ use std::str::FromStr;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
-use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
@@ -382,54 +381,75 @@ fn validate_absolute_connect_url(
     str_value: GraphQLString,
     schema: &SchemaInfo,
 ) -> Result<(), Message> {
-    let relative_url_error = || Message {
-        code: Code::RelativeConnectUrlWithoutSource,
-        message: format!(
-            "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-            raw_value = coordinate.node,
-            source_directive_name = schema.source_directive_name(),
-        ),
-        locations: coordinate
-            .node
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    };
+    let mut is_relative = true;
+    let mut dynamic_in_domain = None;
 
-    let Some(Part::Constant(first)) = url.parts.first() else {
-        return Err(relative_url_error());
-    };
+    // Check each part of the string template that *should* result in a static, valid base URI (scheme+host+port).
+    // - if we don't encounter a scheme, it's not a valid absolute URL
+    // - once we encounter a character that ends the authority (starts the path, query, or fragment) we break
+    // - if we encounter a dynamic part before we break, we have an illegal dynamic component
+    for part in &url.parts {
+        match part {
+            Part::Constant(constant) => {
+                let value = match constant.value.split_once("://") {
+                    Some((_scheme, rest)) => {
+                        is_relative = false;
+                        rest
+                    }
+                    None => &constant.value,
+                };
+                if value.contains('/') || value.contains('?') || value.contains('#') {
+                    break;
+                }
+            }
+            Part::Expression(dynamic) => {
+                dynamic_in_domain = Some(dynamic);
+            }
+        }
+    }
 
-    let Some((_scheme, without_scheme)) = first.value.split_once("://") else {
-        return Err(relative_url_error());
-    };
-
-    if url.parts.len() > 1
-        && !without_scheme.contains('/')
-        && !without_scheme.contains('?')
-        && !without_scheme.contains('#')
-    {
+    if is_relative {
+        return Err(Message {
+            code: Code::RelativeConnectUrlWithoutSource,
+            message: format!(
+                "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
+                raw_value = coordinate.node,
+                source_directive_name = schema.source_directive_name(),
+            ),
+            locations: coordinate
+                .node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+    if let Some(dynamic) = dynamic_in_domain {
         return Err(Message {
             code: Code::InvalidUrl,
             message: format!(
                 "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
             locations: str_value
-                .line_col_for_subslice(first.location.clone(), schema)
+                .line_col_for_subslice(dynamic.location.clone(), schema)
                 .into_iter()
                 .collect(),
         });
     }
 
-    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
-        code: Code::InvalidUrl,
-        message: format!("In {coordinate}: {err}"),
-        locations: str_value
-            .line_col_for_subslice(first.location.clone(), schema)
-            .into_iter()
-            .collect(),
-    })?;
-    validate_url_scheme(&base_url, coordinate, value, str_value, schema)?;
+    // Evaluate the template, replacing all dynamic expressions with empty strings. This should result in a valid
+    // URL because of the URL building logic in `interpolate_uri`, even if the result is illogical with missing values.
+    let url = url
+        .interpolate_uri(&Default::default())
+        .map_err(|err| Message {
+            message: format!("In {coordinate}: {err}"),
+            code: Code::InvalidUrl,
+            locations: value
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })?;
+
+    validate_url_scheme(&url, coordinate, value, str_value, schema)?;
 
     Ok(())
 }

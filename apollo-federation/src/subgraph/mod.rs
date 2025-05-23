@@ -14,6 +14,7 @@ use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
@@ -340,10 +341,9 @@ pub struct SubgraphError {
 
 impl SubgraphError {
     pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
-        SubgraphError {
-            subgraph: subgraph.into(),
-            error: error.into(),
-        }
+        let subgraph = subgraph.into();
+        let error = error.into().unwrap_subgraph_errors(&subgraph);
+        SubgraphError { subgraph, error }
     }
 
     pub fn error(&self) -> &FederationError {
@@ -358,7 +358,7 @@ impl SubgraphError {
     // And return them as a vector of (error_code, error_message) tuples
     // - Gather associated errors from the validation error.
     // - Split each error into its code and message.
-    // - Add the subgraph name prefix to FederationError message.
+    // - Add the subgraph name prefix to CompositionError message.
     pub fn format_errors(&self) -> Vec<(String, String)> {
         self.error
             .errors()
@@ -376,6 +376,12 @@ impl SubgraphError {
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.subgraph, self.error)
+    }
+}
+
+impl From<SubgraphError> for FederationError {
+    fn from(value: SubgraphError) -> Self {
+        internal_error!("[{}] {}", value.subgraph, value.error)
     }
 }
 
@@ -401,15 +407,14 @@ pub mod test_utils {
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
             subgraph
-                .into_fed2_subgraph()
+                .into_fed2_test_subgraph()
                 .map_err(|e| SubgraphError::new(name, e))?
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()
-            .map_err(|e| SubgraphError::new(name, e))?
-            .validate(true)
+        let mut subgraph = subgraph.expand_links()?.assume_upgraded();
+        subgraph.normalize_root_types()?;
+        subgraph.validate()
     }
 
     pub fn build_inner_expanded(
@@ -421,12 +426,12 @@ pub mod test_utils {
             Subgraph::parse(name, &format!("http://{name}"), schema_str)?;
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
             subgraph
-                .into_fed2_subgraph()?
+                .into_fed2_test_subgraph()
+                .map_err(|e| SubgraphError::new(name, e))?
         } else {
             subgraph
         };
-        subgraph
-            .expand_links()
+        subgraph.expand_links()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {

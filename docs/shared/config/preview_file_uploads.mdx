@@ -1,0 +1,13 @@
+### `preview_file_uploads`
+
+```yaml title="preview_file_uploads"
+preview_file_uploads:
+  enabled: false
+  protocols:
+    multipart:
+      enabled: true
+      limits:
+        max_file_size: example_max_file_size
+        max_files: 0
+      mode: stream
+```

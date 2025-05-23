@@ -17,7 +17,7 @@ type R {
 
 type T {
   id: ID!
-  tagged: String
+  tagged: TEnum
   custom: String
   authenticated: String
   requiresScopes: String
@@ -35,4 +35,14 @@ type Z {
   id: ID!
   y: String
   x: X
+}
+
+enum TEnum {
+  ONE
+  TWO
+}
+
+input UnusedInput {
+  one: String
+  two: TEnum
 }

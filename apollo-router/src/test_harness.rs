@@ -5,6 +5,8 @@ use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use serde::de::Error as DeserializeError;
+use serde::ser::Error as SerializeError;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -153,18 +155,21 @@ impl<'a> TestHarness<'a> {
         self,
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
-        let configuration: Configuration = serde_json::from_value(configuration)?;
+        // Convert from a json Value to yaml str to Configuration so that we can ensure we validate
+        // and populate the Configuration's validated_yaml attribute
+        let yaml = serde_yaml::to_string(&configuration).map_err(SerializeError::custom)?;
+        let configuration: Configuration =
+            Configuration::from_str(&yaml).map_err(DeserializeError::custom)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
-    /// Specifies the (static) router configuration as a YAML string,
-    /// such as from the `serde_json::json!` macro.
+    /// Specifies the (static) router configuration as a YAML string
     pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
         let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
-    /// Adds an extra, already instanciated plugin.
+    /// Adds an extra, already instantiated plugin.
     ///
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.

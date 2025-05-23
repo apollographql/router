@@ -254,22 +254,35 @@ pub(crate) fn validate(
     expected_shape: &Shape,
 ) -> Result<(), Message> {
     // TODO: this check should be done in the shape checking, but currently
-    // shape resolution can drop references to inputs the expressions ends with
-    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
+    // shape resolution can drop references to inputs if the expressions ends with
+    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
     // `Unknown`, so variables are dropped and cannot be checked.
     for variable_ref in expression.expression.variable_references() {
-        if !context
-            .var_lookup
-            .contains_key(&variable_ref.namespace.namespace)
-        {
+        let namespace = variable_ref.namespace.namespace;
+        if !context.var_lookup.contains_key(&namespace) {
+            let message = if namespace == Namespace::Batch {
+                "`$batch` may only be used when `@connect` is applied to a type.".to_string()
+            } else {
+                format!(
+                    "{} is not valid here, must be one of {}",
+                    namespace,
+                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                )
+            };
             return Err(Message {
                 code: context.code,
-                message: format!(
-                    "{} is not valid here, must be one of {}",
-                    variable_ref.namespace.namespace,
-                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-                ),
-                locations: transform_location(variable_ref.location, context, expression),
+                message,
+                locations: variable_ref
+                    .location
+                    .iter()
+                    .filter_map(|location| {
+                        context.source.line_col_for_subslice(
+                            location.start + expression.location.start
+                                ..location.end + expression.location.start,
+                            context.schema,
+                        )
+                    })
+                    .collect(),
             });
         }
     }
@@ -475,20 +488,6 @@ fn transform_locations<'a>(
         ))
     }
     locations
-}
-
-fn transform_location(
-    location: Range<usize>,
-    context: &Context,
-    expression: &Expression,
-) -> Vec<Range<LineColumn>> {
-    let Some(location) = context.source.line_col_for_subslice(
-        location.start + expression.location.start..location.end + expression.location.start,
-        context.schema,
-    ) else {
-        return vec![];
-    };
-    vec![location]
 }
 
 /// A simplified shape name for error messages

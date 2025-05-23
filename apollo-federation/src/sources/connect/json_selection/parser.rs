@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::hash::Hash;
 use std::str::FromStr;
 
 use itertools::Itertools;
@@ -31,7 +32,6 @@ use super::location::new_span;
 use super::location::ranged_span;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::variable::VariableNamespace;
-use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
 
 // ParseResult is the internal type returned by most ::parse methods, as it is
@@ -460,21 +460,15 @@ impl PathSelection {
         match self.path.as_ref() {
             PathList::Var(var, tail) => match var.as_ref() {
                 KnownVariable::External(namespace) => {
-                    let parts = tail.as_ref().variable_path_parts();
-                    let location = parts
-                        .last()
-                        .map(|part| part.location.clone())
-                        .or_else(|| var.range())
-                        .map(|location| location.end)
-                        .and_then(|end| var.range().map(|location| location.start..end))
-                        .unwrap_or_default();
+                    let selection = tail.compute_selection_trie();
+                    let full_range = merge_ranges(var.range(), tail.range());
                     Some(VariableReference {
                         namespace: VariableNamespace {
                             namespace: N::from_str(namespace).ok()?,
-                            location: var.range().unwrap_or_default(),
+                            location: var.range(),
                         },
-                        path: parts,
-                        location,
+                        selection,
+                        location: full_range,
                     })
                 }
                 _ => None,
@@ -593,7 +587,7 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+    pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from
@@ -780,20 +774,6 @@ impl PathList {
         match self {
             Self::Key(_, rest) => matches!(rest.as_ref(), Self::Selection(_) | Self::Empty),
             _ => false,
-        }
-    }
-
-    fn variable_path_parts(&self) -> Vec<VariablePathPart> {
-        match self {
-            Self::Key(key, rest) => {
-                let mut parts = vec![VariablePathPart {
-                    part: key.as_str(),
-                    location: key.range().unwrap_or_default(),
-                }];
-                parts.extend(rest.variable_path_parts());
-                parts
-            }
-            _ => Vec::new(),
         }
     }
 
@@ -1105,6 +1085,10 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
+pub(super) fn is_identifier(input: &str) -> bool {
+    all_consuming(parse_identifier_no_space)(new_span(input)).is_ok()
+}
+
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
     preceded(spaces_or_comments, parse_identifier_no_space)(input)
 }
@@ -1228,6 +1212,8 @@ mod tests {
     use super::*;
     use crate::assert_debug_snapshot;
     use crate::selection;
+    use crate::sources::connect::json_selection::PrettyPrintable;
+    use crate::sources::connect::json_selection::SelectionTrie;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
@@ -3053,10 +3039,14 @@ mod tests {
             Some(VariableReference {
                 namespace: VariableNamespace {
                     namespace: Namespace::This,
-                    location: 0..5
+                    location: Some(0..5),
                 },
-                path: vec![],
-                location: 0..5,
+                selection: {
+                    let mut selection = SelectionTrie::new();
+                    selection.add_str_path([]);
+                    selection
+                },
+                location: Some(0..5),
             })
         );
     }
@@ -3066,30 +3056,26 @@ mod tests {
         let selection = JSONSelection::parse("$this.a.b.c").unwrap();
         let var_paths = selection.external_var_paths();
         assert_eq!(var_paths.len(), 1);
+
+        let var_ref = var_paths[0].variable_reference().unwrap();
         assert_eq!(
-            var_paths[0].variable_reference(),
-            Some(VariableReference {
-                namespace: VariableNamespace {
-                    namespace: Namespace::This,
-                    location: 0..5
-                },
-                path: vec![
-                    VariablePathPart {
-                        part: "a",
-                        location: 6..7,
-                    },
-                    VariablePathPart {
-                        part: "b",
-                        location: 8..9,
-                    },
-                    VariablePathPart {
-                        part: "c",
-                        location: 10..11,
-                    },
-                ],
-                location: 0..11,
-            })
+            var_ref.namespace,
+            VariableNamespace {
+                namespace: Namespace::This,
+                location: Some(0..5)
+            }
         );
+        assert_eq!(var_ref.selection.to_string(), "a { b { c } }");
+        assert_eq!(var_ref.location, Some(0..11));
+
+        assert_eq!(
+            var_ref.selection.key_ranges("a").collect::<Vec<_>>(),
+            vec![6..7]
+        );
+        let a_trie = var_ref.selection.get("a").unwrap();
+        assert_eq!(a_trie.key_ranges("b").collect::<Vec<_>>(), vec![8..9]);
+        let b_trie = a_trie.get("b").unwrap();
+        assert_eq!(b_trie.key_ranges("c").collect::<Vec<_>>(), vec![10..11]);
     }
 
     #[test]
@@ -3097,30 +3083,28 @@ mod tests {
         let selection = JSONSelection::parse("a b { c: $this.x.y.z { d } }").unwrap();
         let var_paths = selection.external_var_paths();
         assert_eq!(var_paths.len(), 1);
+
+        let var_ref = var_paths[0].variable_reference().unwrap();
         assert_eq!(
-            var_paths[0].variable_reference(),
-            Some(VariableReference {
-                namespace: VariableNamespace {
-                    namespace: Namespace::This,
-                    location: 9..14
-                },
-                path: vec![
-                    VariablePathPart {
-                        part: "x",
-                        location: 15..16,
-                    },
-                    VariablePathPart {
-                        part: "y",
-                        location: 17..18,
-                    },
-                    VariablePathPart {
-                        part: "z",
-                        location: 19..20,
-                    },
-                ],
-                location: 9..20,
-            })
+            var_ref.namespace,
+            VariableNamespace {
+                namespace: Namespace::This,
+                location: Some(9..14),
+            }
         );
+        assert_eq!(var_ref.selection.to_string(), "x { y { z { d } } }");
+        assert_eq!(var_ref.location, Some(9..26));
+
+        assert_eq!(
+            var_ref.selection.key_ranges("x").collect::<Vec<_>>(),
+            vec![15..16]
+        );
+        let x_trie = var_ref.selection.get("x").unwrap();
+        assert_eq!(x_trie.key_ranges("y").collect::<Vec<_>>(), vec![17..18]);
+        let y_trie = x_trie.get("y").unwrap();
+        assert_eq!(y_trie.key_ranges("z").collect::<Vec<_>>(), vec![19..20]);
+        let z_trie = y_trie.get("z").unwrap();
+        assert_eq!(z_trie.key_ranges("d").collect::<Vec<_>>(), vec![23..24]);
     }
 
     #[test]
@@ -3128,5 +3112,46 @@ mod tests {
         let selection = JSONSelection::parse("a.b.c").unwrap();
         let var_paths = selection.external_var_paths();
         assert_eq!(var_paths.len(), 0);
+    }
+
+    #[test]
+    fn test_naked_literal_path_for_connect_v0_2() {
+        let selection_null_stringify_v0_2 = JSONSelection::parse("$(null->jsonStringify)").unwrap();
+        assert_eq!(
+            selection_null_stringify_v0_2.pretty_print(),
+            "$(null->jsonStringify)"
+        );
+
+        let selection_hello_slice_v0_2 =
+            JSONSelection::parse("sliced: $('hello'->slice(1, 3))").unwrap();
+        assert_eq!(
+            selection_hello_slice_v0_2.pretty_print(),
+            "sliced: $(\"hello\"->slice(1, 3))"
+        );
+
+        let selection_true_not_v0_2 = JSONSelection::parse("true->not").unwrap();
+        assert_eq!(selection_true_not_v0_2.pretty_print(), "true->not");
+
+        let selection_false_not_v0_2 = JSONSelection::parse("false->not").unwrap();
+        assert_eq!(selection_false_not_v0_2.pretty_print(), "false->not");
+
+        let selection_object_path_v0_2 = JSONSelection::parse("$({ a: 123 }.a)").unwrap();
+        assert_eq!(
+            selection_object_path_v0_2.pretty_print_with_indentation(true, 0),
+            "$({ a: 123 }.a)"
+        );
+
+        let selection_array_path_v0_2 = JSONSelection::parse("$([1, 2, 3]->get(1))").unwrap();
+        assert_eq!(
+            selection_array_path_v0_2.pretty_print(),
+            "$([1, 2, 3]->get(1))"
+        );
+
+        assert_debug_snapshot!(selection_null_stringify_v0_2);
+        assert_debug_snapshot!(selection_hello_slice_v0_2);
+        assert_debug_snapshot!(selection_true_not_v0_2);
+        assert_debug_snapshot!(selection_false_not_v0_2);
+        assert_debug_snapshot!(selection_object_path_v0_2);
+        assert_debug_snapshot!(selection_array_path_v0_2);
     }
 }

@@ -28,8 +28,8 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
-pub(crate) use schema::ConnectHTTPArguments;
-pub(crate) use schema::SourceHTTPArguments;
+pub use schema::ConnectHTTPArguments;
+pub use schema::SourceHTTPArguments;
 use strum_macros::EnumIter;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -48,6 +48,7 @@ use crate::schema::FederationSchema;
 pub enum ConnectSpec {
     V0_1,
     V0_2,
+    V0_3,
 }
 
 impl PartialOrd for ConnectSpec {
@@ -63,6 +64,7 @@ impl ConnectSpec {
         match self {
             Self::V0_1 => "0.1",
             Self::V0_2 => "0.2",
+            Self::V0_3 => "0.3",
         }
     }
 
@@ -161,6 +163,7 @@ impl TryFrom<&Version> for ConnectSpec {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
             (0, 2) => Ok(Self::V0_2),
+            (0, 3) => Ok(Self::V0_3),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),
             }),
@@ -179,6 +182,7 @@ impl From<ConnectSpec> for Version {
         match spec {
             ConnectSpec::V0_1 => Version { major: 0, minor: 1 },
             ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
+            ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
         }
     }
 }
