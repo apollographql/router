@@ -129,9 +129,14 @@ expression: "&connectors"
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
     ConnectId {
-        label: "connectors.json http: POST /posts",
+        label: "[BATCH] connectors.json http: POST /posts",
         subgraph_name: "connectors",
         source_name: Some(
             "json",
@@ -145,7 +150,7 @@ expression: "&connectors"
         ),
     }: Connector {
         id: ConnectId {
-            label: "connectors.json http: POST /posts",
+            label: "[BATCH] connectors.json http: POST /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -324,5 +329,10 @@ expression: "&connectors"
                 max_size: None,
             },
         ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+        },
     },
 }

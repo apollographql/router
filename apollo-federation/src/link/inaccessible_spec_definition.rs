@@ -34,21 +34,24 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
 
 pub(crate) struct InaccessibleSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl InaccessibleSpecDefinition {
-    pub(crate) fn new(version: Version) -> Self {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::inaccessible_identity(),
                 version,
             },
+            minimum_federation_version,
         }
     }
 
@@ -90,6 +93,41 @@ impl InaccessibleSpecDefinition {
     ) -> Result<(), FederationError> {
         remove_inaccessible_elements(schema, self)
     }
+
+    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
+        let locations: &[DirectiveLocation] =
+            if self.url.version == (Version { major: 0, minor: 1 }) {
+                &[
+                    DirectiveLocation::FieldDefinition,
+                    DirectiveLocation::Object,
+                    DirectiveLocation::Interface,
+                    DirectiveLocation::Union,
+                ]
+            } else {
+                &[
+                    DirectiveLocation::FieldDefinition,
+                    DirectiveLocation::Object,
+                    DirectiveLocation::Interface,
+                    DirectiveLocation::Union,
+                    DirectiveLocation::ArgumentDefinition,
+                    DirectiveLocation::Scalar,
+                    DirectiveLocation::Enum,
+                    DirectiveLocation::EnumValue,
+                    DirectiveLocation::InputObject,
+                    DirectiveLocation::InputFieldDefinition,
+                ]
+            };
+
+        Box::new(DirectiveSpecification::new(
+            INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false, // not repeatable
+            locations,
+            true, // composes
+            Some(&|v| INACCESSIBLE_VERSIONS.get_minimum_required_version(v)),
+            None,
+        ))
+    }
 }
 
 impl SpecDefinition for InaccessibleSpecDefinition {
@@ -98,25 +136,30 @@ impl SpecDefinition for InaccessibleSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![self.directive_specification()]
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        // No type specs for @inaccessible
+        vec![]
+    }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
     }
 }
 
 pub(crate) static INACCESSIBLE_VERSIONS: LazyLock<SpecDefinitions<InaccessibleSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::inaccessible_identity());
-        definitions.add(InaccessibleSpecDefinition::new(Version {
-            major: 0,
-            minor: 1,
-        }));
-        definitions.add(InaccessibleSpecDefinition::new(Version {
-            major: 0,
-            minor: 2,
-        }));
+        definitions.add(InaccessibleSpecDefinition::new(
+            Version { major: 0, minor: 1 },
+            Version { major: 1, minor: 0 },
+        ));
+        definitions.add(InaccessibleSpecDefinition::new(
+            Version { major: 0, minor: 2 },
+            Version { major: 2, minor: 0 },
+        ));
         definitions
     });
 
@@ -426,8 +469,8 @@ fn validate_inaccessible_in_fields(
                         }.into());
                     }
                 } else if arg.is_required() {
-                    // When an argument is accessible and required, we check that
-                    // it isn't marked inaccessible in any interface implemented by
+                    // When an argument is accessible and required, we check that it
+                    // isn't marked inaccessible in any interface implemented by
                     // the argument's field. This is because the GraphQL spec
                     // requires that any arguments of an implementing field that
                     // aren't in its implemented field are optional.

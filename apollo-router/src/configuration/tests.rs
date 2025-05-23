@@ -676,9 +676,8 @@ fn upgrade_old_minor_configuration() {
                 Mode::NoUpgrade,
             );
 
-            // FIXME: this test will change once we have our first minor upgrade
-            if result.is_ok() {
-                panic!("minor upgrade should raise errors, but it did not for {file_name}")
+            if let Err(err) = result {
+                panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
             }
         }
     }
@@ -786,9 +785,6 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
-    // Enable crypto
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");

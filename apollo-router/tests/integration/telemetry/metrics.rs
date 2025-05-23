@@ -232,8 +232,15 @@ async fn test_graphql_metrics() {
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
+    router.print_logs();
     router
         .assert_log_not_contains("this is a bug and should not happen")
+        .await;
+    router
+        .assert_metrics_contains(
+            &format!(r#"my_custom_router_instrument_total{{my_response_body="{{\"data\":{{\"topProducts\":[{{\"name\":\"Table\"}},{{\"name\":\"Couch\"}},{{\"name\":\"Chair\"}}]}}",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            None,
+        )
         .await;
     router
         .assert_metrics_contains(

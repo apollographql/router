@@ -5,6 +5,7 @@ use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
 use super::ParseResult;
+use super::is_identifier;
 use super::location::Span;
 use super::location::WithRange;
 
@@ -145,9 +146,49 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
     }
 }
 
+pub(crate) fn quote_if_necessary(input: &str) -> String {
+    if is_identifier(input)
+        || (
+            // We also allow unquoted variable syntax, including $, @, and
+            // $identifier.
+            input == "@"
+                || input.starts_with('$') && (input.len() == 1 || is_identifier(&input[1..]))
+        )
+    {
+        input.to_string()
+    } else {
+        serde_json_bytes::Value::String(input.into()).to_string()
+    }
+}
+
+/// A helper to call `assert_snapshot!` without prepending the module, since prepending the
+/// module makes all the paths in json_selection tests too long for Windows.
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_snapshot {
+    ($($arg:tt)*) => {
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_snapshot!($($arg)*);
+        });
+    };
+}
+
+/// A helper to call `assert_debug_snapshot!` without prepending the module, since prepending the
+/// module makes all the paths in json_selection tests too long for Windows.
+#[cfg(test)]
+#[macro_export]
+macro_rules! assert_debug_snapshot {
+    ($($arg:tt)*) => {
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            insta::assert_debug_snapshot!($($arg)*);
+        });
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::connect::json_selection::is_identifier;
     use crate::sources::connect::json_selection::location::new_span;
 
     #[test]
@@ -240,5 +281,41 @@ mod tests {
             # Another comment
         ", "
             "));
+    }
+
+    #[test]
+    fn test_is_identifier() {
+        assert!(is_identifier("hello"));
+        assert!(is_identifier("hello_world"));
+        assert!(is_identifier("hello_world_123"));
+        assert!(is_identifier("_hello_world"));
+        assert!(is_identifier("hello_world_"));
+        assert!(is_identifier("__hello_world"));
+        assert!(is_identifier("__hello_world__"));
+        assert!(!is_identifier("hello world"));
+        assert!(!is_identifier("hello-world"));
+        assert!(!is_identifier("123hello"));
+        assert!(!is_identifier("hello@world"));
+        assert!(!is_identifier("$hello"));
+        assert!(!is_identifier("hello$world"));
+        assert!(!is_identifier(" hello"));
+        assert!(!is_identifier("__hello_world  "));
+        assert!(!is_identifier(" hello_world_123 "));
+    }
+
+    #[test]
+    fn test_quote_if_necessary() {
+        assert_eq!(quote_if_necessary("hello"), "hello");
+        assert_eq!(quote_if_necessary("hello world"), "\"hello world\"");
+        assert_eq!(quote_if_necessary("hello-world"), "\"hello-world\"");
+        assert_eq!(quote_if_necessary("123hello"), "\"123hello\"");
+        assert_eq!(quote_if_necessary("$"), "$");
+        assert_eq!(quote_if_necessary("@"), "@");
+        assert_eq!(quote_if_necessary("$hello"), "$hello");
+        assert_eq!(quote_if_necessary("@asdf"), "\"@asdf\"");
+        assert_eq!(quote_if_necessary("as@df"), "\"as@df\"");
+        assert_eq!(quote_if_necessary("hello$world"), "\"hello$world\"");
+        assert_eq!(quote_if_necessary("hello world!"), "\"hello world!\"");
+        assert_eq!(quote_if_necessary("hello world!@#"), "\"hello world!@#\"");
     }
 }

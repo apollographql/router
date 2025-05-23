@@ -1,0 +1,155 @@
+---
+title: Deploying GraphOS Router on GCP
+subtitle: Deploy router with Google Cloud Run
+description: Build and deploy Apollo GraphOS Router or Apollo Router Core to Google Cloud Platform (GCP) with Google Cloud Run.
+---
+
+Learn how to deploy the router for development on Google Cloud Platform (GCP) with Google Cloud Run.
+
+You will:
+- Build a router image using a Dockerfile and a router configuration file.
+- Set up a container registry and push your router image to it.
+- Create a Cloud Run service and configure it to deploy your router.
+
+## Prerequisites
+
+Before you start:
+
+1. [Set up a GraphQL API in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api).
+    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF` in your GCP Secret Manager. You'll need them when deploying the router.
+1. Install [Docker](https://www.docker.com/get-started/) locally.
+1. Create a [GCP account](https://cloud.google.com/) or use an existing account.
+1. Create a [GCP project](https://console.cloud.google.com/projectcreate). Choose a project name (for example, `my-project`) and save it to use later when deploying the router.
+1. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install) and log in to your GCP account.
+1. Choose a version of the router to deploy (for example, `v1.61.0`). You'll need it when specifying the router image to deploy.
+
+## Build router image
+
+To deploy your own router, start by customizing and building a router image, using a Dockerfile and a router configuration file:
+
+1. In a local directory, create a `router.yaml` file and copy-paste the following configuration into the file: 
+    
+    ```yaml title="router.yaml"
+    supergraph:
+        listen: 0.0.0.0:4000
+    health_check:
+        listen: 0.0.0.0:8088
+    ```
+
+    The router's default HTTP and health check endpoint addresses are localhost, so they wouldn't be reachable when deployed. This configuration enables the router to listen to all addresses.
+
+1. Create a `Dockerfile` file and copy-paste the following into the file:
+
+    ```text showLineNumbers=false
+    # Use the official Apollo Router Core image as the base.
+    # Set the image tag to the desired router version (e.g. v1.61.0)
+    FROM ghcr.io/apollographql/router:v1.61.0
+
+    # Replace the default router config with the local, customized router.yaml
+    COPY router.yaml /dist/config/router.yaml
+    ```
+
+    The Dockerfile sources the base router image from the GitHub container registry, using the version of router you specify. It then copies your customized `router.yaml` configuration file to overwrite the default router configuration file.
+
+1. From the same local directory, use `docker buildx` CLI command to build a new router image. Choose a name and tag for the image, for example `router-gcp:v1.61.0`.
+    
+    ```bash showLineNumbers=false
+    docker buildx build --platform linux/amd64  -t router-gcp:v1.61.0 --load .
+    ```
+
+    - Because Cloud Run only supports AMD64-based images, the `docker buildx build --platform linux/amd64` command ensures the image is built for AMD64 and is compatible.  
+    - The `--load` option loads the built image to `docker images`.
+
+1. Use `docker images` to validate that your router image is successfully built and loaded.
+
+## Push router image to container registry
+
+With a router image built, set up GCP Artifact Registry, then tag and push your image to it.
+
+### Set up container registry
+
+1. In GCP, enable [Artifact Registry](https://cloud.google.com/artifact-registry/docs/enable-service) in your project.
+    - Create a repository and choose a repository name (for example, `my-repo`). Keep this name handy, as you'll need it later to build and deploy a router image.
+
+### Tag and push router image
+
+1. Use `docker tag` to tag the image before pushing it to Artifact Registry. Make sure your tag conforms with Artifact Registry's [naming convention](https://cloud.google.com/artifact-registry/docs/docker/names) (for example, `us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0`).
+
+    ```bash showLineNumbers=false
+    docker tag router-gcp:v1.61.0 \
+        us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    ```
+
+1. Use `docker push` to push the router image to Artifact Registry.
+
+    ```bash showLineNumbers=false
+    docker push us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    ```
+
+1. Validate the router image has been successfully pushed to Artifact Registry. You can use Google Cloud Console and navigate to your repository in Artifact Registry. You can also use the gcloud CLI and run `gcloud artifacts docker images`. For example:
+
+    ```bash showLineNumbers=false
+    gcloud artifacts docker images list us-west2-docker.pkg.dev/my-project/my-repo
+    ```
+
+## Create and deploy Cloud Run service
+
+With the router image pushed to GCP, you can now configure and deploy it as a Cloud Run service.
+
+You can use either Google Cloud console or gcloud CLI. In either case, you need to gather the following information:
+
+* Name for your deployed router service (for example, `my-router`)
+* GCP project name (for example, `my-project`)
+* Artifact Registry repo name (for example, `my-repo`)
+* GCP region (for example, `us-west2`)
+* Full image path (for example, `us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0`) 
+* `APOLLO_KEY` and `APOLLO_GRAPH_REF` secrets
+
+### Deploy with Google Cloud console
+
+1. In GCP console for your project, go to Cloud Run and select **Deploy container** > **Service**.
+1. On the **Create Service** page, fill in the details:
+    - **Container image URL**: Select your router image
+    - **Service name**: Enter a name for your deployed router (for example, `my-router`)
+    - **Region**: Select your GCP region
+    - **Authentication**: Select **Allow unauthenticated invocations**.
+1. On the **Container(s)** > **Edit Container** tab, go to the **Settings** tab and fill in the details:
+    - **Container port**: Enter `4000` (must match the `supergraph.listen` port of your router configuration)
+    - **Container command**: Enter `/dist/router`
+    - **Container arguments**: Enter `--dev` (runs the router in development mode)
+1. Also on the **Container(s)** > **Edit Container** tab, go to the **Variables & Secrets** and fill in the details:
+    * Add `APOLLO_KEY` and set it to your graph API key
+    * Add `APOLLO_GRAPH_REF` and set it to your graph ref   
+1. Click **Deploy**.
+1. Once deployed, select the service from the [Cloud Run console](https://console.cloud.google.com/run), then click on its **URL** (for example, `https://my-router-123456789012.us-west1.run.app/`) and validate that router's development Sandbox is running successfully.
+
+### Deploy with gcloud CLI
+
+1. To deploy the router with the gcloud CLI, use `gcloud run deploy` with your configuration info in place of the example info:
+
+    ```bash showLineNumbers=false
+    gcloud run deploy my-router \
+    --image=us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0 \
+    --command=/dist/router \
+    --args=--dev \
+    --set-secrets=APOLLO_KEY=APOLLO_KEY:latest,APOLLO_GRAPH_REF=APOLLO_GRAPH_REF:latest \
+    --region=us-west2 \
+    --project=router-container-gcp 
+    ```
+
+1. Update traffic to your deployed router by running `gcloud run services update-traffic`:
+
+    ```bash
+    gcloud run services update-traffic my-router --to-latest
+    ```
+
+1. Use `gcloud run services` to get the service URL. For example, for a service named `my-router`:
+
+    ```bash
+    gcloud run services describe my-router --format 'value(status.url)'
+    ```
+
+1. In a browser, go to the service URL and validate the the router's development Sandbox is running successfully.
+
+Congrats, you've successfully deployed the router!
+

@@ -40,8 +40,11 @@ use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
+mod content_type;
+mod error_handling;
 mod mock_api;
 mod progressive_override;
+mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
@@ -298,7 +301,7 @@ async fn test_root_field_plus_entity_plus_requires() {
             })))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header(wiremock::http::HeaderName::from_string(CONTENT_TYPE.to_string()).unwrap(), APPLICATION_JSON.essence_str())
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .set_body_json(json!({
                       "data": {
                         "_entities": [{
@@ -449,7 +452,7 @@ async fn basic_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null,
@@ -470,14 +473,14 @@ async fn basic_errors() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -488,14 +491,14 @@ async fn basic_errors() {
             "user"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         },
         {
@@ -507,19 +510,19 @@ async fn basic_errors() {
             "nickname"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 400
             },
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -628,11 +631,7 @@ async fn test_headers() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("first").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("second").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
                 )
                 .header(
                     HeaderName::from_str("x-config-variable-source").unwrap(),
@@ -732,14 +731,6 @@ async fn test_override_headers_with_config() {
                 .method("GET")
                 .header(
                     HeaderName::from_str("x-forward").unwrap(),
-                    HeaderValue::from_str("forwarded").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-forward").unwrap(),
-                    HeaderValue::from_str("forwarded-again").unwrap(),
-                )
-                .header(
-                    HeaderName::from_str("x-forward").unwrap(),
                     HeaderValue::from_str("forwarded-by-config").unwrap(),
                 )
                 .header(
@@ -748,11 +739,234 @@ async fn test_override_headers_with_config() {
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("third").unwrap(),
+                    HeaderValue::from_str("third,fourth").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_only_send_named_header_once_when_both_config_and_schema_propagate_header() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  {
+                    "propagate": {
+                      "named": "x-forward",
+                    }
+                  },
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.append("x-forward", "forwarded".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    let received_requests = &mock_server.received_requests().await.unwrap();
+
+    assert!(
+        !received_requests
+            .iter()
+            .any(|r| r.headers.get_all("x-forward").iter().count() > 1),
+        "There should only be one instance of x-forward since the yaml config is overriding the sdl"
+    );
+    req_asserts::matches(
+        received_requests,
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
                 )
                 .header(
                     HeaderName::from_str("x-insert-multi-value").unwrap(),
-                    HeaderValue::from_str("fourth").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_only_send_matching_header_once_when_both_config_and_schema_propagate_header() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  {
+                    "propagate": {
+                      "matching": ".+?forward",
+                    }
+                  },
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.append("x-forward", "forwarded".parse().unwrap());
+            headers.append("y-forward", "also-forwarded".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    let received_requests = &mock_server.received_requests().await.unwrap();
+
+    assert!(
+        !received_requests
+            .iter()
+            .any(|r| r.headers.get_all("x-forward").iter().count() > 1),
+        "There should only be one instance of x-forward since the yaml config is overriding the sdl"
+    );
+    req_asserts::matches(
+        received_requests,
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("y-forward").unwrap(),
+                    HeaderValue::from_str("also-forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  {
+                    "remove": {
+                      "named": "x-insert",
+                    }
+                  },
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first,second").unwrap(),
                 )
                 .path("/users"),
         ],
@@ -1085,7 +1299,16 @@ async fn test_selection_set() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/repos/foo/bar/commits")],
+        vec![
+            Matcher::new()
+                // Testing multiline headers
+                .header(
+                    HeaderName::from_static("x-multiline"),
+                    HeaderValue::from_static("multi line header"),
+                )
+                .method("GET")
+                .path("/repos/foo/bar/commits"),
+        ],
     );
 }
 
@@ -1359,7 +1582,7 @@ async fn error_not_redacted() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": null
@@ -1371,19 +1594,19 @@ async fn error_not_redacted() {
             "users"
           ],
           "extensions": {
-            "service": "connectors",
             "http": {
               "status": 404
             },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH"
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors"
           }
         }
       ]
     }
-    "###);
+    "#);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -1717,27 +1940,114 @@ async fn test_variables() {
                 .method("POST")
                 .path("/f")
                 .query("arg=rg&context=B&config=C&header=coolheader")
-                .header("x-source-context".into(), "B".try_into().unwrap())
-                .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "g".try_into().unwrap())
-                .header("x-connect-context".into(), "B".try_into().unwrap())
-                .header("x-connect-config".into(), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-arg"), "g".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-config"), "C".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "request": "coolheader" }))
                 ,
             Matcher::new()
                 .method("POST")
                 .path("/f")
                 .query("arg=g&context=B&config=C&sibling=D")
-                .header("x-source-context".into(), "B".try_into().unwrap())
-                .header("x-source-config".into(), "C".try_into().unwrap())
-                .header("x-connect-arg".into(), "a".try_into().unwrap())
-                .header("x-connect-context".into(), "B".try_into().unwrap())
-                .header("x-connect-config".into(), "C".try_into().unwrap())
-                .header("x-connect-sibling".into(), "D".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-source-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-arg"), "a".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-context"), "B".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-config"), "C".try_into().unwrap())
+                .header(HeaderName::from_static("x-connect-sibling"), "D".try_into().unwrap())
                 .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "sibling": "D" }))
                 ,
         ],
     );
+}
+
+#[tokio::test]
+async fn should_support_using_variable_in_nested_input_argument() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/complexInputType"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("Hello world!")))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+    let mut variables: JsonMap = serde_json_bytes::Map::new();
+    variables.insert(
+        serde_json_bytes::ByteString::from("query"),
+        serde_json_bytes::Value::from("kim"),
+    );
+
+    let response = execute(
+        &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        "query Query ($query: String){ complexInputType(filters: { inSpace: true, search: $query })  }",
+        variables,
+        None,
+        |_|{},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "complexInputType": "Hello world!"
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/complexInputType")
+                .query("inSpace=true&search=kim"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn should_error_when_using_arguments_that_has_not_been_defined() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/complexInputType"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("Hello world!")))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+    let mut variables: JsonMap = serde_json_bytes::Map::new();
+    variables.insert(
+        serde_json_bytes::ByteString::from("query_not_named_right"),
+        serde_json_bytes::Value::from("kim"),
+    );
+
+    let response = execute(
+        &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
+        &uri,
+        "query Query ($query: String){ complexInputType(filters: { inSpace: true, search: $query })  }",
+        variables,
+        None,
+        |_|{},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'connectors': Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables",
+          "path": [],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors",
+            "reason": "Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables"
+          }
+        }
+      ]
+    }
+    "#);
 }
 
 mod quickstart_tests {

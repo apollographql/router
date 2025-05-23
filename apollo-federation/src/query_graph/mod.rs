@@ -40,14 +40,14 @@ pub mod output;
 pub(crate) mod path_tree;
 
 pub use build_query_graph::build_federated_query_graph;
+use graph_path::operation::OpGraphPathContext;
+use graph_path::operation::OpGraphPathTrigger;
+use graph_path::operation::OpPathElement;
 
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
-use crate::query_graph::graph_path::OpGraphPathContext;
-use crate::query_graph::graph_path::OpGraphPathTrigger;
-use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;

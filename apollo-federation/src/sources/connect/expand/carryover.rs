@@ -1,3 +1,5 @@
+mod inputs;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
@@ -5,6 +7,8 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::name;
+use inputs::copy_input_types;
+use multimap::MultiMap;
 
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
@@ -45,6 +49,7 @@ pub(super) fn carryover_directives(
     from: &FederationSchema,
     to: &mut FederationSchema,
     specs: impl Iterator<Item = ConnectSpec>,
+    subgraph_name_replacements: &MultiMap<&str, String>,
 ) -> Result<(), FederationError> {
     let Some(metadata) = from.metadata() else {
         return Ok(());
@@ -60,6 +65,10 @@ pub(super) fn carryover_directives(
     if let Some(link) = metadata.for_identity(&ConnectSpec::identity()) {
         SchemaDefinitionPosition.insert_directive(to, link.to_directive_application().into())?;
     }
+
+    // before copying over directive definitions, we need to ensure we copy over
+    // any input types (scalars, enums, input objects) they use
+    copy_input_types(from, to, subgraph_name_replacements)?;
 
     // @inaccessible
 
@@ -136,21 +145,6 @@ pub(super) fn carryover_directives(
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
 
-                    let scalar_type_pos = ScalarTypeDefinitionPosition {
-                        type_name: link.type_name_in_schema(&name!(Scope)),
-                    };
-
-                    // The scalar might already exist if a subgraph defined it
-                    if scalar_type_pos.get(to.schema()).is_err() {
-                        scalar_type_pos
-                            .get(from.schema())
-                            .map_err(From::from)
-                            .and_then(|def| {
-                                scalar_type_pos.pre_insert(to)?;
-                                scalar_type_pos.insert(to, def.clone())
-                            })?;
-                    }
-
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
@@ -170,21 +164,6 @@ pub(super) fn carryover_directives(
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
-
-                    let scalar_type_pos = ScalarTypeDefinitionPosition {
-                        type_name: link.type_name_in_schema(&name!(Policy)),
-                    };
-
-                    // The scalar might already exist if a subgraph defined it
-                    if scalar_type_pos.get(to.schema()).is_err() {
-                        scalar_type_pos
-                            .get(from.schema())
-                            .map_err(From::from)
-                            .and_then(|def| {
-                                scalar_type_pos.pre_insert(to)?;
-                                scalar_type_pos.insert(to, def.clone())
-                            })?;
-                    }
 
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
@@ -683,6 +662,7 @@ mod tests {
             &supergraph_schema,
             &mut schema,
             [ConnectSpec::V0_1].into_iter(),
+            &Default::default(),
         )
         .expect("carryover failed");
         assert_snapshot!(schema.schema().serialize().to_string());
