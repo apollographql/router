@@ -126,7 +126,7 @@ where
                 extensions.insert(fields);
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -143,7 +143,7 @@ where
                 eprintln!("cannot access to LogAttributes, this is a bug");
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 

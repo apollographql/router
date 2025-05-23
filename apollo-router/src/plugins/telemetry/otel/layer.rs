@@ -817,7 +817,7 @@ where
                 forced_span_name: None,
             });
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -838,7 +838,7 @@ where
                 timings.last = now;
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -859,7 +859,7 @@ where
                 timings.last = now;
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -880,7 +880,7 @@ where
                 });
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -918,7 +918,7 @@ where
                 data.builder.links = Some(vec![follows_link]);
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
@@ -1062,7 +1062,7 @@ where
                     .start_with_context(&self.tracer, &parent_cx);
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("Span not found, this is a bug");
         }
     }
 
