@@ -880,7 +880,7 @@ fn generate_condition_nodes<'a>(
             let if_op = op;
             let (if_node, if_cost) =
                 generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?;
-            let (else_node, _) = generate_condition_nodes(
+            let (else_node, else_cost) = generate_condition_nodes(
                 Arc::new(else_op),
                 conditions.clone(),
                 on_final_operation,
@@ -890,7 +890,10 @@ fn generate_condition_nodes<'a>(
                 if_clause: if_node.map(Box::new),
                 else_clause: else_node.map(Box::new),
             };
-            Ok((Some(PlanNode::Condition(Box::new(node))), if_cost))
+            Ok((
+                Some(PlanNode::Condition(Box::new(node))),
+                if_cost.max(else_cost),
+            ))
         }
     }
 }
