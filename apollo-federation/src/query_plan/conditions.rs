@@ -16,7 +16,7 @@ use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum ConditionKind {

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use crate::operation::Selection;
-use crate::query_graph::graph_path::ClosedBranch;
-use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
+use crate::query_graph::graph_path::operation::ClosedBranch;
+use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirectPaths;
 use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
 
 /// This macro is a wrapper around `tracing::trace!` and should not be confused with our snapshot
