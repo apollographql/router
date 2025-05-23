@@ -2,17 +2,19 @@
 
 use std::any::Any;
 use std::mem;
-
+use buildstructor::builder;
 use bytes::Bytes;
 use displaydoc::Display;
 use futures::Stream;
 use futures::StreamExt;
-use futures::future::Either;
+use futures::future::{ready, Either};
+use futures::stream::once;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
 use http::header::HeaderName;
+use http::response::Parts;
 use http_body_util::BodyExt;
 use multer::Multipart;
 use multimap::MultiMap;
@@ -21,9 +23,9 @@ use serde_json_bytes::Map as JsonMap;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
-
+use wiremock::matchers::body_string;
 use self::body::RouterBody;
-use super::supergraph;
+use super::{router, supergraph};
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
@@ -145,6 +147,7 @@ impl Request {
 }
 
 use crate::context::ROUTER_RESPONSE_ERRORS;
+use crate::protocols::multipart::ProtocolMode;
 
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
@@ -235,12 +238,10 @@ impl Response {
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
+        protocol_mode: Option<ProtocolMode>
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-            context
-                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
-                .expect("Unable to serialize router response errors list for context");
+            let context = Self::update_error_context(context, errors);
         }
         // Build a response
         let b = graphql::Response::builder()
@@ -266,12 +267,55 @@ impl Response {
         let body_string = serde_json::to_string(&res)?;
 
         let body = body::from_bytes(body_string.clone());
+        let body = match protocol_mode {
+            None => { body }
+            Some(mode) => {
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert(mode));
+                let response_multipart = match mode {
+                    ProtocolMode::Subscription => {
+                        // TODO RouterBody doesn't implement stream trait
+                        crate::protocols::multipart::Multipart::new(body, mode)
+                    }
+                    ProtocolMode::Defer => {
+                        crate::protocols::multipart::Multipart::new(once(ready(res)).chain(body), mode)
+                    }
+                };
+                body::from_result_stream(response_multipart)
+            }
+        };
         let response = builder.body(body)?;
         // Stash the body in the extensions so we can access it later
         let mut response = Self { response, context };
         response.stash_the_body_in_extensions(body_string);
 
         Ok(response)
+    }
+
+    #[builder(visibility = "pub")]
+    fn parts_new(
+        response: http::Response<Body>,
+        context: Context,
+    ) -> Result<Self, BoxError>  {
+        if !response.body(). {
+            Self::update_error_context()
+        }
+        let response = http::Response::from_parts(parts, body);
+    }
+
+    fn update_error_context(context: Context, errors: Vec<graphql::Error>) -> Context {
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        // This will ONLY capture errors if any were added during router service processing.
+        // We will avoid this path if no router service errors exist, even if errors were passed
+        // from the supergraph service, because that path builds the router::Response using the
+        // constructor instead of new(). This is ok because we only need this context to count
+        // errors introduced in the router service.
+        context
+            .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+            .expect("Unable to serialize router response errors list for context");
+
+        context
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.

@@ -34,11 +34,9 @@ pub(crate) async fn count_subgraph_errors(
     let response_body = response.response.body();
     if !response_body.errors.is_empty() {
         count_operation_errors(&response_body.errors, &context, &errors_config);
+        // Refresh context with the most up-to-date list of errors
+        let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
     }
-    context
-        .insert(COUNTED_ERRORS, to_map(&response_body.errors))
-        .expect("Unable to insert errors into context.");
-
     SubgraphResponse {
         context: response.context,
         subgraph_name: response.subgraph_name,
@@ -95,13 +93,10 @@ pub(crate) async fn count_supergraph_errors(
             // TODO can we combine this with above?
             if !response_body.errors.is_empty() {
                 count_operation_errors(&response_body.errors, &context, &errors_config);
+                // Refresh context with the most up-to-date list of errors
+                let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
             }
         }
-
-        // Refresh context with the most up-to-date list of errors
-        context
-            .insert(COUNTED_ERRORS, to_map(&response_body.errors))
-            .expect("Unable to insert errors into context.");
     });
 
     let (first_response, rest) = StreamExt::into_future(stream).await;
@@ -130,10 +125,9 @@ pub(crate) async fn count_execution_errors(
     let stream = stream.inspect(move |response_body| {
         if !response_body.errors.is_empty() {
             count_operation_errors(&response_body.errors, &context, &errors_config);
+            // Refresh context with the most up-to-date list of errors
+            let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
         }
-        context
-            .insert(COUNTED_ERRORS, to_map(&response_body.errors))
-            .expect("Unable to insert errors into context.");
     });
 
     let (first_response, rest) = StreamExt::into_future(stream).await;
@@ -157,15 +151,15 @@ pub(crate) async fn count_router_errors(
     let context = response.context.clone();
     let errors_config = errors_config.clone();
 
+    // We look at context for our current errors instead of the existing config so that we don't
+    // have to do a full deserialization of the response
     let errors: Vec<Error> = unwrap_from_context(&context, ROUTER_RESPONSE_ERRORS);
     if !errors.is_empty() {
         count_operation_errors(&errors, &context, &errors_config);
+        // Refresh context ONLY when we have errors. This
+        // TODO don't overwrite, append?
+        let _ = context.insert(COUNTED_ERRORS, to_map(&errors));
     }
-
-    // Refresh context with the most up-to-date list of errors
-    context
-        .insert(COUNTED_ERRORS, to_map(&errors))
-        .expect("Unable to insert errors into context.");
 
     // TODO confirm the count_operation_error_codes() INVALID_ACCEPT_HEADER case is handled here
 
@@ -287,9 +281,9 @@ fn count_operation_errors(
 
 fn unwrap_from_context<V: Default + DeserializeOwned>(context: &Context, key: &str) -> V {
     context
-        .get::<_, V>(key) // -> Option<Result<T, E>>
-        .unwrap_or_default() // -> Result<T, E> (defaults to Ok(T::default()))
-        .unwrap_or_default() // -> T (defaults on Err)
+        .get::<_, V>(key)
+        .unwrap_or_default()
+        .unwrap_or_default()
 }
 
 fn count_graphql_error(count: u64, code: String) {

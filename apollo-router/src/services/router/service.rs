@@ -23,6 +23,7 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+use serde_json::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -290,45 +291,38 @@ impl RouterService {
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
-                Ok(router::Response {
-                    response: http::Response::builder()
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(router::body::from_bytes(
-                            "router service is not available to process request",
-                        ))
-                        .expect("cannot fail"),
-                    context,
-                })
+                // TODO Ideally this would be done as a different from_parts builder
+                Ok(router::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(String::from("router service is not available to process request"))
+                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.to_string())
+                            .build(),
+                    )
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .data(json!({"message": "router service is not available to process request"}))
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build()
+                    .expect("cannot fail")
+                )
             }
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
-                        .in_scope(|| {
-                            let body = serde_json::to_string(&response)?;
-                            Ok(body)
-                        });
-                    let body = body?;
-                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-                    let display_router_response = context
-                        .extensions()
-                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
-
-                    let mut res = router::Response {
-                        response: Response::from_parts(
-                            parts,
-                            router::body::from_bytes(body.clone()),
-                        ),
-                        context,
-                    };
-
-                    if display_router_response {
-                        res.stash_the_body_in_extensions(body);
-                    }
-
-                    Ok(res)
+                    // TODO we will now ALWAYS stash body
+                    // TODO we are no longer generating a body ser trace
+                    router::Response::builder()
+                        .and_label(response.label.clone())
+                        .data(response.data.clone())
+                        .and_path(response.path.clone())
+                        .errors(response.errors.clone())
+                        .extensions(response.extensions.clone())
+                        .headers(parts.headers.clone().into())
+                        .context(context.clone())
+                        .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
@@ -344,23 +338,17 @@ impl RouterService {
                     } else {
                         ProtocolMode::Defer
                     };
-                    context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(protocol_mode));
 
-                    let response_multipart = match protocol_mode {
-                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
-                        ProtocolMode::Defer => {
-                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
-                        }
-                    };
-
-                    let response = http::Response::from_parts(
-                        parts,
-                        router::body::from_result_stream(response_multipart),
-                    );
-
-                    Ok(RouterResponse { response, context })
+                    router::Response::builder()
+                        .and_label(response.label.clone())
+                        .data(response.data.clone())
+                        .and_path(response.path.clone())
+                        .errors(response.errors.clone())
+                        .extensions(response.extensions.clone())
+                        .headers(parts.headers.clone().into())
+                        .context(context.clone())
+                        .protocol_mode(protocol_mode)
+                        .build()
                 } else {
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(invalid_accept_header_response().into())
@@ -460,6 +448,8 @@ impl RouterService {
             }
             bytes.put_u8(b']');
 
+            // TODO there's no easy way to pull the errors from the body or http::Response here,
+            // TODO so we still can't store the errors in context for the router
             Ok(RouterResponse {
                 response: http::Response::from_parts(
                     parts,
