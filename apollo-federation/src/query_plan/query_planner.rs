@@ -172,6 +172,7 @@ impl Default for QueryPlannerDebugConfig {
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
+    pub best_plan_cost: f64,
 }
 
 #[derive(Clone)]
@@ -544,8 +545,10 @@ impl QueryPlanner {
 
         let plan = QueryPlan {
             node: root_node,
-            query_plan_cost: cost,
-            statistics,
+            statistics: QueryPlanningStatistics {
+                best_plan_cost: cost,
+                ..statistics
+            },
         };
 
         snapshot!(

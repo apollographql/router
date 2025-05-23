@@ -10,7 +10,6 @@ impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
         let Self {
             node,
-            query_plan_cost: _,
             statistics: _,
         } = self;
         state.write("QueryPlan {")?;
