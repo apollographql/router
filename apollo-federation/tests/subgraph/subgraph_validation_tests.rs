@@ -1166,14 +1166,10 @@ type Query {
         });
     }
 
-    // TODO: an issue with `@key` directive definition check.
     #[test]
-    #[should_panic(
-        expected = r#"expanded subgraph to be valid: SubgraphError { subgraph: "S", error: DirectiveDefinitionInvalid { message: "Invalid definition for directive \"@key\": argument \"resolvable\" should have default value true but found no default value" } }"#
-    )]
-    fn allows_known_directives_with_incomplete_but_compatible_definitions() {
-        let docs = [
-            // @key has a `resolvable` argument in its full definition, but it is optional.
+    fn allows_directive_redefinition_without_optional_argument() {
+        // @key has a `resolvable` argument in its full definition, but it is optional.
+        let _ = build_and_validate(
             r#"
                 extend schema
                   @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -1192,8 +1188,14 @@ type Query {
 
                 scalar federation__FieldSet
             "#,
-            // @inaccessible can be put in a bunch of locations, but you're welcome to restrict
-            // yourself to just fields.
+        );
+    }
+
+    #[test]
+    fn allows_directive_redefinition_with_subset_of_locations() {
+        // @inaccessible can be put in a bunch of locations, but you're welcome to restrict
+        // yourself to just fields.
+        let _ = build_and_validate(
             r#"
                 extend schema
                   @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -1208,7 +1210,13 @@ type Query {
 
                 directive @inaccessible on FIELD_DEFINITION
             "#,
-            // @key is repeatable, but you're welcome to restrict yourself to never repeating it.
+        );
+    }
+
+    #[test]
+    fn allows_directive_redefinition_without_repeatable() {
+        // @key is repeatable, but you're welcome to restrict yourself to never repeating it.
+        let _ = build_and_validate(
             r#"
                 extend schema
                   @link(
@@ -1227,6 +1235,12 @@ type Query {
 
                 scalar federation__FieldSet
             "#,
+        );
+    }
+
+    #[test]
+    fn allows_directive_redefinition_changing_optional_argument_to_required() {
+        let docs = [
             // @key `resolvable` argument is optional, but you're welcome to force users to always
             // provide it.
             r#"
@@ -1268,7 +1282,10 @@ type Query {
                 ) repeatable on SCHEMA
 
                 scalar link__Import
-                scalar link__Purpose
+                enum link__Purpose {
+                  SECURITY
+                  EXECUTION
+                }
             "#,
         ];
 
