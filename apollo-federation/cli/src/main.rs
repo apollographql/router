@@ -306,8 +306,6 @@ fn cmd_plan(
         println!("{}", serde_json::to_string_pretty(&query_plan).unwrap());
     } else {
         println!("{query_plan}");
-        dbg!("query_plan cost: ", &query_plan.cost);
-        dbg!("query_plan statistics: ", &query_plan.statistics);
     }
 
     // Check the query plan

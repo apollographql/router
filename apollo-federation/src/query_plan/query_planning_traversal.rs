@@ -910,7 +910,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                         Ok(max_so_far.max(path.subgraph_jumps()?))
                     })
                     .unwrap_or_else(|err: FederationError| {
-                        // There's no way to abort `sort_by_key` from this callback.
+                        // There’s no way to abort `sort_by_key` from this callback.
                         // Store the error to be returned later and return an dummy values
                         result = Err(err);
                         0
@@ -1220,8 +1220,8 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
             &mut updated_graph,
             &tree,
             self.parameters.config.type_conditioned_fetching,
-        )?;
-        Ok(PlanInfo {
+        )
+        .map(|_| PlanInfo {
             fetch_dependency_graph: updated_graph,
             path_tree: plan_info.path_tree.merge(&tree),
         })
@@ -1357,14 +1357,8 @@ fn test_prune_and_reorder_first_branch() {
         &["abcD", "fgh", "ijk", "lmn", "op"],
         &["abc", "fgh", "ijk", "lmn", "op"],
     );
-    assert(
-        &["abcD", "fgh", "ijk", "lmn", "op"],
-        &["abc", "fgh", "ijk", "lmn", "op"],
-    );
-    assert(
-        &["abcD", "fgh", "ijk", "lmn"],
-        &["abc", "fgh", "ijk", "lmn"],
-    );
+    assert(&["abcD", "fgh"], &["abc", "fgh"]);
+    assert(&["abcD"], &["abc"]);
 
     // … or, removing exactly one option from the first branch causes it
     // to now have one less option (in this example: two options)

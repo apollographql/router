@@ -1,7 +1,0 @@
-#!operation
-
-query {
-    test_i {
-        data(arg: 0)
-    }
-}
