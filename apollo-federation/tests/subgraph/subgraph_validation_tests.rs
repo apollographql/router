@@ -1664,9 +1664,7 @@ mod shareable_tests {
 mod interface_object_and_key_on_interfaces_validation_tests {
     use super::*;
 
-    // TODO: INTERFACE_KEY_NOT_ON_IMPLEMENTATION error messages are currently redundant.
     #[test]
-    #[should_panic(expected = r#"Mismatched error counts: 1 != 3"#)]
     fn key_on_interfaces_require_key_on_all_implementations() {
         let doc = r#"
             interface I @key(fields: "id1") @key(fields: "id2") {

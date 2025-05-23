@@ -74,44 +74,45 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
                 } else {
                     implementations_with_missing_keys.push(implementation_type_pos);
                 }
+            }
 
-                if !implementations_with_missing_keys.is_empty() {
-                    let types_list = human_readable_list(
-                        implementations_with_missing_keys
-                            .iter()
-                            .map(|pos| format!("\"{}\"", pos)),
-                        HumanReadableListOptions {
-                            prefix: Some(HumanReadableListPrefix {
-                                singular: "type",
-                                plural: "types",
-                            }),
-                            ..Default::default()
-                        },
-                    );
-                    error_collector.errors.push(
-                        SingleFederationError::InterfaceKeyNotOnImplementation {
-                            message: format!(
-                                "Key {} on interface type \"{}\" is missing on implementation {}",
-                                application.serialize(),
-                                type_pos,
-                                types_list,
-                            ),
-                        },
-                    )
-                } else if !implementations_with_non_resolvable_keys.is_empty() {
-                    let types_list = human_readable_list(
-                        implementations_with_non_resolvable_keys
-                            .iter()
-                            .map(|pos| format!("\"{}\"", pos)),
-                        HumanReadableListOptions {
-                            prefix: Some(HumanReadableListPrefix {
-                                singular: "type",
-                                plural: "types",
-                            }),
-                            ..Default::default()
-                        },
-                    );
-                    error_collector.errors.push(
+            if !implementations_with_missing_keys.is_empty() {
+                let types_list = human_readable_list(
+                    implementations_with_missing_keys
+                        .iter()
+                        .map(|pos| format!("\"{}\"", pos)),
+                    HumanReadableListOptions {
+                        prefix: Some(HumanReadableListPrefix {
+                            singular: "type",
+                            plural: "types",
+                        }),
+                        ..Default::default()
+                    },
+                );
+                error_collector.errors.push(
+                    SingleFederationError::InterfaceKeyNotOnImplementation {
+                        message: format!(
+                            "Key {} on interface type \"{}\" is missing on implementation {}.",
+                            application.serialize(),
+                            type_pos,
+                            types_list,
+                        ),
+                    },
+                )
+            } else if !implementations_with_non_resolvable_keys.is_empty() {
+                let types_list = human_readable_list(
+                    implementations_with_non_resolvable_keys
+                        .iter()
+                        .map(|pos| format!("\"{}\"", pos)),
+                    HumanReadableListOptions {
+                        prefix: Some(HumanReadableListPrefix {
+                            singular: "type",
+                            plural: "types",
+                        }),
+                        ..Default::default()
+                    },
+                );
+                error_collector.errors.push(
                         SingleFederationError::InterfaceKeyNotOnImplementation {
                             message: format!(
                                 "Key {} on interface type \"{}\" should be resolvable on all implementation types, but is declared with argument \"@key(resolvable:)\" set to false in {}",
@@ -121,7 +122,6 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
                             )
                         }
                     )
-                }
             }
         }
     }
