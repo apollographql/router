@@ -10,7 +10,6 @@ use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
-use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
@@ -32,22 +31,39 @@ fn join_not_null_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    _vars: &VarsWithPathsMap,
+    vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
-    let Some(separator) = method_args
+    let Some((separator, arg_warnings)) = method_args
         .and_then(|args| args.args.first())
-        .and_then(|s| match &**s {
-            LitExpr::String(s) => Some(s),
-            _ => None,
-        })
+        .map(|arg| arg.apply_to_path(data, vars, input_path))
     else {
         warnings.push(ApplyToError::new(
             format!(
                 "Method ->{} requires a string argument",
                 method_name.as_ref()
+            ),
+            input_path.to_vec(),
+            method_name.range(),
+        ));
+        return (None, warnings);
+    };
+
+    warnings.extend(arg_warnings);
+
+    let Some(separator) = separator.as_ref().and_then(|s| match s {
+        JSON::String(s) => Some(s),
+        _ => None,
+    }) else {
+        warnings.push(ApplyToError::new(
+            format!(
+                "Method ->{} requires a string argument, but received {}",
+                method_name.as_ref(),
+                separator
+                    .as_ref()
+                    .map_or("null".to_string(), |s| s.to_string())
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -195,6 +211,7 @@ mod tests {
 
     use super::*;
     use crate::selection;
+    use crate::sources::connect::json_selection::lit_expr::LitExpr;
 
     #[rstest::rstest]
     #[case(json!(["a","b","c"]), ", ", json!("a, b, c"))]
@@ -215,6 +232,14 @@ mod tests {
         assert_eq!(
             selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input),
             (Some(expected), vec![]),
+        );
+    }
+
+    #[test]
+    fn join_not_null_evaluates_argument() {
+        assert_eq!(
+            selection!(&"$->joinNotNull(@->first)").apply_to(&json!(["1", "2", "3"])),
+            (Some(json!("11213")), vec![]),
         );
     }
 
