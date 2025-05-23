@@ -50,13 +50,6 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)` invalid value `  Value with 😊 emoji and newline  \n `",
-        locations: [
-            22:19..22:56,
-        ],
-    },
-    Message {
-        code: InvalidHeader,
         message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
         locations: [
             24:17..24:33,

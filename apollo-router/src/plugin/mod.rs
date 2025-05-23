@@ -37,6 +37,7 @@ use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
+use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -85,6 +86,11 @@ pub struct PluginInit<T> {
 
     /// User's license's state, including any limits of use
     pub(crate) license: LicenseState,
+
+    /// The full router configuration json for use by the telemetry plugin ONLY.
+    /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
+    /// configuration subset.
+    pub(crate) full_config: Option<Value>,
 }
 
 impl<T> PluginInit<T>
@@ -131,6 +137,7 @@ where
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
@@ -141,6 +148,7 @@ where
             launch_id: launch_id.flatten(),
             notify,
             license,
+            full_config,
         }
     }
 
@@ -158,6 +166,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: LicenseState,
+        full_config: Option<Value>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -169,6 +178,7 @@ where
             launch_id,
             notify,
             license,
+            full_config,
         })
     }
 
@@ -183,6 +193,7 @@ where
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<LicenseState>,
+        full_config: Option<Value>,
     ) -> Self {
         PluginInit {
             config,
@@ -194,6 +205,7 @@ where
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
+            full_config,
         }
     }
 }
@@ -212,6 +224,7 @@ impl PluginInit<serde_json::Value> {
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
             .license(self.license)
+            .and_full_config(self.full_config)
             .build()
     }
 }
@@ -728,6 +741,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// Support downcasting
     #[cfg(test)]
+    #[allow(dead_code)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
     /// The point of no return, this plugin is about to go live

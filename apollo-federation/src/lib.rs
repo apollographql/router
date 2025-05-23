@@ -27,6 +27,7 @@
 
 mod api_schema;
 mod compat;
+pub mod composition;
 #[cfg(feature = "correctness")]
 pub mod correctness;
 mod display_helpers;

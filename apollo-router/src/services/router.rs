@@ -4,6 +4,7 @@ use std::any::Any;
 use std::mem;
 
 use bytes::Bytes;
+use displaydoc::Display;
 use futures::Stream;
 use futures::StreamExt;
 use futures::future::Either;
@@ -17,18 +18,20 @@ use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
+use thiserror::Error;
 use tower::BoxError;
 
 use self::body::RouterBody;
 use super::supergraph;
 use crate::Context;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
 use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::content_negotiation::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
+use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
@@ -80,17 +83,17 @@ impl From<Body> for IntoBody {
 }
 impl From<String> for IntoBody {
     fn from(value: String) -> Self {
-        Self(self::body::from_bytes(value))
+        Self(body::from_bytes(value))
     }
 }
 impl From<Bytes> for IntoBody {
     fn from(value: Bytes) -> Self {
-        Self(self::body::from_bytes(value))
+        Self(body::from_bytes(value))
     }
 }
 impl From<Vec<u8>> for IntoBody {
     fn from(value: Vec<u8>) -> Self {
-        Self(self::body::from_bytes(value))
+        Self(body::from_bytes(value))
     }
 }
 
@@ -132,7 +135,7 @@ impl Request {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.map_or_else(self::body::empty, |constructed| constructed.0))?;
+            .body(body.map_or_else(body::empty, |constructed| constructed.0))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,
@@ -140,11 +143,6 @@ impl Request {
         })
     }
 }
-
-use displaydoc::Display;
-use thiserror::Error;
-
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
@@ -185,11 +183,11 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, self::body::empty())
+            http::Request::from_parts(parts, body::empty())
         } else {
             http::Request::from_parts(
                 parts,
-                self::body::from_bytes(
+                body::from_bytes(
                     serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
                 ),
             )
@@ -211,21 +209,27 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
+    fn stash_the_body_in_extensions(&mut self, body_string: String) {
+        self.context.extensions().with_lock(|ext| {
+            ext.insert(RouterResponseBodyExtensionType(body_string));
+        });
+    }
+
     pub async fn next_response(&mut self) -> Option<Result<Bytes, axum::Error>> {
         self.response.body_mut().into_data_stream().next().await
     }
 
-    /// This is the constructor (or builder) to use when constructing a real Response..
+    /// This is the constructor (or builder) to use when constructing a real Response.
     ///
-    /// Required parameters are required in non-testing code to create a Response..
+    /// Required parameters are required in non-testing code to create a Response.
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
-        data: Option<Value>,
+        data: Option<serde_json_bytes::Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        // Skip the `Object` type alias to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
@@ -244,7 +248,7 @@ impl Response {
             None => b.build(),
         };
 
-        // Build an http Response
+        // Build an HTTP Response
         let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
         for (key, values) in headers {
             let header_name: HeaderName = key.try_into()?;
@@ -254,9 +258,15 @@ impl Response {
             }
         }
 
-        let response = builder.body(self::body::from_bytes(serde_json::to_vec(&res)?))?;
+        let body_string = serde_json::to_string(&res)?;
 
-        Ok(Self { response, context })
+        let body = body::from_bytes(body_string.clone());
+        let response = builder.body(body)?;
+        // Stash the body in the extensions so we can access it later
+        let mut response = Self { response, context };
+        response.stash_the_body_in_extensions(body_string);
+
+        Ok(response)
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
@@ -281,17 +291,17 @@ impl Response {
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a real Response..
+    /// This is the constructor (or builder) to use when constructing a real Response.
     ///
-    /// Required parameters are required in non-testing code to create a Response..
+    /// Required parameters are required in non-testing code to create a Response.
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
-        data: Option<Value>,
+        data: Option<serde_json_bytes::Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        // Skip the `Object` type alias to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
@@ -315,19 +325,18 @@ impl Response {
             }
         }
 
-        let response = builder
-            .body(self::body::from_bytes(
-                serde_json::to_vec(&res).expect("can't fail"),
-            ))
-            .expect("can't fail");
+        let body_string = serde_json::to_string(&res).expect("JSON is always a valid string");
+
+        let body = body::from_bytes(body_string.clone());
+        let response = builder.body(body).expect("RouterBody is always valid");
 
         Self { response, context }
     }
 
-    /// EXPERIMENTAL: this is function is experimental and subject to potentially change.
+    /// EXPERIMENTAL: THIS FUNCTION IS EXPERIMENTAL AND SUBJECT TO POTENTIAL CHANGE.
     pub async fn into_graphql_response_stream(
         self,
-    ) -> impl Stream<Item = Result<crate::graphql::Response, serde_json::Error>> {
+    ) -> impl Stream<Item = Result<graphql::Response, serde_json::Error>> {
         Box::pin(
             if self
                 .response
@@ -347,10 +356,7 @@ impl Response {
                 Either::Left(futures::stream::unfold(multipart, |mut m| async {
                     if let Ok(Some(response)) = m.next_field().await {
                         if let Ok(bytes) = response.bytes().await {
-                            return Some((
-                                serde_json::from_slice::<crate::graphql::Response>(&bytes),
-                                m,
-                            ));
+                            return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
                         }
                     }
                     None
@@ -361,23 +367,23 @@ impl Response {
 
                 Either::Right(
                     futures::stream::iter(res.into_iter())
-                        .map(|bytes| serde_json::from_slice::<crate::graphql::Response>(&bytes)),
+                        .map(|bytes| serde_json::from_slice::<graphql::Response>(&bytes)),
                 )
             },
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a fake Response..
+    /// This is the constructor (or builder) to use when constructing a fake Response.
     ///
-    /// Required parameters are required in non-testing code to create a Response..
+    /// Required parameters are required in non-testing code to create a Response.
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
-        data: Option<Value>,
+        data: Option<serde_json_bytes::Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        // Skip the `Object` type alias to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
@@ -443,11 +449,11 @@ impl From<Request> for http::Request<Body> {
     }
 }
 
-/// This function is used to convert a `http_body::Body` into a `Body`.
-/// It does a downcast check to see if the body is already a `Body` and if it is then it just returns it.
+/// This function is used to convert an `http_body::Body` into a `Body`.
+/// It does a downcast check to see if the body is already a `Body` and if it is, then it just returns it.
 /// There is zero overhead if the body is already a `Body`.
 /// Note that ALL graphql responses are already a stream as they may be part of a deferred or stream response,
-/// therefore if a body has to be wrapped the cost is minimal.
+/// therefore, if a body has to be wrapped, the cost is minimal.
 fn convert_to_body<T>(mut b: T) -> Body
 where
     T: http_body::Body<Data = Bytes> + Send + 'static,
@@ -466,7 +472,6 @@ mod test {
     use std::task::Context;
     use std::task::Poll;
 
-    use http_body::Frame;
     use tower::BoxError;
 
     use super::convert_to_body;
@@ -484,7 +489,7 @@ mod test {
             _cx: &mut Context<'_>,
         ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
             if let Some(data) = self.get_mut().data.take() {
-                Poll::Ready(Some(Ok(Frame::data(bytes::Bytes::from(data)))))
+                Poll::Ready(Some(Ok(http_body::Frame::data(bytes::Bytes::from(data)))))
             } else {
                 Poll::Ready(None)
             }

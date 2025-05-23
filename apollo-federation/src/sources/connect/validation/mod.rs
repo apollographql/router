@@ -16,6 +16,7 @@
 
 mod connect;
 mod coordinates;
+mod errors;
 mod expression;
 mod graphql;
 mod http;
@@ -130,15 +131,23 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     }
 
     // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
-    // incorrect line/col info.
+    // incorrect line/col info if we mess this up
     if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
-        if let Some(replace_range) = schema_info.connect_link.directive().location() {
-            let mut new_link = schema_info.connect_link.clone();
-            new_link.set_spec(ConnectSpec::V0_2);
-            source_text.replace_range(
-                replace_range.offset()..replace_range.end_offset(),
-                &new_link.to_string(),
-            );
+        if let Some(version_range) =
+            schema_info
+                .connect_link
+                .directive()
+                .location()
+                .and_then(|link_range| {
+                    let version_offset = source_text
+                        .get(link_range.offset()..link_range.end_offset())?
+                        .find(ConnectSpec::V0_1.as_str())?;
+                    let start = link_range.offset() + version_offset;
+                    let end = start + ConnectSpec::V0_1.as_str().len();
+                    Some(start..end)
+                })
+        {
+            source_text.replace_range(version_range, ConnectSpec::V0_2.as_str());
         } else {
             messages.push(Message {
                 code: Code::UnknownConnectorsVersion,
@@ -232,7 +241,7 @@ pub enum Code {
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
     InvalidUrlScheme,
-    /// The `source` argument used in a `@connect` directive doesn't match any named connecter
+    /// The `source` argument used in a `@connect` directive doesn't match any named connector
     /// sources created with `@source`.
     SourceNameMismatch,
     /// Connectors currently don't support subscription operations.
@@ -265,6 +274,8 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `errors.message` provided in `@connect` or `@source` was not valid.
+    InvalidErrorsMessage,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
@@ -285,30 +296,32 @@ pub enum Code {
     ConnectorsUnresolvedField,
     /// A field resolved by a connector has arguments defined.
     ConnectorsFieldWithArguments,
+    /// Connector batch key is not reflected in the output selection
+    ConnectorsBatchKeyNotInSelection,
+    /// Connector batch key is derived from a non-root variable such as `$this` or `$context`.
+    ConnectorsNonRootBatchKey,
     /// Part of the `@connect` refers to an `$args` which is not defined.
     UndefinedArgument,
     /// Part of the `@connect` refers to an `$this` which is not defined.
     UndefinedField,
     /// A type used in a variable is not yet supported (i.e., unions).
     UnsupportedVariableType,
-    /// A variable is nullable in a location which requires non-null at runtime.
-    NullabilityMismatch,
     /// The version set in the connectors `@link` URL is not recognized.
     UnknownConnectorsVersion,
-    /// Feature unavailable
-    FeatureUnavailable,
     /// When `@connect` is applied to a type, `entity` can't be set to `false`
     ConnectOnTypeMustBeEntity,
     /// `@connect` cannot be applied to a query, mutation, or subscription root type
     ConnectOnRoot,
     /// Using both `$batch` and `$this` is not allowed
     ConnectBatchAndThis,
+    /// Invalid URL property
+    InvalidUrlProperty,
 }
 
 impl Code {
     pub fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport | Self::NullabilityMismatch => Severity::Warning,
+            Self::NoSourceImport => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -344,10 +357,10 @@ mod test_validate_source {
                 assert_snapshot!(format!("{:#?}", result.errors));
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
-                    diff::Result::Left(line) => Some(format!("- {line}")),
-                    diff::Result::Right(line) => Some(format!("+ {line}")),
-                    diff::Result::Both(_, _) => None,
-                }).join("\n"));
+                        diff::Result::Left(line) => Some(format!("- {line}")),
+                        diff::Result::Right(line) => Some(format!("+ {line}")),
+                        diff::Result::Both(_, _) => None,
+                    }).join("\n"));
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }

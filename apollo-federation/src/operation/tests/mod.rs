@@ -13,7 +13,7 @@ use super::SelectionSet;
 use super::normalize_operation;
 use crate::SingleFederationError;
 use crate::error::FederationError;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
