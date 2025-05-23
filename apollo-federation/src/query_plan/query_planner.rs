@@ -544,7 +544,7 @@ impl QueryPlanner {
 
         let plan = QueryPlan {
             node: root_node,
-            cost,
+            query_plan_cost: cost,
             statistics,
         };
 
