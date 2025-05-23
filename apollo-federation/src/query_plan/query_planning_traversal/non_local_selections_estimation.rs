@@ -14,7 +14,7 @@ use crate::operation::SelectionSet;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
