@@ -510,40 +510,6 @@ pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
     fn get_field_mut(&mut self) -> Option<&mut Field>;
 }
 
-impl GraphPathTriggerVariant for OpGraphPathTrigger {
-    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition> {
-        match self {
-            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
-                Some(field.field_position.parent())
-            }
-            _ => None,
-        }
-    }
-
-    fn get_field_mut(&mut self) -> Option<&mut Field> {
-        match self {
-            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => Some(field),
-            _ => None,
-        }
-    }
-}
-
-impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
-    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition> {
-        match self {
-            QueryGraphEdgeTransition::FieldCollection {
-                field_definition_position,
-                ..
-            } => Some(field_definition_position.parent()),
-            _ => None,
-        }
-    }
-
-    fn get_field_mut(&mut self) -> Option<&mut Field> {
-        None
-    }
-}
-
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: GraphPathTriggerVariant + Display,
