@@ -6,3 +6,9 @@ expression: yaml
     kind: my.request.event
   level: INFO
   message: my request event message
+  span:
+    name: connect_request
+    otel.kind: INTERNAL
+  spans:
+    - name: connect_request
+      otel.kind: INTERNAL

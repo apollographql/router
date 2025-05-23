@@ -125,7 +125,7 @@ where
     // all plans are guaranteed to be more costly than `initial` anyway.
     // Note that save for `initial`,
     // we always compute `partialCost` as the pros of exiting some branches early are large enough
-    // that it outweight computing some costs unecessarily from time to time.
+    // that it outweigh computing some costs unnecessarily from time to time.
     let mut stack = VecDeque::new();
     stack.push_back(Partial {
         partial_plan: initial,

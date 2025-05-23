@@ -49,6 +49,8 @@ pub(crate) mod transform;
 pub(crate) mod traverse;
 
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const ERROR_CODE_RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAILED";
+pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
@@ -162,7 +164,9 @@ impl Query {
 
                             if !parameters.errors.is_empty() {
                                 if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                                    response.extensions.insert("valueCompletion", value);
+                                    response
+                                        .extensions
+                                        .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                                 }
                             }
 
@@ -216,7 +220,9 @@ impl Query {
                     );
                     if !parameters.errors.is_empty() {
                         if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                            response.extensions.insert("valueCompletion", value);
+                            response
+                                .extensions
+                                .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                         }
                     }
 

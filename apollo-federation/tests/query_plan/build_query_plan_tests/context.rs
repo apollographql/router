@@ -118,39 +118,39 @@ fn set_context_test_variable_is_from_same_subgraph() {
         }
         "#,
         @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
-                         __typename
-                         prop
-                         u {
-                           __typename
-                           id
-                           b
-                         }
-                       }
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     prop
+                     u {
+                       __typename
+                       id
+                       b
                      }
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
-                       }
-                     },
-                   },
+                   }
+                 }
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
                  },
-               }
-               "###
+               },
+             },
+           }
+           "###
     );
     node_assert!(
         plan,
@@ -191,8 +191,8 @@ fn set_context_test_variable_is_from_different_subgraph() {
       "#,
       );
     let plan = assert_plan!(
-            planner,
-            r#"
+        planner,
+        r#"
         {
           t {
             u {
@@ -201,55 +201,55 @@ fn set_context_test_variable_is_from_different_subgraph() {
             }
           }
         }
-            "#,
-            @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
-                         __typename
-                         id
-                         u {
-                           __typename
-                           id
-                         }
-                       }
+        "#,
+        @r###"
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     id
+                     u {
+                       __typename
+                       id
                      }
-                   },
-                   Flatten(path: "t") {
-                     Fetch(service: "Subgraph2") {
-                       {
-                         ... on T {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on T {
-                           prop
-                         }
-                       }
-                     },
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
-                       }
-                     },
-                   },
+                   }
+                 }
+               },
+               Flatten(path: "t") {
+                 Fetch(service: "Subgraph2") {
+                   {
+                     ... on T {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on T {
+                       prop
+                     }
+                   }
                  },
-               }
-               "###);
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
+                 },
+               },
+             },
+           }
+           "###);
 
     node_assert!(
         plan,
@@ -711,51 +711,51 @@ fn set_context_test_with_type_conditions_for_union() {
         }
         "#,
         @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     ... on A {
+                       __typename
+                       prop
+                       u {
                          __typename
-                         ... on A {
-                           __typename
-                           prop
-                           u {
-                             __typename
-                             id
-                             b
-                           }
-                         }
-                         ... on B {
-                           __typename
-                           prop
-                           u {
-                             __typename
-                             id
-                             b
-                           }
-                         }
+                         id
+                         b
                        }
                      }
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
+                     ... on B {
+                       __typename
+                       prop
+                       u {
+                         __typename
+                         id
+                         b
                        }
-                     },
-                   },
+                     }
+                   }
+                 }
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
                  },
-               }
-               "###
+               },
+             },
+           }
+           "###
     );
 
     node_assert!(

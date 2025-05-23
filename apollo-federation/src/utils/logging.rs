@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use crate::operation::Selection;
-use crate::query_graph::graph_path::ClosedBranch;
-use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
+use crate::query_graph::graph_path::operation::ClosedBranch;
+use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirectPaths;
 use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
 
 /// This macro is a wrapper around `tracing::trace!` and should not be confused with our snapshot
@@ -10,7 +10,7 @@ use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
 /// so that external tools (like the snapshot log visualizer) can show how various key data
 /// structures evolve over the course of planning a query.
 ///
-/// There are two ways of creating a snapshot. The easiest is by passing the macro a indentifier
+/// There are two ways of creating a snapshot. The easiest is by passing the macro a identifier
 /// for the value you'd like to take a snapshot of. This will tag the snapshot type with the type
 /// name of the value, create data that is JSON string using serde_json, and add the message
 /// literal that you pass in. EX:

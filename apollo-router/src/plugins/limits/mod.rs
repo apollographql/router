@@ -430,12 +430,11 @@ mod test {
     }
 
     async fn plugin() -> PluginTestHarness<LimitsPlugin> {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::new(
-            Some(include_str!("fixtures/content_length_limit.router.yaml")),
-            None,
-            None,
-        )
-        .await;
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(include_str!("fixtures/content_length_limit.router.yaml"))
+            .build()
+            .await
+            .expect("test harness");
         plugin
     }
 }

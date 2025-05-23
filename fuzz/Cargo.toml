@@ -1,20 +1,20 @@
-
 [package]
 name = "router-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
 edition = "2018"
+license-file = "../LICENSE"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "=0.4.7"
+libfuzzer-sys = "=0.4.9"
 apollo-federation = { path = "../apollo-federation" }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
-bnf = "0.4.4"
+bnf = "0.5.0"
 env_logger = "0.11.0"
 log = "0.4"
 rand = "0.8.0"
@@ -50,12 +50,6 @@ doc = false
 [[bin]]
 name = "router_errors"
 path = "fuzz_targets/router_errors.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "federation"
-path = "fuzz_targets/federation.rs"
 test = false
 doc = false
 

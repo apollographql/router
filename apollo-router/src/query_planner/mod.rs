@@ -18,7 +18,7 @@ mod labeler;
 mod plan;
 pub(crate) mod query_planner_service;
 pub(crate) mod rewrites;
-mod selection;
+pub(crate) mod selection;
 mod subgraph_context;
 pub(crate) mod subscription;
 

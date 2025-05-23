@@ -48,7 +48,7 @@ improvements, we should adhere to the following principles:
 2. It must be possible to statically determine the output shape (object
    properties, array types, and nested value shapes) produced by a
    `JSONSelection` string. JSON data encountered at runtime may be inherently
-   dynamic and unpredicatable, but we must be able to validate the output shape
+   dynamic and unpredictable, but we must be able to validate the output shape
    matches the GraphQL schema. Because we can assume all input data is some kind
    of JSON, for types whose shape cannot be statically determined, the GraphQL
    `JSON` scalar type can be used as an "any" type, though this should be
@@ -99,7 +99,8 @@ PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
-LitExpr              ::= LitPrimitive | LitObject | LitArray | PathSelection
+LitExpr              ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitPath              ::= (LitPrimitive | LitObject | LitArray) PathStep+
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -672,25 +673,46 @@ The `->echo` method is still useful when you want to do something with the input
 value (which is bound to `@` within the echoed expression), rather than ignoring
 the input value (using `@` nowhere in the expression).
 
-The `$(...)` syntax can be useful within a `LitExpr` as well:
+#### The difference between `array.field->map(...)` and `$(array.field)->map(...)`
 
-```graphql
-# $(-1) needs wrapping in order to apply the ->mul method
-suffix: results.slice($(-1)->mul($args.suffixLength))
+When you apply a field selection to an array (as in `array.field`), the field
+selection is automatically mapped over each element of the array, producing a
+new array of all the field values.
 
-# Instead of something like this:
-# suffix: results.slice($->echo(-1)->mul($args.suffixLength))
+If the field selection has a further `->method` applied to it (as in
+`array.field->map(...)`), the method will be applied to each of the resulting
+field values _individually_, rather than to the array as a whole, which is
+probably not what you want given that you're using `->map` (unless each field
+value is an array, and you want an array of all those arrays, after mapping).
+
+The `$(...)` wrapping syntax can be useful to control this behavior, because it
+allows writing `$(array.field)->map(...)`, which provides the complete array of
+field values as a single input to the `->map` method:
+
+```json
+// Input JSON
+{
+  "array": [
+    { "field": 1 },
+    { "field": 2 },
+    { "field": 3 }
+  ]
+}
 ```
 
-In fairness, due to the commutavity of multiplication, this particular case
-could have been written as `suffix: results.slice($args.suffixLength->mul(-1))`,
-but not all methods allow reversing the input and arguments so easily, and this
-syntax works in part because it still parenthesizes the `-1` literal value,
-forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
+```graphql
+# Produces [2, 4, 6] by doubling each field value
+doubled: $(array.field)->map(@->mul(2))
 
-When you don't need to apply a `.key` or `->method` to a literal value within a
-`LitExpr`, you do not need to wrap it with `$(...)`, so the `ExprPath` syntax is
-relatively uncommon within `LitExpr` expressions.
+# Produces [[2], [4], [6]], since ->map applied to a non-array produces a
+# single-element array wrapping the result of the mapping expression applied
+# to that individual value
+nested: array.field->map(@->mul(2))
+```
+
+In this capacity, the `$(...)` syntax is useful for controlling
+associativity/grouping/precedence, similar to parenthesized expressions in other
+programming languages.
 
 ### `PathStep ::=`
 
@@ -832,6 +854,55 @@ powerful ways, e.g. `page: list->slice(0, $limit)`.
 Also, as a minor syntactic convenience, `LitObject` literals can have
 `Identifier` or `LitString` keys, whereas JSON objects can have only
 double-quoted string literal keys.
+
+### `LitPath ::=`
+
+![LitPath](./grammar/LitPath.svg)
+
+A `LitPath` is a special form of `PathSelection` (similar to `VarPath`,
+`KeyPath`, `AtPath`, and `ExprPath`) that can be used _only_ within `LitExpr`
+expressions, allowing the head of the path to be any `LitExpr` value, with a
+non-empty tail of `PathStep` items afterward:
+
+```graphql
+object: $({
+  sd: "asdf"->slice(1, 3),
+  sum: 1234->add(5678),
+  celsius: 98.6->sub(32)->mul(5)->div(9),
+  nine: -1->add(10),
+  false: true->not,
+  true: false->not,
+  twenty: { a: 1, b: 2 }.b->mul(10),
+  last: [1, 2, 3]->last,
+  justA: "abc"->first,
+  justC: "abc"->last,
+})
+```
+
+Note that expressions like `true->not` and `"asdf"->slice(1, 3)` have a
+different interpretation in the default selection syntax (outside of `LitExpr`
+parsing), since `true` and `"asdf"` will be interpreted as field names there,
+not as literal values. If you want to refer to a quoted field value within a
+`LitExpr`, you can use the `$.` variable prefix to disambiguate it:
+
+```graphql
+object: $({
+  fieldEntries: $."quoted field"->entries,
+  stringPrefix: "quoted field"->slice(0, "quoted"->size),
+})
+```
+
+You can still nest the `$(...)` inside itself (or use it within `->` method
+arguments), as in
+
+```graphql
+justA: $($("abc")->first)
+nineAgain: $($(-1)->add($(10)))
+```
+
+In these examples, only the outermost `$(...)` wrapper is required, though the
+inner wrappers may be used to clarify the structure of the expression, similar
+to parentheses in other languages.
 
 ### `LitPrimitive ::=`
 

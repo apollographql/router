@@ -1,5 +1,6 @@
 use apollo_compiler::ExecutableDocument;
 
+use super::query_plan_analysis::AnalysisContext;
 use super::query_plan_analysis::interpret_query_plan;
 use super::response_shape::ResponseShape;
 use super::*;
@@ -42,9 +43,9 @@ interface I
 scalar join__FieldSet
 
 enum join__Graph {
-  A @join__graph(name: "A", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=A")
-  B @join__graph(name: "B", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=B")
-  S @join__graph(name: "S", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=S")
+  A @join__graph(name: "A", url: "local-tests/correctness-issues/boolean-condition-overfetch.graphql?subgraph=A")
+  B @join__graph(name: "B", url: "local-tests/correctness-issues/boolean-condition-overfetch.graphql?subgraph=B")
+  S @join__graph(name: "S", url: "local-tests/correctness-issues/boolean-condition-overfetch.graphql?subgraph=S")
 }
 
 scalar link__Import
@@ -59,6 +60,22 @@ enum link__Purpose {
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
+}
+
+type P implements I
+  @join__implements(graph: A, interface: "I")
+  @join__implements(graph: B, interface: "I")
+  @join__implements(graph: S, interface: "I")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: S, key: "id")
+{
+  id: ID!
+  data_a(arg: Int!): String! @join__field(graph: A)
+  a_p: Int! @join__field(graph: A) @join__field(graph: S, external: true)
+  data_b(arg: Int!): String! @join__field(graph: B)
+  data(arg: Int!): Int! @join__field(graph: S)
+  s_p: Int! @join__field(graph: S, requires: "a_p")
 }
 
 type Query
@@ -85,7 +102,7 @@ type T implements I
 }
 "#;
 
-fn plan_response_shape(op_str: &str) -> ResponseShape {
+pub(crate) fn plan_response_shape_with_schema(schema_str: &str, op_str: &str) -> ResponseShape {
     // Initialization
     let config = query_planner::QueryPlannerConfig {
         generate_query_fragments: false,
@@ -95,7 +112,7 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
         },
         ..Default::default()
     };
-    let supergraph = crate::Supergraph::new(SCHEMA_STR).unwrap();
+    let supergraph = crate::Supergraph::new(schema_str).unwrap();
     let planner = query_planner::QueryPlanner::new(&supergraph, config).unwrap();
 
     // Parse the schema and operation
@@ -111,17 +128,27 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
     // Compare response shapes
     let op_rs = response_shape::compute_response_shape_for_operation(&op, api_schema).unwrap();
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&op).unwrap();
-    let plan_rs = interpret_query_plan(&supergraph.schema, &root_type, &query_plan).unwrap();
+    let supergraph_schema = planner.supergraph_schema();
     let subgraphs_by_name = supergraph
         .extract_subgraphs()
         .unwrap()
         .into_iter()
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
+    let context = AnalysisContext::new(supergraph_schema.clone(), &subgraphs_by_name);
+    let plan_rs = interpret_query_plan(&context, &root_type, &query_plan).unwrap();
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
-    assert!(compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs).is_ok());
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    assert!(
+        compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs)
+            .is_ok()
+    );
 
     plan_rs
+}
+
+fn plan_response_shape(op_str: &str) -> ResponseShape {
+    plan_response_shape_with_schema(SCHEMA_STR, op_str)
 }
 
 //=================================================================================================
@@ -277,14 +304,81 @@ fn test_defer_node_nested() {
     insta::assert_snapshot!(plan_response_shape(op_str), @r###"
     {
       test_i -may-> test_i if v1 {
-        __typename -----> __typename
+        __typename -may-> __typename on I
+        __typename -may-> __typename on T
         data -----> data(arg: 0)
-        id -----> id
+        id -may-> id on T
         nested -may-> nested on T {
           __typename -----> __typename
           id -----> id
           data_b -----> data_b(arg: 1)
         }
+      }
+    }
+    "###);
+}
+
+// QP missing ConditionNode bug (FED-505).
+// - Note: The correctness checker won't report this, since it's an over-fetching issue.
+#[test]
+fn test_missing_boolean_condition_over_fetch() {
+    let op_str = r#"
+      query($v0: Boolean!) {
+        test_i {
+          ... on P @include(if: $v0) {
+              s_p
+          }
+          ... on P @skip(if: $v0) {
+              a_p
+          }
+        }
+      }
+    "#;
+    // Note: `s_p -may-> s_p on P` is supposed to have `if v0` condition.
+    let rs = plan_response_shape(op_str);
+    insta::assert_snapshot!(rs, @r###"
+    {
+      test_i -----> test_i {
+        __typename -may-> __typename on I
+        __typename -may-> __typename on P if v0
+        __typename -may-> __typename on P if ¬v0
+        id -may-> id on P if v0
+        id -may-> id on P if ¬v0
+        a_p -may-> a_p on P if v0
+        a_p -may-> a_p on P if ¬v0
+        s_p -may-> s_p on P
+      }
+    }
+    "###);
+}
+
+// Related to FED-505, but QP is still correct in this case.
+#[test]
+fn test_missing_boolean_condition_still_correct() {
+    let op_str = r#"
+      query($v0: Boolean!) {
+        test_i {
+          ... on P @include(if: $v0) {
+              s_p
+          }
+          ... on P @skip(if: $v0) {
+              s_p
+          }
+        }
+      }
+    "#;
+    // Note: `s_p -may-> s_p on P` below is missing Boolean conditions, but still correct.
+    insta::assert_snapshot!(plan_response_shape(op_str), @r###"
+    {
+      test_i -----> test_i {
+        __typename -may-> __typename on I
+        __typename -may-> __typename on P if v0
+        __typename -may-> __typename on P if ¬v0
+        id -may-> id on P if v0
+        id -may-> id on P if ¬v0
+        a_p -may-> a_p on P if v0
+        a_p -may-> a_p on P if ¬v0
+        s_p -may-> s_p on P
       }
     }
     "###);

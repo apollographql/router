@@ -17,6 +17,7 @@ use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
+use http::uri::Scheme;
 use parking_lot::Mutex;
 use rhai::AST;
 use rhai::Array;
@@ -1187,6 +1188,21 @@ mod router_plugin {
         }
     }
 
+    // Uri.scheme
+    #[rhai_fn(get = "scheme", pure, return_raw)]
+    pub(crate) fn uri_scheme_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.scheme_str())
+    }
+
+    #[rhai_fn(set = "scheme", return_raw)]
+    pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        parts.scheme = Some(new_scheme);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
@@ -1721,12 +1737,11 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: block.engine.clone(),
-            ast: block.ast.clone(),
+            engine: self.engine.clone(),
+            ast: self.ast.clone(),
         };
         let mut guard = scope.lock();
         // Note: We don't use `process_error()` here, because this code executes in the context of
@@ -1736,20 +1751,20 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(
+                    .call_fn::<Dynamic>(
                         &mut guard,
-                        &block.ast,
+                        &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
+                    .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1874,10 +1889,6 @@ impl Rhai {
     }
 
     pub(super) fn ast_has_function(&self, name: &str) -> bool {
-        self.block
-            .load()
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == name)
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }

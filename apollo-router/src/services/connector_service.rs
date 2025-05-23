@@ -146,7 +146,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "otel.kind" = "INTERNAL",
                 "apollo.connector.type" = CONNECTOR_TYPE_HTTP,
                 "apollo.connector.detail" = tracing::field::Empty,
-                "apollo.connector.field.name" = %connector.field_name(),
+                "apollo.connector.coordinate" = %connector.id.coordinate(),
                 "apollo.connector.selection" = %connector.selection,
                 "apollo.connector.source.name" = tracing::field::Empty,
                 "apollo.connector.source.detail" = tracing::field::Empty,
@@ -167,9 +167,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             }
             if let Some(source_name) = connector.id.source_name.as_ref() {
                 span.record("apollo.connector.source.name", source_name);
-                if let Ok(detail) =
-                    serde_json::to_string(&serde_json::json!({ "baseURL": transport.source_url }))
-                {
+                if let Ok(detail) = serde_json::to_string(
+                    &serde_json::json!({ "baseURL": transport.source_url.as_ref().map(|uri| uri.to_string()) }),
+                ) {
                     span.record("apollo.connector.source.detail", detail);
                 }
             }
@@ -196,6 +196,7 @@ async fn execute(
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
+    let source_name = connector.source_config_key();
     let debug = &context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
@@ -203,11 +204,14 @@ async fn execute(
     let tasks = make_requests(request, &context, connector, service_name, debug)
         .map_err(BoxError::from)?
         .into_iter()
-        .map(move |request| async {
-            connector_request_service_factory
-                .create()
-                .oneshot(request)
-                .await
+        .map(move |request| {
+            let source_name = source_name.clone();
+            async move {
+                connector_request_service_factory
+                    .create(source_name)
+                    .oneshot(request)
+                    .await
+            }
         });
 
     aggregate_responses(
@@ -261,6 +265,7 @@ impl ConnectorServiceFactory {
             Default::default(),
             Default::default(),
             Arc::new(ConnectorRequestServiceFactory::new(
+                Default::default(),
                 Default::default(),
                 Default::default(),
             )),

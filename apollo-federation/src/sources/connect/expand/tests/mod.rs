@@ -22,9 +22,9 @@ fn it_expand_supergraph() {
                 panic!("expected expansion to actually expand subgraphs for {path:?}");
             };
 
-            assert_snapshot!(api_schema);
-            assert_debug_snapshot!(connectors.by_service_name);
-            assert_snapshot!(raw_sdl);
+            assert_snapshot!("api", api_schema);
+            assert_debug_snapshot!("connectors", connectors.by_service_name);
+            assert_snapshot!("supergraph", raw_sdl);
         });
     });
 }

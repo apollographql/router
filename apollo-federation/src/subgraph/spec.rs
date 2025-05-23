@@ -85,7 +85,8 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     TAG_DIRECTIVE_NAME,
 ];
 
-pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 1] = [FIELDSET_SCALAR_NAME];
+pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
+    [FIELDSET_SCALAR_NAME, CONTEXTFIELDVALUE_SCALAR_NAME];
 
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.
@@ -436,7 +437,7 @@ impl FederationSpecDefinitions {
         }
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.

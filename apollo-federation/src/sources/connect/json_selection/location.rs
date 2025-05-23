@@ -34,7 +34,7 @@ pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 
     fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
-        self.range().map(|range| source_id.location(range.clone()))
+        self.range().map(|range| source_id.location(range))
     }
 }
 
@@ -157,7 +157,7 @@ pub(crate) mod strip_ranges {
     use super::WithRange;
 
     /// Including location information in the AST introduces unnecessary
-    /// varation in many tests. StripLoc is a test-only trait allowing
+    /// variation in many tests. StripLoc is a test-only trait allowing
     /// participating AST nodes to remove their own and their descendants'
     /// location information, thereby normalizing the AST for assert_eq!
     /// comparisons.
@@ -295,6 +295,9 @@ pub(crate) mod strip_ranges {
                         LitExpr::Array(new_vec)
                     }
                     LitExpr::Path(path) => LitExpr::Path(path.strip_ranges()),
+                    LitExpr::LitPath(literal, subpath) => {
+                        LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
+                    }
                 },
                 None,
             )
@@ -310,10 +313,9 @@ pub(crate) mod strip_ranges {
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-    use insta::assert_snapshot;
-
     use super::*;
+    use crate::assert_debug_snapshot;
+    use crate::assert_snapshot;
     use crate::sources::connect::JSONSelection;
 
     #[test]

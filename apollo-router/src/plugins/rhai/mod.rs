@@ -4,23 +4,11 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
 
-use arc_swap::ArcSwap;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use http::StatusCode;
-use notify::Config;
-use notify::EventKind;
-use notify::PollWatcher;
-use notify::RecursiveMode;
-use notify::Watcher;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
-use notify::event::ModifyKind;
 use parking_lot::Mutex;
 use rhai::AST;
 use rhai::Dynamic;
@@ -56,55 +44,11 @@ mod router;
 mod subgraph;
 mod supergraph;
 
-struct EngineBlock {
+/// Plugin which implements Rhai functionality
+struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
     scope: Arc<Mutex<Scope<'static>>>,
-}
-
-impl EngineBlock {
-    fn try_new(
-        scripts: Option<PathBuf>,
-        main: PathBuf,
-        sdl: Arc<String>,
-    ) -> Result<Self, BoxError> {
-        let engine = Arc::new(Rhai::new_rhai_engine(
-            scripts,
-            sdl.to_string(),
-            main.clone(),
-        ));
-        let ast = engine
-            .compile_file(main.clone())
-            .map_err(|err| format!("in Rhai script {}: {}", main.display(), err))?;
-        let mut scope = Scope::new();
-        // Keep these two lower cases ones as mistakes until 2.0
-        // At 2.0 (or maybe before), replace with upper case
-        // Note: Any constants that we add to scope here, *must* be catered for in the on_var
-        // functionality in `new_rhai_engine`.
-        scope.push_constant("apollo_sdl", sdl.to_string());
-        scope.push_constant("apollo_start", Instant::now());
-
-        // Run the AST with our scope to put any global variables
-        // defined in scripts into scope.
-        engine.run_ast_with_scope(&mut scope, &ast)?;
-
-        Ok(EngineBlock {
-            ast,
-            engine,
-            scope: Arc::new(Mutex::new(scope)),
-        })
-    }
-}
-
-/// Plugin which implements Rhai functionality
-/// Note: We use ArcSwap here in preference to a shared RwLock. Updates to
-/// the engine block will be infrequent in relation to the accesses of it.
-/// We'd love to use AtomicArc if such a thing existed, but since it doesn't
-/// we'll use ArcSwap to accomplish our goal.
-struct Rhai {
-    block: Arc<ArcSwap<EngineBlock>>,
-    park_flag: Arc<AtomicBool>,
-    watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -135,90 +79,30 @@ impl Plugin for Rhai {
 
         let main = scripts_path.join(main_file);
 
-        let watched_path = scripts_path.clone();
-        let watched_main = main.clone();
-        let watched_sdl = sdl.clone();
-
-        let block = Arc::new(ArcSwap::from_pointee(EngineBlock::try_new(
+        let engine = Arc::new(Rhai::new_rhai_engine(
             Some(scripts_path),
-            main,
-            sdl,
-        )?));
-        let watched_block = block.clone();
+            sdl.to_string(),
+            main.clone(),
+        ));
+        let ast = engine
+            .compile_file(main.clone())
+            .map_err(|err| format!("in Rhai script {}: {}", main.display(), err))?;
+        let mut scope = Scope::new();
+        // Keep these two lower cases ones as mistakes until 2.0
+        // At 2.0 (or maybe before), replace with upper case
+        // Note: Any constants that we add to scope here, *must* be catered for in the on_var
+        // functionality in `new_rhai_engine`.
+        scope.push_constant("apollo_sdl", sdl.to_string());
+        scope.push_constant("apollo_start", Instant::now());
 
-        let park_flag = Arc::new(AtomicBool::new(false));
-        let watching_flag = park_flag.clone();
-
-        let watcher_handle = std::thread::spawn(move || {
-            let watching_path = watched_path.clone();
-            let config = Config::default()
-                .with_poll_interval(Duration::from_secs(3))
-                .with_compare_contents(true);
-            let mut watcher = PollWatcher::new(
-                move |res: Result<notify::Event, notify::Error>| {
-                    match res {
-                        Ok(event) => {
-                            // Let's limit the events we are interested in to:
-                            //  - Modified files
-                            //  - Created/Remove files
-                            //  - with suffix "rhai"
-                            if matches!(
-                                event.kind,
-                                EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
-                                    | EventKind::Modify(ModifyKind::Data(DataChange::Any))
-                                    | EventKind::Create(_)
-                                    | EventKind::Remove(_)
-                            ) {
-                                let mut proceed = false;
-                                for path in event.paths {
-                                    if path.extension().is_some_and(|ext| ext == "rhai") {
-                                        proceed = true;
-                                        break;
-                                    }
-                                }
-
-                                if proceed {
-                                    match EngineBlock::try_new(
-                                        Some(watching_path.clone()),
-                                        watched_main.clone(),
-                                        watched_sdl.clone(),
-                                    ) {
-                                        Ok(eb) => {
-                                            tracing::info!("updating rhai execution engine");
-                                            watched_block.store(Arc::new(eb))
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "could not create new rhai execution engine: {}",
-                                                e
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => tracing::error!("rhai watching event error: {:?}", e),
-                    }
-                },
-                config,
-            )
-            .unwrap_or_else(|_| panic!("could not create watch on: {watched_path:?}"));
-            watcher
-                .watch(&watched_path, RecursiveMode::Recursive)
-                .unwrap_or_else(|_| panic!("could not watch: {watched_path:?}"));
-            // Park the thread until this Rhai instance is dropped (see Drop impl)
-            // We may actually unpark() before this code executes or exit from park() spuriously.
-            // Use the watching_flag to control a loop which waits from the flag to be updated
-            // from Drop.
-            while !watching_flag.load(Ordering::Acquire) {
-                std::thread::park();
-            }
-        });
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
 
         Ok(Self {
-            block,
-            park_flag,
-            watcher_handle: Some(watcher_handle),
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
         })
     }
 
@@ -233,9 +117,12 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Router(shared_service.clone()),
-            self.block.load().scope.clone(),
+            self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "RouterService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -251,9 +138,12 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
-            self.block.load().scope.clone(),
+            self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "SupergraphService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -269,9 +159,12 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
-            self.block.load().scope.clone(),
+            self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "ExecutionService",
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
     }
@@ -287,21 +180,15 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
-            self.block.load().scope.clone(),
+            self.scope.clone(),
         ) {
-            tracing::error!("service callback failed: {error}");
+            tracing::error!(
+                service = "SubgraphService",
+                subgraph = name,
+                "service callback failed: {error}"
+            );
         }
         shared_service.take_unwrap()
-    }
-}
-
-impl Drop for Rhai {
-    fn drop(&mut self) {
-        if let Some(wh) = self.watcher_handle.take() {
-            self.park_flag.store(true, Ordering::Release);
-            wh.thread().unpark();
-            wh.join().expect("rhai file watcher thread terminating");
-        }
     }
 }
 

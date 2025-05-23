@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::Supergraph;
 use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -13,17 +15,16 @@ use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
+use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::subgraph;
-use apollo_federation::ApiSchemaOptions;
-use apollo_federation::Supergraph;
+use apollo_federation::subgraph::typestate;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
 mod bench;
-use bench::run_bench;
 use bench::BenchOutput;
+use bench::run_bench;
 
 #[derive(Parser)]
 struct QueryPlannerArgs {
@@ -76,6 +77,8 @@ enum Command {
     },
     /// Outputs the formatted query plan for the given query and schema
     Plan {
+        #[arg(long)]
+        json: bool,
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
@@ -91,6 +94,11 @@ enum Command {
     Compose {
         /// Path(s) to subgraph schemas.
         schemas: Vec<PathBuf>,
+    },
+    /// Expand and validate a subgraph schema and print the result
+    Subgraph {
+        /// The path to the subgraph schema file, or `-` for stdin
+        subgraph_schema: PathBuf,
     },
     /// Extract subgraph schemas from a supergraph schema to stdout (or in a directory if specified)
     Extract {
@@ -166,11 +174,13 @@ fn main() -> ExitCode {
         Command::QueryGraph { schemas } => cmd_query_graph(&schemas),
         Command::FederatedGraph { schemas } => cmd_federated_graph(&schemas),
         Command::Plan {
+            json,
             query,
             schemas,
             planner,
-        } => cmd_plan(&query, &schemas, planner),
+        } => cmd_plan(json, &query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
+        Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
             supergraph_schema,
@@ -278,6 +288,7 @@ fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
 }
 
 fn cmd_plan(
+    use_json: bool,
     query_path: &Path,
     schema_paths: &[PathBuf],
     planner: QueryPlannerArgs,
@@ -291,7 +302,11 @@ fn cmd_plan(
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
-    println!("{query_plan}");
+    if use_json {
+        println!("{}", serde_json::to_string_pretty(&query_plan).unwrap());
+    } else {
+        println!("{query_plan}");
+    }
 
     // Check the query plan
     let subgraphs_by_name = supergraph
@@ -310,16 +325,28 @@ fn cmd_plan(
     match result {
         Ok(_) => Ok(()),
         Err(CorrectnessError::FederationError(e)) => Err(e),
-        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!(
-            "Response shape from query plan does not match response shape from input operation:\n{}",
-            e.description()
-        )),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
     }
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     load_supergraph(file_paths)?;
     println!("[SUCCESS]");
+    Ok(())
+}
+
+fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
+    let doc_str = read_input(file_path);
+    let name = file_path
+        .file_name()
+        .and_then(|name| name.to_str().map(|x| x.to_string()));
+    let name = name.unwrap_or("subgraph".to_string());
+    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)?
+        .expand_links()?
+        .assume_upgraded()
+        .validate()
+        .map_err(|e| e.into_inner())?;
+    println!("{}", subgraph.schema_string());
     Ok(())
 }
 

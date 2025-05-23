@@ -28,8 +28,8 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
-pub(crate) use schema::ConnectHTTPArguments;
-pub(crate) use schema::SourceHTTPArguments;
+pub use schema::ConnectHTTPArguments;
+pub use schema::SourceHTTPArguments;
 use strum_macros::EnumIter;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -47,12 +47,24 @@ use crate::schema::FederationSchema;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, EnumIter)]
 pub enum ConnectSpec {
     V0_1,
+    V0_2,
+    V0_3,
+}
+
+impl PartialOrd for ConnectSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_version: Version = (*self).into();
+        let other_version: Version = (*other).into();
+        self_version.partial_cmp(&other_version)
+    }
 }
 
 impl ConnectSpec {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",
+            Self::V0_2 => "0.2",
+            Self::V0_3 => "0.3",
         }
     }
 
@@ -123,7 +135,7 @@ impl ConnectSpec {
             arguments: vec![
                 Argument {
                     name: name!("graphs"),
-                    value: Value::List(vec![]).into(),
+                    value: Value::List(Vec::new()).into(),
                 }
                 .into(),
                 Argument {
@@ -150,6 +162,8 @@ impl TryFrom<&Version> for ConnectSpec {
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
+            (0, 2) => Ok(Self::V0_2),
+            (0, 3) => Ok(Self::V0_3),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),
             }),
@@ -167,6 +181,8 @@ impl From<ConnectSpec> for Version {
     fn from(spec: ConnectSpec) -> Self {
         match spec {
             ConnectSpec::V0_1 => Version { major: 0, minor: 1 },
+            ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
+            ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
         }
     }
 }

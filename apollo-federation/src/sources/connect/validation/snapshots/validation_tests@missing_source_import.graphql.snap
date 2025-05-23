@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/missing_source_import.graphql
 ---
 [
@@ -13,7 +13,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/missing_s
     },
     Message {
         code: NoSourceImport,
-        message: "The `@source` directive is not imported. Try adding `@source` to `import` for `@link(url: \"https://specs.apollo.dev/connect\")`",
+        message: "The `@source` directive is not imported. Try adding `@source` to `import` for `@link(url: \"https://specs.apollo.dev/connect/v0.2\", import: [\"@connect\"])`",
         locations: [
             2:3..2:76,
         ],

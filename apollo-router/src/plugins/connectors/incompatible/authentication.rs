@@ -3,12 +3,11 @@ use std::collections::HashSet;
 use apollo_federation::sources::connect::expand::Connectors;
 use itertools::Itertools;
 
-use self::authentication::subgraph::AuthConfig;
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
 use crate::Configuration;
-use crate::configuration::connector::ConnectorConfiguration;
 use crate::plugins::authentication;
+use crate::plugins::authentication::connector;
 
 /// Incompatibility handler for the built-in authentication plugin
 pub(super) struct AuthIncompatPlugin {
@@ -18,7 +17,7 @@ pub(super) struct AuthIncompatPlugin {
     /// The auth configuration per connector source
     /// Note: We don't necessarily care about how each source is configured,
     /// only that it has an entry in the config.
-    connector_sources: Option<ConnectorConfiguration<AuthConfig>>,
+    connector_sources: Option<connector::Config>,
 }
 
 impl AuthIncompatPlugin {

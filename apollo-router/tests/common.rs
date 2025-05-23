@@ -63,7 +63,9 @@ use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
+use wiremock::http::Method;
 use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 pub struct Query {
     traced: bool,
@@ -328,7 +330,15 @@ impl Telemetry {
         let headers: HashMap<String, String> = request
             .headers
             .iter()
-            .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value
+                        .to_str()
+                        .expect("non-UTF-8 header value in tests")
+                        .to_string(),
+                )
+            })
             .collect();
 
         match self {
@@ -387,6 +397,7 @@ impl IntegrationTest {
         mut subgraph_overrides: HashMap<String, String>,
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+        http_method: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -404,6 +415,11 @@ impl IntegrationTest {
             .entry("products".into())
             .or_insert(url.clone());
 
+        // Add a default override for jsonPlaceholder (connectors), if not specified
+        subgraph_overrides
+            .entry("jsonPlaceholder".into())
+            .or_insert(url.clone());
+
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
 
@@ -418,8 +434,15 @@ impl IntegrationTest {
             .start()
             .await;
 
+        // Allow for GET or POST so that connectors works
+        let http_method = match http_method.unwrap_or("POST".to_string()).as_str() {
+            "GET" => Method::GET,
+            "POST" => Method::POST,
+            _ => panic!("Unknown http method specified"),
+        };
         let subgraph_context = Arc::new(Mutex::new(None));
-        Mock::given(method("POST"))
+        Mock::given(method(http_method))
+            .and(path_regex(".*")) // Match any path so that connectors functions
             .respond_with(TracedResponder {
                 response_template: responder.unwrap_or_else(|| {
                     ResponseTemplate::new(200).set_body_json(json!({
@@ -823,7 +846,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn pid(&mut self) -> i32 {
+    pub(crate) fn pid(&self) -> i32 {
         self.router
             .as_ref()
             .expect("router must have been started")
@@ -867,7 +890,32 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contained(&self, msg: &str) {
+    pub fn print_logs(&self) {
+        for line in &self.logs {
+            println!("{}", line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn read_logs(&mut self) {
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            self.logs.push(line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn capture_logs<T>(&mut self, try_match_line: impl Fn(String) -> Option<T>) -> Vec<T> {
+        let mut logs = Vec::new();
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            if let Some(log) = try_match_line(line) {
+                logs.push(log);
+            }
+        }
+        logs
+    }
+
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 return;
@@ -910,9 +958,18 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    /// Checks the metrics contain the supplied string in prometheus format.
+    /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
+    /// For example:
+    /// ```rust,ignore
+    /// router.assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+    /// ```
+    /// Will allow the metric to be checked even if the config hash and schema id are fluid.
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let text = regex::escape(text).replace("<any>", ".+");
+        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -921,7 +978,7 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                if metrics.contains(text) {
+                if re.is_match(&metrics) {
                     return;
                 }
                 last_metrics = metrics;
@@ -1008,7 +1065,7 @@ impl IntegrationTest {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn dump_stack_traces(&mut self) {
+    pub fn dump_stack_traces(&self) {
         if let Ok(trace) = rstack::TraceOptions::new()
             .symbols(true)
             .thread_names(true)
@@ -1034,7 +1091,7 @@ impl IntegrationTest {
         }
     }
     #[cfg(not(target_os = "linux"))]
-    pub fn dump_stack_traces(&mut self) {}
+    pub fn dump_stack_traces(&self) {}
 
     #[allow(dead_code)]
     pub(crate) fn force_flush(&self) {

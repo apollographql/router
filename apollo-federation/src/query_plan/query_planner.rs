@@ -10,6 +10,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
 
@@ -20,7 +21,7 @@ use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
+use crate::internal_error;
 use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
@@ -43,6 +44,7 @@ use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -165,13 +167,13 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default, Serialize)]
+#[derive(Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct QueryPlanOptions<'a> {
     /// A set of labels which will be used _during query planning_ to
     /// enable/disable edges with a matching label in their override condition.
@@ -182,6 +184,25 @@ pub struct QueryPlanOptions<'a> {
     pub override_conditions: Vec<String>,
 
     pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+    /// Impose a limit on the number of non-local selections, which can be a
+    /// performance hazard. On by default.
+    pub non_local_selections_limit_enabled: bool,
+    /// Names of subgraphs that are disabled and should be avoided during
+    /// planning. If this is non-empty, query planner may error if it cannot
+    /// find a plan that doesn't use the disabled subgraphs, specifically with
+    /// `SingleFederationError::NoPlanFoundWithDisabledSubgraphs`.
+    pub disabled_subgraph_names: IndexSet<String>,
+}
+
+impl Default for QueryPlanOptions<'_> {
+    fn default() -> Self {
+        Self {
+            override_conditions: Vec::new(),
+            check_for_cooperative_cancellation: None,
+            non_local_selections_limit_enabled: true,
+            disabled_subgraph_names: Default::default(),
+        }
+    }
 }
 
 impl std::fmt::Debug for QueryPlanOptions<'_> {
@@ -195,6 +216,10 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
                 } else {
                     &"None"
                 },
+            )
+            .field(
+                "non_local_selections_limit_enabled",
+                &self.non_local_selections_limit_enabled,
             )
             .finish()
     }
@@ -223,7 +248,7 @@ pub struct QueryPlanner {
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
+    abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
 impl QueryPlanner {
@@ -316,6 +341,7 @@ impl QueryPlanner {
             .get_types()
             .filter_map(|position| AbstractTypeDefinitionPosition::try_from(position).ok())
             .filter(|position| is_inconsistent(position.clone()))
+            .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
         Ok(Self {
@@ -364,7 +390,7 @@ impl QueryPlanner {
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
+            &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
             &|| {
@@ -440,12 +466,36 @@ impl QueryPlanner {
             )),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
+            disabled_subgraphs: self
+                .federated_query_graph
+                .subgraphs()
+                .filter_map(|(subgraph, _)| {
+                    if options.disabled_subgraph_names.contains(subgraph.as_ref()) {
+                        Some(subgraph.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
 
+        let mut non_local_selection_state = options
+            .non_local_selections_limit_enabled
+            .then(non_local_selections_estimation::State::default);
         let root_node = if !defer_conditions.is_empty() {
-            compute_plan_for_defer_conditionals(&mut parameters, &mut processor, defer_conditions)
+            compute_plan_for_defer_conditionals(
+                &mut parameters,
+                &mut processor,
+                defer_conditions,
+                &mut non_local_selection_state,
+            )
         } else {
-            compute_plan_internal(&mut parameters, &mut processor, has_defers)
+            compute_plan_internal(
+                &mut parameters,
+                &mut processor,
+                has_defers,
+                &mut non_local_selection_state,
+            )
         }?;
 
         let root_node = match root_node {
@@ -460,10 +510,11 @@ impl QueryPlanner {
             ),
             Some(PlanNode::Sequence(root_node)) if is_subscription => {
                 let Some((primary, rest)) = root_node.nodes.split_first() else {
-                    unreachable!("Sequence must have at least one node");
+                    // TODO(@goto-bus-stop): We could probably guarantee this in the type system
+                    bail!("Invalid query plan: Sequence must have at least one node");
                 };
                 let PlanNode::Fetch(primary) = primary.clone() else {
-                    unreachable!("Primary node of a subscription is not a Fetch");
+                    bail!("Invalid query plan: Primary node of a subscription is not a Fetch");
                 };
                 let rest = PlanNode::Sequence(SequenceNode {
                     nodes: rest.to_vec(),
@@ -476,9 +527,10 @@ impl QueryPlanner {
                 ))
             }
             Some(node) if is_subscription => {
-                unreachable!(
-                    "Unexpected top level PlanNode: '{node:?}' when processing subscription"
-                )
+                bail!(
+                    "Invalid query plan for subscription: unexpected {} at root",
+                    node.node_kind()
+                );
             }
             Some(PlanNode::Fetch(inner)) => Some(TopLevelPlanNode::Fetch(inner)),
             Some(PlanNode::Sequence(inner)) => Some(TopLevelPlanNode::Sequence(inner)),
@@ -520,6 +572,7 @@ impl QueryPlanner {
 fn compute_root_serial_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
     let QueryPlanningParameters {
         supergraph_schema,
@@ -546,14 +599,24 @@ fn compute_root_serial_dependency_graph(
         mut fetch_dependency_graph,
         path_tree: mut prev_path,
         ..
-    } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    } = compute_root_parallel_best_plan(
+        parameters,
+        selection_set,
+        has_defers,
+        non_local_selection_state,
+    )?;
     let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
     for selection_set in split_roots {
         let BestQueryPlanInfo {
             fetch_dependency_graph: new_dep_graph,
             path_tree: new_path,
             ..
-        } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+        } = compute_root_parallel_best_plan(
+            parameters,
+            selection_set,
+            has_defers,
+            non_local_selection_state,
+        )?;
         let new_subgraph = only_root_subgraph(&new_dep_graph)?;
         if new_subgraph == prev_subgraph {
             // The new operation (think 'mutation' operation) is on the same subgraph than the previous one, so we can concat them in a single fetch
@@ -584,7 +647,7 @@ fn compute_root_serial_dependency_graph(
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
-            // taken; however, it could be the case that this causes unforseen issues.
+            // taken; however, it could be the case that this causes unforeseen issues.
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,
@@ -676,10 +739,16 @@ pub(crate) fn compute_root_fetch_groups(
 fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<FetchDependencyGraph, FederationError> {
     trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
-    let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    let best_plan = compute_root_parallel_best_plan(
+        parameters,
+        selection_set,
+        has_defers,
+        non_local_selection_state,
+    )?;
     snapshot!(
         "FetchDependencyGraph",
         best_plan.fetch_dependency_graph.to_dot(),
@@ -692,6 +761,7 @@ fn compute_root_parallel_best_plan(
     parameters: &QueryPlanningParameters,
     selection: SelectionSet,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
         parameters,
@@ -699,6 +769,7 @@ fn compute_root_parallel_best_plan(
         has_defers,
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
+        non_local_selection_state.as_mut(),
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -712,11 +783,16 @@ fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<Option<PlanNode>, FederationError> {
     let root_kind = parameters.operation.root_kind;
 
     let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
-        let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
+        let dependency_graphs = compute_root_serial_dependency_graph(
+            parameters,
+            has_defers,
+            non_local_selection_state,
+        )?;
         let mut main = None;
         let mut deferred = vec![];
         let mut primary_selection = None::<SelectionSet>;
@@ -740,7 +816,11 @@ fn compute_plan_internal(
         }
         (main, deferred, primary_selection)
     } else {
-        let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
+        let mut dependency_graph = compute_root_parallel_dependency_graph(
+            parameters,
+            has_defers,
+            non_local_selection_state,
+        )?;
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
@@ -768,13 +848,14 @@ fn compute_plan_for_defer_conditionals(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     defer_conditions: IndexMap<Name, IndexSet<String>>,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<Option<PlanNode>, FederationError> {
     generate_condition_nodes(
         parameters.operation.clone(),
         defer_conditions.iter(),
         &mut |op| {
             parameters.operation = op;
-            compute_plan_internal(parameters, processor, true)
+            compute_plan_internal(parameters, processor, true, non_local_selection_state)
         },
     )
 }
@@ -812,14 +893,24 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
+            Self::GenerateFragments => Ok(operation.generate_fragments()?),
+            Self::Disabled => {
+                let operation_document = operation.try_into().map_err(|err: FederationError| {
+                    if err.has_invalid_graphql_error() {
+                        internal_error!(
+                            "Query planning produced an invalid subgraph operation.\n{err}"
+                        )
+                    } else {
+                        err
+                    }
+                })?;
+                Ok(operation_document)
             }
-            Self::Disabled => Ok(operation),
         }
     }
 }
@@ -827,7 +918,6 @@ impl SubgraphOperationCompression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::Subgraph;
 
     const TEST_SUPERGRAPH: &str = r#"
 schema
@@ -1236,33 +1326,18 @@ type User
 
     #[test]
     fn drop_operation_root_level_typename() {
-        let subgraph1 = Subgraph::parse_and_expand(
-            "Subgraph1",
-            "https://Subgraph1",
-            r#"
-                type Query {
-                    t: T
-                }
-
-                type T @key(fields: "id") {
-                    id: ID!
-                    x: Int
-                }
-            "#,
-        )
-        .unwrap();
-        let subgraphs = vec![&subgraph1];
-        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
         let document = ExecutableDocument::parse_and_validate(
             planner.api_schema().schema(),
             r#"
-                query {
-                    __typename
-                    t {
-                        x
-                    }
+            {
+                __typename
+                bestRatedProducts {
+                    id
                 }
+            }
             "#,
             "operation.graphql",
         )
@@ -1270,12 +1345,14 @@ type User
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
+        // Note: There should be no `__typename` selection at the root level.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
-          Fetch(service: "Subgraph1") {
+          Fetch(service: "reviews") {
             {
-              t {
-                x
+              bestRatedProducts {
+                __typename
+                id
               }
             }
           },

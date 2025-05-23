@@ -125,11 +125,12 @@ authentication:
   jwt:
     jwks:
       - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+    on_error: Error
 ```
 
 Pros:
 
-- The router prevents unauthenticated requests from reaching your subgraphs.
+- The router prevents unauthenticated requests from reaching your subgraphs (except when `on_error` is set to `Continue`.)
 - The router can extract claims from the JWT and pass them to your subgraphs as headers, reducing logic needed in your subgraphs.
 
 Cons:

@@ -11,12 +11,13 @@ mod strings;
 
 pub(super) use strings::GraphQLString;
 
-pub(super) struct SchemaInfo<'schema> {
+use crate::sources::connect::validation::link::ConnectLink;
+
+pub(crate) struct SchemaInfo<'schema> {
     pub(crate) schema: &'schema Schema,
     len: usize,
     lookup: LineColLookup<'schema>,
-    pub(crate) connect_directive_name: &'schema Name,
-    pub(crate) source_directive_name: &'schema Name,
+    pub(crate) connect_link: ConnectLink<'schema>,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
 }
@@ -25,15 +26,13 @@ impl<'schema> SchemaInfo<'schema> {
     pub(crate) fn new(
         schema: &'schema Schema,
         src: &'schema str,
-        connect_directive_name: &'schema Name,
-        source_directive_name: &'schema Name,
+        connect_link: ConnectLink<'schema>,
     ) -> Self {
         Self {
             schema,
             len: src.len(),
             lookup: LineColLookup::new(src),
-            connect_directive_name,
-            source_directive_name,
+            connect_link,
             shape_lookup: shape::graphql::shapes_for_schema(schema),
         }
     }
@@ -48,6 +47,16 @@ impl<'schema> SchemaInfo<'schema> {
         } else {
             Some(self.lookup.get(offset))
         }
+    }
+
+    #[inline]
+    pub(crate) fn source_directive_name(&self) -> &Name {
+        self.connect_link.source_directive_name()
+    }
+
+    #[inline]
+    pub(crate) fn connect_directive_name(&self) -> &Name {
+        self.connect_link.connect_directive_name()
     }
 }
 
@@ -66,14 +75,15 @@ mod tests {
     #[test]
     fn line_col_lookup() {
         let src = r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.1")
             type Query {
                 foo: String
             }
         "#;
         let schema = Schema::parse(src, "testSchema").unwrap();
 
-        let name = "unused".try_into().unwrap();
-        let schema_info = SchemaInfo::new(&schema, src, &name, &name);
+        let schema_info =
+            SchemaInfo::new(&schema, src, ConnectLink::new(&schema).unwrap().unwrap());
 
         assert_eq!(schema_info.line_col(0), Some((1, 1)));
         assert_eq!(schema_info.line_col(4), Some((2, 4)));

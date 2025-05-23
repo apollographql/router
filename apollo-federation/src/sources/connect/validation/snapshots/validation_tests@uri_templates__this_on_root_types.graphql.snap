@@ -6,16 +6,16 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 [
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.requiresThis`: $this is not valid here, must be one of $args, $config, $context",
+        message: "In `GET` in `@connect(http:)` on `Query.requiresThis`: $this is not valid here, must be one of $args, $config, $context, $request",
         locations: [
-            11:39..11:44,
+            11:39..11:51,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Mutation.requiresThis`: $this is not valid here, must be one of $args, $config, $context",
+        message: "In `GET` in `@connect(http:)` on `Mutation.requiresThis`: $this is not valid here, must be one of $args, $config, $context, $request",
         locations: [
-            20:37..20:42,
+            20:37..20:49,
         ],
     },
 ]

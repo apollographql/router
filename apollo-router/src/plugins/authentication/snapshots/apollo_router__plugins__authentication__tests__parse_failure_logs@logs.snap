@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/authentication/tests.rs
+assertion_line: 1430
 expression: yaml
 ---
 - fields:
@@ -20,4 +21,3 @@ expression: yaml
     index: 5
   level: WARN
   message: "ignoring a key since it is not valid, enable debug logs to full content"
-

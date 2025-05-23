@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
-use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
 
@@ -56,6 +56,30 @@ pub(crate) enum ConditionResolution {
         #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
+}
+
+impl std::fmt::Display for ConditionResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConditionResolution::Satisfied {
+                cost,
+                path_tree,
+                context_map,
+            } => {
+                writeln!(f, "Satisfied: cost={cost}")?;
+                if let Some(path_tree) = path_tree {
+                    writeln!(f, "path_tree:\n{path_tree}")?;
+                }
+                if let Some(context_map) = context_map {
+                    writeln!(f, ", context_map:\n{context_map:?}")?;
+                }
+                Ok(())
+            }
+            ConditionResolution::Unsatisfied { reason } => {
+                writeln!(f, "Unsatisfied: reason={:?}", reason)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +184,7 @@ impl ConditionResolverCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query_graph::graph_path::OpGraphPathContext;
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
     //use crate::link::graphql_definition::{OperationConditional, OperationConditionalKind, BooleanOrVariable};
 
     #[test]

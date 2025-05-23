@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
@@ -45,6 +46,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
@@ -108,6 +110,8 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory
@@ -172,6 +176,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .license(license)
+                                .full_config(configuration.validated_yaml.clone())
                                 .build(),
                         )
                         .await
@@ -397,9 +402,19 @@ pub(crate) async fn create_http_services(
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
-    let tls_root_store: RootCertStore = configuration
+    // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
+    // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
+    // This generates the native root store once, and reuses it across subgraphs
+    let subgraph_tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
+    let connector_tls_root_store: RootCertStore = configuration
+        .tls
+        .connector
         .all
         .create_certificate_store()
         .transpose()?
@@ -411,18 +426,52 @@ pub(crate) async fn create_http_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
+    let connector_subgraphs: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .iter()
+                .map(|(_, connector)| connector.id.subgraph_name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let http_service = crate::services::http::HttpClientService::from_config(
+        if connector_subgraphs.contains(name) {
+            continue; // Avoid adding services for subgraphs that are actually connectors since we'll separately add them below per source
+        }
+        let http_service = crate::services::http::HttpClientService::from_config_for_subgraph(
             name,
             configuration,
-            &tls_root_store,
+            &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
         http_services.insert(name.clone(), http_service_factory);
     }
+
+    // Also create client service factories for connector sources
+    let connector_sources = schema
+        .connectors
+        .as_ref()
+        .map(|c| c.source_config_keys.clone())
+        .unwrap_or_default();
+
+    for name in connector_sources.iter() {
+        let http_service = crate::services::http::HttpClientService::from_config_for_connector(
+            name,
+            configuration,
+            &connector_tls_root_store,
+            shaping.connector_client_config(name),
+        )?;
+
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
+        http_services.insert(name.clone(), http_service_factory);
+    }
+
     Ok(http_services)
 }
 
@@ -517,6 +566,7 @@ pub(crate) async fn add_plugin(
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: LicenseState,
+    full_config: Option<Value>,
 ) {
     match factory
         .create_instance(
@@ -529,6 +579,7 @@ pub(crate) async fn add_plugin(
                 .launch_id(launch_id)
                 .notify(notify.clone())
                 .license(license)
+                .and_full_config(full_config)
                 .build(),
         )
         .await
@@ -577,7 +628,7 @@ pub(crate) async fn create_plugins(
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
-        ($name: expr, $factory: expr, $plugin_config: expr) => {{
+        ($name: expr, $factory: expr, $plugin_config: expr, $maybe_full_config: expr) => {{
             add_plugin(
                 $name,
                 $factory,
@@ -591,6 +642,7 @@ pub(crate) async fn create_plugins(
                 &mut plugin_instances,
                 &mut errors,
                 license.clone(),
+                $maybe_full_config,
             )
             .await;
         }};
@@ -605,13 +657,17 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
+                    let mut full_config = None;
                     if name == "apollo.telemetry" {
                         // The apollo.telemetry" plugin isn't happy with empty config, so we
                         // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
+
+                        // Only the telemetry plugin should have access to the full configuration
+                        full_config = configuration.validated_yaml.clone();
                     }
-                    add_plugin!(name.to_string(), factory, plugin_config);
+                    add_plugin!(name.to_string(), factory, plugin_config, full_config);
                 }
             }
             .instrument(span)
@@ -647,7 +703,7 @@ pub(crate) async fn create_plugins(
                     if let Some(factory) =
                         plugin_registry.iter().find(|factory| factory.name == name)
                     {
-                        add_plugin!(name, factory, plugin_config);
+                        add_plugin!(name, factory, plugin_config, None);
                     } else {
                         errors.push(ConfigurationError::PluginUnknown(name))
                     }
@@ -703,6 +759,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
+    add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -713,12 +770,18 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
+    add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
+
+    // Because this plugin intercepts subgraph requests
+    // and does not forward them to the next service in the chain,
+    // it needs to intervene after user plugins for users plugins to run at all.
+    add_optional_apollo_plugin!("experimental_mock_subgraphs");
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.
@@ -747,9 +810,16 @@ pub(crate) async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
+        let errors_list = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+            .join("\n");
+
         Err(BoxError::from(format!(
-            "there were {} configuration errors",
-            errors.len()
+            "there were {} configuration errors\n{}",
+            errors.len(),
+            errors_list
         )))
     } else {
         Ok(plugin_instances)

@@ -11,6 +11,7 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
 use super::DemandControlError;
@@ -26,7 +27,6 @@ use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
@@ -422,7 +422,7 @@ impl StaticCostCalculator {
     fn estimated_cost_of_operation(
         &self,
         subgraph: &str,
-        operation: &SubgraphOperation,
+        operation: &SerializableDocument,
         variables: &Object,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
@@ -819,7 +819,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
@@ -847,7 +847,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)

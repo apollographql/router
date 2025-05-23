@@ -18,7 +18,7 @@ use nom::AsChar;
 
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-fn is_whitespace(c: char) -> bool {
+const fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t')
 }
 
@@ -110,7 +110,7 @@ impl<'schema> GraphQLString<'schema> {
         })
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         match self {
             GraphQLString::Standard { data } => data.compiled_string,
             GraphQLString::Block { data, .. } => data.compiled_string,
@@ -219,10 +219,11 @@ mod tests {
     use apollo_compiler::schema::ExtendedType;
     use pretty_assertions::assert_eq;
 
+    use crate::sources::connect::validation::ConnectLink;
     use crate::sources::connect::validation::graphql::GraphQLString;
     use crate::sources::connect::validation::graphql::SchemaInfo;
 
-    const SCHEMA: &str = r#"
+    const SCHEMA: &str = r#"extend schema @link(url: "https://specs.apollo.dev/connect/v0.1")
         type Query {
           field: String @connect(
             http: {
@@ -255,8 +256,8 @@ mod tests {
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(string.as_str(), "https://example.com");
-        let name = "unused".try_into().unwrap();
-        let schema_info = SchemaInfo::new(&schema, SCHEMA, &name, &name);
+        let schema_info =
+            SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
         assert_eq!(
             string.line_col_for_subslice(2..5, &schema_info),
             Some(
@@ -278,8 +279,8 @@ mod tests {
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(string.as_str(), "something\nsomethingElse {\n  nested\n}");
-        let name = "unused".try_into().unwrap();
-        let schema_info = SchemaInfo::new(&schema, SCHEMA, &name, &name);
+        let schema_info =
+            SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
         assert_eq!("nested", &string.as_str()[28..34]);
         assert_eq!(
             string.line_col_for_subslice(28..34, &schema_info),

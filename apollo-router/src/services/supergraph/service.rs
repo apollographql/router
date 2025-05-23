@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
+use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
@@ -40,13 +41,15 @@ use crate::graphql::Response;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::query_planner::CachingQueryPlanner;
@@ -73,12 +76,10 @@ use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
-use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -93,7 +94,7 @@ pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
-/// Containing [`Service`] in the request lifecyle.
+/// Containing [`Service`] in the request lifecycle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
@@ -434,10 +435,11 @@ async fn service_call(
                         ));
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            if let Some(condition) = supergraph_response_event.0.condition() {
-                                if !condition.lock().evaluate_event_response(resp, &ctx) {
-                                    return;
-                                }
+                            if !supergraph_response_event
+                                .condition
+                                .evaluate_event_response(resp, &ctx)
+                            {
+                                return;
                             }
                             attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
@@ -446,7 +448,7 @@ async fn service_call(
                                 ),
                             ));
                             log_event(
-                                supergraph_response_event.0.level(),
+                                supergraph_response_event.level,
                                 "supergraph.response",
                                 attrs.clone(),
                                 "",
@@ -534,7 +536,7 @@ async fn subscription_task(
         .extensions()
         .with_lock(|lock| {
             lock.get::<Arc<UsageReporting>>()
-                .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+                .map(|usage_reporting| usage_reporting.get_stats_report_key().clone())
         })
         .unwrap_or_default();
 
@@ -559,9 +561,17 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
-    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
-
-    let mut timeout = Box::pin(tokio::time::sleep(expires_in));
+    let mut timeout = if supergraph_req
+        .context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .is_some()
+    {
+        let expires_in =
+            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        tokio::time::sleep(expires_in).boxed()
+    } else {
+        futures::future::pending().boxed()
+    };
 
     loop {
         tokio::select! {
@@ -643,6 +653,13 @@ async fn subscription_task(
                         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
                         .map(|p| p.config.clone());
 
+                    let connector_sources = execution_service_factory.schema
+                        .connectors
+                        .as_ref()
+                        .map(|c| c.source_config_keys.clone()
+                        )
+                        .unwrap_or_default();
+
                     let fetch_service_factory = Arc::new(FetchServiceFactory::new(
                         execution_service_factory.schema.clone(),
                                     execution_service_factory.subgraph_schemas.clone(),
@@ -651,7 +668,6 @@ async fn subscription_task(
                                         execution_service_factory.plugins.clone(),
                                     )),
                                     subscription_plugin_conf.clone(),
-                                    // TODO: HTTP SERVICE + CONNECTORS
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
@@ -662,6 +678,7 @@ async fn subscription_task(
                                         Arc::new(ConnectorRequestServiceFactory::new(
                                             Arc::new(http_service_factory),
                                             execution_service_factory.plugins.clone(),
+                                            connector_sources
                                         )),
                                     )),
                                  ),
@@ -940,6 +957,12 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
 
+        let connector_sources = schema
+            .connectors
+            .as_ref()
+            .map(|c| c.source_config_keys.clone())
+            .unwrap_or_default();
+
         let fetch_service_factory = Arc::new(FetchServiceFactory::new(
             schema.clone(),
             subgraph_schemas.clone(),
@@ -951,7 +974,6 @@ impl PluggableSupergraphServiceBuilder {
                 self.plugins.clone(),
             )),
             subscription_plugin_conf.clone(),
-            // TODO: HTTP SERVICE + CONNECTORS
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
@@ -964,6 +986,7 @@ impl PluggableSupergraphServiceBuilder {
                 Arc::new(ConnectorRequestServiceFactory::new(
                     Arc::new(self.http_service_factory),
                     self.plugins.clone(),
+                    connector_sources,
                 )),
             )),
         ));
@@ -986,7 +1009,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let sb = Buffer::new(
             ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
                         .iter()

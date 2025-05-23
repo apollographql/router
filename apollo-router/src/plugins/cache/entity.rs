@@ -5,8 +5,13 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_compiler::Schema;
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::parser::Parser;
+use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -80,6 +85,9 @@ pub(crate) struct EntityCache {
     expose_keys_in_context: bool,
     private_queries: Arc<RwLock<HashSet<String>>>,
     pub(crate) invalidation: Invalidation,
+    supergraph_schema: Arc<Valid<Schema>>,
+    /// map containing the enum GRAPH
+    subgraph_enums: Arc<HashMap<String, String>>,
 }
 
 pub(crate) struct Storage {
@@ -123,11 +131,11 @@ pub(crate) struct Subgraph {
     /// Redis configuration
     pub(crate) redis: Option<RedisCache>,
 
-    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: bool,
+    pub(crate) enabled: Option<bool>,
 
     /// Context key used to separate cache sections per user
     pub(crate) private_id: Option<String>,
@@ -140,7 +148,7 @@ impl Default for Subgraph {
     fn default() -> Self {
         Self {
             redis: None,
-            enabled: true,
+            enabled: Some(true),
             ttl: Default::default(),
             private_id: Default::default(),
             invalidation: Default::default(),
@@ -202,9 +210,9 @@ impl Plugin for EntityCache {
         if let Some(redis) = &init.config.subgraph.all.redis {
             let mut redis_config = redis.clone();
             let required_to_start = redis_config.required_to_start;
-            // we need to explicitely disable TTL reset because it is managed directly by this plugin
+            // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
-            all = match RedisCacheStorage::new(redis_config).await {
+            all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
@@ -223,10 +231,10 @@ impl Plugin for EntityCache {
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
                 let required_to_start = redis.required_to_start;
-                // we need to explicitely disable TTL reset because it is managed directly by this plugin
+                // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
-                let storage = match RedisCacheStorage::new(redis_config).await {
+                let storage = match RedisCacheStorage::new(redis_config, "entity").await {
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -312,6 +320,8 @@ impl Plugin for EntityCache {
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
             invalidation,
+            subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
+            supergraph_schema: init.supergraph_schema,
         })
     }
 
@@ -356,15 +366,8 @@ impl Plugin for EntityCache {
             }
         };
 
-        let subgraph_ttl = self
-            .subgraphs
-            .get(name)
-            .ttl
-            .clone()
-            .map(|t| t.0)
-            .or_else(|| storage.ttl());
-        let subgraph_enabled =
-            self.enabled && (self.subgraphs.all.enabled || self.subgraphs.get(name).enabled);
+        let subgraph_ttl = self.subgraph_ttl(name, &storage);
+        let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
@@ -404,6 +407,8 @@ impl Plugin for EntityCache {
                     private_id,
                     invalidation: self.invalidation.clone(),
                     expose_keys_in_context: self.expose_keys_in_context,
+                    supergraph_schema: self.supergraph_schema.clone(),
+                    subgraph_enums: self.subgraph_enums.clone(),
                 });
             tower::util::BoxService::new(inner)
         } else {
@@ -460,11 +465,14 @@ impl Plugin for EntityCache {
     }
 }
 
+#[cfg(test)]
+pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl EntityCache {
     #[cfg(test)]
     pub(crate) async fn with_mocks(
         storage: RedisCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -485,7 +493,13 @@ impl EntityCache {
             enabled: true,
             expose_keys_in_context: true,
             subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph::default(),
+                all: Subgraph {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                    }),
+                    ..Default::default()
+                },
                 subgraphs,
             }),
             metrics: Metrics::default(),
@@ -500,8 +514,59 @@ impl EntityCache {
                 concurrent_requests: 10,
             })),
             invalidation,
+            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
+            supergraph_schema,
         })
     }
+
+    // Returns boolean to know if cache is enabled for this subgraph
+    fn subgraph_enabled(&self, subgraph_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match (
+            self.subgraphs.all.enabled,
+            self.subgraphs.get(subgraph_name).enabled,
+        ) {
+            (_, Some(x)) => x, // explicit per-subgraph setting overrides the `all` default
+            (Some(true) | None, None) => true, // unset defaults to true
+            (Some(false), None) => false,
+        }
+    }
+
+    // Returns the configured ttl for this subgraph
+    fn subgraph_ttl(&self, subgraph_name: &str, storage: &RedisCacheStorage) -> Option<Duration> {
+        self.subgraphs
+            .get(subgraph_name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| match self.subgraphs.all.ttl.clone() {
+                Some(ttl) => Some(ttl.0),
+                None => storage.ttl(),
+            })
+    }
+}
+
+/// Get the map of subgraph enum variant mapped with subgraph name
+fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
+    let mut subgraph_enums = HashMap::new();
+    if let Some(graph_enum) = supergraph_schema.get_enum("join__Graph") {
+        subgraph_enums.extend(graph_enum.values.iter().filter_map(
+            |(enum_name, enum_value_def)| {
+                let subgraph_name = enum_value_def
+                    .directives
+                    .get("join__graph")?
+                    .specified_argument_by_name("name")?
+                    .as_str()?
+                    .to_string();
+
+                Some((enum_name.to_string(), subgraph_name))
+            },
+        ));
+    }
+
+    subgraph_enums
 }
 
 #[derive(Clone)]
@@ -515,6 +580,8 @@ struct CacheService {
     private_id: Option<String>,
     expose_keys_in_context: bool,
     invalidation: Invalidation,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: Arc<HashMap<String, String>>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -604,7 +671,6 @@ impl CacheService {
                         );
 
                         let mut response = self.service.call(request).await?;
-
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
@@ -680,6 +746,8 @@ impl CacheService {
             let request_id = request.id.clone();
             match cache_lookup_entities(
                 self.name.clone(),
+                self.supergraph_schema.clone(),
+                &self.subgraph_enums,
                 self.storage.clone(),
                 is_known_private,
                 private_id.as_deref(),
@@ -926,8 +994,11 @@ async fn cache_lookup_root(
 
 struct EntityCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
+#[allow(clippy::too_many_arguments)]
 async fn cache_lookup_entities(
     name: String,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: &HashMap<String, String>,
     cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
@@ -935,9 +1006,10 @@ async fn cache_lookup_entities(
     expose_keys_in_context: bool,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
-
     let keys = extract_cache_keys(
         &name,
+        supergraph_schema,
+        subgraph_enums,
         &request.query_hash,
         body,
         &request.context,
@@ -1242,6 +1314,7 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
+    body.variables.sort_keys();
     digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
@@ -1305,8 +1378,11 @@ fn extract_cache_key_root(
 }
 
 // build a list of keys to get from the cache in one query
+#[allow(clippy::too_many_arguments)]
 fn extract_cache_keys(
     subgraph_name: &str,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: &HashMap<String, String>,
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
@@ -1325,18 +1401,44 @@ fn extract_cache_keys(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
+    // Get entity key to only get the right fields in representations
+
     let mut res = Vec::new();
     for representation in representations {
-        let opt_type = representation
-            .as_object_mut()
-            .and_then(|o| o.remove(TYPENAME))
+        let representation =
+            representation
+                .as_object_mut()
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "representation variable should be an array of object".to_string(),
+                })?;
+        let typename_value =
+            representation
+                .remove(TYPENAME)
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "missing __typename in representation".to_string(),
+                })?;
+
+        let typename = typename_value
+            .as_str()
             .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "missing __typename in representation".to_string(),
+                reason: "__typename in representation is not a string".to_string(),
             })?;
 
-        let typename = opt_type.as_str().unwrap_or("-");
+        // Split `representation` into two parts: the entity key part and the rest.
+        let representation_entity_key = take_matching_key_field_set(
+            representation,
+            typename,
+            subgraph_name,
+            &supergraph_schema,
+            subgraph_enums,
+        )?;
 
-        let hashed_entity_key = hash_entity_key(representation);
+        let hashed_representation = if representation.is_empty() {
+            String::new()
+        } else {
+            hash_other_representation(representation)
+        };
+        let hashed_entity_key = hash_entity_key(&representation_entity_key);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - entity cache version: current version of the hash
@@ -1345,10 +1447,8 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let mut key = String::new();
-        let _ = write!(
-            &mut key,
-            "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}"
+        let mut key = format!(
+            "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         if is_known_private {
             if let Some(id) = private_id {
@@ -1356,19 +1456,210 @@ fn extract_cache_keys(
             }
         }
 
-        representation
-            .as_object_mut()
-            .map(|o| o.insert(TYPENAME, opt_type));
+        // Restore the `representation` back whole again
+        representation.insert(TYPENAME, typename_value);
+        merge_representation(representation, representation_entity_key);
+
         res.push(key);
     }
     Ok(res)
 }
 
-pub(crate) fn hash_entity_key(representation: &Value) -> String {
-    // We have to hash the representation because it can contains PII
+fn take_matching_key_field_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    typename: &str,
+    subgraph_name: &str,
+    supergraph_schema: &Valid<Schema>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+    // find an entry in the `key_field_sets` that matches the `representation`.
+    let matched_key_field_set =
+        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+        .find(|field_set| {
+            matches_selection_set(representation, &field_set.selection_set)
+        })
+        .ok_or_else(|| {
+            tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
+            FetchError::MalformedRequest {
+                reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
+            }
+        })?;
+    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
+        FetchError::MalformedRequest {
+            reason: format!("representation does not match the field set {matched_key_field_set}"),
+        }
+    })
+}
+
+// Collect `@key` field sets on a `typename` in a `subgraph_name`.
+// - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
+fn collect_key_field_sets(
+    typename: &str,
+    subgraph_name: &str,
+    supergraph_schema: &Valid<Schema>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
+    Ok(supergraph_schema
+        .types
+        .get(typename)
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: format!("unknown typename {typename:?} in representations"),
+        })?
+        .directives()
+        .get_all("join__type")
+        .filter_map(move |directive| {
+            let schema_subgraph_name = directive
+                .specified_argument_by_name("graph")
+                .and_then(|arg| arg.as_enum())
+                .and_then(|arg| subgraph_enums.get(arg.as_str()))?;
+
+            if schema_subgraph_name == subgraph_name {
+                let mut parser = Parser::new();
+                directive
+                    .specified_argument_by_name("key")
+                    .and_then(|arg| arg.as_str())
+                    .and_then(|arg| {
+                        parser
+                            .parse_field_set(
+                                supergraph_schema,
+                                NamedType::new(typename).ok()?,
+                                arg,
+                                "entity_caching.graphql",
+                            )
+                            .ok()
+                    })
+            } else {
+                None
+            }
+        }))
+}
+
+// Does the shape of `representation`  match the `selection_set`?
+fn matches_selection_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        let Some(value) = representation.get(field.name.as_str()) else {
+            return false;
+        };
+
+        if field.selection_set.is_empty() {
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return false;
+            }
+            continue;
+        }
+
+        // Check the sub-selection set.
+        let Value::Object(sub_value) = value else {
+            return false;
+        };
+        if !matches_selection_set(sub_value, &field.selection_set) {
+            return false;
+        }
+    }
+    true
+}
+
+// Removes the selection set from `representation` and returns the value corresponding to it.
+// - Returns None if the representation doesn't match the selection set.
+fn take_selection_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> Option<serde_json_bytes::Map<ByteString, Value>> {
+    let mut result = serde_json_bytes::Map::new();
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        if field.selection_set.is_empty() {
+            let value = representation.remove(field.name.as_str())?;
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return None;
+            }
+            // Move the scalar field to the `result`.
+            result.insert(ByteString::from(field.name.as_str()), value);
+            continue;
+        } else {
+            let value = representation.get_mut(field.name.as_str())?;
+            // Update the sub-selection set.
+            let Value::Object(sub_value) = value else {
+                return None;
+            };
+            let removed = take_selection_set(sub_value, &field.selection_set)?;
+            result.insert(
+                ByteString::from(field.name.as_str()),
+                Value::Object(removed),
+            );
+        }
+    }
+    Some(result)
+}
+
+// The inverse of `take_selection_set`.
+fn merge_representation(
+    dest: &mut serde_json_bytes::Map<ByteString, Value>,
+    source: serde_json_bytes::Map<ByteString, Value>,
+) {
+    source.into_iter().for_each(|(key, src_value)| {
+        // Note: field sets can't have aliases.
+        let Some(dest_value) = dest.get_mut(&key) else {
+            dest.insert(key, src_value);
+            return;
+        };
+
+        // Overlapping fields must be objects.
+        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
+            (dest_value, src_value)
+        {
+            // Merge sub-values
+            merge_representation(dest_sub_value, src_sub_value);
+        }
+    });
+}
+
+// Order-insensitive structural hash of the representation value
+pub(crate) fn hash_representation(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+) -> String {
     let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+        fields
+            .iter()
+            .sorted_by(|a, b| a.0.cmp(b.0))
+            .for_each(|(k, v)| {
+                state.update(serde_json::to_string(k).unwrap().as_bytes());
+                state.update(":".as_bytes());
+                match v {
+                    serde_json_bytes::Value::Object(obj) => {
+                        state.update("{".as_bytes());
+                        hash(state, obj);
+                        state.update("}".as_bytes());
+                    }
+                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+                }
+            });
+    }
+    hash(&mut digest, representation);
     hex::encode(digest.finalize().as_slice())
+}
+
+// Only hash the list of entity keys
+pub(crate) fn hash_entity_key(
+    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
+) -> String {
+    tracing::trace!("entity keys: {entity_keys:?}");
+    // We have to hash the representation because it can contains PII
+    hash_representation(entity_keys)
+}
+
+// Hash other representation variables except __typename and entity keys
+fn hash_other_representation(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+) -> String {
+    hash_representation(representation)
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -1584,9 +1875,9 @@ pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContex
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub(crate) struct CacheKeyContext {
-    key: String,
-    status: CacheKeyStatus,
-    cache_control: String,
+    pub(super) key: String,
+    pub(super) status: CacheKeyStatus,
+    pub(super) cache_control: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1615,5 +1906,128 @@ impl Ord for CacheKeyStatus {
             (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
             (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::cache::tests::MockStore;
+    use crate::plugins::cache::tests::SCHEMA;
+
+    #[tokio::test]
+    async fn test_subgraph_enabled() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(entity_cache.subgraph_enabled("user"));
+        assert!(!entity_cache.subgraph_enabled("archive"));
+        let subgraph_config = serde_json::json!({
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": entity_cache.subgraphs.subgraphs.clone()
+        });
+        entity_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        assert!(!entity_cache.subgraph_enabled("archive"));
+        assert!(entity_cache.subgraph_enabled("user"));
+        assert!(entity_cache.subgraph_enabled("orga"));
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_ttl() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let mut redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub",
+                "ttl": "2s"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false,
+                "ttl": "5000ms"
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert!(entity_cache.subgraph_ttl("orga", &redis_cache).is_none());
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
+        // update global storage TTL
+        redis_cache.ttl = Some(Duration::from_secs(25));
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("orga", &redis_cache),
+            Some(Duration::from_secs(25))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
+        entity_cache.subgraphs = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: Some(Ttl(Duration::from_secs(42))),
+                ..Default::default()
+            },
+            subgraphs: entity_cache.subgraphs.subgraphs.clone(),
+        });
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("orga", &redis_cache),
+            Some(Duration::from_secs(42))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
     }
 }

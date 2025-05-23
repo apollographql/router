@@ -12,6 +12,7 @@ use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
+use apollo_federation::query_plan::serializable_document::SerializableDocumentNotInitialized;
 use displaydoc::Display;
 use futures::StreamExt;
 use futures::future::Either;
@@ -19,6 +20,7 @@ use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -125,7 +127,7 @@ pub(crate) enum DemandControlError {
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
     /// {0}
-    SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
+    SubgraphOperationNotInitialized(SerializableDocumentNotInitialized),
     /// {0}
     ContextSerializationError(String),
     /// {0}
@@ -171,7 +173,12 @@ impl IntoGraphQLErrors for DemandControlError {
                     .message(self.to_string())
                     .build(),
             ]),
-            DemandControlError::SubgraphOperationNotInitialized(e) => Ok(e.into_graphql_errors()),
+            DemandControlError::SubgraphOperationNotInitialized(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
             DemandControlError::ContextSerializationError(_) => Ok(vec![
                 graphql::Error::builder()
                     .extension_code(self.code())
@@ -194,7 +201,9 @@ impl DemandControlError {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
-            DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
+            DemandControlError::SubgraphOperationNotInitialized(_) => {
+                "SUBGRAPH_OPERATION_NOT_INITIALIZED"
+            }
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
             DemandControlError::FederationError(_) => "FEDERATION_ERROR",
         }
@@ -371,13 +380,23 @@ impl Plugin for DemandControl {
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
                         Err(err) => {
-                            emit_error_event(err.code(), "Demand control execution error");
+                            let graphql_errors = err
+                                .into_graphql_errors()
+                                .expect("must be able to convert to graphql error");
+                            graphql_errors.iter().for_each(|mapped_error| {
+                                if let Some(Value::String(error_code)) =
+                                    mapped_error.extensions.get("code")
+                                {
+                                    emit_error_event(
+                                        error_code.as_str(),
+                                        &mapped_error.message,
+                                        mapped_error.path.clone(),
+                                    );
+                                }
+                            });
                             ControlFlow::Break(
                                 execution::Response::builder()
-                                    .errors(
-                                        err.into_graphql_errors()
-                                            .expect("must be able to convert to graphql error"),
-                                    )
+                                    .errors(graphql_errors)
                                     .context(req.context.clone())
                                     .build()
                                     .expect("Must be able to build response"),
@@ -651,7 +670,8 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let ctx = context();
         let resp = plugin
             .execution_service(|req| async {
@@ -674,7 +694,8 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let strategy = plugin.strategy_factory.create();
 
         let ctx = context();

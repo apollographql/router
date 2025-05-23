@@ -50,7 +50,7 @@ impl HttpClientServiceFactory {
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpClientService::from_config(
+        let service = HttpClientService::from_config_for_subgraph(
             service,
             configuration,
             &rustls::RootCertStore::empty(),

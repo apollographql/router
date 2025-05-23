@@ -1,9 +1,13 @@
 //! This module is all about validating [`Expression`]s for a given context. This isn't done at
 //! runtime, _only_ during composition because it could be expensive.
 
+use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
+use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
@@ -14,13 +18,39 @@ use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
 
+use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
+use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::VariableReference;
+
+static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
+
+static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
@@ -31,6 +61,8 @@ pub(super) struct Context<'schema> {
     /// The code that all resulting messages will use
     /// TODO: make code dynamic based on coordinate so new validations can be warnings
     code: Code,
+    /// Used to determine if `$root` is available (aka: we're mapping a response, not a request)
+    has_response_body: bool,
 }
 
 impl<'schema> Context<'schema> {
@@ -41,36 +73,113 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let object_type = coordinate.field_coordinate.object;
-        let is_root_type = schema
-            .schema_definition
-            .query
-            .as_ref()
-            .is_some_and(|query| query.name == object_type.name)
-            || schema
-                .schema_definition
-                .mutation
-                .as_ref()
-                .is_some_and(|mutation| mutation.name == object_type.name);
-        let mut var_lookup: IndexMap<Namespace, Shape> = [
-            (
-                Namespace::Args,
-                shape_for_arguments(coordinate.field_coordinate.field),
-            ),
-            (Namespace::Config, Shape::unknown([])),
-            (Namespace::Context, Shape::unknown([])),
-        ]
-        .into_iter()
-        .collect();
-        if !is_root_type {
-            var_lookup.insert(Namespace::This, Shape::from(object_type));
-        }
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
 
-        Self {
-            schema,
-            var_lookup,
-            source,
-            code,
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: false,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: false,
+                }
+            }
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@connect` directive
+    /// TODO: We might be able to re-use this for the "selection" field later down the road
+    pub(super) fn for_connect_response(
+        schema: &'schema SchemaInfo,
+        coordinate: ConnectDirectiveCoordinate,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: true,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                    has_response_body: true,
+                }
+            }
         }
     }
 
@@ -83,6 +192,7 @@ impl<'schema> Context<'schema> {
         let var_lookup: IndexMap<Namespace, Shape> = [
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
         ]
         .into_iter()
         .collect();
@@ -91,6 +201,33 @@ impl<'schema> Context<'schema> {
             var_lookup,
             source,
             code,
+            has_response_body: false,
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@source` directive
+    /// Note that we can't use stuff like "this" here cause we have no idea what the "type" is when on a @source block
+    pub(super) fn for_source_response(
+        schema: &'schema SchemaInfo,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
+            (Namespace::Status, Shape::int([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
+            (Namespace::Response, RESPONSE_SHAPE.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
+            has_response_body: true,
         }
     }
 }
@@ -116,6 +253,40 @@ pub(crate) fn validate(
     context: &Context,
     expected_shape: &Shape,
 ) -> Result<(), Message> {
+    // TODO: this check should be done in the shape checking, but currently
+    // shape resolution can drop references to inputs if the expressions ends with
+    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
+    // `Unknown`, so variables are dropped and cannot be checked.
+    for variable_ref in expression.expression.variable_references() {
+        let namespace = variable_ref.namespace.namespace;
+        if !context.var_lookup.contains_key(&namespace) {
+            let message = if namespace == Namespace::Batch {
+                "`$batch` may only be used when `@connect` is applied to a type.".to_string()
+            } else {
+                format!(
+                    "{} is not valid here, must be one of {}",
+                    namespace,
+                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                )
+            };
+            return Err(Message {
+                code: context.code,
+                message,
+                locations: variable_ref
+                    .location
+                    .iter()
+                    .filter_map(|location| {
+                        context.source.line_col_for_subslice(
+                            location.start + expression.location.start
+                                ..location.end + expression.location.start,
+                            context.schema,
+                        )
+                    })
+                    .collect(),
+            });
+        }
+    }
+
     let shape = expression.expression.shape();
 
     let actual_shape = resolve_shape(&shape, context, expression)?;
@@ -169,6 +340,12 @@ fn resolve_shape(
         }
         ShapeCase::Name(name, key) => {
             let mut resolved = if name.value == "$root" {
+                // For response mapping, $root (aka the response body) is allowed so we will exit out early here
+                // However, $root is not allowed for requests so we will error below
+                if context.has_response_body {
+                    return Ok(Shape::unknown([]));
+                }
+
                 let mut key_str = key.iter().map(|key| key.to_string()).join(".");
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");
@@ -332,16 +509,77 @@ fn shape_name(shape: &Shape) -> &'static str {
     }
 }
 
+pub(crate) struct MappingArgument<'schema> {
+    pub(crate) expression: Expression,
+    pub(crate) string: GraphQLString<'schema>,
+}
+
+impl MappingArgument<'_> {
+    pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
+        self.expression.expression.variable_references()
+    }
+}
+
+pub(crate) fn parse_mapping_argument<'schema>(
+    node: &'schema Node<Value>,
+    coordinate: impl Display,
+    code: Code,
+    schema: &'schema SchemaInfo,
+) -> Result<MappingArgument<'schema>, Message> {
+    let Ok(string) = GraphQLString::new(node, &schema.sources) else {
+        return Err(Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must be a string."),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    };
+
+    let selection = match JSONSelection::parse(string.as_str()) {
+        Ok(selection) => selection,
+        Err(e) => {
+            return Err(Message {
+                code,
+                message: format!("{coordinate} is not valid: {e}"),
+                locations: string
+                    .line_col_for_subslice(e.offset..e.offset + 1, schema)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    };
+
+    if selection.is_empty() {
+        return Err(Message {
+            code,
+            message: format!("{coordinate} is empty"),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    Ok(MappingArgument {
+        expression: Expression {
+            expression: selection,
+            location: 0..string.as_str().len(),
+        },
+        string,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use apollo_compiler::name;
     use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::validation::coordinates::FieldCoordinate;
+    use crate::sources::connect::validation::link::ConnectLink;
 
     fn expression(selection: &str) -> Expression {
         Expression {
@@ -399,8 +637,8 @@ mod tests {
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
-        let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(&schema, &schema_str, &directive.name, &source_directive);
+        let schema_info =
+            SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
         let expr_string = GraphQLString::new(
             &directive
                 .argument_by_name("http", &schema)
@@ -414,7 +652,11 @@ mod tests {
         )
         .unwrap();
         let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
+            element: ConnectedElement::Field {
+                parent_type: object,
+                field_def: field,
+                parent_category: ObjectCategory::Query,
+            },
             directive,
         };
         let context =

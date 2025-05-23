@@ -35,3 +35,11 @@ dockerfiles/federation2-demo
 
 # dhat
 dhat-heap.json
+
+# env file
+.env
+
+# generated fuzz/ files
+fuzz/crash-*
+fuzz/slow-unit-*
+fuzz/timeout-*

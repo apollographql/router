@@ -27,16 +27,20 @@ use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
 
+use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::connector;
+use crate::services::connector::request_service::Error;
+use crate::services::connector::request_service::Request;
+use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
 use crate::services::router;
 use crate::services::subgraph;
@@ -128,6 +132,59 @@ impl Merge for SubgraphShaping {
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+struct ConnectorsShapingConfig {
+    /// Applied on all connectors
+    all: Option<ConnectorShaping>,
+    /// Applied on specific connector sources
+    sources: HashMap<String, ConnectorShaping>,
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ConnectorShaping {
+    /// Enable compression for connectors (available compressions are deflate, br, gzip)
+    compression: Option<Compression>,
+    /// Enable global rate limiting
+    global_rate_limit: Option<RateLimitConf>,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// Enable timeout for connectors requests
+    timeout: Option<Duration>,
+    /// Enable HTTP2 for connectors
+    experimental_http2: Option<Http2Config>,
+    /// DNS resolution strategy for connectors
+    dns_resolution_strategy: Option<DnsResolutionStrategy>,
+}
+
+impl Merge for ConnectorShaping {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => ConnectorShaping {
+                compression: self.compression.or(fallback.compression),
+                timeout: self.timeout.or(fallback.timeout),
+                global_rate_limit: self
+                    .global_rate_limit
+                    .as_ref()
+                    .or(fallback.global_rate_limit.as_ref())
+                    .cloned(),
+                experimental_http2: self
+                    .experimental_http2
+                    .as_ref()
+                    .or(fallback.experimental_http2.as_ref())
+                    .cloned(),
+                dns_resolution_strategy: self
+                    .dns_resolution_strategy
+                    .as_ref()
+                    .or(fallback.dns_resolution_strategy.as_ref())
+                    .cloned(),
+            },
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 struct RouterShaping {
     /// The global concurrency limit
@@ -153,6 +210,9 @@ pub(crate) struct Config {
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, SubgraphShaping>,
+    /// Applied on specific subgraphs
+    connector: ConnectorsShapingConfig,
+
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
@@ -185,16 +245,18 @@ impl Merge for RateLimitConf {
 pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    rate_limit_sources: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
 #[async_trait::async_trait]
-impl Plugin for TrafficShaping {
+impl PluginPrivate for TrafficShaping {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
             config: init.config,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
+            rate_limit_sources: Mutex::new(HashMap::new()),
         })
     }
 
@@ -390,6 +452,83 @@ impl Plugin for TrafficShaping {
             service
         }
     }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        let all_config = self.config.connector.all.as_ref();
+        let source_config = self.config.connector.sources.get(&source_name).cloned();
+        let final_config = Self::merge_config(all_config, source_config.as_ref());
+
+        if let Some(config) = final_config {
+            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
+                self.rate_limit_sources
+                    .lock()
+                    .entry(source_name.clone())
+                    .or_insert_with(|| {
+                        RateLimitLayer::new(
+                            rate_limit_conf.capacity.into(),
+                            rate_limit_conf.interval,
+                        )
+                    })
+                    .clone()
+            });
+
+            ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &Request| (req.context.clone(), req.connector.clone(), req.key.clone()),
+                    move |(ctx, connector, response_key), future| {
+                        async {
+                            let response: Result<Response, BoxError> = future.await;
+                            match response {
+                                Ok(ok) => Ok(ok),
+                                Err(err) if err.is::<Elapsed>() => {
+                                    let response = Response::error_builder()
+                                        .context(ctx)
+                                        .connector(connector)
+                                        .error(Error::GatewayTimeout)
+                                        .message("Your request has been timed out")
+                                        .response_key(response_key)
+                                        .build();
+                                    Ok(response)
+                                }
+                               Err(err) if err.is::<Overloaded>() => {
+                                    let response = Response::error_builder()
+                                        .context(ctx)
+                                        .connector(connector)
+                                        .error(Error::RateLimited)
+                                        .message("Your request has been rate limited")
+                                        .response_key(response_key)
+                                        .build();
+                                    Ok(response)
+                                }
+                                Err(err) => Err(err),
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(rate_limit)
+                .map_request(move |mut req: connector::request_service::Request| {
+                    if let Some(compression) = config.compression {
+                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+                    req
+                })
+                .buffered()
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+    }
 }
 
 impl TrafficShaping {
@@ -415,15 +554,37 @@ impl TrafficShaping {
         })
         .unwrap_or_default()
     }
+
+    pub(crate) fn connector_client_config(
+        &self,
+        source_name: &str,
+    ) -> crate::configuration::shared::Client {
+        let source_config = self.config.connector.sources.get(source_name).cloned();
+        Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
+            .map(|config| crate::configuration::shared::Client {
+                experimental_http2: config.experimental_http2,
+                dns_resolution_strategy: config.dns_resolution_strategy,
+            })
+            .unwrap_or_default()
+    }
 }
 
-register_plugin!("apollo", "traffic_shaping", TrafficShaping);
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
+    use http::HeaderMap;
+    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -433,10 +594,13 @@ mod test {
 
     use super::*;
     use crate::Configuration;
+    use crate::Context;
     use crate::json_ext::Object;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
+    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::HasSchema;
@@ -444,6 +608,8 @@ mod test {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
+    use crate::services::connector::request_service::Request as ConnectorRequest;
+    use crate::services::connector::request_service::transport::http::HttpRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
@@ -593,6 +759,69 @@ mod test {
             .expect("Plugin not created")
     }
 
+    fn get_fake_connector_request(
+        service_name: String,
+        headers: Option<HeaderMap<HeaderValue>>,
+        data: String,
+    ) -> ConnectorRequest {
+        let context = Context::default();
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some("test_sourcename".into()),
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Uri::from_str("http://localhost/api").ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            error_settings: Default::default(),
+        });
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let mapping_problems = Default::default();
+
+        let mut request_builder = http::Request::builder();
+        if let Some(headers) = headers {
+            for (header_name, header_value) in headers.iter() {
+                request_builder = request_builder.header(header_name, header_value);
+            }
+        }
+        let request = request_builder.body(data).unwrap();
+
+        let http_request = HttpRequest {
+            inner: request,
+            debug: None,
+        };
+
+        ConnectorRequest {
+            context,
+            connector,
+            service_name,
+            transport_request: http_request.into(),
+            key,
+            mapping_problems,
+            supergraph_request: Default::default(),
+        }
+    }
+
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
         let config = serde_yaml::from_str::<serde_json::Value>(
@@ -640,13 +869,54 @@ mod test {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn it_adds_correct_headers_for_compression_for_connector() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        connector:
+            sources:
+                test_subgraph.test_sourcename:
+                    compression: gzip
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+
+        let test_service =
+            MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
+                let TransportRequest::Http(ref http_request) = req.transport_request;
+
+                assert_eq!(
+                    http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
+                    HeaderValue::from_static("gzip")
+                );
+
+                req
+            });
+
+        let _response = plugin
+            .connector_request_service(
+                test_service.boxed(),
+                "test_subgraph.test_sourcename".to_string(),
+            )
+            .oneshot(request)
+            .await
+            .unwrap();
+    }
+
     #[test]
     fn test_merge_config() {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
           deduplicate_query: true
-        subgraphs: 
+        subgraphs:
           products:
             deduplicate_query: false
         "#,
@@ -676,7 +946,7 @@ mod test {
             r#"
         all:
           experimental_http2: disable
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
           reviews:
@@ -720,7 +990,7 @@ mod test {
         all:
           experimental_http2: disable
           dns_resolution_strategy: ipv6_only
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
             dns_resolution_strategy: ipv6_then_ipv4
@@ -817,6 +1087,86 @@ mod test {
                 .body()
                 .errors
                 .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rate_limit_connector_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        connector:
+            sources:
+                test_subgraph.test_sourcename:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 100ms
+                    timeout: 500ms
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+
+        let test_service = MockConnector::new(hashmap! {
+            "test_request".into() => "test_request".into()
+        });
+
+        let mut svc = plugin.connector_request_service(
+            test_service.boxed(),
+            "test_subgraph.test_sourcename".to_string(),
+        );
+
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_result
+                .is_ok()
+        );
+
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+        let response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(request)
+            .await
+            .expect("it responded");
+
+        assert!(response.transport_result.is_err());
+        assert!(matches!(
+            response.transport_result.err().unwrap(),
+            Error::RateLimited
+        ));
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_result
+                .is_ok()
         );
     }
 

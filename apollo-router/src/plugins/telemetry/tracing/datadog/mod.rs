@@ -141,12 +141,12 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
+        let endpoint = &self
+            .endpoint
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
         let exporter = datadog_exporter::new_pipeline()
-            .with(
-                &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
-                |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),
-            )
+            .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {
