@@ -6,6 +6,10 @@ use crate::integration::common::graph_os_enabled;
 mod max_evaluated_plans;
 
 const PROMETHEUS_METRICS_CONFIG: &str = include_str!("telemetry/fixtures/prometheus.router.yaml");
+#[cfg(target_os = "windows")]
+const PROCESS_EXECUTABLE_NAME: &str = "router.exe";
+#[cfg(not(target_os = "windows"))]
+const PROCESS_EXECUTABLE_NAME: &str = "router";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fed1_schema_with_new_qp() {
@@ -36,7 +40,7 @@ async fn fed2_schema_with_new_qp() {
     router.assert_started().await;
     router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_lifecycle_query_planner_init_total{{init_is_success="true",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            &format!(r#"apollo_router_lifecycle_query_planner_init_total{{init_is_success="true",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
             None,
         )
         .await;
@@ -88,7 +92,7 @@ async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
     router.assert_started().await;
     router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_lifecycle_query_planner_init_total{{init_is_success="true",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            &format!(r#"apollo_router_lifecycle_query_planner_init_total{{init_is_success="true",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
             None,
         )
         .await;
