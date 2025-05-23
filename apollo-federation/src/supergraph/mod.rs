@@ -1738,7 +1738,7 @@ pub(crate) const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
 pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
-const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
+pub(crate) const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
 pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
 pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
 pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");

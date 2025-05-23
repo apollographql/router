@@ -2,10 +2,10 @@ use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use multimap::MultiMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::bail;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::operation::FieldSelection;
@@ -22,27 +22,29 @@ use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::utils::MultiIndexMap;
 
 /// Returns a satisfiability error in Ok case; Otherwise, returns another error in Err case.
-#[allow(unused)]
+#[allow(dead_code)]
 fn satisfiability_error(
     unsatisfiable_path: &TransitionGraphPath,
     _subgraphs_paths: &[TransitionGraphPath],
     subgraphs_paths_unadvanceables: &[Unadvanceables],
-) -> Result<SingleFederationError, FederationError> {
+    errors: &mut Vec<SingleFederationError>,
+) -> Result<(), FederationError> {
     let witness = build_witness_operation(unsatisfiable_path)?;
     let operation = witness.to_string();
     let message = format!(
-        r#"The following supergraph API query:
-           {operation}
-           cannot be satisfied by the subgraphs because:
-           {reasons}
-           "#,
+        "The following supergraph API query:\n\
+         {operation}\n\
+         cannot be satisfied by the subgraphs because:\n\
+         {reasons}",
         reasons = display_reasons(subgraphs_paths_unadvanceables),
     );
     // PORT_NOTE: We're not using `_subgraphs_paths` parameter, since we didn't port
     //            the `ValidationError` class, yet.
-    Ok(SingleFederationError::SatisfiabilityError { message })
+    errors.push(SingleFederationError::SatisfiabilityError { message });
+    Ok(())
 }
 
 fn build_witness_operation(witness: &TransitionGraphPath) -> Result<Operation, FederationError> {
@@ -52,6 +54,10 @@ fn build_witness_operation(witness: &TransitionGraphPath) -> Result<Operation, F
     };
     let schema = witness.schema_by_source(&root.source)?;
     let edges: Vec<_> = witness.iter().map(|item| item.0).collect();
+    ensure!(
+        !edges.is_empty(),
+        "unsatisfiable_path should contain at least one edge/transition"
+    );
     let Some(selection_set) = build_witness_next_step(schema, witness, &edges)? else {
         bail!("build_witness_operation: root selection set failed to build");
     };
@@ -125,7 +131,6 @@ fn build_witness_next_step(
                     let Some(sub_selection) = sub_selection else {
                         bail!("build_witness_next_step: sub_selection is None");
                     };
-                    // let sub_selection = sub_selection.rebase_on(to_type_position, schema)?;
                     (
                         from_type_position.clone(),
                         InlineFragmentSelection::new(inline_fragment, sub_selection).into(),
@@ -164,13 +169,14 @@ fn build_witness_field(
     schema: &ValidFederationSchema,
     field_definition_position: &FieldDefinitionPosition,
 ) -> Result<executable::Field, FederationError> {
-    // let parent_type_pos = field_definition_position.parent();
     let field_def = field_definition_position.get(schema.schema())?;
     let result = executable::Field::new(field_def.name.clone(), field_def.node.clone());
     let args = field_def
         .arguments
         .iter()
         .filter_map(|arg_def| {
+            // PORT_NOTE: JS implementation didn't skip optional arguments. Rust version skips them
+            //            for brevity.
             if !arg_def.is_required() {
                 return None;
             }
@@ -197,7 +203,7 @@ fn generate_witness_value(
     schema: &ValidFederationSchema,
     value_def: &ast::InputValueDefinition,
 ) -> Result<Node<ast::Value>, FederationError> {
-    // Note: We always generate a non-null value, even if the argument is nullable.
+    // Note: We always generate a non-null value, even if the value's type is nullable.
     let value = match value_def.ty.as_ref() {
         executable::Type::Named(type_name) | executable::Type::NonNullNamed(type_name) => {
             let type_pos = schema.get_type(type_name.clone())?;
@@ -205,7 +211,8 @@ fn generate_witness_value(
                 TypeDefinitionPosition::Scalar(scalar_type_pos) => {
                     match scalar_type_pos.type_name.as_str() {
                         "Int" => ast::Value::Int(0.into()),
-                        "Float" => ast::Value::Float((3.1).into()),
+                        #[allow(clippy::approx_constant)]
+                        "Float" => ast::Value::Float((3.14).into()),
                         "Boolean" => ast::Value::Boolean(true),
                         "String" => ast::Value::String("A string value".to_string()),
                         // Users probably expect a particular format of ID at any particular place,
@@ -259,14 +266,14 @@ fn generate_witness_value(
 }
 
 fn display_reasons(reasons: &[Unadvanceables]) -> String {
-    let mut by_subgraph = MultiMap::new();
+    let mut by_subgraph = MultiIndexMap::new();
     for reason in reasons {
         for unadvanceable in reason.iter() {
             by_subgraph.insert(unadvanceable.source_subgraph(), unadvanceable)
         }
     }
     by_subgraph
-        .iter_all()
+        .iter()
         .filter_map(|(subgraph, reasons)| {
             let (first, rest) = reasons.split_first()?;
             let details = if rest.is_empty() {
@@ -281,10 +288,10 @@ fn display_reasons(reasons: &[Unadvanceables]) -> String {
                     .collect::<IndexSet<_>>();
                 let mut formatted_details = vec!["".to_string()]; // to add a newline
                 formatted_details
-                    .extend(all_details.iter().map(|details| format!(" - {details}.")));
+                    .extend(all_details.iter().map(|details| format!("  - {details}.")));
                 formatted_details.join("\n")
             };
-            Some(format!(r#"- from subgraph "{subgraph}": {details}"#))
+            Some(format!(r#"- from subgraph "{subgraph}":{details}"#))
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -434,7 +441,7 @@ mod tests {
 
         Query(test) --[t]--> T(test) --[someField]--> String(test): {
           t {
-            someField(boolArg: true, enumArg: A, floatArg: 3.1, listArg: [], myInputArg: {enumInput: A, intInput: 0}, numArg: 0, strArg: "A string value")
+            someField(boolArg: true, enumArg: A, floatArg: 3.14, listArg: [], myInputArg: {enumInput: A, intInput: 0}, numArg: 0, strArg: "A string value")
           }
         }
 

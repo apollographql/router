@@ -1,5 +1,3 @@
-pub(crate) mod transition_graph_path;
-
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -49,7 +47,9 @@ use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
 use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
@@ -859,7 +859,7 @@ impl Display for Unadvanceables {
 }
 
 impl Unadvanceables {
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -888,7 +888,7 @@ impl Display for Unadvanceable {
 }
 
 impl Unadvanceable {
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn reason(&self) -> &UnadvanceableReason {
         &self.reason
     }
@@ -901,7 +901,7 @@ impl Unadvanceable {
 
     /// Returns `self.to_subgraph`. It's named `dest_subgraph`, since `fn to_subgraph()` may
     /// be ambiguous with the Rust `to_*` convention.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn dest_subgraph(&self) -> &str {
         &self.to_subgraph
     }
@@ -1527,6 +1527,14 @@ where
                 arguments_to_context_usages,
             )
         }
+    }
+
+    pub(crate) fn head_node(&self) -> Result<&QueryGraphNode, FederationError> {
+        self.graph.node_weight(self.head)
+    }
+
+    pub(crate) fn tail_node(&self) -> Result<&QueryGraphNode, FederationError> {
+        self.graph.node_weight(self.tail)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
@@ -2486,6 +2494,31 @@ where
         } else {
             None
         })
+    }
+}
+
+// Query graph accessors
+// - `self` is used to access the underlying query graph, not its path data.
+// - These methods will be useful in other modules of the crate.
+impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
+where
+    TTrigger: GraphPathTriggerVariant + Display,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    pub(crate) fn schema_by_source(
+        &self,
+        source: &str,
+    ) -> Result<&ValidFederationSchema, FederationError> {
+        self.graph.schema_by_source(source)
+    }
+
+    pub(crate) fn edge_weight(
+        &self,
+        edge_index: EdgeIndex,
+    ) -> Result<&QueryGraphEdge, FederationError> {
+        self.graph.edge_weight(edge_index)
     }
 }
 

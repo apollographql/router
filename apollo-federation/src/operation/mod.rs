@@ -53,6 +53,8 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
+use crate::supergraph::GRAPHQL_STRING_TYPE_NAME;
+use crate::utils::MultiIndexMap;
 
 mod contains;
 mod directive_list;
@@ -976,37 +978,6 @@ pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
 use self::selection_map::OwnedSelectionKey;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
-
-/// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
-/// - Preserves the insertion order of keys and values.
-struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
-
-impl<K, V> Deref for MultiIndexMap<K, V> {
-    type Target = IndexMap<K, Vec<V>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<K, V> MultiIndexMap<K, V>
-where
-    K: Eq + Hash,
-{
-    fn new() -> Self {
-        Self(IndexMap::default())
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        self.0.entry(key).or_default().push(value);
-    }
-
-    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iterable: I) {
-        for (key, value) in iterable {
-            self.insert(key, value);
-        }
-    }
-}
 
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
@@ -2915,7 +2886,7 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
             // by create a fake selection set that just contains an ellipsis, indicate there is
             // supposed to be more but we elided it for clarity. And yes, the whole thing is a bit
             // of a hack, albeit a convenient one.
-            flattened.push(ellipsis_field(&val.type_position)?);
+            flattened.push(ellipsis_field()?);
         }
         Ok(Self {
             ty: val.type_position.type_name().clone(),
@@ -2925,9 +2896,7 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
 }
 
 /// Create a synthetic field named "...".
-fn ellipsis_field(
-    parent_type: &CompositeTypeDefinitionPosition,
-) -> Result<executable::Selection, FederationError> {
+fn ellipsis_field() -> Result<executable::Selection, FederationError> {
     let field_name = Name::new_unchecked("...");
     let field_def = ast::FieldDefinition {
         description: None,
@@ -2942,7 +2911,7 @@ fn ellipsis_field(
         name: field_name,
         arguments: vec![],
         directives: Default::default(),
-        selection_set: executable::SelectionSet::new(parent_type.type_name().clone()),
+        selection_set: executable::SelectionSet::new(GRAPHQL_STRING_TYPE_NAME),
     })))
 }
 
