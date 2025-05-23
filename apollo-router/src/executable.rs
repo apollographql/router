@@ -542,7 +542,7 @@ impl Executable {
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_KEY and APOLLO_OCI_REGISTRY_ENDPOINT
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
