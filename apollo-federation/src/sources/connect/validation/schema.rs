@@ -332,7 +332,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
             Ok(None) => continue,
             Err(_) => {
                 let variables = connector.variable_references().collect_vec();
-                messages.push(field_set_error(&variables, &connector, &schema));
+                messages.push(field_set_error(&variables, &connector, schema));
             }
             Ok(Some(field_set)) => {
                 entity_checker.add_connector(field_set);
