@@ -43,6 +43,7 @@ use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
+use crate::schema::validators::shareable::validate_shareable_directives;
 use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
@@ -140,6 +141,7 @@ impl FederationBlueprint {
         validate_requires_directives(schema, meta, &mut error_collector)?;
         validate_external_directives(schema, meta, &mut error_collector)?;
         validate_interface_object_directives(schema, meta, &mut error_collector)?;
+        validate_shareable_directives(schema, meta, &mut error_collector)?;
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
 
