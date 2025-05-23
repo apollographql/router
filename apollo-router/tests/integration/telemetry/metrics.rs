@@ -243,7 +243,7 @@ async fn test_graphql_metrics() {
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"my_custom_router_instrument_total{{my_response_body="{{\"data\":{{\"topProducts\":[{{\"name\":\"Table\"}},{{\"name\":\"Couch\"}},{{\"name\":\"Chair\"}}]}}",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            &format!(r#"my_custom_router_instrument_total{{my_response_body="{{\"data\":{{\"topProducts\":[{{\"name\":\"Table\"}},{{\"name\":\"Couch\"}},{{\"name\":\"Chair\"}}]}}}}",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:router",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
             None,
         )
         .await;
