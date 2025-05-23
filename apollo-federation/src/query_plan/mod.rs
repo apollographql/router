@@ -23,7 +23,6 @@ pub type QueryPlanCost = f64;
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
-    /// `cost` can be NaN, if the cost is not computed or irrelevant.
     pub statistics: QueryPlanningStatistics,
 }
 

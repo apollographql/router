@@ -172,6 +172,7 @@ impl Default for QueryPlannerDebugConfig {
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
+    /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     pub best_plan_cost: f64,
 }
 
