@@ -12,7 +12,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch/bat
         ],
     },
     Message {
-        code: GraphQLError,
+        code: ConnectorsCannotResolveKey,
         message: "Variables used in connector (`$batch { foo }`) on type `User` cannot be used to create a valid `@key` directive.",
         locations: [
             12:4..12:11,

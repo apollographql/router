@@ -124,7 +124,7 @@ pub(crate) fn field_set_error(
     schema: &Schema,
 ) -> Message {
     Message {
-        code: Code::GraphQLError,
+        code: Code::ConnectorsCannotResolveKey,
         message: format!(
             "Variables used in connector (`{}`) on type `{}` cannot be used to create a valid `@key` directive.",
             variables.iter().join("`, `"),
