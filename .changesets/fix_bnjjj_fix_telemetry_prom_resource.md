@@ -13,6 +13,6 @@ telemetry:
         enabled: true
 ```
 
-This bug only occurred with Prometheus and not OTLP.
+This bug only occurred with Prometheus and not OTLP. It will also adds the generic labels on prometheus metrics `process_executable_name`, `service_name` and `service_version`.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7394
