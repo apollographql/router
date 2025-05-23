@@ -45,6 +45,11 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
+#[cfg(target_os = "windows")]
+const PROCESS_EXECUTABLE_NAME: &str = "router.exe";
+#[cfg(not(target_os = "windows"))]
+const PROCESS_EXECUTABLE_NAME: &str = "router";
+
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1515,7 +1520,7 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.assert_started().await;
 
     let expected_metric = format!(
-        r#"apollo_router_cache_redis_connections{{kind="query planner",otel_scope_name="apollo/router",process_executable_name="router",service_name="unknown_service:router",service_version="{}"}} 4"#,
+        r#"apollo_router_cache_redis_connections{{kind="query planner",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 4"#,
         std::env!("CARGO_PKG_VERSION")
     );
     router.assert_metrics_contains(&expected_metric, None).await;

@@ -53,7 +53,7 @@ async fn test_trace_error() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full");
-    router.assert_metrics_contains(&format!(r#"apollo_router_telemetry_batch_processor_errors_total{{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:router",service_version="{}"}}"#, std::env!("CARGO_PKG_VERSION")), None).await;
+    router.assert_metrics_contains(&format!(r#"apollo_router_telemetry_batch_processor_errors_total{{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}}"#, std::env!("CARGO_PKG_VERSION")), None).await;
     router.graceful_shutdown().await;
 
     drop(mock_server);
