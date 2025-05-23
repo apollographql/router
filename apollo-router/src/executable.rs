@@ -228,7 +228,7 @@ pub struct Opt {
     /// The endpoint used to fetch the supergraph schema from the OCI registry.
     #[clap(long, env, action = ArgAction::Append)]
     // TODO: Update name to be final public name
-    apollo_oci_registry_endpoint: Option<String>,
+     graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
@@ -296,10 +296,10 @@ impl Opt {
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            url: self
-                .apollo_oci_registry_endpoint
+            reference: self
+                . graph_artifact_reference
                 .clone()
-                .ok_or(Self::err_require_opt("APOLLO_OCI_REGISTRY_ENDPOINT"))?,
+                .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
         })
     }
 
@@ -541,7 +541,7 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_OCI_REGISTRY_ENDPOINT
+        // 4. Env APOLLO_KEY and  GRAPH_ARTIFACT_REFERENCE
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
@@ -639,7 +639,7 @@ impl Executable {
                             return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
                     };
-                    match opt.apollo_oci_registry_endpoint {
+                    match opt. graph_artifact_reference {
                         None => SchemaSource::Registry(opt.uplink_config()?),
                         Some(_) => SchemaSource::OCI(opt.oci_config()?),
                     }
@@ -648,7 +648,7 @@ impl Executable {
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                match opt.apollo_oci_registry_endpoint {
+                match opt. graph_artifact_reference {
                     None => SchemaSource::Registry(opt.uplink_config()?),
                     Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }

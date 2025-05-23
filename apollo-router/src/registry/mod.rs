@@ -17,7 +17,7 @@ pub struct OciConfig {
     pub apollo_key: String,
 
     /// OCI Compliant URL pointing to the release bundle
-    pub url: String,
+    pub reference: String,
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +121,7 @@ async fn pull_oci(
 
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
-    let reference: Reference = oci_config.url.as_str().parse()?;
+    let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     pull_oci(&mut Client::default(), &auth, &reference).await
 }
