@@ -16,8 +16,8 @@ use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::graph_path::GraphPathItem;
-use crate::query_graph::graph_path::OpGraphPath;
-use crate::query_graph::graph_path::OpGraphPathTrigger;
+use crate::query_graph::graph_path::operation::OpGraphPath;
+use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
 use crate::utils::FallibleIterator;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
@@ -587,9 +587,9 @@ mod tests {
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
-    use crate::query_graph::graph_path::OpGraphPath;
-    use crate::query_graph::graph_path::OpGraphPathTrigger;
-    use crate::query_graph::graph_path::OpPathElement;
+    use crate::query_graph::graph_path::operation::OpGraphPath;
+    use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::operation::OpPathElement;
     use crate::query_graph::path_tree::OpPathTree;
     use crate::schema::ValidFederationSchema;
     use crate::schema::position::SchemaRootDefinitionKind;

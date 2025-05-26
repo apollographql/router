@@ -30,6 +30,7 @@ pub(crate) mod list_size;
 pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
+pub(crate) mod shareable;
 
 /// A trait for validating FieldSets used in schema directives. Do not use this
 /// to validate FieldSets used in operations. This will skip named fragments
