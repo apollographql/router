@@ -859,8 +859,8 @@ jobs:
                     # This is in-line with SemVer's expectations/designations!
                     *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
 
-                    # In all other cases, publish it as the latest version.
-                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
+                    # In 1.x, don't publish it as latest, but don't publish it as a pre-release either.
+                    *) gh release create $VERSION --latest=false --notes-file /dev/null --title $VERSION artifacts/* ;;
 
                   esac
             - run:
