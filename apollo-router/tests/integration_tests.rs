@@ -644,7 +644,7 @@ async fn input_object_variable_validation() {
         input MyInput
           @join__type(graph: SUBGRAPH1)
         {
-          coordinates: CoordinatesInput
+          coordinates: [CoordinatesInput]
         }
 
         type Query
@@ -657,7 +657,7 @@ async fn input_object_variable_validation() {
         .query("query($x: MyInput) { getData(params: $x) }")
         .variable(
             "x",
-            json!({"coordinates": {"latitude": 45.5, "longitude": null}}),
+            json!({"coordinates": [{"latitude": 45.5, "longitude": null}]}),
         )
         .build()
         .unwrap();
@@ -675,7 +675,7 @@ async fn input_object_variable_validation() {
     insta::assert_debug_snapshot!(&response.errors, @r###"
     [
         Error {
-            message: "invalid type for variable: 'x'",
+            message: "invalid input value at x.coordinates[0].longitude: found JSON null for GraphQL Float!",
             locations: [],
             path: None,
             extensions: {
