@@ -434,13 +434,13 @@ You can also chart the percentage of operations that would be allowed or rejecte
   width="600"
 />
 
-## Accessing Demand Control Data with Rhai
+## Accessing programmatically
 
-You can programmatically access demand control cost data using [Rhai scripts](/routing/customization/rhai). This can be useful for custom logging, decision making, or exposing cost data to clients.
+You can programmatically access demand control cost data using [Rhai scripts](/routing/customization/rhai) or Coprocessors. This can be useful for custom logging, decision making, or exposing cost data to clients.
 
-### Exposing Cost Estimates in Response Headers
+### Exposing cost in response headers
 
-You can access cost estimation data and expose it to clients through response headers using Rhai scripts. This is useful for debugging or providing transparency about query costs.
+It's possible to expose cost information in the HTTP response payload returned to clients, which can be useful for debugging. This can be accomplished via a Rhai script on the `supergraph_service` hook:
 
 ```rust
 fn supergraph_service(service) {
