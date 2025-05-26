@@ -860,10 +860,8 @@ jobs:
                   # Just do a dry-run for now on apollo-federation, since that's a leading
                   # indicator that the publish is going to work.  We don't do the attempt for
                   # router because it's dependent on apollo-federation, so it'll definitely fail.
-                  # Remove this comment (itself) and the --dry-run flag when it's showtime.
-                  cargo publish -p apollo-federation@${VERSION_WITHOUT_LEADING_V} --dry-run
-                  # Remove this comment, uncomment next line, and remove the --dry-run flag when it's showtime.
-                  # cargo publish -p apollo-router@${VERSION_WITHOUT_LEADING_V} --dry-run
+                  cargo publish -p apollo-federation@${VERSION_WITHOUT_LEADING_V}
+                  cargo publish -p apollo-router@${VERSION_WITHOUT_LEADING_V}
 
             - run:
                 name: Create GitHub Release
