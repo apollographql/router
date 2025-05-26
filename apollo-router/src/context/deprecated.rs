@@ -1,51 +1,76 @@
 //! Support 1.x context key names in 2.x.
 
-use crate::context::DEPRECATED_OPERATION_KIND;
-use crate::context::DEPRECATED_OPERATION_NAME;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::authentication::DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::DEPRECATED_AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::DEPRECATED_REQUIRED_POLICIES_KEY;
-use crate::plugins::authorization::DEPRECATED_REQUIRED_SCOPES_KEY;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
 use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
 use crate::plugins::demand_control::COST_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_ESTIMATED_KEY;
 use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::demand_control::COST_STRATEGY_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_ACTUAL_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_ESTIMATED_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_RESULT_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_STRATEGY_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_ENABLED_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_QUERY_PLAN_CONTEXT_KEY;
 use crate::plugins::expose_query_plan::ENABLED_CONTEXT_KEY;
 use crate::plugins::expose_query_plan::FORMATTED_QUERY_PLAN_CONTEXT_KEY;
 use crate::plugins::expose_query_plan::QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::progressive_override::DEPRECATED_LABELS_TO_OVERRIDE_KEY;
-use crate::plugins::progressive_override::DEPRECATED_UNRESOLVED_LABELS_KEY;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
-use crate::plugins::telemetry::DEPRECATED_CLIENT_NAME;
-use crate::plugins::telemetry::DEPRECATED_CLIENT_VERSION;
-use crate::plugins::telemetry::DEPRECATED_STUDIO_EXCLUDE;
-use crate::plugins::telemetry::DEPRECATED_SUBGRAPH_FTV1;
 use crate::plugins::telemetry::STUDIO_EXCLUDE;
 use crate::plugins::telemetry::SUBGRAPH_FTV1;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::query_planner::DEPRECATED_APOLLO_OPERATION_ID;
-use crate::services::DEPRECATED_FIRST_EVENT_CONTEXT_KEY;
 use crate::services::FIRST_EVENT_CONTEXT_KEY;
-use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_REGISTERED;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::apq::PERSISTED_QUERY_REGISTERED;
+
+// From crate::context
+pub(crate) const DEPRECATED_OPERATION_NAME: &str = "operation_name";
+pub(crate) const DEPRECATED_OPERATION_KIND: &str = "operation_kind";
+
+// crate::plugins::authentication
+pub(crate) const DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS: &str =
+    "apollo_authentication::JWT::claims";
+
+// crate::plugins::authorization
+pub(crate) const DEPRECATED_AUTHENTICATION_REQUIRED_KEY: &str =
+    "apollo_authorization::authenticated::required";
+pub(crate) const DEPRECATED_REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
+pub(crate) const DEPRECATED_REQUIRED_POLICIES_KEY: &str =
+    "apollo_authorization::policies::required";
+
+// crate::plugins::demand_control
+pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
+pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
+pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
+pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
+
+// crate::plugins::expose_query_plan
+pub(crate) const DEPRECATED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
+pub(crate) const DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str =
+    "experimental::expose_query_plan.formatted_plan";
+pub(crate) const DEPRECATED_ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
+
+// crate::plugins::progressive_override
+pub(crate) const DEPRECATED_UNRESOLVED_LABELS_KEY: &str = "apollo_override::unresolved_labels";
+pub(crate) const DEPRECATED_LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_override";
+
+// crate::plugins::telemetry
+pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
+pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
+pub(crate) const DEPRECATED_STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+
+// crate::query_planner::caching_query_planner
+pub(crate) const DEPRECATED_APOLLO_OPERATION_ID: &str = "apollo_operation_id";
+
+// crate::services::supergraph::service
+pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
+    "apollo_router::supergraph::first_event";
+
+// crate::services::layers::apq
+pub(crate) const DEPRECATED_PERSISTED_QUERY_CACHE_HIT: &str = "persisted_query_hit";
+pub(crate) const DEPRECATED_PERSISTED_QUERY_REGISTERED: &str = "persisted_query_register";
 
 /// Generate the function pair with a macro to be sure that they handle all the same keys.
 macro_rules! make_deprecated_key_conversions {
