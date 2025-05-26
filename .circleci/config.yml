@@ -852,7 +852,7 @@ jobs:
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
 
             - run:
-                name: Dry-run Publish to Crates.io
+                name: Publish to Crates.io
                 command: |
                   # Remove leading 'v' which is present on the Git tag; Cargo doesn't want that leading 'v'
                   VERSION_WITHOUT_LEADING_V="${VERSION#v}"
