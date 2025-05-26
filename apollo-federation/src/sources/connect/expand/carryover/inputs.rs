@@ -54,6 +54,11 @@ pub(super) fn copy_input_types(
         }
         match ty {
             ExtendedType::Scalar(node) => {
+                let references = from.referencers().scalar_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
+                    continue;
+                }
+
                 let pos = ScalarTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -63,6 +68,11 @@ pub(super) fn copy_input_types(
                 pos.insert(to, node).ok();
             }
             ExtendedType::Enum(node) => {
+                let references = from.referencers().enum_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
+                    continue;
+                }
+
                 let pos = EnumTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -72,6 +82,11 @@ pub(super) fn copy_input_types(
                 pos.insert(to, node).ok();
             }
             ExtendedType::InputObject(node) => {
+                let references = from.referencers().input_object_types.get(name);
+                if references.is_none_or(|refs| refs.len() == 0) {
+                    continue;
+                }
+
                 let pos = InputObjectTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
@@ -107,14 +122,14 @@ pub(super) fn copy_input_types(
 /// ```
 ///
 /// and a map of original subgraph names to new subgraph names:
-/// ```
+/// ```ignore
 /// {
 ///   "connectors-subgraph" => vec!["connectors-subgraph_Query_user_0", "connectors-subgraph_Query_users_0"]
 /// }
 /// ```
 ///
 /// Return a map of enum value replacements:
-/// ```
+/// ```ignore
 /// {
 ///   "CONNECTORS_SUBGRAPH" => vec!["CONNECTORS_SUBGRAPH_QUERY_USER_0", "CONNECTORS_SUBGRAPH_QUERY_USERS_0"],
 /// }

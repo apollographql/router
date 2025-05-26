@@ -465,6 +465,8 @@ impl Plugin for EntityCache {
     }
 }
 
+#[cfg(test)]
+pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl EntityCache {
     #[cfg(test)]
     pub(crate) async fn with_mocks(
@@ -491,7 +493,13 @@ impl EntityCache {
             enabled: true,
             expose_keys_in_context: true,
             subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph::default(),
+                all: Subgraph {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                    }),
+                    ..Default::default()
+                },
                 subgraphs,
             }),
             metrics: Metrics::default(),

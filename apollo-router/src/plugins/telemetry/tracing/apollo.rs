@@ -5,6 +5,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
@@ -41,6 +42,7 @@ impl TracingConfigurator for Config {
                     .expect("apollo_graph_ref is checked in the enabled function, qed"),
             )
             .schema_id(&self.schema_id)
+            .router_id(router_id())
             .buffer_size(self.buffer_size)
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
             .batch_config(&self.batch_processor)

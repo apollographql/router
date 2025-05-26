@@ -1,5 +1,4 @@
 use opentelemetry::Context;
-use opentelemetry::KeyValue;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
@@ -37,7 +36,6 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
             span.span_context.is_remote(),
             span.span_context.trace_state().clone(),
         );
-        span.attributes.push(KeyValue::new("_dd.measured", 1));
         self.delegate.on_end(span)
     }
 

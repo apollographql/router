@@ -1901,10 +1901,8 @@ async fn http_compressed_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             },
         }))
         .unwrap()
@@ -1953,10 +1951,8 @@ async fn http_deferred_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             }
         }))
         .unwrap()

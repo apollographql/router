@@ -232,8 +232,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     });
                 }
             };
-            if subscription_config.enable_deduplication {
-                request.to_sha256()
+            if subscription_config.deduplication.enabled {
+                request.to_sha256(&subscription_config.deduplication.ignored_headers)
             } else {
                 Uuid::new_v4().to_string()
             }
@@ -1682,6 +1682,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
+    use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -2348,7 +2349,7 @@ mod tests {
                     .into(),
                 }),
             },
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }

@@ -13,7 +13,7 @@ pub(super) use strings::GraphQLString;
 
 use crate::sources::connect::validation::link::ConnectLink;
 
-pub(super) struct SchemaInfo<'schema> {
+pub(crate) struct SchemaInfo<'schema> {
     pub(crate) schema: &'schema Schema,
     len: usize,
     lookup: LineColLookup<'schema>,

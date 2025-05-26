@@ -1,10 +1,13 @@
 //! This module is all about validating [`Expression`]s for a given context. This isn't done at
 //! runtime, _only_ during composition because it could be expensive.
 
+use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
@@ -15,6 +18,7 @@ use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
 
+use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
@@ -24,6 +28,7 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     Shape::record(
@@ -248,6 +253,40 @@ pub(crate) fn validate(
     context: &Context,
     expected_shape: &Shape,
 ) -> Result<(), Message> {
+    // TODO: this check should be done in the shape checking, but currently
+    // shape resolution can drop references to inputs if the expressions ends with
+    // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
+    // `Unknown`, so variables are dropped and cannot be checked.
+    for variable_ref in expression.expression.variable_references() {
+        let namespace = variable_ref.namespace.namespace;
+        if !context.var_lookup.contains_key(&namespace) {
+            let message = if namespace == Namespace::Batch {
+                "`$batch` may only be used when `@connect` is applied to a type.".to_string()
+            } else {
+                format!(
+                    "{} is not valid here, must be one of {}",
+                    namespace,
+                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                )
+            };
+            return Err(Message {
+                code: context.code,
+                message,
+                locations: variable_ref
+                    .location
+                    .iter()
+                    .filter_map(|location| {
+                        context.source.line_col_for_subslice(
+                            location.start + expression.location.start
+                                ..location.end + expression.location.start,
+                            context.schema,
+                        )
+                    })
+                    .collect(),
+            });
+        }
+    }
+
     let shape = expression.expression.shape();
 
     let actual_shape = resolve_shape(&shape, context, expression)?;
@@ -468,6 +507,68 @@ fn shape_name(shape: &Shape) -> &'static str {
         ShapeCase::None => "none",
         ShapeCase::Error(_) => "error",
     }
+}
+
+pub(crate) struct MappingArgument<'schema> {
+    pub(crate) expression: Expression,
+    pub(crate) string: GraphQLString<'schema>,
+}
+
+impl MappingArgument<'_> {
+    pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
+        self.expression.expression.variable_references()
+    }
+}
+
+pub(crate) fn parse_mapping_argument<'schema>(
+    node: &'schema Node<Value>,
+    coordinate: impl Display,
+    code: Code,
+    schema: &'schema SchemaInfo,
+) -> Result<MappingArgument<'schema>, Message> {
+    let Ok(string) = GraphQLString::new(node, &schema.sources) else {
+        return Err(Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must be a string."),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    };
+
+    let selection = match JSONSelection::parse(string.as_str()) {
+        Ok(selection) => selection,
+        Err(e) => {
+            return Err(Message {
+                code,
+                message: format!("{coordinate} is not valid: {e}"),
+                locations: string
+                    .line_col_for_subslice(e.offset..e.offset + 1, schema)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    };
+
+    if selection.is_empty() {
+        return Err(Message {
+            code,
+            message: format!("{coordinate} is empty"),
+            locations: node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    Ok(MappingArgument {
+        expression: Expression {
+            expression: selection,
+            location: 0..string.as_str().len(),
+        },
+        string,
+    })
 }
 
 #[cfg(test)]

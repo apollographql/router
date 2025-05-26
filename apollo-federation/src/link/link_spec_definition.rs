@@ -29,6 +29,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
@@ -46,12 +47,18 @@ pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); 
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
+    minimum_federation_version: Version,
 }
 
 impl LinkSpecDefinition {
-    pub(crate) fn new(version: Version, identity: Identity) -> Self {
+    pub(crate) fn new(
+        version: Version,
+        identity: Identity,
+        minimum_federation_version: Version,
+    ) -> Self {
         Self {
             url: Url { identity, version },
+            minimum_federation_version,
         }
     }
 
@@ -164,9 +171,10 @@ impl LinkSpecDefinition {
         //
         // So instead, we put the directive on the schema definition unless some extensions exists
         // but no definition does (that is, no non-extension elements are populated).
+        //
+        // Side-note: this test must be done _before_ we call `insert_directive`, otherwise it
+        // would take it into account.
 
-        // TODO: complete porting - used by `onDirectiveDefinitionAndSchemaParsed` in JS (FED-428)
-        // - need to port`SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
         let name = alias.as_ref().unwrap_or(&self.url.identity.name).clone();
         let mut arguments = vec![Node::new(ast::Argument {
             name: self.url_arg_name(),
@@ -178,8 +186,16 @@ impl LinkSpecDefinition {
                 value: alias.to_string().into(),
             }));
         }
-        SchemaDefinitionPosition
-            .insert_directive(schema, Component::new(Directive { name, arguments }))?;
+
+        let schema_definition = SchemaDefinitionPosition.get(schema.schema());
+        SchemaDefinitionPosition.insert_directive_at(
+            schema,
+            Component {
+                origin: schema_definition.origin_to_use(),
+                node: Node::new(Directive { name, arguments }),
+            },
+            0, // @link to link spec should be first
+        )?;
         Ok(())
     }
 
@@ -301,6 +317,10 @@ impl SpecDefinition for LinkSpecDefinition {
         specs
     }
 
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
+
     fn add_elements_to_schema(
         &self,
         _schema: &mut FederationSchema,
@@ -344,10 +364,12 @@ pub(crate) static CORE_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 1 },
             Identity::core_identity(),
+            Version { major: 1, minor: 0 },
         ));
         definitions.add(LinkSpecDefinition::new(
             Version { major: 0, minor: 2 },
             Identity::core_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });
@@ -357,6 +379,7 @@ pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Identity::link_identity(),
+            Version { major: 2, minor: 0 },
         ));
         definitions
     });

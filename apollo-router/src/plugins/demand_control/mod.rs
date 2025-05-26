@@ -20,6 +20,7 @@ use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -379,13 +380,23 @@ impl Plugin for DemandControl {
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
                         Err(err) => {
-                            emit_error_event(err.code(), "Demand control execution error");
+                            let graphql_errors = err
+                                .into_graphql_errors()
+                                .expect("must be able to convert to graphql error");
+                            graphql_errors.iter().for_each(|mapped_error| {
+                                if let Some(Value::String(error_code)) =
+                                    mapped_error.extensions.get("code")
+                                {
+                                    emit_error_event(
+                                        error_code.as_str(),
+                                        &mapped_error.message,
+                                        mapped_error.path.clone(),
+                                    );
+                                }
+                            });
                             ControlFlow::Break(
                                 execution::Response::builder()
-                                    .errors(
-                                        err.into_graphql_errors()
-                                            .expect("must be able to convert to graphql error"),
-                                    )
+                                    .errors(graphql_errors)
                                     .context(req.context.clone())
                                     .build()
                                     .expect("Must be able to build response"),
