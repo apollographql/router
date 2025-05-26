@@ -1251,7 +1251,6 @@ type Query {
             // sure we still accept definition where it's mandatory.
             r#"
                 extend schema
-                  @link(url: "https://specs.apollo.dev/link/v1.0")
                   @link(
                     url: "https://specs.apollo.dev/federation/v2.0"
                     import: ["@key"]
@@ -1572,10 +1571,11 @@ mod federation_1_schema_tests {
 }
 
 mod shareable_tests {
+    use apollo_federation::subgraph::test_utils::build_inner;
+
     use super::*;
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn can_only_be_applied_to_fields_of_object_types() {
         let doc = r#"
             interface I {
@@ -1592,7 +1592,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_duplicate_shareable_on_the_same_definition_declaration() {
         let doc = r#"
             type E @shareable @key(fields: "id") @shareable {
@@ -1610,7 +1609,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_the_same_extension_declaration() {
         let doc = r#"
             type E @shareable {
@@ -1632,7 +1630,6 @@ mod shareable_tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"subgraph error was expected: "#)]
     fn rejects_duplicate_shareable_on_a_field() {
         let doc = r#"
             type E {
@@ -1646,6 +1643,21 @@ mod shareable_tests {
                 r#"[S] Invalid duplicate application of @shareable on field "E.a": @shareable is only repeatable on types so it can be used simultaneously on a type definition and its extensions, but it should not be duplicated on the same definition/extension declaration"#
             )]
         );
+    }
+
+    #[test]
+    fn allows_shareable_on_declaration_and_extension_of_same_type() {
+        let doc = r#"
+            type E @shareable {
+                id: ID!
+                a: Int
+            }
+
+            extend type E @shareable {
+                b: Int
+            }
+        "#;
+        assert!(build_inner(doc, BuildOption::AsFed2).is_ok());
     }
 }
 
@@ -2015,5 +2027,90 @@ mod list_size_tests {
                 r#"[S] Sized field "A.notList" is not a list"#
             )]
         );
+    }
+}
+
+mod tag_tests {
+    use super::*;
+
+    #[test]
+    fn errors_on_tag_missing_required_argument() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag on FIELD_DEFINITION
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": Missing required argument "name""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_unknown_argument() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: String!, foo: Int) repeatable on FIELD_DEFINITION | OBJECT
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": unknown/unsupported argument "foo""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_wrong_argument_type() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: Int!) repeatable on FIELD_DEFINITION | OBJECT
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": argument "name" should have type "String!" but found type "Int!""#
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_tag_with_wrong_locations() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | SCHEMA
+        "#;
+        assert_errors!(
+            build_for_errors_with_option(doc, BuildOption::AsIs),
+            [(
+                "DIRECTIVE_DEFINITION_INVALID",
+                r#"[S] Invalid definition for directive "@tag": "@tag" should have locations FIELD_DEFINITION, OBJECT, INTERFACE, UNION, ARGUMENT_DEFINITION, SCALAR, ENUM, ENUM_VALUE, INPUT_OBJECT, INPUT_FIELD_DEFINITION, but found (non-subset) FIELD_DEFINITION, OBJECT, SCHEMA"#
+            )]
+        );
+    }
+
+    #[test]
+    fn allows_tag_with_valid_subset_of_locations() {
+        let doc = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            type T @tag(name: "foo") { x: Int }
+
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE
+        "#;
+        let _ = build_and_validate(doc);
     }
 }

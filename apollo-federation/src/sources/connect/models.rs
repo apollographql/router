@@ -4,6 +4,7 @@ mod keys;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
@@ -321,6 +322,16 @@ impl Connector {
             .clone()
             .unwrap_or_else(|| self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
+    }
+
+    /// Get the name of the `@connect` directive associated with this [`Connector`] instance.
+    ///
+    /// The [`Name`] can be used to help locate the connector within a source file.
+    pub fn name(&self) -> Name {
+        match &self.id.directive {
+            ConnectorPosition::Field(field_position) => field_position.directive_name.clone(),
+            ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
+        }
     }
 }
 

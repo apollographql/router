@@ -38,6 +38,7 @@ use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::GraphPath;
+use crate::query_graph::graph_path::GraphPathTriggerVariant;
 use crate::query_graph::graph_path::IndirectPaths;
 use crate::query_graph::graph_path::OverrideId;
 use crate::query_graph::path_tree::Preference;
@@ -69,6 +70,24 @@ impl Display for OpGraphPathTrigger {
         match self {
             OpGraphPathTrigger::OpPathElement(ele) => ele.fmt(f),
             OpGraphPathTrigger::Context(ctx) => ctx.fmt(f),
+        }
+    }
+}
+
+impl GraphPathTriggerVariant for OpGraphPathTrigger {
+    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
+                Some(field.field_position.parent())
+            }
+            _ => None,
+        }
+    }
+
+    fn get_field_mut(&mut self) -> Option<&mut Field> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => Some(field),
+            _ => None,
         }
     }
 }
