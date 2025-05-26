@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.61.7] - 2025-05-26
 
-## 🚀 Features
+## 🔍 Debuggability
 
 ### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
 
