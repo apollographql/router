@@ -8,8 +8,8 @@ use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
 use crate::error::SingleFederationError;
-use crate::merge::error_reporter::ErrorReporter;
-use crate::merge::hints::HintCode;
+use crate::merger::error_reporter::ErrorReporter;
+use crate::merger::hints::HintCode;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
