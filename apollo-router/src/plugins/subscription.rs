@@ -721,19 +721,19 @@ fn ensure_id_consistency(
     id_from_path: &str,
     id_from_body: &str,
 ) -> Result<(), router::Response> {
-    (id_from_path != id_from_body)
-        .then(|| {
-            Err(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(router::body::from_bytes(
-                        "id from url path and id from body are different",
-                    ))
-                    .expect("this body is valid"),
-                context: context.clone(),
-            })
+    if id_from_path != id_from_body {
+        Err(router::Response {
+            response: http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(router::body::from_bytes(
+                    "id from url path and id from body are different",
+                ))
+                .expect("this body is valid"),
+            context: context.clone(),
         })
-        .unwrap_or_else(|| Ok(()))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
