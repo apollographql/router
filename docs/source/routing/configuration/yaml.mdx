@@ -180,6 +180,19 @@ The router can serve a landing page to browsers that visit its endpoint path (`s
     enabled: false
   ```
 
+- Sending users to Apollo Explorer
+
+  ```yaml title="router.yaml"
+  homepage:
+    graph_ref: my-org-graph@production
+  ```
+
+  When you specify a `graph_ref`, the router's landing page includes an option for users to redirect to Apollo Explorer. Users can check a box that will remember their preference and automatically redirect them to Explorer on subsequent visits.
+
+  <Note>
+  The `graph_ref` value should match the format `organization-name@variant-name`, which is the same format used with the `APOLLO_GRAPH_REF` environment variable. Note that the router does not automatically use the value from the `APOLLO_GRAPH_REF` environment variable for this setting - you must explicitly set `graph_ref` in your YAML configuration even if you're already using the environment variable.
+  </Note>
+
 ---
 
 <IncludeSubErr /> 
