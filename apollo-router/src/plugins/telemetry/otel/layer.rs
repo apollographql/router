@@ -817,7 +817,7 @@ where
                 forced_span_name: None,
             });
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_new_span: Span not found, this is a bug");
         }
     }
 
@@ -838,7 +838,7 @@ where
                 timings.last = now;
             }
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_enter: Span not found, this is a bug");
         }
     }
 
@@ -859,7 +859,7 @@ where
                 timings.last = now;
             }
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_exit: Span not found, this is a bug");
         }
     }
 
@@ -880,7 +880,7 @@ where
                 });
             }
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_record: Span not found, this is a bug");
         }
     }
 
@@ -918,7 +918,7 @@ where
                 data.builder.links = Some(vec![follows_link]);
             }
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_follows_from: Span not found, this is a bug");
         }
     }
 
@@ -1062,7 +1062,7 @@ where
                     .start_with_context(&self.tracer, &parent_cx);
             }
         } else {
-            eprintln!("Span not found, this is a bug");
+            eprintln!("OpenTelemetryLayer::on_close: Span not found, this is a bug");
         }
     }
 
