@@ -93,6 +93,7 @@ impl PersistedQueryLayer {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -135,6 +136,7 @@ impl PersistedQueryLayer {
     }
 
     /// Places an operation body on a [`SupergraphRequest`] if it has been persisted
+    #[allow(clippy::result_large_err)]
     pub(crate) fn replace_query_id_with_operation_body(
         &self,
         mut request: SupergraphRequest,

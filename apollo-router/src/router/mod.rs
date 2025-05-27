@@ -411,7 +411,7 @@ mod tests {
 
         // let's push a valid configuration to the state machine, so it can start up
         router_handle
-            .send_event(UpdateConfiguration(configuration))
+            .send_event(UpdateConfiguration(Arc::new(configuration)))
             .await
             .unwrap();
         router_handle
@@ -454,10 +454,10 @@ mod tests {
         let mut router_handle = TestRouterHttpServer::new();
         // let's push a valid configuration to the state machine, so it can start up
         router_handle
-            .send_event(UpdateConfiguration(
+            .send_event(UpdateConfiguration(Arc::new(
                 Configuration::from_str(include_str!("../testdata/supergraph_config.router.yaml"))
                     .unwrap(),
-            ))
+            )))
             .await
             .unwrap();
         router_handle
