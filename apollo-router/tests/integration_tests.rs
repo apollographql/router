@@ -561,7 +561,7 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let response = serde_json::from_slice::<graphql::Response>(
+    let mut response = serde_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -572,36 +572,23 @@ async fn missing_variables() {
     )
     .unwrap();
 
-    insta::assert_debug_snapshot!(&response.errors, @r###"
-    [
-        Error {
-            message: "missing variable `$missingVariable`: for required GraphQL type `Int!`",
-            locations: [],
-            path: None,
-            extensions: {
-                "name": String(
-                    "missingVariable",
-                ),
-                "code": String(
-                    "VALIDATION_INVALID_TYPE_VARIABLE",
-                ),
-            },
-        },
-        Error {
-            message: "missing variable `$yetAnotherMissingVariable`: for required GraphQL type `ID!`",
-            locations: [],
-            path: None,
-            extensions: {
-                "name": String(
-                    "yetAnotherMissingVariable",
-                ),
-                "code": String(
-                    "VALIDATION_INVALID_TYPE_VARIABLE",
-                ),
-            },
-        },
-    ]
-    "###);
+    let mut expected = vec![
+        graphql::Error::builder()
+            .message("missing variable `$missingVariable`: for required GraphQL type `Int!`")
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
+            .extension("name", "missingVariable")
+            .build(),
+        graphql::Error::builder()
+            .message(
+                "missing variable `$yetAnotherMissingVariable`: for required GraphQL type `ID!`",
+            )
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
+            .extension("name", "yetAnotherMissingVariable")
+            .build(),
+    ];
+    response.errors.sort_by_key(|e| e.message.clone());
+    expected.sort_by_key(|e| e.message.clone());
+    assert_eq!(response.errors, expected);
 }
 
 /// <https://github.com/apollographql/router/issues/2984>
