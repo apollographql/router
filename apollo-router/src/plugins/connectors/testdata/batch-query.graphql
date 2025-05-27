@@ -63,7 +63,7 @@ type Query
 
 type User
   @join__type(graph: CONNECTORS)
-  @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/user-details?ids={$batch.id->joinNotNull(',')}"}, selection: "id name username"})
+  @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/user-details?ids={$batch.id->joinNotNull(','->urlSafe)}"}, selection: "id name username"})
 {
   id: ID!
   name: String

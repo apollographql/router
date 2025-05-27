@@ -39,11 +39,7 @@ fn get_method(
             None,
             vec![ApplyToError::new(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         );
@@ -70,11 +66,7 @@ fn get_method(
                                     method_name.as_ref(),
                                     i,
                                 ),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 index_literal.range(),
                             ),
                         ),
@@ -102,11 +94,7 @@ fn get_method(
                                     method_name.as_ref(),
                                     i,
                                 ),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 index_literal.range(),
                             ),
                         ),
@@ -123,11 +111,7 @@ fn get_method(
                             "Method ->{} requires an integer index",
                             method_name.as_ref()
                         ),
-                        input_path
-                            .to_vec()
-                            .into_iter()
-                            .map(|safe_json| safe_json.into())
-                            .collect(),
+                        input_path.to_vec(),
                         index_literal.range(),
                     ),
                 ),
@@ -142,11 +126,7 @@ fn get_method(
                             method_name.as_ref(),
                             json_type_name(data),
                         ),
-                        input_path
-                            .to_vec()
-                            .into_iter()
-                            .map(|safe_json| safe_json.into())
-                            .collect(),
+                        input_path.to_vec(),
                         method_name.range(),
                     ),
                 ),
@@ -167,11 +147,7 @@ fn get_method(
                                     method_name.as_ref(),
                                     key
                                 ),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 index_literal.range(),
                             ),
                         ),
@@ -188,11 +164,7 @@ fn get_method(
                             method_name.as_ref(),
                             key
                         ),
-                        input_path
-                            .to_vec()
-                            .into_iter()
-                            .map(|safe_json| safe_json.into())
-                            .collect(),
+                        input_path.to_vec(),
                         merge_ranges(
                             method_name.range(),
                             method_args.and_then(|args| args.range()),
@@ -211,11 +183,7 @@ fn get_method(
                         method_name.as_ref(),
                         value,
                     ),
-                    input_path
-                        .to_vec()
-                        .into_iter()
-                        .map(|safe_json| safe_json.into())
-                        .collect(),
+                    input_path.to_vec(),
                     index_literal.range(),
                 ),
             ),
@@ -229,11 +197,7 @@ fn get_method(
                         "Method ->{} received undefined argument",
                         method_name.as_ref()
                     ),
-                    input_path
-                        .to_vec()
-                        .into_iter()
-                        .map(|safe_json| safe_json.into())
-                        .collect(),
+                    input_path.to_vec(),
                     index_literal.range(),
                 ),
             ),

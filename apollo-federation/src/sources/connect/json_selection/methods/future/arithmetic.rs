@@ -55,11 +55,7 @@ pub(super) fn arithmetic_method(
                                         method_name.as_ref(),
                                         n
                                     ),
-                                    input_path
-                                        .to_vec()
-                                        .into_iter()
-                                        .map(|safe_json| safe_json.into())
-                                        .collect(),
+                                    input_path.to_vec(),
                                     arg.range(),
                                 ),
                             ),
@@ -75,11 +71,7 @@ pub(super) fn arithmetic_method(
                                     "Method ->{} requires numeric arguments",
                                     method_name.as_ref()
                                 ),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 arg.range(),
                             ),
                         ),
@@ -95,11 +87,7 @@ pub(super) fn arithmetic_method(
                         "Method ->{} requires numeric arguments",
                         method_name.as_ref()
                     ),
-                    input_path
-                        .to_vec()
-                        .into_iter()
-                        .map(|safe_json| safe_json.into())
-                        .collect(),
+                    input_path.to_vec(),
                     method_name.range(),
                 )],
             )
@@ -112,11 +100,7 @@ pub(super) fn arithmetic_method(
                     "Method ->{} requires at least one argument",
                     method_name.as_ref()
                 ),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         )

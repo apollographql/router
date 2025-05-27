@@ -40,11 +40,7 @@ fn eq_method(
                 "Method ->{} requires exactly one argument",
                 method_name.as_ref()
             ),
-            input_path
-                .to_vec()
-                .into_iter()
-                .map(|safe_json| safe_json.into())
-                .collect(),
+            input_path.to_vec(),
             method_name.range(),
         )],
     )

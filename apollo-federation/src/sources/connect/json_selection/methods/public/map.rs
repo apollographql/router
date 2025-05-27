@@ -39,11 +39,7 @@ fn map_method(
             None,
             vec![ApplyToError::new(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         );
@@ -53,11 +49,7 @@ fn map_method(
             None,
             vec![ApplyToError::new(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         );

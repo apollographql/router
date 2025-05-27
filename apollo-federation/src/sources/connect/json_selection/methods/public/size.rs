@@ -35,11 +35,7 @@ fn size_method(
                     "Method ->{} does not take any arguments",
                     method_name.as_ref()
                 ),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         );
@@ -68,11 +64,7 @@ fn size_method(
                     method_name.as_ref(),
                     json_type_name(data),
                 ),
-                input_path
-                    .to_vec()
-                    .into_iter()
-                    .map(|safe_json| safe_json.into())
-                    .collect(),
+                input_path.to_vec(),
                 method_name.range(),
             )],
         ),

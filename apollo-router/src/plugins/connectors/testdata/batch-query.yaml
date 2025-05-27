@@ -15,7 +15,7 @@ subgraphs:
 
         type User
           @connect(source: "json"
-            http: { GET: "/users-details/?ids={$$batch.id->joinNotNull(',')}" }
+            http: { GET: "/users-details/?ids={$$batch.id->joinNotNull(','->urlSafe)}" }
             selection: "id name username"
           )
         {

@@ -46,11 +46,7 @@ fn join_not_null_method(
                 "Method ->{} requires a string argument",
                 method_name.as_ref()
             ),
-            input_path
-                .to_vec()
-                .into_iter()
-                .map(|safe_json| safe_json.into())
-                .collect(),
+            input_path.to_vec(),
             method_name.range(),
         ));
         return (None, warnings);
@@ -70,11 +66,7 @@ fn join_not_null_method(
                     .as_ref()
                     .map_or("null".to_string(), |s| s.to_string())
             ),
-            input_path
-                .to_vec()
-                .into_iter()
-                .map(|safe_json| safe_json.into())
-                .collect(),
+            input_path.to_vec(),
             method_name.range(),
         ));
         return (None, warnings);
@@ -109,11 +101,7 @@ fn join_not_null_method(
                     Err(err) => {
                         warnings.push(ApplyToError::new(
                             err,
-                            input_path
-                                .to_vec()
-                                .into_iter()
-                                .map(|safe_json| safe_json.into())
-                                .collect(),
+                            input_path.to_vec(),
                             method_name.range(),
                         ));
                         return (None, warnings);
@@ -129,11 +117,7 @@ fn join_not_null_method(
             Err(err) => {
                 warnings.push(ApplyToError::new(
                     err,
-                    input_path
-                        .to_vec()
-                        .into_iter()
-                        .map(|safe_json| safe_json.into())
-                        .collect(),
+                    input_path.to_vec(),
                     method_name.range(),
                 ));
                 return (None, warnings);

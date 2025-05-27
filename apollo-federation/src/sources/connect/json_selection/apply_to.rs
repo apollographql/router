@@ -177,12 +177,12 @@ pub(super) trait ApplyToInternal {
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct ApplyToError {
     message: String,
-    path: Vec<JSON>,
+    path: Vec<SafeJSON>,
     range: OffsetRange,
 }
 
 impl ApplyToError {
-    pub(crate) const fn new(message: String, path: Vec<JSON>, range: OffsetRange) -> Self {
+    pub(crate) const fn new(message: String, path: Vec<SafeJSON>, range: OffsetRange) -> Self {
         Self {
             message,
             path,
@@ -196,7 +196,15 @@ impl ApplyToError {
     pub(crate) fn from_json(json: &JSON) -> Self {
         let error = json.as_object().unwrap();
         let message = error.get("message").unwrap().as_str().unwrap().to_string();
-        let path = error.get("path").unwrap().as_array().unwrap().clone();
+        let path = error
+            .get("path")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone()
+            .iter()
+            .map(|v| v.into())
+            .collect::<Vec<_>>();
         let range = error.get("range").unwrap().as_array().unwrap();
 
         Self {
@@ -216,7 +224,7 @@ impl ApplyToError {
         self.message.as_str()
     }
 
-    pub fn path(&self) -> &[JSON] {
+    pub fn path(&self) -> &[SafeJSON] {
         self.path.as_slice()
     }
 
@@ -346,11 +354,7 @@ impl ApplyToInternal for NamedSelection {
                             key.dotted(),
                             json_type_name(data),
                         ),
-                        input_path_with_key
-                            .to_vec()
-                            .into_iter()
-                            .map(|safe_json| safe_json.into())
-                            .collect(),
+                        input_path_with_key.to_vec(),
                         key.range(),
                     ));
                 }
@@ -382,22 +386,14 @@ impl ApplyToInternal for NamedSelection {
                         Some(value) => {
                             errors.push(ApplyToError::new(
                                 format!("Expected object or null, not {}", json_type_name(&value)),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 path.range(),
                             ));
                         }
                         None => {
                             errors.push(ApplyToError::new(
                                 "Expected object or null, not nothing".to_string(),
-                                input_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path.to_vec(),
                                 path.range(),
                             ));
                         }
@@ -405,7 +401,7 @@ impl ApplyToInternal for NamedSelection {
                 } else {
                     errors.push(ApplyToError::new(
                         "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
-                        input_path.to_vec().into_iter().map(|safe_json| safe_json.into()).collect(),
+                        input_path.to_vec(),
                         path.range(),
                     ));
                 }
@@ -566,11 +562,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                         vec![ApplyToError::new(
                             format!("Variable {} not found", var_name.as_str()),
-                            input_path
-                                .to_vec()
-                                .into_iter()
-                                .map(|safe_json| safe_json.into())
-                                .collect(),
+                            input_path.to_vec(),
                             ranged_var_name.range(),
                         )],
                     )
@@ -607,11 +599,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                     key.dotted(),
                                     json_type_name(data),
                                 ),
-                                input_path_with_key
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path_with_key.to_vec(),
                                 key.range(),
                             )],
                         );
@@ -625,11 +613,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                     key.dotted(),
                                     json_type_name(data),
                                 ),
-                                input_path_with_key
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                input_path_with_key.to_vec(),
                                 key.range(),
                             )],
                         );
@@ -651,11 +635,7 @@ impl ApplyToInternal for WithRange<PathList> {
                             None,
                             vec![ApplyToError::new(
                                 format!("Method ->{} not found", method_name.as_ref()),
-                                method_path
-                                    .to_vec()
-                                    .into_iter()
-                                    .map(|safe_json| safe_json.into())
-                                    .collect(),
+                                method_path.to_vec(),
                                 method_name.range(),
                             )],
                         )
@@ -947,17 +927,11 @@ impl ApplyToInternal for SubSelection {
 
             let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
 
-            errors.extend(merge_errors.into_iter().map(|message| {
-                ApplyToError::new(
-                    message,
-                    input_path
-                        .to_vec()
-                        .into_iter()
-                        .map(|safe_json| safe_json.into())
-                        .collect(),
-                    self.range(),
-                )
-            }));
+            errors.extend(
+                merge_errors
+                    .into_iter()
+                    .map(|message| ApplyToError::new(message, input_path.to_vec(), self.range())),
+            );
 
             if let Some(merged) = merged {
                 output = merged;
@@ -1256,7 +1230,7 @@ mod tests {
         fn make_yellow_errors_expected(yellow_range: std::ops::Range<usize>) -> Vec<ApplyToError> {
             vec![ApplyToError::new(
                 "Property .yellow not found in object".to_string(),
-                vec![json!("yellow")],
+                vec![json!("yellow").into()],
                 Some(yellow_range),
             )]
         }
@@ -1281,7 +1255,7 @@ mod tests {
                 None,
                 vec![ApplyToError::new(
                     "Property .\"yellow\" not found in object".to_string(),
-                    vec![json!("nested"), json!("yellow")],
+                    vec![json!("nested").into(), json!("yellow").into()],
                     Some(yellow_range),
                 )],
             )
@@ -1775,7 +1749,7 @@ mod tests {
                 Some(json!({})),
                 vec![ApplyToError::new(
                     "Property .\"Product\" not found in object".to_string(),
-                    vec![json!("Product")],
+                    vec![json!("Product").into()],
                     Some(14..23),
                 )],
             ),
@@ -2397,20 +2371,20 @@ mod tests {
                     ApplyToError::new(
                         "Property .role not found in string".to_string(),
                         vec![
-                            json!("choices"),
-                            json!("->first"),
-                            json!("message"),
-                            json!("role"),
+                            json!("choices").into(),
+                            json!("->first").into(),
+                            json!("message").into(),
+                            json!("role").into(),
                         ],
                         Some(123..127),
                     ),
                     ApplyToError::new(
                         "Property .content not found in string".to_string(),
                         vec![
-                            json!("choices"),
-                            json!("->first"),
-                            json!("message"),
-                            json!("content"),
+                            json!("choices").into(),
+                            json!("->first").into(),
+                            json!("message").into(),
+                            json!("content").into(),
                         ],
                         Some(128..135),
                     ),
@@ -2453,7 +2427,11 @@ mod tests {
                 vec![
                     ApplyToError::new(
                         "Property .nonexistent not found in string".to_string(),
-                        vec![json!("nested"), json!("path"), json!("nonexistent")],
+                        vec![
+                            json!("nested").into(),
+                            json!("path").into(),
+                            json!("nonexistent").into()
+                        ],
                         Some(15..26),
                     ),
                     ApplyToError::new(

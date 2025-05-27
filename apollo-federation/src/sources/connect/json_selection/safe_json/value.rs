@@ -46,6 +46,20 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        match *self {
+            Value::Number(ref n) => n.as_u64(),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match *self {
+            Value::String(ref s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
 }
 
 impl AsRef<Value> for Value {
