@@ -177,9 +177,6 @@ fn validate_selection_format(
     from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
 ) -> SelectionType {
-    // For now, implement a simple heuristic-based approach
-    // A more sophisticated approach would require proper GraphQL parsing
-
     let trimmed = selection.trim();
 
     if trimmed.is_empty() {
