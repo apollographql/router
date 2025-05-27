@@ -285,14 +285,14 @@ fn is_valid_implementation_field_type(
         if implemented_field_type.is_non_null() {
             // Both are NonNull, check their inner types
             return is_valid_implementation_field_type(
-                &field_type.item_type(),
-                &implemented_field_type.item_type(),
+                field_type.item_type(),
+                implemented_field_type.item_type(),
             );
         } else {
             // field_type is NonNull but implemented_field_type is nullable
             // This is valid - NonNull can implement nullable
             return is_valid_implementation_field_type(
-                &field_type.item_type(),
+                field_type.item_type(),
                 implemented_field_type,
             );
         }
@@ -301,8 +301,8 @@ fn is_valid_implementation_field_type(
     // If both are List types
     if field_type.is_list() && implemented_field_type.is_list() {
         return is_valid_implementation_field_type(
-            &field_type.item_type(),
-            &implemented_field_type.item_type(),
+            field_type.item_type(),
+            implemented_field_type.item_type(),
         );
     }
 
