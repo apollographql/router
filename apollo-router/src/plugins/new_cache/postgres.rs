@@ -1,0 +1,360 @@
+use std::{collections::HashMap, time::Duration};
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sqlx::{
+    Acquire, PgPool,
+    postgres::PgPoolOptions,
+    types::chrono::{DateTime, Utc},
+};
+
+use super::cache_control::CacheControl;
+
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub(crate) struct CacheEntryRow {
+    pub(crate) id: i64,
+    pub(crate) cache_key: String,
+    pub(crate) data: String,
+    pub(crate) expires_at: DateTime<Utc>,
+    pub(crate) control: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CacheEntry {
+    pub(crate) id: i64,
+    pub(crate) cache_key: String,
+    pub(crate) data: serde_json_bytes::Value,
+    pub(crate) expires_at: DateTime<Utc>,
+    pub(crate) control: CacheControl,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BatchDocument {
+    pub(crate) cache_key: String,
+    pub(crate) data: String,
+    pub(crate) control: String,
+    pub(crate) invalidation_keys: Vec<String>,
+    pub(crate) expire: Duration,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Postgres cache configuration
+pub(crate) struct PostgresCacheConfig {
+    /// List of URL to Postgres
+    pub(crate) url: url::Url,
+
+    /// PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL
+    pub(crate) username: Option<String>,
+    /// PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL
+    pub(crate) password: Option<String>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// PostgreSQL request timeout (default: 4mins)
+    pub(crate) timeout: Option<Duration>,
+
+    // #[serde(default)]
+    // /// TLS client configuration
+    // pub(crate) tls: Option<TlsClient>,
+    #[serde(default = "default_required_to_start")]
+    /// Prevents the router from starting if it cannot connect to PostgreSQL
+    pub(crate) required_to_start: bool,
+
+    // #[serde(default = "default_reset_ttl")]
+    // /// When a TTL is set on a key, reset it when reading the data from that key
+    // pub(crate) reset_ttl: bool,
+    #[serde(default = "default_pool_size")]
+    /// The size of the PostgreSQL connection pool
+    pub(crate) pool_size: u32,
+}
+
+fn default_required_to_start() -> bool {
+    false
+}
+
+fn default_pool_size() -> u32 {
+    5
+}
+
+impl TryFrom<CacheEntryRow> for CacheEntry {
+    type Error = serde_json::Error;
+
+    fn try_from(value: CacheEntryRow) -> Result<Self, Self::Error> {
+        let data = serde_json::from_str(&value.data)?;
+        let control = serde_json::from_str(&value.control)?;
+        Ok(Self {
+            id: value.id,
+            cache_key: value.cache_key,
+            data,
+            expires_at: value.expires_at,
+            control,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct PostgresCacheStorage {
+    pg_pool: PgPool,
+}
+
+impl PostgresCacheStorage {
+    pub(crate) async fn new(conf: &PostgresCacheConfig) -> sqlx::Result<Self> {
+        let pg_pool = PgPoolOptions::new()
+            .max_connections(conf.pool_size)
+            .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+            .connect(conf.url.as_ref())
+            .await?;
+        Ok(Self { pg_pool })
+    }
+
+    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
+        sqlx::migrate!().run(&self.pg_pool).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn truncate(&self) -> anyhow::Result<()> {
+        let mut conn = self.pg_pool.acquire().await?;
+        let mut transaction = conn.begin().await?;
+        let tx = &mut transaction;
+
+        sqlx::query!("TRUNCATE TABLE cache CASCADE")
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query!("TRUNCATE TABLE invalidation_key")
+            .execute(&mut **tx)
+            .await?;
+
+        transaction.commit().await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn insert(
+        &self,
+        cache_key: &str,
+        expire: Duration,
+        invalidation_keys: Vec<String>,
+        value: serde_json_bytes::Value,
+        control: CacheControl,
+        subgraph_name: &str,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.pg_pool.acquire().await?;
+        let mut transaction = conn.begin().await?;
+        let tx = &mut transaction;
+
+        let expired_at = Utc::now() + expire;
+        let value_str = serde_json::to_string(&value)?;
+        let control_str = serde_json::to_string(&control)?;
+        let rec = sqlx::query!(
+            r#"
+        INSERT INTO cache ( cache_key, data, control, expires_at )
+        VALUES ( $1, $2, $3, $4 )
+        ON CONFLICT (cache_key) DO UPDATE SET data = $2, control = $3, expires_at = $4
+        RETURNING id
+                "#,
+            cache_key,
+            value_str,
+            control_str,
+            expired_at
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        for invalidation_key in invalidation_keys {
+            sqlx::query!(
+                r#"INSERT into invalidation_key (cache_key_id, invalidation_key, subgraph_name) VALUES ($1, $2, $3) ON CONFLICT (cache_key_id, invalidation_key, subgraph_name) DO NOTHING"#,
+                rec.id,
+                &invalidation_key,
+                subgraph_name
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        transaction.commit().await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn insert_in_batch(
+        &self,
+        batch_docs: Vec<BatchDocument>,
+        subgraph_name: &str,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.pg_pool.acquire().await?;
+
+        let batch_docs = batch_docs.chunks(100);
+        for batch_docs in batch_docs {
+            let mut transaction = conn.begin().await?;
+            let tx = &mut transaction;
+            let cache_keys = batch_docs
+                .iter()
+                .map(|b| b.cache_key.clone())
+                .collect::<Vec<String>>();
+
+            let data = batch_docs
+                .iter()
+                .map(|b| b.data.clone())
+                .collect::<Vec<String>>();
+            let controls = batch_docs
+                .iter()
+                .map(|b| b.control.clone())
+                .collect::<Vec<String>>();
+            let expires = batch_docs
+                .iter()
+                .map(|b| Utc::now() + b.expire)
+                .collect::<Vec<DateTime<Utc>>>();
+            let resp = sqlx::query!(
+                r#"
+                INSERT INTO cache
+                ( cache_key, data, expires_at, control ) SELECT * FROM UNNEST(
+                    $1::VARCHAR(1024)[],
+                    $2::TEXT[],
+                    $3::TIMESTAMP WITH TIME ZONE[],
+                    $4::TEXT[]
+                ) ON CONFLICT (cache_key) DO UPDATE SET data = excluded.data, control = excluded.control, expires_at = excluded.expires_at
+                RETURNING id
+                "#,
+                &cache_keys,
+                &data,
+                &expires,
+                &controls
+            )
+            .fetch_all(&mut **tx)
+            .await?;
+
+            let invalidation_keys: Vec<(i64, String)> = resp
+                .iter()
+                .enumerate()
+                .flat_map(|(idx, resp)| {
+                    let cache_key_id = resp.id;
+                    batch_docs
+                        .get(idx)
+                        .unwrap()
+                        .invalidation_keys
+                        .iter()
+                        .map(move |k| (cache_key_id, k.clone()))
+                })
+                .collect();
+
+            let cache_key_ids: Vec<i64> = invalidation_keys.iter().map(|(idx, _)| *idx).collect();
+
+            let subgraph_names: Vec<String> = (0..invalidation_keys.len())
+                .map(|_| subgraph_name.to_string())
+                .collect();
+            let invalidation_keys: Vec<String> = invalidation_keys
+                .into_iter()
+                .map(|(_, invalidation_key)| invalidation_key)
+                .collect();
+            sqlx::query!(
+                r#"
+                INSERT INTO invalidation_key (cache_key_id, invalidation_key, subgraph_name)
+                SELECT * FROM UNNEST(
+                    $1::BIGINT[],
+                    $2::VARCHAR(255)[],
+                    $3::VARCHAR(255)[]
+                ) ON CONFLICT (cache_key_id, invalidation_key, subgraph_name) DO NOTHING
+                "#,
+                &cache_key_ids,
+                &invalidation_keys,
+                &subgraph_names,
+            )
+            .execute(&mut **tx)
+            .await?;
+
+            transaction.commit().await?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn get(&self, cache_key: &str) -> anyhow::Result<CacheEntry> {
+        let resp = sqlx::query_as!(
+            CacheEntryRow,
+            "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
+            &cache_key
+        )
+        .fetch_one(&self.pg_pool)
+        .await?;
+
+        let cache_entry_json = resp.try_into()?;
+
+        Ok(cache_entry_json)
+    }
+
+    pub(crate) async fn get_multiple(
+        &self,
+        cache_keys: &[String],
+    ) -> anyhow::Result<Vec<Option<CacheEntry>>> {
+        let resp = sqlx::query_as!(
+            CacheEntryRow,
+            "SELECT * FROM cache WHERE cache.cache_key = ANY($1::VARCHAR(1024)[]) AND expires_at >= NOW()",
+            &cache_keys
+        )
+        .fetch_all(&self.pg_pool)
+        .await?;
+
+        let cache_key_entries: Result<HashMap<String, CacheEntry>, serde_json::Error> = resp
+            .into_iter()
+            .map(|e| {
+                let entry: CacheEntry = e.try_into()?;
+
+                Ok((entry.cache_key.clone(), entry))
+            })
+            .collect();
+        let mut cache_key_entries = cache_key_entries?;
+
+        Ok(cache_keys
+            .iter()
+            .map(|ck| cache_key_entries.remove(ck))
+            .collect())
+    }
+
+    /// Deletes all documents that have one (or more) of the keys
+    /// Returns the number of deleted documents.
+    pub(crate) async fn invalidate_by_subgraphs(
+        &self,
+        subgraph_names: Vec<String>,
+    ) -> anyhow::Result<u64> {
+        let rec = sqlx::query!(
+            r#"WITH deleted AS
+            (DELETE
+                FROM cache
+                USING invalidation_key
+                WHERE invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($1::text[]) RETURNING cache.cache_key
+            )
+        SELECT COUNT(*) AS count FROM deleted"#,
+            &subgraph_names
+        )
+        .fetch_one(&self.pg_pool)
+        .await?;
+
+        Ok(rec.count.unwrap_or_default() as u64)
+    }
+
+    /// Deletes all documents that have one (or more) of the keys
+    /// Returns the number of deleted documents.
+    pub(crate) async fn invalidate(
+        &self,
+        invalidation_keys: Vec<String>,
+        subgraph_names: Vec<String>,
+    ) -> anyhow::Result<u64> {
+        let rec = sqlx::query!(
+            r#"WITH deleted AS
+            (DELETE
+                FROM cache
+                USING invalidation_key
+                WHERE invalidation_key.invalidation_key = ANY($1::text[])
+                    AND invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($2::text[]) RETURNING cache.cache_key
+            )
+        SELECT COUNT(*) AS count FROM deleted"#,
+            &invalidation_keys,
+            &subgraph_names
+        )
+        .fetch_one(&self.pg_pool)
+        .await?;
+
+        Ok(rec.count.unwrap_or_default() as u64)
+    }
+}

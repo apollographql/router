@@ -388,6 +388,7 @@ dependencies = [
  "sha2",
  "shellexpand",
  "similar",
+ "sqlx",
  "static_assertions",
  "strum_macros 0.27.1",
  "sys-info",
