@@ -255,8 +255,8 @@ impl Merger {
                 for value in source.values.values() {
                     // Note that we add all the values we see as a simple way to know which values there is to consider. But some of those value may
                     // be removed later in `merge_enum_value`
-                    if !dest.values.contains_key(&value.name) {
-                        dest.values.insert(value.name.clone(), value.clone());
+                    if !dest.values.contains_key(&value.node.value) {
+                        dest.values.insert(value.node.value.clone(), value.clone());
                     }
                 }
             }
@@ -292,15 +292,15 @@ impl Merger {
         // 1. this will catch any problems merging the description/directives (which feels like a good thing).
         // 2. it easier to see if the value is marked @inaccessible.
         let value_sources = self.map_sources(sources, |s| {
-            s.and_then(|enum_type| enum_type.values.get(value_name))
+            s.and_then(|enum_type| enum_type.values.get(value_name).map(|v| &v.node))
         });
         
-        // TODO: Implement these helper methods
-        self.merge_description(&value_sources, dest.values.get_mut(value_name).unwrap());
-        self.record_applied_directives_to_merge(&value_sources, dest.values.get_mut(value_name).unwrap());
-        self.add_join_enum_value(&value_sources, dest.values.get_mut(value_name).unwrap());
+        // TODO: Implement these helper methods - for now skip the actual merging
+        // self.merge_description(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
+        // self.record_applied_directives_to_merge(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
+        // self.add_join_enum_value(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
 
-        let is_inaccessible = self.is_inaccessible_directive_in_supergraph(dest.values.get(value_name).unwrap());
+        let is_inaccessible = self.is_inaccessible_directive_in_supergraph(&dest.values.get(value_name).unwrap().node);
         
         // The merging strategy depends on the enum type usage:
         //  - if it is _only_ used in position of Input type, we merge it with an "intersection" strategy (like other input types/things).
@@ -344,7 +344,7 @@ impl Merger {
                 // We remove the value after the generation of the hint/errors because `report_mismatch_hint` will show the message for the subgraphs that are "like" the supergraph
                 // first, and the message flows better if we say which subgraph defines the value first, so we want the value to still be present for the generation of the
                 // message.
-                dest.values.remove(value_name);
+                dest.values.shift_remove(value_name);
             }
         } else if usage.position == EnumUsagePosition::Output {
             self.hint_on_inconsistent_output_enum_value(sources, dest, value_name);

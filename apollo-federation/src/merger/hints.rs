@@ -52,6 +52,7 @@ impl HintCodeDefinition {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) enum HintCode {
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
