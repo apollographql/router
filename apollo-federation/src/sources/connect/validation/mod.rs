@@ -300,6 +300,8 @@ pub enum Code {
     ConnectorsBatchKeyNotInSelection,
     /// Connector batch key is derived from a non-root variable such as `$this` or `$context`.
     ConnectorsNonRootBatchKey,
+    /// A `@key` could not be resolved for the given combination of variables.
+    ConnectorsCannotResolveKey,
     /// Part of the `@connect` refers to an `$args` which is not defined.
     UndefinedArgument,
     /// Part of the `@connect` refers to an `$this` which is not defined.

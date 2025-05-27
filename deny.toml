@@ -60,6 +60,7 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "NCSA", # similar to MIT/BSD-3-Clause, used by libfuzzer
+    "CDLA-Permissive-2.0", # webpki-roots
 ]
 confidence-threshold = 0.8
 

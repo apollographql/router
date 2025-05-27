@@ -35,7 +35,6 @@ use crate::link::spec::Identity;
 use crate::sources::connect::Connector;
 use crate::sources::connect::EntityResolver::TypeBatch;
 use crate::sources::connect::Namespace::Batch;
-use crate::sources::connect::id::ConnectorPosition;
 use crate::sources::connect::json_selection::SelectionTrie;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -318,9 +317,8 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
 
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(TypeBatch) {
-            let root_name = extract_connector_name(connector);
             let input_trie = compute_batch_input_trie(connector);
-            match SelectionSetWalker::new(root_name, schema, &input_trie)
+            match SelectionSetWalker::new(connector.name(), schema, &input_trie)
                 .walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
@@ -334,10 +332,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
             Ok(None) => continue,
             Err(_) => {
                 let variables = connector.variable_references().collect_vec();
-                messages.push(field_set_error(
-                    &variables,
-                    &connector.id.directive.coordinate(),
-                ));
+                messages.push(field_set_error(&variables, &connector, schema));
             }
             Ok(Some(field_set)) => {
                 entity_checker.add_connector(field_set);
@@ -362,13 +357,6 @@ fn compute_batch_input_trie(connector: &Connector) -> SelectionTrie {
             let _ = &trie.extend(&var.selection);
         });
     trie
-}
-
-fn extract_connector_name(connector: &Connector) -> Name {
-    match &connector.id.directive {
-        ConnectorPosition::Field(field_position) => field_position.directive_name.clone(),
-        ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
-    }
 }
 
 struct SelectionSetWalker<'walker> {
