@@ -36,3 +36,14 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." router --config myrouter.yaml
 ```
 
 > The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to restart with its updated configuration.
+
+## Redirect to Explorer
+
+The option to redirect to [Apollo Explorer](https://www.apollographql.com/docs/studio/explorer/) has existed since [Router v1.13.1](https://github.com/apollographql/router/releases/tag/v1.13.1).  
+To enable this, explicitly set the `graph_ref` under the `homepage` configuration:
+
+```yaml
+homepage:
+  graph_ref: my-org-graph@production
+```
+
