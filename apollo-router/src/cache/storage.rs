@@ -135,7 +135,8 @@ where
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let cache_estimated_storage_for_gauge = self.cache_estimated_storage.clone();
         let caller = self.caller;
-        let cache_estimated_storage_gauge = meter
+
+        meter
             .i64_observable_gauge("apollo.router.cache.storage.estimated_size")
             .with_description("Estimated cache storage")
             .with_unit("bytes")
@@ -152,8 +153,7 @@ where
                     )
                 }
             })
-            .init();
-        cache_estimated_storage_gauge
+            .init()
     }
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache

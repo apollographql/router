@@ -44,9 +44,9 @@ pub(crate) struct UsedQueryIdFromManifest {
 /// This type actually consists of two conceptual layers that must both be applied at the supergraph
 /// service stage, at different points:
 /// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
-///    and validated.
+///   and validated.
 /// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
-///    GraphQL request is parsed and validated.
+///   GraphQL request is parsed and validated.
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current
@@ -93,6 +93,7 @@ impl PersistedQueryLayer {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -135,6 +136,7 @@ impl PersistedQueryLayer {
     }
 
     /// Places an operation body on a [`SupergraphRequest`] if it has been persisted
+    #[allow(clippy::result_large_err)]
     pub(crate) fn replace_query_id_with_operation_body(
         &self,
         mut request: SupergraphRequest,

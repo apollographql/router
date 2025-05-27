@@ -764,7 +764,7 @@ where
 
         if matches!(
             edge_weight.transition,
-            QueryGraphEdgeTransition::KeyResolution { .. }
+            QueryGraphEdgeTransition::KeyResolution
         ) {
             // We're adding a `@key` edge. If the last edge to that point is an `@interfaceObject`
             // fake downcast, and if our destination type is not an `@interfaceObject` itself, then
