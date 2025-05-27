@@ -28,7 +28,9 @@ impl ErrorReporter {
         !self.errors.is_empty()
     }
 
-    pub(crate) fn into_errors_and_hints(self) -> (Vec<SingleFederationError>, Vec<CompositionHint>) {
+    pub(crate) fn into_errors_and_hints(
+        self,
+    ) -> (Vec<SingleFederationError>, Vec<CompositionHint>) {
         (self.errors, self.hints)
     }
 }

@@ -1,36 +1,15 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::Schema;
 use apollo_compiler::Name;
-use apollo_compiler::schema::EnumType;
-use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
 use crate::error::SingleFederationError;
 use crate::merger::error_reporter::ErrorReporter;
-use crate::merger::hints::HintCode;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
-
-/// Type alias for Sources mapping - maps subgraph indices to optional values
-type Sources<T> = HashMap<usize, Option<T>>;
-
-/// Enum usage position tracking
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum EnumUsagePosition {
-    Input,
-    Output,
-    Both,
-}
-
-/// Tracks how an enum type is used across the schema
-#[derive(Debug, Clone)]
-pub(crate) struct EnumTypeUsage {
-    pub position: EnumUsagePosition,
-    pub examples: HashMap<EnumUsagePosition, String>, // Example field coordinates
-}
 
 #[derive(Debug)]
 pub(crate) struct MergeResult {
@@ -47,12 +26,6 @@ pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
 }
 
-impl Default for CompositionOptions {
-    fn default() -> Self {
-        Self {}
-    }
-}
-
 #[allow(unused)]
 pub(crate) struct Merger {
     subgraphs: Vec<Subgraph<Validated>>,
@@ -62,7 +35,7 @@ pub(crate) struct Merger {
     merged: Schema,
     subgraph_names_to_join_spec_name: HashMap<String, String>,
     merged_federation_directive_names: HashSet<String>,
-    enum_usages: HashMap<String, EnumTypeUsage>,
+    enum_usages: HashMap<String, String>, // Simplified for now
     fields_with_from_context: HashSet<String>,
     fields_with_override: HashSet<String>,
 }
@@ -208,7 +181,7 @@ impl Merger {
     }
 
     fn merge_type_enum(&mut self, _enum_type: &Name) {
-        todo!("Implement enum type merging - collect sources and call merge_enum")
+        todo!("Implement enum type merging")
     }
 
     fn validate_query_root(&mut self) {
@@ -225,192 +198,6 @@ impl Merger {
 
     fn post_merge_validations(&mut self) {
         todo!("Implement post-merge validations")
-    }
-
-    /// Merge enum type from multiple subgraphs
-    pub(crate) fn merge_enum(&mut self, sources: Sources<&EnumType>, dest: &mut EnumType) {
-        let usage = self.enum_usages.get(&dest.name.to_string()).cloned().unwrap_or_else(|| {
-            // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
-            // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
-            // an "input-only" or as a "input/ouput" type, but the hints/errors generated in both those cases would be confusing in that case, and while we could amend them
-            // for this case, it would complicate things and doesn't feel like it would feel very justified. So we merge it as an "output" type, which is the least contraining
-            // option. We do raise an hint though so users can notice this.
-            let usage = EnumTypeUsage {
-                position: EnumUsagePosition::Output,
-                examples: HashMap::new(),
-            };
-            self.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
-                message: format!(
-                    "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
-                    dest.name
-                ),
-            });
-            usage
-        });
-
-        // Add all values from all sources
-        for (_, source) in sources.iter() {
-            if let Some(source) = source {
-                for value in source.values.values() {
-                    // Note that we add all the values we see as a simple way to know which values there is to consider. But some of those value may
-                    // be removed later in `merge_enum_value`
-                    if !dest.values.contains_key(&value.node.value) {
-                        dest.values.insert(value.node.value.clone(), value.clone());
-                    }
-                }
-            }
-        }
-
-        // Merge each enum value
-        let value_names: Vec<Name> = dest.values.keys().cloned().collect();
-        for value_name in value_names {
-            self.merge_enum_value(&sources, dest, &value_name, &usage);
-        }
-
-        // We could be left with an enum type with no values, and that's invalid in graphQL
-        if dest.values.is_empty() {
-            self.add_error(SingleFederationError::EmptyMergedEnumType {
-                message: format!(
-                    "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
-                    dest.name
-                ),
-            });
-        }
-    }
-
-    /// Merge a specific enum value across subgraphs
-    fn merge_enum_value(
-        &mut self,
-        sources: &Sources<&EnumType>,
-        dest: &mut EnumType,
-        value_name: &Name,
-        usage: &EnumTypeUsage,
-    ) {
-        // We merge directives (and description while at it) on the value even though we might remove it later in that function,
-        // but we do so because:
-        // 1. this will catch any problems merging the description/directives (which feels like a good thing).
-        // 2. it easier to see if the value is marked @inaccessible.
-        let value_sources = self.map_sources(sources, |s| {
-            s.and_then(|enum_type| enum_type.values.get(value_name).map(|v| &v.node))
-        });
-        
-        // TODO: Implement these helper methods - for now skip the actual merging
-        // self.merge_description(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
-        // self.record_applied_directives_to_merge(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
-        // self.add_join_enum_value(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
-
-        let is_inaccessible = self.is_inaccessible_directive_in_supergraph(&dest.values.get(value_name).unwrap().node);
-        
-        // The merging strategy depends on the enum type usage:
-        //  - if it is _only_ used in position of Input type, we merge it with an "intersection" strategy (like other input types/things).
-        //  - if it is _only_ used in position of Output type, we merge it with an "union" strategy (like other output types/things).
-        //  - otherwise, it's used as both input and output and we can only merge it if it has the same values in all subgraphs.
-        // So in particular, the value will be in the supergraph only if it is either an "output only" enum, or if the value is in all subgraphs.
-        // Note that (like for input object fields), manually marking the value as @inaccessible let's use skips any check and add the value
-        // regardless of inconsistencies.
-        if !is_inaccessible
-            && usage.position != EnumUsagePosition::Output
-            && self.some_sources(sources, |source| source.is_some() && !source.unwrap().values.contains_key(value_name))
-        {
-            // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
-            // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
-            if usage.position == EnumUsagePosition::Both {
-                let input_example = usage.examples.get(&EnumUsagePosition::Input).unwrap();
-                let output_example = usage.examples.get(&EnumUsagePosition::Output).unwrap();
-                self.report_mismatch_error_with_specifics(
-                    SingleFederationError::EnumValueMismatch {
-                        message: format!(
-                            "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                            dest.name, input_example, output_example, value_name, dest.name
-                        ),
-                    },
-                    sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(value_name) { "yes" } else { "no" },
-                );
-                // We leave the value in the merged output in that case because:
-                // 1. it's harmless to do so; we have an error so we won't return a supergraph.
-                // 2. it avoids generating an additional "enum type is empty" error in `merge_enum` if all the values are inconsistent.
-            } else {
-                self.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForInputEnum,
-                    format!(
-                        "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
-                        value_name, dest.name, dest.name
-                    ),
-                    sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(value_name) { "yes" } else { "no" },
-                );
-                // We remove the value after the generation of the hint/errors because `report_mismatch_hint` will show the message for the subgraphs that are "like" the supergraph
-                // first, and the message flows better if we say which subgraph defines the value first, so we want the value to still be present for the generation of the
-                // message.
-                dest.values.shift_remove(value_name);
-            }
-        } else if usage.position == EnumUsagePosition::Output {
-            self.hint_on_inconsistent_output_enum_value(sources, dest, value_name);
-        }
-    }
-
-    // Helper functions that need to be implemented as stubs
-
-    fn add_hint(&mut self, _hint: CompositionHint) {
-        todo!("Implement add_hint")
-    }
-
-    fn add_error(&mut self, _error: SingleFederationError) {
-        todo!("Implement add_error")
-    }
-
-    fn map_sources<T, R>(&self, _sources: &Sources<T>, _mapper: impl Fn(&Option<T>) -> Option<R>) -> Sources<R> {
-        todo!("Implement map_sources")
-    }
-
-    fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
-        todo!("Implement merge_description")
-    }
-
-    fn record_applied_directives_to_merge<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
-        todo!("Implement record_applied_directives_to_merge")
-    }
-
-    fn add_join_enum_value(&mut self, _sources: &Sources<Option<&EnumValueDefinition>>, _dest: &mut EnumValueDefinition) {
-        todo!("Implement add_join_enum_value")
-    }
-
-    fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
-        todo!("Implement is_inaccessible_directive_in_supergraph")
-    }
-
-    fn some_sources<T>(&self, sources: &Sources<T>, predicate: impl Fn(&Option<T>) -> bool) -> bool {
-        sources.values().any(predicate)
-    }
-
-    fn report_mismatch_error_with_specifics<T>(
-        &mut self,
-        _error: SingleFederationError,
-        _sources: &Sources<T>,
-        _accessor: impl Fn(&Option<T>) -> &str,
-    ) {
-        todo!("Implement report_mismatch_error_with_specifics")
-    }
-
-    fn report_mismatch_hint<T>(
-        &mut self,
-        _code: HintCode,
-        _message: String,
-        _sources: &Sources<T>,
-        _accessor: impl Fn(&Option<T>) -> &str,
-    ) {
-        todo!("Implement report_mismatch_hint")
-    }
-
-    fn hint_on_inconsistent_output_enum_value(
-        &mut self,
-        _sources: &Sources<&EnumType>,
-        _dest: &EnumType,
-        _value_name: &Name,
-    ) {
-        todo!("Implement hint_on_inconsistent_output_enum_value")
     }
 }
 
