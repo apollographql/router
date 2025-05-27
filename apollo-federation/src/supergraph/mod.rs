@@ -96,7 +96,10 @@ pub struct Supergraph<S> {
 impl Supergraph<Merged> {
     pub fn new(schema: Valid<Schema>) -> Self {
         Self {
-            state: Merged { schema },
+            state: Merged {
+                schema,
+                hints: vec![],
+            },
         }
     }
 
@@ -112,6 +115,10 @@ impl Supergraph<Merged> {
     pub fn schema(&self) -> &Valid<Schema> {
         &self.state.schema
     }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
 }
 
 impl Supergraph<Satisfiable> {
@@ -123,12 +130,25 @@ impl Supergraph<Satisfiable> {
     ) -> Result<ValidFederationSchema, FederationError> {
         api_schema::to_api_schema(self.state.schema.clone(), options)
     }
+
+    pub fn schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
+    pub fn metadata(&self) -> &SupergraphMetadata {
+        &self.state.metadata
+    }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
 }
 
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub struct Merged {
     schema: Valid<Schema>,
+    hints: Vec<CompositionHint>,
 }
 
 #[derive(Clone, Debug)]
