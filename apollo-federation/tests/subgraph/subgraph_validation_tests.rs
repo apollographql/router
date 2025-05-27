@@ -1265,6 +1265,7 @@ type Query {
             // sure we still accept definition where it's mandatory.
             r#"
                 extend schema
+                  @link(url: "https://specs.apollo.dev/link/v1.0")
                   @link(
                     url: "https://specs.apollo.dev/federation/v2.0"
                     import: ["@key"]
@@ -1282,10 +1283,7 @@ type Query {
                 ) repeatable on SCHEMA
 
                 scalar link__Import
-                enum link__Purpose {
-                  SECURITY
-                  EXECUTION
-                }
+                scalar link__Purpose
             "#,
         ];
 
