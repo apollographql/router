@@ -1,6 +1,6 @@
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
 use serde_json::Number;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -55,7 +55,11 @@ pub(super) fn arithmetic_method(
                                         method_name.as_ref(),
                                         n
                                     ),
-                                    input_path.to_vec(),
+                                    input_path
+                                        .to_vec()
+                                        .into_iter()
+                                        .map(|safe_json| safe_json.into())
+                                        .collect(),
                                     arg.range(),
                                 ),
                             ),
@@ -71,7 +75,11 @@ pub(super) fn arithmetic_method(
                                     "Method ->{} requires numeric arguments",
                                     method_name.as_ref()
                                 ),
-                                input_path.to_vec(),
+                                input_path
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 arg.range(),
                             ),
                         ),
@@ -87,7 +95,11 @@ pub(super) fn arithmetic_method(
                         "Method ->{} requires numeric arguments",
                         method_name.as_ref()
                     ),
-                    input_path.to_vec(),
+                    input_path
+                        .to_vec()
+                        .into_iter()
+                        .map(|safe_json| safe_json.into())
+                        .collect(),
                     method_name.range(),
                 )],
             )
@@ -100,7 +112,11 @@ pub(super) fn arithmetic_method(
                     "Method ->{} requires at least one argument",
                     method_name.as_ref()
                 ),
-                input_path.to_vec(),
+                input_path
+                    .to_vec()
+                    .into_iter()
+                    .map(|safe_json| safe_json.into())
+                    .collect(),
                 method_name.range(),
             )],
         )

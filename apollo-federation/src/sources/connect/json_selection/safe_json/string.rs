@@ -1,12 +1,17 @@
-use std::{borrow::Borrow, ops::Add};
+use std::{
+    borrow::Borrow,
+    fmt::{self, Display},
+    ops::Add,
+};
 
 use percent_encoding::percent_encode;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 
 #[derive(Debug, Clone, Eq, PartialOrd, Ord)]
 pub enum SafeString {
-    Safe(ByteString),
-    Unsafe(ByteString),
+    Trusted(ByteString),
+    AutoEncoded(ByteString),
 }
 
 /*
@@ -19,12 +24,21 @@ fn escape(s: &str) -> String {
 }
 
 impl SafeString {
+    pub fn as_str(&self) -> &str {
+        match self {
+            SafeString::Trusted(byte_string) => byte_string.as_str(),
+            SafeString::AutoEncoded(byte_string) => byte_string.as_str(),
+        }
+    }
+
     pub(crate) fn escape(self) -> ByteString {
         match self {
-            SafeString::Unsafe(s) => percent_encode(s.inner(), percent_encoding::NON_ALPHANUMERIC)
-                .to_string()
-                .into(),
-            SafeString::Safe(safe) => safe,
+            SafeString::AutoEncoded(s) => {
+                percent_encode(s.inner(), percent_encoding::NON_ALPHANUMERIC)
+                    .to_string()
+                    .into()
+            }
+            SafeString::Trusted(safe) => safe,
         }
     }
 }
@@ -35,33 +49,48 @@ impl Add<&SafeString> for SafeString {
     fn add(self, other: &Self) -> Self::Output {
         use SafeString::*;
         match (self, other) {
-            (Safe(s1), Safe(s2)) => {
+            (Trusted(s1), Trusted(s2)) => {
                 let s = s1.as_str().to_string() + s2.as_str();
-                Safe(s.into())
+                Trusted(s.into())
             }
-            (Unsafe(s1), Unsafe(s2)) => {
+            (AutoEncoded(s1), AutoEncoded(s2)) => {
                 let s = s1.as_str().to_string() + s2.as_str();
-                Unsafe(s.into())
+                AutoEncoded(s.into())
             }
-            (Safe(s1), Unsafe(s2)) => {
+            (Trusted(s1), AutoEncoded(s2)) => {
                 let s = s1.as_str().to_string() + &escape(s2.as_str());
-                Safe(s.into())
+                Trusted(s.into())
             }
-            (Unsafe(s1), Safe(s2)) => {
+            (AutoEncoded(s1), Trusted(s2)) => {
                 let s = escape(s1.as_str()) + s2.as_str();
-                Safe(s.into())
+                Trusted(s.into())
             }
         }
+    }
+}
+
+impl Default for SafeString {
+    fn default() -> Self {
+        "".into()
     }
 }
 
 impl PartialEq for SafeString {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (SafeString::Safe(s1), SafeString::Safe(s2)) => s1 == s2,
-            (SafeString::Unsafe(s1), SafeString::Unsafe(s2)) => s1 == s2,
-            (SafeString::Safe(s1), SafeString::Unsafe(s2)) => s1 == s2,
-            (SafeString::Unsafe(s1), SafeString::Safe(s2)) => s1 == s2,
+            (SafeString::Trusted(s1), SafeString::Trusted(s2)) => s1 == s2,
+            (SafeString::AutoEncoded(s1), SafeString::AutoEncoded(s2)) => s1 == s2,
+            (SafeString::Trusted(s1), SafeString::AutoEncoded(s2)) => s1 == s2,
+            (SafeString::AutoEncoded(s1), SafeString::Trusted(s2)) => s1 == s2,
+        }
+    }
+}
+
+impl PartialEq<ByteString> for SafeString {
+    fn eq(&self, other: &ByteString) -> bool {
+        match self {
+            Self::Trusted(safe) => safe == other,
+            Self::AutoEncoded(encoded) => encoded == other,
         }
     }
 }
@@ -69,8 +98,8 @@ impl PartialEq for SafeString {
 impl std::hash::Hash for SafeString {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            SafeString::Safe(s) => s.hash(state),
-            SafeString::Unsafe(s) => s.hash(state),
+            SafeString::Trusted(s) => s.hash(state),
+            SafeString::AutoEncoded(s) => s.hash(state),
         }
     }
 }
@@ -78,44 +107,43 @@ impl std::hash::Hash for SafeString {
 impl Borrow<str> for SafeString {
     fn borrow(&self) -> &str {
         match self {
-            SafeString::Safe(s) => s.as_str(),
-            SafeString::Unsafe(s) => s.as_str(),
+            SafeString::Trusted(s) => s.as_str(),
+            SafeString::AutoEncoded(s) => s.as_str(),
         }
     }
 }
 
 impl From<String> for SafeString {
     fn from(s: String) -> Self {
-        Self::Unsafe(s.into())
+        Self::AutoEncoded(s.into())
     }
 }
 
 impl From<&str> for SafeString {
     fn from(s: &str) -> Self {
-        Self::Unsafe(s.into())
+        Self::AutoEncoded(s.into())
     }
 }
 
-pub trait Join {
-    fn join(self, separator: &SafeString) -> SafeString;
+impl Display for SafeString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                SafeString::Trusted(byte_string) => byte_string.as_str(),
+                SafeString::AutoEncoded(byte_string) => byte_string.as_str(),
+            }
+        )
+    }
 }
 
-impl<I> Join for I
-where
-    I: IntoIterator<Item = SafeString>,
-{
-    fn join(self, separator: &SafeString) -> SafeString {
-        let mut iter = self.into_iter();
-        let first = match iter.next() {
-            Some(s) => s,
-            None => return SafeString::Unsafe("".into()),
-        };
-
-        let mut result = first;
-        for s in iter {
-            result = result + separator;
-            result = result + &s;
-        }
-        result
+impl Serialize for SafeString {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }

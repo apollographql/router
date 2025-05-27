@@ -1,5 +1,5 @@
+use super::safe_json::Value as SafeJSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 
 use shape::Shape;
 use shape::location::SourceId;
@@ -67,10 +67,13 @@ macro_rules! impl_arrow_method {
                 &self,
                 method_name: &WithRange<String>,
                 method_args: Option<&MethodArgs>,
-                data: &JSON,
+                data: &$crate::sources::connect::json_selection::safe_json::Value,
                 vars: &VarsWithPathsMap,
-                input_path: &InputPath<JSON>,
-            ) -> (Option<JSON>, Vec<ApplyToError>) {
+                input_path: &InputPath<$crate::sources::connect::json_selection::safe_json::Value>,
+            ) -> (
+                Option<$crate::sources::connect::json_selection::safe_json::Value>,
+                Vec<ApplyToError>,
+            ) {
                 $impl_fn_name(method_name, method_args, data, vars, input_path)
             }
 
@@ -102,10 +105,10 @@ pub(super) trait ArrowMethodImpl {
         &self,
         method_name: &WithRange<String>,
         method_args: Option<&MethodArgs>,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>);
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>);
 
     fn shape(
         &self,

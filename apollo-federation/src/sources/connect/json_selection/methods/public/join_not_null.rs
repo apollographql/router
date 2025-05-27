@@ -1,5 +1,6 @@
+use crate::sources::connect::json_selection::safe_json::SafeString;
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -45,7 +46,11 @@ fn join_not_null_method(
                 "Method ->{} requires a string argument",
                 method_name.as_ref()
             ),
-            input_path.to_vec(),
+            input_path
+                .to_vec()
+                .into_iter()
+                .map(|safe_json| safe_json.into())
+                .collect(),
             method_name.range(),
         ));
         return (None, warnings);
@@ -65,17 +70,21 @@ fn join_not_null_method(
                     .as_ref()
                     .map_or("null".to_string(), |s| s.to_string())
             ),
-            input_path.to_vec(),
+            input_path
+                .to_vec()
+                .into_iter()
+                .map(|safe_json| safe_json.into())
+                .collect(),
             method_name.range(),
         ));
         return (None, warnings);
     };
 
-    fn to_string(value: &JSON, method_name: &str) -> Result<Option<String>, String> {
+    fn to_string(value: &JSON, method_name: &str) -> Result<Option<SafeString>, String> {
         match value {
-            JSON::Bool(b) => Ok(Some(b.then_some("true").unwrap_or("false").to_string())),
-            JSON::Number(number) => Ok(Some(number.to_string())),
-            JSON::String(byte_string) => Ok(Some(byte_string.as_str().to_string())),
+            JSON::Bool(b) => Ok(Some(b.then_some("true").unwrap_or("false").into())),
+            JSON::Number(number) => Ok(Some(number.to_string().into())),
+            JSON::String(safe_string) => Ok(Some(safe_string.to_owned())),
             JSON::Null => Ok(None),
             JSON::Array(_) | JSON::Object(_) => Err(format!(
                 "Method ->{} requires an array of scalar values as input",
@@ -86,30 +95,45 @@ fn join_not_null_method(
 
     let joined = match data {
         JSON::Array(values) => {
-            let mut joined = Vec::with_capacity(values.len());
-            for value in values {
+            let mut joined = SafeString::default();
+            for (idx, value) in values.iter().enumerate() {
                 match to_string(value, method_name) {
-                    Ok(Some(value)) => joined.push(value),
+                    Ok(Some(value)) => {
+                        if idx == 0 {
+                            joined = joined + &value;
+                        } else {
+                            joined = joined + separator + &value;
+                        }
+                    }
                     Ok(None) => {}
                     Err(err) => {
                         warnings.push(ApplyToError::new(
                             err,
-                            input_path.to_vec(),
+                            input_path
+                                .to_vec()
+                                .into_iter()
+                                .map(|safe_json| safe_json.into())
+                                .collect(),
                             method_name.range(),
                         ));
                         return (None, warnings);
                     }
                 }
             }
-            joined.join(separator.as_str())
+
+            joined
         }
         // Single values are emitted as strings with no separator
         _ => match to_string(data, method_name) {
-            Ok(value) => value.unwrap_or_else(|| "".to_string()),
+            Ok(value) => value.unwrap_or_default(),
             Err(err) => {
                 warnings.push(ApplyToError::new(
                     err,
-                    input_path.to_vec(),
+                    input_path
+                        .to_vec()
+                        .into_iter()
+                        .map(|safe_json| safe_json.into())
+                        .collect(),
                     method_name.range(),
                 ));
                 return (None, warnings);
@@ -117,7 +141,7 @@ fn join_not_null_method(
         },
     };
 
-    (Some(JSON::String(joined.into())), warnings)
+    (Some(JSON::String(joined)), warnings)
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn join_not_null_method_shape(
@@ -213,25 +237,104 @@ mod tests {
     use crate::selection;
     use crate::sources::connect::json_selection::lit_expr::LitExpr;
 
-    #[rstest::rstest]
-    #[case(json!(["a","b","c"]), ", ", json!("a, b, c"))]
-    #[case(json!([1, 2, 3]), "|", json!("1|2|3"))]
-    #[case(json!([1.00000000000001, 2.9999999999999, 0.3]), "|", json!("1.00000000000001|2.9999999999999|0.3"))]
-    #[case(json!([true, false]), " and ", json!("true and false"))]
-    #[case(json!([null, "a", null, 1, null]), ", ", json!("a, 1"))]
-    #[case(json!([null, null]), ", ", json!(""))]
-    #[case(json!(1), ", ", json!("1"))]
-    #[case(json!("a"), ", ", json!("a"))]
-    #[case(json!(true), ", ", json!("true"))]
-    #[case(json!(null), ", ", json!(""))]
-    fn join_not_null_should_combine_arrays_with_a_separator(
-        #[case] input: JSON,
-        #[case] separator: String,
-        #[case] expected: JSON,
-    ) {
-        assert_eq!(
-            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input),
-            (Some(expected), vec![]),
+    #[test]
+    fn join_not_null_should_combine_array_strings_with_comma() {
+        let input = json!(["a", "b", "c"]);
+        let separator = ", ";
+        let expected = json!("a, b, c");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_ints_with_pipe() {
+        let input = json!([1, 2, 3]);
+        let separator = "|";
+        let expected = json!("1|2|3");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_floats_with_pipe() {
+        let input = json!([1.00000000000001, 2.9999999999999, 0.3]);
+        let separator = "|";
+        let expected = json!("1.00000000000001|2.9999999999999|0.3");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_bools_with_and() {
+        let input = json!([true, false]);
+        let separator = " and ";
+        let expected = json!("true and false");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_complex_with_comma() {
+        let input = json!([null, "a", null, 1, null]);
+        let separator = ", ";
+        let expected = json!("a, 1");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_nulls_with_comma() {
+        let input = json!([null, null]);
+        let separator = ", ";
+        let expected = json!("");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_single_val_int_with_comma() {
+        let input = json!(1);
+        let separator = ", ";
+        let expected = json!("1");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_single_string_with_comma() {
+        let input = json!("a");
+        let separator = ", ";
+        let expected = json!("a");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_bool_with_comma() {
+        let input = json!(true);
+        let separator = ", ";
+        let expected = json!("true");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
+        );
+    }
+    #[test]
+    fn join_not_null_should_combine_array_null_with_comma() {
+        let input = json!(null);
+        let separator = ", ";
+        let expected = json!("");
+        assert!(
+            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input)
+                == (Some(expected), vec![])
         );
     }
 
@@ -243,18 +346,34 @@ mod tests {
         );
     }
 
-    #[rstest::rstest]
-    #[case(json!({"a": 1}), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
-    #[case(json!([{"a": 1}, {"a": 2}]), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
-    #[case(json!([[1, 2]]), vec!["Method ->joinNotNull requires an array of scalar values as input"])]
-    fn join_not_null_warnings(#[case] input: JSON, #[case] expected_warnings: Vec<&str>) {
-        use itertools::Itertools;
-
-        let (result, warnings) = selection!("$->joinNotNull(',')").apply_to(&input);
+    #[test]
+    fn join_not_null_should_return_warnings_on_object() {
+        let (result, warnings) = selection!("$->joinNotNull(',')").apply_to(&json!({"a": 1}));
         assert_eq!(result, None);
         assert_eq!(
-            warnings.iter().map(|w| w.message()).collect_vec(),
-            expected_warnings
+            warnings.iter().map(|w| w.message()).collect::<Vec<_>>(),
+            vec!["Method ->joinNotNull requires an array of scalar values as input"]
+        );
+    }
+
+    #[test]
+    fn join_not_null_should_return_warnings_on_array_of_object() {
+        let (result, warnings) =
+            selection!("$->joinNotNull(',')").apply_to(&json!([{"a": 1}, {"a": 2}]));
+        assert_eq!(result, None);
+        assert_eq!(
+            warnings.iter().map(|w| w.message()).collect::<Vec<_>>(),
+            vec!["Method ->joinNotNull requires an array of scalar values as input"]
+        );
+    }
+
+    #[test]
+    fn join_not_null_should_return_warnings_on_array_of_arrays() {
+        let (result, warnings) = selection!("$->joinNotNull(',')").apply_to(&json!([[1, 2]]));
+        assert_eq!(result, None);
+        assert_eq!(
+            warnings.iter().map(|w| w.message()).collect::<Vec<_>>(),
+            vec!["Method ->joinNotNull requires an array of scalar values as input"]
         );
     }
 

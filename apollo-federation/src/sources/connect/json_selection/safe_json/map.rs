@@ -11,6 +11,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::hash::RandomState;
+use std::iter;
 use std::ops;
 
 // use serde::de;
@@ -389,6 +390,14 @@ impl FromIterator<(String, Value)> for Map<SafeString, Value> {
     {
         Map {
             map: FromIterator::from_iter(iter.into_iter().map(|(key, value)| (key.into(), value))),
+        }
+    }
+}
+
+impl From<(String, Value)> for Map<SafeString, Value> {
+    fn from((key, value): (String, Value)) -> Self {
+        Map {
+            map: IndexMap::from_iter(iter::once((key.into(), value))),
         }
     }
 }

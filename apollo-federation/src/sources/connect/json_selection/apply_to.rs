@@ -4,16 +4,17 @@ use std::hash::Hash;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
 
-use super::safe_json::map::Map as JSONMap;
-use super::safe_json::value::Value as JSON;
-
 use super::helpers::json_merge;
 use super::helpers::json_type_name;
+use super::safe_json::Map as SafeJSONMap;
+use super::safe_json::Value as SafeJSON;
+
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
@@ -23,7 +24,7 @@ use super::location::WithRange;
 use super::methods::ArrowMethod;
 use super::parser::*;
 
-pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
+pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a SafeJSON, InputPath<SafeJSON>)>;
 
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
@@ -40,11 +41,11 @@ impl JSONSelection {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        let safe_data: JSON = data.into();
+        let safe_data: SafeJSON = data.into();
         let vars = vars
             .iter()
-            .map(|(var_name, var_data)| (var_name, JSON::from(var_data)))
-            .collect::<IndexMap<&String, JSON>>();
+            .map(|(var_name, var_data)| (var_name, SafeJSON::from(var_data)))
+            .collect::<IndexMap<&String, SafeJSON>>();
 
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::default();
@@ -61,7 +62,8 @@ impl JSONSelection {
         // selection set was applied to.
         vars_with_paths.insert(KnownVariable::Dollar, (&safe_data, InputPath::empty()));
 
-        let (value, apply_errors) = self.apply_to_path(&safe_data, &vars_with_paths, &InputPath::empty());
+        let (value, apply_errors) =
+            self.apply_to_path(&safe_data, &vars_with_paths, &InputPath::empty());
 
         // Since errors is an IndexSet, this line effectively deduplicates the
         // errors, in an attempt to make them less verbose. However, now that we
@@ -121,19 +123,19 @@ pub(super) trait ApplyToInternal {
     // recursively by the various JSONSelection types.
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>);
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>);
 
     // When array is encountered, the Self selection will be applied to each
     // element of the array, producing a new array.
     fn apply_to_array(
         &self,
-        data_array: &[JSON],
+        data_array: &[SafeJSON],
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         let mut output = Vec::with_capacity(data_array.len());
         let mut errors = Vec::new();
 
@@ -144,10 +146,10 @@ pub(super) trait ApplyToInternal {
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
             // insert null values to preserve the original array indices/length.
-            output.push(applied.unwrap_or(JSON::Null));
+            output.push(applied.unwrap_or(SafeJSON::Null));
         }
 
-        (Some(JSON::Array(output)), errors)
+        (Some(SafeJSON::Array(output)), errors)
     }
 
     /// Computes the static output shape produced by a JSONSelection, by
@@ -231,11 +233,11 @@ pub(super) trait ApplyToResultMethods {
 
     fn and_then_collecting_errors(
         self,
-        f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
-    ) -> (Option<JSON>, Vec<ApplyToError>);
+        f: impl FnOnce(&SafeJSON) -> (Option<SafeJSON>, Vec<ApplyToError>),
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>);
 }
 
-impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
+impl ApplyToResultMethods for (Option<SafeJSON>, Vec<ApplyToError>) {
     // Intentionally taking ownership of self to avoid cloning, since we pretty
     // much always use this method to replace the previous (value, errors) tuple
     // before returning.
@@ -253,8 +255,8 @@ impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
     // scenes. I'm no Haskell programmer, but this feels monadic? ¯\_(ツ)_/¯
     fn and_then_collecting_errors(
         self,
-        f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        f: impl FnOnce(&SafeJSON) -> (Option<SafeJSON>, Vec<ApplyToError>),
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         match self {
             (Some(data), errors) => f(&data).prepend_errors(errors),
             (None, errors) => (None, errors),
@@ -265,10 +267,10 @@ impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
 impl ApplyToInternal for JSONSelection {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         match self {
             // Because we represent a JSONSelection::Named as a SubSelection, we
             // can fully delegate apply_to_path to SubSelection::apply_to_path.
@@ -308,28 +310,34 @@ impl ApplyToInternal for JSONSelection {
 impl ApplyToInternal for NamedSelection {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
-        let mut output: Option<JSON> = None;
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
+        let mut output: Option<SafeJSON> = None;
         let mut errors = Vec::new();
 
         match self {
             Self::Field(alias, key, selection) => {
-                let input_path_with_key = input_path.append(key.to_json());
+                let input_path_with_key = input_path.append(key.to_json().into());
                 let name = key.as_str();
-                if let Some(child) = data.get(name) {
+                if let Some(child) = data.get_key(name) {
                     let output_name = alias.as_ref().map_or(name, |alias| alias.name());
                     if let Some(selection) = selection {
                         let (value, apply_errors) =
                             selection.apply_to_path(child, vars, &input_path_with_key);
                         errors.extend(apply_errors);
                         if let Some(value) = value {
-                            output = Some(json!({ output_name: value }));
+                            output = Some(SafeJSON::Object(SafeJSONMap::from((
+                                output_name.to_string(),
+                                value,
+                            ))));
                         }
                     } else {
-                        output = Some(json!({ output_name: child.clone() }));
+                        output = Some(SafeJSON::Object(SafeJSONMap::from((
+                            output_name.to_string(),
+                            child.to_owned(),
+                        ))));
                     }
                 } else {
                     errors.push(ApplyToError::new(
@@ -338,7 +346,11 @@ impl ApplyToInternal for NamedSelection {
                             key.dotted(),
                             json_type_name(data),
                         ),
-                        input_path_with_key.to_vec(),
+                        input_path_with_key
+                            .to_vec()
+                            .into_iter()
+                            .map(|safe_json| safe_json.into())
+                            .collect(),
                         key.range(),
                     ));
                 }
@@ -354,27 +366,38 @@ impl ApplyToInternal for NamedSelection {
                 if let Some(alias) = alias {
                     // Handle the NamedPathSelection case.
                     if let Some(value) = value_opt {
-                        output = Some(json!({ alias.name(): value }));
+                        output = Some(SafeJSON::Object(SafeJSONMap::from((
+                            alias.name().to_owned(),
+                            value,
+                        ))));
                     }
                 } else if *inline {
                     match value_opt {
-                        Some(JSON::Object(map)) => {
-                            output = Some(JSON::Object(map));
+                        Some(SafeJSON::Object(map)) => {
+                            output = Some(SafeJSON::Object(map));
                         }
-                        Some(JSON::Null) => {
-                            output = Some(JSON::Null);
+                        Some(SafeJSON::Null) => {
+                            output = Some(SafeJSON::Null);
                         }
                         Some(value) => {
                             errors.push(ApplyToError::new(
                                 format!("Expected object or null, not {}", json_type_name(&value)),
-                                input_path.to_vec(),
+                                input_path
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 path.range(),
                             ));
                         }
                         None => {
                             errors.push(ApplyToError::new(
                                 "Expected object or null, not nothing".to_string(),
-                                input_path.to_vec(),
+                                input_path
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 path.range(),
                             ));
                         }
@@ -382,7 +405,7 @@ impl ApplyToInternal for NamedSelection {
                 } else {
                     errors.push(ApplyToError::new(
                         "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
-                        input_path.to_vec(),
+                        input_path.to_vec().into_iter().map(|safe_json| safe_json.into()).collect(),
                         path.range(),
                     ));
                 }
@@ -391,7 +414,10 @@ impl ApplyToInternal for NamedSelection {
                 let (value_opt, apply_errors) = sub_selection.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
                 if let Some(value) = value_opt {
-                    output = Some(json!({ alias.name(): value }));
+                    output = Some(SafeJSON::Object(SafeJSONMap::from((
+                        alias.name().to_owned(),
+                        value,
+                    ))));
                 }
             }
         };
@@ -461,10 +487,10 @@ impl ApplyToInternal for NamedSelection {
 impl ApplyToInternal for PathSelection {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         match (self.path.as_ref(), vars.get(&KnownVariable::Dollar)) {
             // If this is a KeyPath, instead of using data as given, we need to
             // evaluate the path starting from the current value of $. To evaluate
@@ -517,10 +543,10 @@ impl ApplyToInternal for PathSelection {
 impl ApplyToInternal for WithRange<PathList> {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -540,16 +566,20 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                         vec![ApplyToError::new(
                             format!("Variable {} not found", var_name.as_str()),
-                            input_path.to_vec(),
+                            input_path
+                                .to_vec()
+                                .into_iter()
+                                .map(|safe_json| safe_json.into())
+                                .collect(),
                             ranged_var_name.range(),
                         )],
                     )
                 }
             }
             PathList::Key(key, tail) => {
-                let input_path_with_key = input_path.append(key.to_json());
+                let input_path_with_key = input_path.append(key.to_safe_json());
 
-                if let JSON::Array(array) = data {
+                if let SafeJSON::Array(array) = data {
                     // If we recursively call self.apply_to_array, it will end
                     // up invoking the tail of the key recursively, whereas we
                     // want to apply the tail once to the entire output array of
@@ -568,7 +598,7 @@ impl ApplyToInternal for WithRange<PathList> {
                             tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
                         })
                 } else {
-                    if !matches!(data, JSON::Object(_)) {
+                    if !matches!(data, SafeJSON::Object(_)) {
                         return (
                             None,
                             vec![ApplyToError::new(
@@ -577,12 +607,16 @@ impl ApplyToInternal for WithRange<PathList> {
                                     key.dotted(),
                                     json_type_name(data),
                                 ),
-                                input_path_with_key.to_vec(),
+                                input_path_with_key
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 key.range(),
                             )],
                         );
                     }
-                    let Some(child) = data.get(key.as_str()) else {
+                    let Some(child) = data.get_key(key.as_str()) else {
                         return (
                             None,
                             vec![ApplyToError::new(
@@ -591,7 +625,11 @@ impl ApplyToInternal for WithRange<PathList> {
                                     key.dotted(),
                                     json_type_name(data),
                                 ),
-                                input_path_with_key.to_vec(),
+                                input_path_with_key
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 key.range(),
                             )],
                         );
@@ -603,8 +641,9 @@ impl ApplyToInternal for WithRange<PathList> {
                 .apply_to_path(data, vars, input_path)
                 .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path)),
             PathList::Method(method_name, method_args, tail) => {
-                let method_path =
-                    input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
+                let method_path = input_path.append(SafeJSON::String(
+                    format!("->{}", method_name.as_ref()).into(),
+                ));
 
                 ArrowMethod::lookup(method_name).map_or_else(
                     || {
@@ -612,7 +651,11 @@ impl ApplyToInternal for WithRange<PathList> {
                             None,
                             vec![ApplyToError::new(
                                 format!("Method ->{} not found", method_name.as_ref()),
-                                method_path.to_vec(),
+                                method_path
+                                    .to_vec()
+                                    .into_iter()
+                                    .map(|safe_json| safe_json.into())
+                                    .collect(),
                                 method_name.range(),
                             )],
                         )
@@ -764,17 +807,17 @@ impl ApplyToInternal for WithRange<PathList> {
 impl ApplyToInternal for WithRange<LitExpr> {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
         match self.as_ref() {
-            LitExpr::String(s) => (Some(JSON::String(s.clone().into())), vec![]),
-            LitExpr::Number(n) => (Some(JSON::Number(n.clone())), vec![]),
-            LitExpr::Bool(b) => (Some(JSON::Bool(*b)), vec![]),
-            LitExpr::Null => (Some(JSON::Null), vec![]),
+            LitExpr::String(s) => (Some(SafeJSON::String(s.clone().into())), vec![]),
+            LitExpr::Number(n) => (Some(SafeJSON::Number(n.clone())), vec![]),
+            LitExpr::Bool(b) => (Some(SafeJSON::Bool(*b)), vec![]),
+            LitExpr::Null => (Some(SafeJSON::Null), vec![]),
             LitExpr::Object(map) => {
-                let mut output = JSONMap::with_capacity(map.len());
+                let mut output = SafeJSONMap::with_capacity(map.len());
                 let mut errors = Vec::new();
                 for (key, value) in map {
                     let (value_opt, apply_errors) = value.apply_to_path(data, vars, input_path);
@@ -783,7 +826,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         output.insert(key.as_str(), value_json);
                     }
                 }
-                (Some(JSON::Object(output)), errors)
+                (Some(SafeJSON::Object(output)), errors)
             }
             LitExpr::Array(vec) => {
                 let mut output = Vec::with_capacity(vec.len());
@@ -791,9 +834,9 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 for value in vec {
                     let (value_opt, apply_errors) = value.apply_to_path(data, vars, input_path);
                     errors.extend(apply_errors);
-                    output.push(value_opt.unwrap_or(JSON::Null));
+                    output.push(value_opt.unwrap_or(SafeJSON::Null));
                 }
-                (Some(JSON::Array(output)), errors)
+                (Some(SafeJSON::Array(output)), errors)
             }
             LitExpr::Path(path) => path.apply_to_path(data, vars, input_path),
             LitExpr::LitPath(literal, subpath) => literal
@@ -880,11 +923,11 @@ impl ApplyToInternal for WithRange<LitExpr> {
 impl ApplyToInternal for SubSelection {
     fn apply_to_path(
         &self,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
-        if let JSON::Array(array) = data {
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>) {
+        if let SafeJSON::Array(array) = data {
             return self.apply_to_array(array, vars, input_path);
         }
 
@@ -894,7 +937,7 @@ impl ApplyToInternal for SubSelection {
             vars
         };
 
-        let mut output = JSON::Object(JSONMap::new());
+        let mut output = SafeJSON::Object(SafeJSONMap::new());
         let mut errors = Vec::new();
 
         for named_selection in self.selections.iter() {
@@ -904,20 +947,26 @@ impl ApplyToInternal for SubSelection {
 
             let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
 
-            errors.extend(
-                merge_errors
-                    .into_iter()
-                    .map(|message| ApplyToError::new(message, input_path.to_vec(), self.range())),
-            );
+            errors.extend(merge_errors.into_iter().map(|message| {
+                ApplyToError::new(
+                    message,
+                    input_path
+                        .to_vec()
+                        .into_iter()
+                        .map(|safe_json| safe_json.into())
+                        .collect(),
+                    self.range(),
+                )
+            }));
 
             if let Some(merged) = merged {
                 output = merged;
             }
         }
 
-        if !matches!(data, JSON::Object(_)) {
+        if !matches!(data, SafeJSON::Object(_)) {
             let output_is_empty = match &output {
-                JSON::Object(map) => map.is_empty(),
+                SafeJSON::Object(map) => map.is_empty(),
                 _ => false,
             };
             if output_is_empty {

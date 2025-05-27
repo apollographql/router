@@ -1,13 +1,13 @@
 use apollo_compiler::collections::IndexSet;
 use nom::Slice;
 use nom::character::complete::multispace0;
-use serde_json_bytes::Map as JSONMap;
-use serde_json_bytes::Value as JSON;
 
 use super::ParseResult;
 use super::is_identifier;
 use super::location::Span;
 use super::location::WithRange;
+use super::safe_json::Map as SafeJSONMap;
+use super::safe_json::Value as SafeJSON;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -68,14 +68,14 @@ pub(crate) fn span_is_all_spaces_or_comments(input: Span) -> bool {
     }
 }
 
-pub(crate) const fn json_type_name(v: &JSON) -> &str {
+pub(crate) const fn json_type_name(v: &SafeJSON) -> &str {
     match v {
-        JSON::Array(_) => "array",
-        JSON::Object(_) => "object",
-        JSON::String(_) => "string",
-        JSON::Number(_) => "number",
-        JSON::Bool(_) => "boolean",
-        JSON::Null => "null",
+        SafeJSON::Array(_) => "array",
+        SafeJSON::Object(_) => "object",
+        SafeJSON::String(_) => "string",
+        SafeJSON::Number(_) => "number",
+        SafeJSON::Bool(_) => "boolean",
+        SafeJSON::Null => "null",
     }
 }
 
@@ -84,10 +84,13 @@ pub(crate) fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
     vec
 }
 
-pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, Vec<String>) {
+pub(crate) fn json_merge(
+    a: Option<&SafeJSON>,
+    b: Option<&SafeJSON>,
+) -> (Option<SafeJSON>, Vec<String>) {
     match (a, b) {
-        (Some(JSON::Object(a)), Some(JSON::Object(b))) => {
-            let mut merged = JSONMap::new();
+        (Some(SafeJSON::Object(a)), Some(SafeJSON::Object(b))) => {
+            let mut merged = SafeJSONMap::new();
             let mut errors = Vec::new();
 
             for key in IndexSet::from_iter(a.keys().chain(b.keys())) {
@@ -98,10 +101,10 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
                 errors.extend(child_errors);
             }
 
-            (Some(JSON::Object(merged)), errors)
+            (Some(SafeJSON::Object(merged)), errors)
         }
 
-        (Some(JSON::Array(a)), Some(JSON::Array(b))) => {
+        (Some(SafeJSON::Array(a)), Some(SafeJSON::Array(b))) => {
             let max_len = a.len().max(b.len());
             let mut merged = Vec::with_capacity(max_len);
             let mut errors = Vec::new();
@@ -114,11 +117,11 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
                 errors.extend(child_errors);
             }
 
-            (Some(JSON::Array(merged)), errors)
+            (Some(SafeJSON::Array(merged)), errors)
         }
 
-        (Some(JSON::Null), _) => (Some(JSON::Null), Vec::new()),
-        (_, Some(JSON::Null)) => (Some(JSON::Null), Vec::new()),
+        (Some(SafeJSON::Null), _) => (Some(SafeJSON::Null), Vec::new()),
+        (_, Some(SafeJSON::Null)) => (Some(SafeJSON::Null), Vec::new()),
 
         (Some(a), Some(b)) => {
             if a == b {

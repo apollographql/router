@@ -1,7 +1,8 @@
 use std::iter::empty;
 
+use crate::sources::connect::json_selection::helpers::json_type_name;
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -10,7 +11,6 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
@@ -35,7 +35,11 @@ fn keys_method(
                     "Method ->{} does not take any arguments",
                     method_name.as_ref()
                 ),
-                input_path.to_vec(),
+                input_path
+                    .to_vec()
+                    .into_iter()
+                    .map(|safe_json| safe_json.into())
+                    .collect(),
                 method_name.range(),
             )],
         );
@@ -54,7 +58,11 @@ fn keys_method(
                     method_name.as_ref(),
                     json_type_name(data),
                 ),
-                input_path.to_vec(),
+                input_path
+                    .to_vec()
+                    .into_iter()
+                    .map(|safe_json| safe_json.into())
+                    .collect(),
                 method_name.range(),
             )],
         ),

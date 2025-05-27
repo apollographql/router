@@ -1,5 +1,5 @@
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -68,7 +68,11 @@ fn match_method(
                     "Method ->{} did not match any [candidate, value] pair",
                     method_name.as_ref(),
                 ),
-                input_path.to_vec(),
+                input_path
+                    .to_vec()
+                    .into_iter()
+                    .map(|safe_json| safe_json.into())
+                    .collect(),
                 merge_ranges(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),

@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
 
+use super::safe_json::Value as SafeJSON;
 use itertools::Itertools;
 use nom::IResult;
 use nom::Slice;
@@ -1033,10 +1034,18 @@ impl Key {
         matches!(self, Self::Quoted(_))
     }
 
+    // TODO: evaluate if remove/replace is viable
     pub fn to_json(&self) -> JSON {
         match self {
             Key::Field(name) => JSON::String(name.clone().into()),
             Key::Quoted(name) => JSON::String(name.clone().into()),
+        }
+    }
+
+    pub fn to_safe_json(&self) -> SafeJSON {
+        match self {
+            Key::Field(name) => SafeJSON::String(name.clone().into()),
+            Key::Quoted(name) => SafeJSON::String(name.clone().into()),
         }
     }
 
