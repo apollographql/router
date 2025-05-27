@@ -177,7 +177,8 @@ pub struct SupergraphMetadata {
 #[allow(unused)]
 #[allow(unreachable_pub)]
 pub struct CompositionHint {
-    message: String,
+    pub message: String,
+    pub code: String,
 }
 
 /// Assumes the given schema has been validated.
