@@ -16,15 +16,16 @@ impl HintLevel {
         match self {
             HintLevel::Warn => "WARN",
             HintLevel::Info => "INFO",
+            HintLevel::Debug => "DEBUG",
         }
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub(crate) struct HintCodeDefinition {
-    pub(crate) code: String,
-    pub(crate) level: HintLevel,
-    pub(crate) description: String,
+    code: String,
+    level: HintLevel,
+    description: String,
 }
 
 #[allow(dead_code)]
@@ -35,6 +36,93 @@ impl HintCodeDefinition {
             level,
             description: description.into(),
         }
+    }
+
+    pub(crate) fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub(crate) fn level(&self) -> &HintLevel {
+        &self.level
+    }
+
+    pub(crate) fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum HintCode {
+    InconsistentButCompatibleFieldType,
+    InconsistentButCompatibleArgumentType,
+    InconsistentDefaultValuePresence,
+    InconsistentEntity,
+    InconsistentObjectValueTypeField,
+    InconsistentInterfaceValueTypeField,
+    InconsistentInputObjectField,
+    InconsistentUnionMember,
+    InconsistentEnumValueForInputEnum,
+    InconsistentEnumValueForOutputEnum,
+    InconsistentTypeSystemDirectiveRepeatable,
+    InconsistentTypeSystemDirectiveLocations,
+    InconsistentExecutableDirectivePresence,
+    NoExecutableDirectiveLocationsIntersection,
+    InconsistentExecutableDirectiveRepeatable,
+    InconsistentExecutableDirectiveLocations,
+    InconsistentDescription,
+    InconsistentArgumentPresence,
+    FromSubgraphDoesNotExist,
+    OverriddenFieldCanBeRemoved,
+    OverrideDirectiveCanBeRemoved,
+    OverrideMigrationInProgress,
+    UnusedEnumType,
+    InconsistentNonRepeatableDirectiveArguments,
+    MergedNonRepeatableDirectiveArguments,
+    DirectiveCompositionInfo,
+    DirectiveCompositionWarn,
+    InconsistentRuntimeTypesForShareableReturn,
+    ImplicitlyUpgradedFederationVersion,
+    ContextualArgumentNotContextualInAllSubgraphs,
+}
+
+impl HintCode {
+    pub(crate) fn definition(&self) -> &'static HintCodeDefinition {
+        match self {
+            HintCode::InconsistentButCompatibleFieldType => &INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE,
+            HintCode::InconsistentButCompatibleArgumentType => &INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE,
+            HintCode::InconsistentDefaultValuePresence => &INCONSISTENT_DEFAULT_VALUE_PRESENCE,
+            HintCode::InconsistentEntity => &INCONSISTENT_ENTITY,
+            HintCode::InconsistentObjectValueTypeField => &INCONSISTENT_OBJECT_VALUE_TYPE_FIELD,
+            HintCode::InconsistentInterfaceValueTypeField => &INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD,
+            HintCode::InconsistentInputObjectField => &INCONSISTENT_INPUT_OBJECT_FIELD,
+            HintCode::InconsistentUnionMember => &INCONSISTENT_UNION_MEMBER,
+            HintCode::InconsistentEnumValueForInputEnum => &INCONSISTENT_ENUM_VALUE_FOR_INPUT_ENUM,
+            HintCode::InconsistentEnumValueForOutputEnum => &INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM,
+            HintCode::InconsistentTypeSystemDirectiveRepeatable => &INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_REPEATABLE,
+            HintCode::InconsistentTypeSystemDirectiveLocations => &INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_LOCATIONS,
+            HintCode::InconsistentExecutableDirectivePresence => &INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE,
+            HintCode::NoExecutableDirectiveLocationsIntersection => &NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION,
+            HintCode::InconsistentExecutableDirectiveRepeatable => &INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE,
+            HintCode::InconsistentExecutableDirectiveLocations => &INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS,
+            HintCode::InconsistentDescription => &INCONSISTENT_DESCRIPTION,
+            HintCode::InconsistentArgumentPresence => &INCONSISTENT_ARGUMENT_PRESENCE,
+            HintCode::FromSubgraphDoesNotExist => &FROM_SUBGRAPH_DOES_NOT_EXIST,
+            HintCode::OverriddenFieldCanBeRemoved => &OVERRIDDEN_FIELD_CAN_BE_REMOVED,
+            HintCode::OverrideDirectiveCanBeRemoved => &OVERRIDE_DIRECTIVE_CAN_BE_REMOVED,
+            HintCode::OverrideMigrationInProgress => &OVERRIDE_MIGRATION_IN_PROGRESS,
+            HintCode::UnusedEnumType => &UNUSED_ENUM_TYPE,
+            HintCode::InconsistentNonRepeatableDirectiveArguments => &INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS,
+            HintCode::MergedNonRepeatableDirectiveArguments => &MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS,
+            HintCode::DirectiveCompositionInfo => &DIRECTIVE_COMPOSITION_INFO,
+            HintCode::DirectiveCompositionWarn => &DIRECTIVE_COMPOSITION_WARN,
+            HintCode::InconsistentRuntimeTypesForShareableReturn => &INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN,
+            HintCode::ImplicitlyUpgradedFederationVersion => &IMPLICITLY_UPGRADED_FEDERATION_VERSION,
+            HintCode::ContextualArgumentNotContextualInAllSubgraphs => &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS,
+        }
+    }
+
+    pub(crate) fn code(&self) -> &str {
+        self.definition().code()
     }
 }
 
@@ -307,96 +395,3 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
         "Contextual argument is not contextual in all subgraphs"
     )
 });
-
-// Helper functions for creating hints
-
-#[allow(dead_code)]
-pub(crate) fn create_hint(_definition: &HintCodeDefinition, message: impl Into<String>) -> CompositionHint {
-    CompositionHint::new(message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_but_compatible_field_type_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_but_compatible_argument_type_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_default_value_presence_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_DEFAULT_VALUE_PRESENCE, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_entity_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&INCONSISTENT_ENTITY, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_object_value_type_field_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_OBJECT_VALUE_TYPE_FIELD, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_interface_value_type_field_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_input_object_field_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&INCONSISTENT_INPUT_OBJECT_FIELD, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_union_member_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&INCONSISTENT_UNION_MEMBER, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_enum_value_for_input_enum_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_ENUM_VALUE_FOR_INPUT_ENUM, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_inconsistent_enum_value_for_output_enum_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_from_subgraph_does_not_exist_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&FROM_SUBGRAPH_DOES_NOT_EXIST, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_overridden_field_can_be_removed_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&OVERRIDDEN_FIELD_CAN_BE_REMOVED, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_override_directive_can_be_removed_hint(
-    message: impl Into<String>,
-) -> CompositionHint {
-    create_hint(&OVERRIDE_DIRECTIVE_CAN_BE_REMOVED, message)
-}
-
-#[allow(dead_code)]
-pub(crate) fn create_override_migration_in_progress_hint(message: impl Into<String>) -> CompositionHint {
-    create_hint(&OVERRIDE_MIGRATION_IN_PROGRESS, message)
-}
