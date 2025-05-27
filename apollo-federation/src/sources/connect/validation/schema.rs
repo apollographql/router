@@ -1,5 +1,7 @@
 //! Validations that check the entire connectors schema together:
 
+use std::ops::Range;
+
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
@@ -7,6 +9,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::parser::SourceSpan;
@@ -315,7 +318,8 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     for (_, connector) in &connectors {
         if connector.entity_resolver == Some(TypeBatch) {
             let input_trie = compute_batch_input_trie(connector);
-            match SelectionSetWalker::new(&input_trie).walk(&connector.selection.shape(), connector)
+            match SelectionSetWalker::new(connector.name(), schema, &input_trie)
+                .walk(&connector.selection.shape(), connector)
             {
                 Ok(res) => messages.extend(res),
                 Err(err) => messages.push(err),
@@ -328,10 +332,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
             Ok(None) => continue,
             Err(_) => {
                 let variables = connector.variable_references().collect_vec();
-                messages.push(field_set_error(
-                    &variables,
-                    &connector.id.directive.coordinate(),
-                ));
+                messages.push(field_set_error(&variables, &connector, schema));
             }
             Ok(Some(field_set)) => {
                 entity_checker.add_connector(field_set);
@@ -359,13 +360,17 @@ fn compute_batch_input_trie(connector: &Connector) -> SelectionTrie {
 }
 
 struct SelectionSetWalker<'walker> {
+    name: Name,
+    schema: &'walker SchemaInfo<'walker>,
     trie: &'walker SelectionTrie,
     unmapped_fields: HashSet<String>,
 }
 
 impl<'walker> SelectionSetWalker<'walker> {
-    fn new(trie: &'walker SelectionTrie) -> Self {
+    fn new(name: Name, schema: &'walker SchemaInfo<'walker>, trie: &'walker SelectionTrie) -> Self {
         SelectionSetWalker {
+            name,
+            schema,
             trie,
             unmapped_fields: HashSet::new(),
         }
@@ -380,32 +385,36 @@ enum ShapeVisitorError<'error> {
     BatchKeyNotSubsetOfOutputShape {
         connector: String,
         unset: &'error String,
+        locations: Vec<Range<LineColumn>>,
     },
     #[error("Attempted to resolve key on unexpected shape `{shape_str}`")]
-    UnexpectedKeyOnShape { shape_str: String },
+    UnexpectedKeyOnShape {
+        shape_str: String,
+        locations: Vec<Range<LineColumn>>,
+    },
     #[error(
         "`$batch` fields must be mapped from the API response body. Variables such as `$context` and `$this` are not supported"
     )]
-    NonRootBatch,
+    NonRootBatch(Vec<Range<LineColumn>>),
 }
 
 impl From<ShapeVisitorError<'_>> for Message {
     fn from(value: ShapeVisitorError) -> Self {
         match &value {
-            ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { .. } => Message {
+            ShapeVisitorError::BatchKeyNotSubsetOfOutputShape { locations, .. } => Message {
+                code: Code::ConnectorsBatchKeyNotInSelection,
+                message: value.to_string(),
+                locations: locations.clone(),
+            },
+            ShapeVisitorError::UnexpectedKeyOnShape { locations, .. } => Message {
                 code: Code::ConnectorsUnresolvedField,
                 message: value.to_string(),
-                locations: Vec::new(),
+                locations: locations.clone(),
             },
-            ShapeVisitorError::UnexpectedKeyOnShape { .. } => Message {
-                code: Code::ConnectorsUnresolvedField,
+            ShapeVisitorError::NonRootBatch(locations) => Message {
+                code: Code::ConnectorsNonRootBatchKey,
                 message: value.to_string(),
-                locations: Vec::new(),
-            },
-            ShapeVisitorError::NonRootBatch => Message {
-                code: Code::ConnectBatchAndThis,
-                message: value.to_string(),
-                locations: Vec::new(),
+                locations: locations.clone(),
             },
         }
     }
@@ -428,6 +437,11 @@ impl SelectionSetWalker<'_> {
                 ShapeVisitorError::BatchKeyNotSubsetOfOutputShape {
                     connector: connector.id.directive.simple_name(),
                     unset,
+                    locations: self
+                        .name
+                        .line_column_range(&self.schema.sources)
+                        .into_iter()
+                        .collect(),
                 }
                 .into(),
             );
@@ -442,6 +456,11 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
         Err(ShapeVisitorError::UnexpectedKeyOnShape {
             shape_str: shape.pretty_print(),
+            locations: self
+                .name
+                .line_column_range(&self.schema.sources)
+                .into_iter()
+                .collect(),
         })
     }
 
@@ -462,7 +481,12 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             // Check that next shape doesn't come from a non-`$root` field.
             if let ShapeCase::Name(root, _) = next_shape.case() {
                 if root.value != Self::ROOT_SHAPE {
-                    return Err(ShapeVisitorError::NonRootBatch);
+                    return Err(ShapeVisitorError::NonRootBatch(
+                        self.name
+                            .line_column_range(&self.schema.sources)
+                            .into_iter()
+                            .collect(),
+                    ));
                 }
             }
 
@@ -472,7 +496,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             }
 
             // Continue walking with nested selection sets
-            let mut nested = SelectionSetWalker::new(sub_selection);
+            let mut nested = SelectionSetWalker::new(self.name.clone(), self.schema, sub_selection);
             next_shape.visit_shape(&mut nested)?;
             self.unmapped_fields
                 .extend(nested.unmapped_fields.into_iter());

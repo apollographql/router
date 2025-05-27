@@ -3,5 +3,10 @@ extend schema
 
 type Query {
   resources(anArg: String): [String!]!
-    @connect(http: { GET: "http://127.0.0.1:8000/{$args.anArg}?{$args.anArg}={$args.anArg}" }, selection: "$")
+    @connect(
+      http: {
+        GET: "http://127.0.0.1:8000/ with spaces /{$args.anArg}?{$args.anArg}={$args.anArg}"
+      }
+      selection: "$"
+    )
 }
