@@ -1699,8 +1699,9 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
+                let element_key = element.key().to_owned_key();
                 let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
+                    .entry(element_key.as_borrowed_key())
                     .or_insert(|| {
                         Selection::from_element(
                             element,

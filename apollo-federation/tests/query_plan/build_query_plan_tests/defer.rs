@@ -2093,7 +2093,7 @@ fn defer_test_defer_on_query_root_type() {
             Flatten(path: "op2.next") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on Query {
+                  ... {
                     op3
                   }
                 }
@@ -2107,7 +2107,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       op1
                     }
                   }
@@ -2116,7 +2116,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph2") {
                   {
-                    ... on Query {
+                    ... {
                       op4
                     }
                   }
@@ -2174,7 +2174,7 @@ fn defer_test_defer_on_everything_queried() {
               Flatten(path: "") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       t {
                         __typename
                         id

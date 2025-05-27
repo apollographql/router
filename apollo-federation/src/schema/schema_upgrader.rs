@@ -629,11 +629,7 @@ impl SchemaUpgrader {
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
-        schema
-            .schema()
-            .schema_definition
-            .iter_root_operations()
-            .any(|op| op.1.as_str() == ty.type_name().as_str())
+        schema.is_root_type(ty.type_name())
     }
 
     fn remove_directives_on_interface(
