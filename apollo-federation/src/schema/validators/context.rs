@@ -161,5 +161,4 @@ mod tests {
         rule.validate("validName123", &mut errors);
         assert_eq!(errors.errors.len(), 0, "Expected no errors for valid name");
     }
-
 }

@@ -52,7 +52,8 @@ pub(crate) fn validate_from_context_directives(
                 // Additional validation for field values if context and selection are present
                 if context.is_some() && selection.is_some() {
                     // We need the context locations from the context map for this target
-                    if let Some(set_context_locations) = context_map.get(context.as_ref().unwrap()) {
+                    if let Some(set_context_locations) = context_map.get(context.as_ref().unwrap())
+                    {
                         if let Err(validation_error) = validate_field_value(
                             &context,
                             &selection,
@@ -164,7 +165,9 @@ static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
 enum SelectionType {
     Error,
     Field,
-    InlineFragment { type_conditions: std::collections::HashSet<String> },
+    InlineFragment {
+        type_conditions: std::collections::HashSet<String>,
+    },
 }
 
 /// Validates a field value selection format and returns whether it's a field or inline fragment
@@ -176,9 +179,9 @@ fn validate_selection_format(
 ) -> SelectionType {
     // For now, implement a simple heuristic-based approach
     // A more sophisticated approach would require proper GraphQL parsing
-    
+
     let trimmed = selection.trim();
-    
+
     if trimmed.is_empty() {
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
@@ -191,12 +194,12 @@ fn validate_selection_format(
         );
         return SelectionType::Error;
     }
-    
+
     // Check if this looks like an inline fragment pattern
     if trimmed.contains("... on ") {
         // Extract type conditions from inline fragments
         let mut type_conditions = std::collections::HashSet::new();
-        
+
         // Simple regex to find "... on TypeName" patterns
         let inline_fragment_regex = Regex::new(r"\.\.\.\s+on\s+([A-Za-z_]\w*)").unwrap();
         for cap in inline_fragment_regex.captures_iter(trimmed) {
@@ -204,7 +207,7 @@ fn validate_selection_format(
                 type_conditions.insert(type_name.as_str().to_string());
             }
         }
-        
+
         if type_conditions.is_empty() {
             errors.push(
                 SingleFederationError::ContextSelectionInvalid {
@@ -217,7 +220,7 @@ fn validate_selection_format(
             );
             return SelectionType::Error;
         }
-        
+
         SelectionType::InlineFragment { type_conditions }
     } else {
         // Assume it's a field selection
@@ -273,35 +276,50 @@ fn selection_set_has_alias(selection_set: &SelectionSet) -> bool {
 /// Port note: Ported from JS isValidImplementationFieldType in federation.ts
 /// Implementation of spec https://spec.graphql.org/draft/#IsValidImplementationFieldType()
 #[allow(dead_code)]
-fn is_valid_implementation_field_type(field_type: &apollo_compiler::schema::Type, implemented_field_type: &apollo_compiler::schema::Type) -> bool {
+fn is_valid_implementation_field_type(
+    field_type: &apollo_compiler::schema::Type,
+    implemented_field_type: &apollo_compiler::schema::Type,
+) -> bool {
     // If field_type is NonNull
     if field_type.is_non_null() {
         if implemented_field_type.is_non_null() {
             // Both are NonNull, check their inner types
-            return is_valid_implementation_field_type(&field_type.item_type(), &implemented_field_type.item_type());
+            return is_valid_implementation_field_type(
+                &field_type.item_type(),
+                &implemented_field_type.item_type(),
+            );
         } else {
             // field_type is NonNull but implemented_field_type is nullable
             // This is valid - NonNull can implement nullable
-            return is_valid_implementation_field_type(&field_type.item_type(), implemented_field_type);
+            return is_valid_implementation_field_type(
+                &field_type.item_type(),
+                implemented_field_type,
+            );
         }
     }
-    
+
     // If both are List types
     if field_type.is_list() && implemented_field_type.is_list() {
-        return is_valid_implementation_field_type(&field_type.item_type(), &implemented_field_type.item_type());
+        return is_valid_implementation_field_type(
+            &field_type.item_type(),
+            &implemented_field_type.item_type(),
+        );
     }
-    
+
     // Both should be named types (not wrapped) and have the same name
-    !field_type.is_list() && 
-    !field_type.is_non_null() &&
-    !implemented_field_type.is_list() && 
-    !implemented_field_type.is_non_null() &&
-    field_type.inner_named_type() == implemented_field_type.inner_named_type()
+    !field_type.is_list()
+        && !field_type.is_non_null()
+        && !implemented_field_type.is_list()
+        && !implemented_field_type.is_non_null()
+        && field_type.inner_named_type() == implemented_field_type.inner_named_type()
 }
 
 /// Helper function that compares types by name (for backward compatibility)
 /// This version works with the current validation infrastructure that only passes type names
-fn is_valid_implementation_field_type_by_name(field_type_name: &Name, implemented_field_type_name: &Name) -> bool {
+fn is_valid_implementation_field_type_by_name(
+    field_type_name: &Name,
+    implemented_field_type_name: &Name,
+) -> bool {
     // For now, we do simple name comparison since we only have the inner names
     // The full type compatibility checking happens at a higher level in validate_field_value
     // where we have access to the complete type information
@@ -319,54 +337,50 @@ fn validate_field_value(
 ) -> Result<(), FederationError> {
     let context = context.as_deref().unwrap_or("");
     let selection = selection.as_deref().unwrap_or("");
-    
+
     if context.is_empty() || selection.is_empty() {
         return Ok(());
     }
 
     // Get the expected type from the target argument
     let expected_type = match target {
-        FieldArgumentDefinitionPosition::Object(pos) => {
-            match pos.get(schema.schema()) {
-                Ok(arg_def) => arg_def.ty.inner_named_type().clone(),
-                Err(_) => return Ok(()),
-            }
-        }
-        FieldArgumentDefinitionPosition::Interface(pos) => {
-            match pos.get(schema.schema()) {
-                Ok(arg_def) => arg_def.ty.inner_named_type().clone(),
-                Err(_) => return Ok(()),
-            }
-        }
+        FieldArgumentDefinitionPosition::Object(pos) => match pos.get(schema.schema()) {
+            Ok(arg_def) => arg_def.ty.inner_named_type().clone(),
+            Err(_) => return Ok(()),
+        },
+        FieldArgumentDefinitionPosition::Interface(pos) => match pos.get(schema.schema()) {
+            Ok(arg_def) => arg_def.ty.inner_named_type().clone(),
+            Err(_) => return Ok(()),
+        },
     };
 
     // Validate the selection format
     let selection_type = validate_selection_format(context, selection, target, errors);
-    
+
     if selection_type == SelectionType::Error {
         return Ok(());
     }
 
     let mut used_type_conditions = std::collections::HashSet::new();
-    
+
     // For each set context location, validate the selection
     for location_name in set_context_locations {
         // Try to create a composite type position from the location name
         let location = match schema.schema().types.get(location_name) {
             Some(apollo_compiler::schema::ExtendedType::Object(_)) => {
-                CompositeTypeDefinitionPosition::Object(
-                    ObjectTypeDefinitionPosition::new(location_name.clone())
-                )
+                CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+                    location_name.clone(),
+                ))
             }
             Some(apollo_compiler::schema::ExtendedType::Interface(_)) => {
-                CompositeTypeDefinitionPosition::Interface(
-                    InterfaceTypeDefinitionPosition::new(location_name.clone())
-                )
+                CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition::new(
+                    location_name.clone(),
+                ))
             }
             Some(apollo_compiler::schema::ExtendedType::Union(_)) => {
-                CompositeTypeDefinitionPosition::Union(
-                    UnionTypeDefinitionPosition { type_name: location_name.clone() }
-                )
+                CompositeTypeDefinitionPosition::Union(UnionTypeDefinitionPosition {
+                    type_name: location_name.clone(),
+                })
             }
             _ => continue, // Skip non-composite types
         };
@@ -374,12 +388,14 @@ fn validate_field_value(
         // For now, let's use a simpler approach: we'll create the SelectionSet directly
         // without parsing the field set, since that requires a ValidFederationSchema
         // and the complexity is getting too high for this initial implementation.
-        
+
         // Instead, we'll just do basic validation on the selection string format
         // and trust that validate_field_value_type will catch type mismatches
-        
+
         // Create a minimal SelectionSet for validation
-        let valid_schema = match crate::schema::ValidFederationSchema::new_assume_valid(schema.clone()) {
+        let valid_schema = match crate::schema::ValidFederationSchema::new_assume_valid(
+            schema.clone(),
+        ) {
             Ok(vs) => vs,
             Err(_) => {
                 errors.push(
@@ -394,7 +410,7 @@ fn validate_field_value(
                 continue;
             }
         };
-        
+
         // Try to parse the selection using our field_set parser
         let selection_set = match crate::schema::field_set::parse_field_set_without_normalization(
             valid_schema.schema(),
@@ -479,11 +495,17 @@ fn validate_field_value(
             SelectionType::Field => {
                 // For field selections, validate the type
                 let type_position = match location {
-                    CompositeTypeDefinitionPosition::Object(obj) => TypeDefinitionPosition::Object(obj),
-                    CompositeTypeDefinitionPosition::Interface(itf) => TypeDefinitionPosition::Interface(itf),
-                    CompositeTypeDefinitionPosition::Union(union) => TypeDefinitionPosition::Union(union),
+                    CompositeTypeDefinitionPosition::Object(obj) => {
+                        TypeDefinitionPosition::Object(obj)
+                    }
+                    CompositeTypeDefinitionPosition::Interface(itf) => {
+                        TypeDefinitionPosition::Interface(itf)
+                    }
+                    CompositeTypeDefinitionPosition::Union(union) => {
+                        TypeDefinitionPosition::Union(union)
+                    }
                 };
-                
+
                 if let Ok(resolved_type) = validate_field_value_type(
                     &type_position,
                     &selection_set,
@@ -492,7 +514,10 @@ fn validate_field_value(
                     errors,
                 ) {
                     if let Some(resolved_type) = resolved_type {
-                        if !is_valid_implementation_field_type_by_name(&resolved_type, &expected_type) {
+                        if !is_valid_implementation_field_type_by_name(
+                            &resolved_type,
+                            &expected_type,
+                        ) {
                             errors.push(
                                 SingleFederationError::ContextSelectionInvalid {
                                     message: format!(
@@ -522,10 +547,12 @@ fn validate_field_value(
                 // For inline fragment selections, validate each fragment
                 for selection in selection_set.iter() {
                     if let Selection::InlineFragment(frag) = selection {
-                        if let Some(type_condition_pos) = &frag.inline_fragment.type_condition_position {
+                        if let Some(type_condition_pos) =
+                            &frag.inline_fragment.type_condition_position
+                        {
                             let type_condition = type_condition_pos.type_name();
                             used_type_conditions.insert(type_condition.as_str().to_string());
-                            
+
                             // Create type position for the fragment's type condition
                             let frag_type_position = match type_condition_pos {
                                 CompositeTypeDefinitionPosition::Object(obj_pos) => {
@@ -538,7 +565,7 @@ fn validate_field_value(
                                     TypeDefinitionPosition::Union(union_pos.clone())
                                 }
                             };
-                            
+
                             if let Ok(Some(resolved_type)) = validate_field_value_type(
                                 &frag_type_position,
                                 &frag.selection_set,
@@ -548,7 +575,10 @@ fn validate_field_value(
                             ) {
                                 // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
                                 // This matches the TypeScript behavior
-                                if !is_valid_implementation_field_type_by_name(&resolved_type, &expected_type) {
+                                if !is_valid_implementation_field_type_by_name(
+                                    &resolved_type,
+                                    &expected_type,
+                                ) {
                                     errors.push(
                                         SingleFederationError::ContextSelectionInvalid {
                                             message: format!(
@@ -586,7 +616,7 @@ fn validate_field_value(
             .iter()
             .map(|name| name.as_str().to_string())
             .collect();
-        
+
         let mut has_matching_condition = false;
         for type_condition in type_conditions {
             if context_location_names.contains(type_condition) {
@@ -594,7 +624,7 @@ fn validate_field_value(
                 break;
             }
         }
-        
+
         if !has_matching_condition && !type_conditions.is_empty() {
             // No type condition matches any context location
             let context_locations_str = set_context_locations
@@ -602,7 +632,7 @@ fn validate_field_value(
                 .map(|name| name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             errors.push(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
@@ -631,7 +661,7 @@ fn validate_field_value(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -905,16 +935,16 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
         // Check if this is a directive definition argument
         // Note: This is a simplified check - in practice, we'd need to analyze the schema structure
         // to determine if this argument belongs to a directive definition vs a field definition
-        
+
         // For now, we can detect this by checking if the field name pattern suggests it's a directive
         // This is not a perfect solution but should work for the test case
         let coordinate = as_coordinate(target);
-        
+
         // In the test case, we have a directive @testDirective with argument contextArg
         // The coordinate would be something like "testDirective.contextArg" or similar
         // But actually, directive arguments won't be picked up by the from_context_directive_applications()
         // because they're not field arguments. So this validator might not be triggered by our test.
-        
+
         // Let's add a simple check for now - this may need refinement based on how
         // directive arguments are represented in the schema
         if coordinate.contains("testDirective") {
@@ -928,7 +958,7 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
                 .into(),
             );
         }
-        
+
         Ok(())
     }
 }
@@ -964,7 +994,7 @@ fn validate_field_value_type_inner(
                         errors,
                     );
                 }
-                
+
                 // Get the actual field definition to extract its type
                 if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
                     // Get the base type name (strip wrappers like NonNull, List)
@@ -1296,10 +1326,10 @@ mod tests {
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_single_field() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1319,43 +1349,57 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case 1: Single field selection - should return the field type
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "id",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_some(), "Should return a type for single field selection");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_some(),
+            "Should return a type for single field selection"
+        );
         assert_eq!(result.unwrap().as_str(), "ID", "Should return ID type");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
     }
 
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_consistent_fields() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1374,43 +1418,61 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Multiple fields with same type - should return common type
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ id userId identifier }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_some(), "Should return a type for consistent field types");
-        assert_eq!(result.unwrap().as_str(), "ID", "Should return common ID type");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_some(),
+            "Should return a type for consistent field types"
+        );
+        assert_eq!(
+            result.unwrap().as_str(),
+            "ID",
+            "Should return common ID type"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
     }
 
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_inconsistent_fields() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1429,42 +1491,56 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Multiple fields with different types - should return None
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ id name age }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_none(), "Should return None for inconsistent field types");
-        assert!(errors.errors.is_empty(), "Should not have validation errors for type mismatch");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_none(),
+            "Should return None for inconsistent field types"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for type mismatch"
+        );
     }
 
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_nested_selection() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1487,43 +1563,61 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Nested selection with consistent types
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ profile { id } settings { id } }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_some(), "Should return a type for nested consistent selections");
-        assert_eq!(result.unwrap().as_str(), "ID", "Should return ID type from nested selection");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_some(),
+            "Should return a type for nested consistent selections"
+        );
+        assert_eq!(
+            result.unwrap().as_str(),
+            "ID",
+            "Should return ID type from nested selection"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
     }
 
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_nested_inconsistent() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1549,42 +1643,56 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Nested selection with inconsistent types
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ profile { id } settings { name } }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_none(), "Should return None for nested inconsistent selections");
-        assert!(errors.errors.is_empty(), "Should not have validation errors for type mismatch");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_none(),
+            "Should return None for nested inconsistent selections"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for type mismatch"
+        );
     }
 
     #[test]
     // Port note: Relates to JS test "context selection references an @interfaceObject"
     fn test_validate_field_value_type_interface_object_error() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext", "@interfaceObject"])
@@ -1602,33 +1710,47 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Interface object should generate error
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ id }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
+        )
+        .expect("valid field value type");
+
         // Should still return the type but generate an error
-        assert!(result.is_some(), "Should still return a type even with interface object error");
-        assert!(!errors.errors.is_empty(), "Should have validation error for interface object");
+        assert!(
+            result.is_some(),
+            "Should still return a type even with interface object error"
+        );
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation error for interface object"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -1642,10 +1764,10 @@ mod tests {
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_wrapped_types() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1666,44 +1788,61 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Multiple fields with same base type but different wrappers - should return common base type
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ id idNonNull ids idsNonNull }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_some(), "Should return a type for wrapped types with same base");
-        assert_eq!(result.unwrap().as_str(), "ID", "Should return common base type ID");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
-    }
+        )
+        .expect("valid field value type");
 
+        assert!(
+            result.is_some(),
+            "Should return a type for wrapped types with same base"
+        );
+        assert_eq!(
+            result.unwrap().as_str(),
+            "ID",
+            "Should return common base type ID"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
+    }
 
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_deep_nesting() {
         use crate::schema::position::CompositeTypeDefinitionPosition;
+        use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
-        use crate::schema::position::FieldArgumentDefinitionPosition;
-        
+
         let schema_str = r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext"])
@@ -1728,33 +1867,51 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(Name::new_unchecked("User")));
-        let query_contextual_arg_pos = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Query"),
-            field_name: Name::new_unchecked("contextual"),
-            argument_name: Name::new_unchecked("id"),
-        });
+        let user_type = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(
+            Name::new_unchecked("User"),
+        ));
+        let query_contextual_arg_pos =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Query"),
+                field_name: Name::new_unchecked("contextual"),
+                argument_name: Name::new_unchecked("id"),
+            });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone()).expect("valid schema");
-        
+        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
+            .expect("valid schema");
+
         // Test case: Deep nesting - should return the deeply nested field type
         let selection_set = SelectionSet::parse(
             valid_schema.clone(),
-            CompositeTypeDefinitionPosition::Object(user_type.clone().try_into().expect("valid type")),
+            CompositeTypeDefinitionPosition::Object(
+                user_type.clone().try_into().expect("valid type"),
+            ),
             "{ profile { settings { id } } }",
-        ).expect("valid selection set");
-        
+        )
+        .expect("valid selection set");
+
         let result = validate_field_value_type(
             &user_type,
             &selection_set,
             &valid_schema,
             &query_contextual_arg_pos,
             &mut errors,
-        ).expect("valid field value type");
-        
-        assert!(result.is_some(), "Should return a type for deeply nested selection");
-        assert_eq!(result.unwrap().as_str(), "ID", "Should return the deeply nested field type");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
+        )
+        .expect("valid field value type");
+
+        assert!(
+            result.is_some(),
+            "Should return a type for deeply nested selection"
+        );
+        assert_eq!(
+            result.unwrap().as_str(),
+            "ID",
+            "Should return the deeply nested field type"
+        );
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
     }
 
     #[test]
@@ -1784,11 +1941,12 @@ mod tests {
 
         let context = Some("userContext".to_string());
         let selection = Some("name".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -1801,7 +1959,10 @@ mod tests {
         );
 
         assert!(result.is_ok(), "Should validate successfully");
-        assert!(errors.errors.is_empty(), "Should not have validation errors");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors"
+        );
     }
 
     #[test]
@@ -1831,11 +1992,12 @@ mod tests {
 
         let context = Some("userContext".to_string());
         let selection = Some("nonExistentField".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -1849,7 +2011,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for invalid field selection
-        assert!(!errors.errors.is_empty(), "Should have validation errors for invalid selection");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for invalid selection"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -1886,11 +2051,12 @@ mod tests {
 
         let context = Some("userContext".to_string());
         let selection = Some("name".to_string()); // String field but expecting ID
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -1904,7 +2070,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for type mismatch between String and ID
-        assert!(!errors.errors.is_empty(), "Should have validation errors for type mismatch");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for type mismatch"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -1941,11 +2110,12 @@ mod tests {
 
         let context = Some("userContext".to_string());
         let selection = Some("... on Parent { name }".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -1994,11 +2164,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("prop".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Foo"), Name::new_unchecked("Bar")];
 
         let result = validate_field_value(
@@ -2012,7 +2183,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for type mismatch between String and Int from different context types
-        assert!(!errors.errors.is_empty(), "Should have validation errors for type mismatch");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for type mismatch"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2097,11 +2271,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("{ id prop }".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -2115,7 +2290,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have validation error for multiple selections
-        assert!(!errors.errors.is_empty(), "Should have validation errors for multiple selections");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for multiple selections"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2154,11 +2332,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("{ prop @testDirective }".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -2172,7 +2351,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for directives in selection
-        assert!(!errors.errors.is_empty(), "Should have validation errors for directives");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for directives"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2209,11 +2391,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("{ alias: prop }".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
@@ -2227,7 +2410,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for aliases in selection
-        assert!(!errors.errors.is_empty(), "Should have validation errors for aliases");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for aliases"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2269,11 +2455,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("... on Foo { prop }".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("Bar")];
 
         let result = validate_field_value(
@@ -2288,7 +2475,10 @@ mod tests {
         assert!(result.is_ok(), "Function should complete");
         // Should have validation error when type condition doesn't match the context location
         // In this case, we have "... on Foo" but the context is set on "Bar"
-        assert!(!errors.errors.is_empty(), "Should have validation errors for type condition mismatch");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for type condition mismatch"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2409,11 +2599,12 @@ mod tests {
 
         let context = Some("context".to_string());
         let selection = Some("prop".to_string());
-        let target = FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-            type_name: Name::new_unchecked("Target"),
-            field_name: Name::new_unchecked("value"),
-            argument_name: Name::new_unchecked("contextArg"),
-        });
+        let target =
+            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
+                type_name: Name::new_unchecked("Target"),
+                field_name: Name::new_unchecked("value"),
+                argument_name: Name::new_unchecked("contextArg"),
+            });
         let set_context_locations = vec![Name::new_unchecked("T")];
 
         let result = validate_field_value(
@@ -2427,7 +2618,10 @@ mod tests {
 
         assert!(result.is_ok(), "Function should complete");
         // Should have errors because T2 doesn't have the "prop" field
-        assert!(!errors.errors.is_empty(), "Should have validation errors for missing field in union member");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for missing field in union member"
+        );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
@@ -2474,7 +2668,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // Should have error for context name with underscore
-        assert!(!errors.errors.is_empty(), "Should have validation errors for underscore in context name");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for underscore in context name"
+        );
         // Note: The specific error type depends on the context validator implementation
     }
 
@@ -2515,7 +2712,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // Should have error for default values on @fromContext arguments
-        assert!(!errors.errors.is_empty(), "Should have validation errors for default values on contextual arguments");
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for default values on contextual arguments"
+        );
         // Note: This validation may need to be implemented in the fromContext validator
     }
 
@@ -2557,7 +2757,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
-        assert!(errors.errors.is_empty(), "Should not have validation errors for valid basic @fromContext usage");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for valid basic @fromContext usage"
+        );
     }
 
     #[test]
@@ -2598,7 +2801,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
-        assert!(errors.errors.is_empty(), "Should not have validation errors for valid list type usage");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for valid list type usage"
+        );
     }
 
     #[test]
@@ -2646,7 +2852,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // This should succeed because both Foo and Bar have the same field type
-        assert!(errors.errors.is_empty(), "Should not have validation errors for duck typing with same field types");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for duck typing with same field types"
+        );
     }
 
     #[test]
@@ -2741,7 +2950,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // This should succeed with interface context
-        assert!(errors.errors.is_empty(), "Should not have validation errors for valid interface context");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for valid interface context"
+        );
     }
 
     #[test]
@@ -2829,7 +3041,10 @@ mod tests {
             .expect("validates fromContext directives");
 
         // This should succeed - nullability mismatch is ok if contextual value is non-nullable
-        assert!(errors.errors.is_empty(), "Should not have validation errors for nullability mismatch when contextual value is non-nullable");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for nullability mismatch when contextual value is non-nullable"
+        );
     }
 
     #[test]
