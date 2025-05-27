@@ -330,6 +330,10 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 }
 
 impl Subgraph<Validated> {
+    pub fn validated_schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
     pub fn invalidate(self) -> Subgraph<Upgraded> {
         // PORT_NOTE: In JS, the metadata gets invalidated by calling
         // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
