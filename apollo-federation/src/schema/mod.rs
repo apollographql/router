@@ -841,7 +841,7 @@ impl ValidFederationSchema {
 
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
     #[allow(clippy::result_large_err)] // lint is accurate but this is not in a hot path
-    fn new_assume_valid(
+    pub fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
         // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
