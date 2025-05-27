@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::Schema;
 use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
 use crate::error::SingleFederationError;
-use crate::merge::error_reporter::ErrorReporter;
+use crate::merger::error_reporter::ErrorReporter;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -24,12 +24,6 @@ pub(crate) struct MergeResult {
 #[derive(Debug)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
-}
-
-impl Default for CompositionOptions {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 #[allow(unused)]

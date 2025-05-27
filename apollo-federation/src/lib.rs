@@ -34,6 +34,7 @@ mod display_helpers;
 pub mod error;
 pub mod link;
 pub mod merge;
+mod merger;
 pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
