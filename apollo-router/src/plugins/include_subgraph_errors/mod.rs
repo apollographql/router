@@ -44,8 +44,7 @@ impl Plugin for IncludeSubgraphErrors {
             for (name, config) in &init.config.subgraphs {
                 if !matches!(config, SubgraphConfig::Included(_)) {
                     return Err(format!(
-                        "Subgraph '{}' must use boolean config when global config is boolean",
-                        name
+                        "Subgraph '{name}' must use boolean config when global config is boolean",
                     )
                     .into());
                 }

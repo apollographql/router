@@ -43,6 +43,9 @@ pub(crate) enum AuthenticationError {
     /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from JWKS configured to only accept from '{expected}'
     InvalidIssuer { expected: String, token: String },
 
+    /// Invalid audience: the token's `aud` was '{actual}', but '{expected}' was expected
+    InvalidAudience { actual: String, expected: String },
+
     /// Unsupported key algorithm: {0}
     UnsupportedKeyAlgorithm(KeyAlgorithm),
 }
@@ -98,6 +101,7 @@ impl AuthenticationError {
             AuthenticationError::CannotFindKID(_) => ("CANNOT_FIND_KID", None),
             AuthenticationError::CannotFindSuitableKey(_, _) => ("CANNOT_FIND_SUITABLE_KEY", None),
             AuthenticationError::InvalidIssuer { .. } => ("INVALID_ISSUER", None),
+            AuthenticationError::InvalidAudience { .. } => ("INVALID_AUDIENCE", None),
             AuthenticationError::UnsupportedKeyAlgorithm(_) => ("UNSUPPORTED_KEY_ALGORITHM", None),
         };
 
