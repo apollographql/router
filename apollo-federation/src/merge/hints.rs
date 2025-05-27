@@ -1,8 +1,8 @@
 #[allow(dead_code)]
 use std::sync::LazyLock;
 
-use crate::supergraph::CompositionHint;
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) enum HintLevel {
     Warn,

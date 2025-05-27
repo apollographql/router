@@ -183,10 +183,8 @@ pub struct CompositionHint {
 
 impl CompositionHint {
     #[allow(unused)]
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
+    pub(crate) fn code(&self) -> &str {
+        &self.code
     }
 
     #[allow(unused)]
