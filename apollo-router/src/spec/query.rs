@@ -925,13 +925,11 @@ impl Query {
                     let value = request
                         .variables
                         .get(name.as_str())
-                        .or(default_value.as_ref())
-                        .unwrap_or(&Value::Null);
-                    let path = super::JsonValuePathElement::ObjectKey {
-                        key: name.as_str(),
-                        parent: None,
+                        .or(default_value.as_ref());
+                    let path = super::JsonValuePath::Variable {
+                        name: name.as_str(),
                     };
-                    ty.validate_input_value(value, schema, Some(&path))
+                    ty.validate_input_value(value, schema, &path)
                         .err()
                         .map(|message| {
                             FetchError::ValidationInvalidTypeVariable {

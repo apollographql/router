@@ -31,16 +31,17 @@ fn describe_json_value(value: &Value) -> &'static str {
 pub(crate) struct FieldType(pub(crate) schema::Type);
 
 /// A path within a JSON object that doesn’t need heap allocation in the happy path
-pub(crate) type JsonValuePath<'a> = Option<&'a JsonValuePathElement<'a>>;
-
-pub(crate) enum JsonValuePathElement<'a> {
+pub(crate) enum JsonValuePath<'a> {
+    Variable {
+        name: &'a str,
+    },
     ObjectKey {
         key: &'a str,
-        parent: JsonValuePath<'a>,
+        parent: &'a JsonValuePath<'a>,
     },
     ArrayItem {
         index: usize,
-        parent: JsonValuePath<'a>,
+        parent: &'a JsonValuePath<'a>,
     },
 }
 
@@ -119,40 +120,53 @@ impl std::fmt::Display for FieldType {
 /// in case e.g. every item of a large array is invalid.
 fn validate_input_value(
     ty: &schema::Type,
-    value: &Value,
+    value: Option<&Value>,
     schema: &Schema,
-    path: JsonValuePath<'_>,
+    path: &JsonValuePath<'_>,
 ) -> Result<(), InvalidInputValue> {
+    let fmt_path = || match path {
+        JsonValuePath::Variable { .. } => format!("variable `{path}`"),
+        _ => format!("input value at `{path}`"),
+    };
+    let Some(value) = value else {
+        if ty.is_non_null() {
+            return Err(InvalidInputValue(format!(
+                "missing {}: for required GraphQL type `{ty}`",
+                fmt_path(),
+            )));
+        } else {
+            return Ok(());
+        }
+    };
     let invalid = || {
-        let path = path
-            .map(|p| p as &dyn std::fmt::Display)
-            .unwrap_or(&"" as _);
         InvalidInputValue(format!(
-            "invalid input value at {path}: found JSON {} for GraphQL {ty}",
+            "invalid {}: found JSON {} for GraphQL type `{ty}`",
+            fmt_path(),
             describe_json_value(value)
         ))
     };
     if value.is_null() {
-        return match ty {
-            schema::Type::Named(_) | schema::Type::List(_) => Ok(()),
-            schema::Type::NonNullNamed(_) | schema::Type::NonNullList(_) => Err(invalid()),
-        };
+        if ty.is_non_null() {
+            return Err(invalid());
+        } else {
+            return Ok(());
+        }
     }
     let type_name = match ty {
         schema::Type::Named(name) | schema::Type::NonNullNamed(name) => name,
         schema::Type::List(inner_type) | schema::Type::NonNullList(inner_type) => {
             if let Value::Array(vec) = value {
                 for (i, x) in vec.iter().enumerate() {
-                    let path = JsonValuePathElement::ArrayItem {
+                    let path = JsonValuePath::ArrayItem {
                         index: i,
                         parent: path,
                     };
-                    validate_input_value(inner_type, x, schema, Some(&path))?
+                    validate_input_value(inner_type, Some(x), schema, &path)?
                 }
                 return Ok(());
             } else {
                 // For coercion from single value to list
-                return validate_input_value(inner_type, value, schema, path);
+                return validate_input_value(inner_type, Some(value), schema, path);
             }
         }
     };
@@ -193,7 +207,7 @@ fn validate_input_value(
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
             // TODO: check keys in `obj` but not in `def.fields`?
             def.fields.values().try_for_each(|field| {
-                let path = JsonValuePathElement::ObjectKey {
+                let path = JsonValuePath::ObjectKey {
                     key: &field.name,
                     parent: path,
                 };
@@ -202,11 +216,10 @@ fn validate_input_value(
                         let default = field
                             .default_value
                             .as_ref()
-                            .and_then(|v| parse_hir_value(v))
-                            .unwrap_or(Value::Null);
-                        validate_input_value(&field.ty, &default, schema, Some(&path))
+                            .and_then(|v| parse_hir_value(v));
+                        validate_input_value(&field.ty, default.as_ref(), schema, &path)
                     }
-                    Some(value) => validate_input_value(&field.ty, value, schema, Some(&path)),
+                    value => validate_input_value(&field.ty, value, schema, &path),
                 }
             })
         }
@@ -223,9 +236,9 @@ impl FieldType {
     // Each of the values are validated against the "input coercion" rules.
     pub(crate) fn validate_input_value(
         &self,
-        value: &Value,
+        value: Option<&Value>,
         schema: &Schema,
-        path: JsonValuePath<'_>,
+        path: &JsonValuePath<'_>,
     ) -> Result<(), InvalidInputValue> {
         validate_input_value(&self.0, value, schema, path)
     }
@@ -241,20 +254,20 @@ impl From<&'_ schema::Type> for FieldType {
     }
 }
 
-impl std::fmt::Display for JsonValuePathElement<'_> {
+impl std::fmt::Display for JsonValuePath<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JsonValuePathElement::ObjectKey { key, parent } => {
-                if let Some(parent) = parent {
-                    parent.fmt(f)?;
-                    f.write_str(".")?;
-                }
+            Self::Variable { name } => {
+                f.write_str("$")?;
+                f.write_str(name)
+            }
+            Self::ObjectKey { key, parent } => {
+                parent.fmt(f)?;
+                f.write_str(".")?;
                 f.write_str(key)
             }
-            JsonValuePathElement::ArrayItem { index, parent } => {
-                if let Some(parent) = parent {
-                    parent.fmt(f)?;
-                }
+            Self::ArrayItem { index, parent } => {
+                parent.fmt(f)?;
                 write!(f, "[{index}]")
             }
         }
