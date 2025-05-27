@@ -4,6 +4,16 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.7] - 2025-05-26
+
+## 🔍 Debuggability
+
+### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
+
+When logging unknown operations encountered during safe-listing, include information about whether enforcement was skipped. This will help distinguish between truly problematic external operations (where `enforcement_skipped` is false) and internal operations that are intentionally allowed to bypass safelisting (where `enforcement_skipped` is true).
+
+By [@DaleSeo](https://github.com/DaleSeo) in https://github.com/apollographql/router/pull/7509
+
 # [1.61.6] - 2025-05-06
 
 ## 🐛 Fixes
