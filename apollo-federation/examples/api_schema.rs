@@ -12,7 +12,11 @@ fn main() -> ExitCode {
     };
 
     let schema = Schema::parse_and_validate(source, name).unwrap();
-    let supergraph = Supergraph::from_schema(schema).unwrap();
+    let supergraph = Supergraph::from_schema(
+        schema,
+        Some(&apollo_federation::DEFAULT_SUPPORTED_SUPERGRAPH_SPECS),
+    )
+    .unwrap();
 
     match supergraph.to_api_schema(Default::default()) {
         Ok(result) => println!("{}", result.schema()),

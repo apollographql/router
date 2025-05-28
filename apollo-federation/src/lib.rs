@@ -46,6 +46,7 @@ pub(crate) mod utils;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use link::join_spec_definition::JOIN_VERSIONS;
@@ -53,12 +54,18 @@ use schema::FederationSchema;
 
 pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;
+use crate::error::MultiTryAll;
+use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
@@ -135,16 +142,42 @@ pub struct Supergraph {
 }
 
 impl Supergraph {
-    pub fn new(schema_str: &str) -> Result<Self, FederationError> {
+    /// For tests only.
+    pub fn new_with_spec_check(
+        schema_str: &str,
+        supported_specs: &[&str],
+    ) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
-        Self::from_schema(schema)
+        Self::from_schema(schema, Some(supported_specs))
     }
 
-    pub fn from_schema(schema: Valid<Schema>) -> Result<Self, FederationError> {
-        let schema = schema.into_inner();
+    /// For tests only.
+    pub fn new_without_spec_check(schema_str: &str) -> Result<Self, FederationError> {
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        Self::from_schema(schema, None)
+    }
+
+    /// Same as `new_with_spec_check(...)` with the default set of supported specs.
+    /// For tests only.
+    pub fn new(schema_str: &str) -> Result<Self, FederationError> {
+        Self::new_with_spec_check(schema_str, &DEFAULT_SUPPORTED_SUPERGRAPH_SPECS)
+    }
+
+    /// Construct from a pre-validation supergraph schema, which will be validated.
+    /// * `supported_specs`: (optional) If provided, checks if all EXECUTION/SECURITY specs are
+    ///   supported.
+    pub fn from_schema(
+        schema: Valid<Schema>,
+        supported_specs: Option<&[&str]>,
+    ) -> Result<Self, FederationError> {
+        let schema: Schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
 
         let _ = validate_supergraph_for_query_planning(&schema)?;
+
+        if let Some(supported_specs) = supported_specs {
+            check_spec_support(&schema, supported_specs)?;
+        }
 
         Ok(Self {
             // We know it's valid because the input was.
@@ -183,6 +216,107 @@ const _: () = {
 /// Returns if the type of the node is a scalar or enum.
 pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
+}
+
+pub const DEFAULT_SUPPORTED_SUPERGRAPH_SPECS: [&str; 12] = [
+    "https://specs.apollo.dev/core/v0.1",
+    "https://specs.apollo.dev/core/v0.2",
+    "https://specs.apollo.dev/join/v0.1",
+    "https://specs.apollo.dev/join/v0.2",
+    "https://specs.apollo.dev/join/v0.3",
+    "https://specs.apollo.dev/join/v0.4",
+    "https://specs.apollo.dev/join/v0.5",
+    "https://specs.apollo.dev/tag/v0.1",
+    "https://specs.apollo.dev/tag/v0.2",
+    "https://specs.apollo.dev/tag/v0.3",
+    "https://specs.apollo.dev/inaccessible/v0.1",
+    "https://specs.apollo.dev/inaccessible/v0.2",
+];
+
+pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 20] = [
+    "https://specs.apollo.dev/core/v0.1",
+    "https://specs.apollo.dev/core/v0.2",
+    "https://specs.apollo.dev/join/v0.1",
+    "https://specs.apollo.dev/join/v0.2",
+    "https://specs.apollo.dev/join/v0.3",
+    "https://specs.apollo.dev/join/v0.4",
+    "https://specs.apollo.dev/join/v0.5",
+    "https://specs.apollo.dev/tag/v0.1",
+    "https://specs.apollo.dev/tag/v0.2",
+    "https://specs.apollo.dev/tag/v0.3",
+    "https://specs.apollo.dev/inaccessible/v0.1",
+    "https://specs.apollo.dev/inaccessible/v0.2",
+    // Additional specs for Router below:
+    "https://specs.apollo.dev/authenticated/v0.1",
+    "https://specs.apollo.dev/requiresScopes/v0.1",
+    "https://specs.apollo.dev/policy/v0.1",
+    "https://specs.apollo.dev/source/v0.1",
+    "https://specs.apollo.dev/context/v0.1",
+    "https://specs.apollo.dev/cost/v0.1",
+    "https://specs.apollo.dev/connect/v0.1",
+    "https://specs.apollo.dev/connect/v0.2",
+];
+
+fn is_core_version_zero_dot_one(url: &Url) -> bool {
+    CORE_VERSIONS
+        .find(&Version { major: 0, minor: 1 })
+        .is_some_and(|v| *v.url() == *url)
+}
+
+fn check_spec_support(
+    schema: &FederationSchema,
+    supported_specs: &[&str],
+) -> Result<(), FederationError> {
+    let Some(metadata) = schema.metadata() else {
+        // This can't happen since `validate_supergraph_for_query_planning` already checked.
+        bail!("Schema must have metadata");
+    };
+    let mut errors = MultipleFederationErrors::new();
+    let link_spec = metadata.link_spec_definition()?;
+    if is_core_version_zero_dot_one(link_spec.url()) {
+        let has_link_with_purpose = metadata
+            .all_links()
+            .iter()
+            .any(|link| link.purpose.is_some());
+        if has_link_with_purpose {
+            // PORT_NOTE: This is unreachable since the schema is validated before this check in
+            //            Rust and a apollo-compiler error will have been raised already. This is
+            //            still kept for historic reasons and potential fix in the future. However,
+            //            it didn't seem worth changing the router's workflow so this specialized
+            //            error message can be displayed.
+            errors.push(SingleFederationError::UnsupportedLinkedFeature {
+                message: format!(
+                    "the `for:` argument is unsupported by version {version} of the core spec.\n\
+                    Please upgrade to at least @core v0.2 (https://specs.apollo.dev/core/v0.2).",
+                    version = link_spec.url().version),
+            }.into());
+        }
+    }
+
+    let supported_specs: HashSet<_> = supported_specs.iter().copied().collect();
+    errors
+        .and_try(metadata.all_links().iter().try_for_all(|link| {
+            let Some(purpose) = link.purpose else {
+                return Ok(());
+            };
+            if !is_core_version_zero_dot_one(&link.url)
+                && purpose != link::Purpose::EXECUTION
+                && purpose != link::Purpose::SECURITY
+            {
+                return Ok(());
+            }
+
+            let link_url = link.url.to_string();
+            if supported_specs.contains(link_url.as_str()) {
+                Ok(())
+            } else {
+                Err(SingleFederationError::UnsupportedLinkedFeature {
+                    message: format!("feature {link_url} is for: {purpose} but is unsupported"),
+                }
+                .into())
+            }
+        }))
+        .into_result()
 }
 
 #[cfg(test)]

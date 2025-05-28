@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use apollo_compiler::collections::IndexSet;
+use apollo_federation::ROUTER_SUPPORTED_SUPERGRAPH_SPECS;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
@@ -92,7 +93,11 @@ pub(crate) fn test_planner(
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> QueryPlanner {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
-    let supergraph = apollo_federation::Supergraph::new(&supergraph).expect("valid supergraph");
+    let supergraph = apollo_federation::Supergraph::new_with_spec_check(
+        &supergraph,
+        &ROUTER_SUPPORTED_SUPERGRAPH_SPECS,
+    )
+    .expect("valid supergraph");
     QueryPlanner::new(&supergraph, config).expect("can create query planner")
 }
 
