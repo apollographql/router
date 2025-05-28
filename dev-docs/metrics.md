@@ -135,7 +135,6 @@ change for customers. Ideally this will be accomplished in router 3.
 Examples of Prometheus metric renaming; note that annotations are not appended to the metric names:
 
 ```rust
-u64_counter!("apollo.test", "test description", 1); // apollo_test
 u64_counter_with_unit!("apollo.test.requests", "test description", "{request}", 1); // apollo_test_requests
 f64_counter_with_unit!("apollo.test.total_duration", "test description", "s", 1); // apollo_test_total_duration_seconds
 ```
@@ -148,7 +147,7 @@ When using the macro in a test you will need a different pattern depending on if
    #[test]
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
-        u64_counter!("test", "test description", 1, "attr" => "val");
+        u64_counter_with_unit!("test", "test description", 1, "attr" => "val");
         assert_counter!("test", 1, "attr" => "val");
     }
 ```
@@ -234,3 +233,114 @@ Strong references to instruments will be discarded when changes to the aggregate
 On the fast path the mutex is locked for the period that it takes to upgrade the weak reference. This is a fast operation, and should not block the thread for any meaningful period of time.
 
 If there is shown to be contention in future profiling we can revisit.
+
+## Adding new metrics
+There are different types of metrics.
+
+* Static - Declared via macro, cannot be configured, low cardinality, and are transmitted to Apollo.
+* Dynamic - Configurable via yaml, not transmitted to Apollo.
+
+New features should add BOTH static and dynamic metrics.
+
+> Why are static metrics less good for users to for debugging?
+ 
+They can be used, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
+ 
+For instance, we **must not** add operation name to the attributes of a static metric as this is potentially infinite cardinality, but as a dynamic metric this is fine as users can use conditions to reduce the amount of data they are looking at.
+
+### Naming
+Metrics should be named in a way that is consistent with the rest of the metrics in the system.
+
+**Metrics**
+* `<feature>` - This should be a noun that describes the feature that the metric is monitoring.
+
+* `<feature>.<verb>` - Sub-metrics are usually a verb that describes the action that the metric is monitoring.
+
+**Attributes**
+* `<feature>.<feature-specific-attribute>` - Are always prefixed with the feature name unless they are standard metrics from the [otel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/). 
+
+### Static metrics
+When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature, they can suppress these via views, but feature usage will always be sent to Apollo.
+These metrics must be low cardinality and not leak any sensitive information. Users cannot change the attributes that are attached to these metrics.
+These metrics are transmitted to Apollo unless explicitly disabled.
+
+When adding new static metrics and attributes make sure to:
+* Include them in your design document.
+* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) 
+* Engage with other developers to ensure that the metrics are right. Metrics form part of our public API and can only be removed in a major release.
+
+To define a static metric us a macro:
+```rust
+u64_counter!("apollo.router.<feature>.<verb>", "description", 1, "attr" => "val");
+```
+| DO NOT USE `tracing` macros to define static metrics! They are slow, untestable and can lead to subtle bugs due to type mismatches!
+
+#### Non request/response metrics
+Static metrics should be used for things that happen outside of the request response cycle.
+
+For instance:
+* Router lifecycle events.
+* Global log error rates.
+* Cache connection failures.
+* Rust vs JS query planner performance.
+
+None of these metrics will leak information to apollo, and they are all low cardinality.
+
+#### Operation counts
+Each new feature MUST have an operation count metric that counts the number of requests that the feature has processed.
+
+When defining new operation metrics use the following conventions:
+
+**Name:** `apollo.router.operations.<feature>` - (counter)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+**Attributes:**
+* `<feature>.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
+
+> [!WARNING]
+> **Remember that attributes are not to be used to store high cardinality or user specific information. Operation name is not permitted!**
+
+#### Config metrics
+Each new feature MUST have a config metric that gives us information if a feature has been enabled. 
+
+When defining new config metrics use the following conventions:
+
+**Name:** `apollo.router.config.<feature>` - (gauge)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+**Attributes:**
+* `opt.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
+
+### Dynamic metrics
+Users may create custom instrument to monitor the health and performance of their system. They are highly configurable and the user has the ability to add custom attributes as they see fit. 
+These metrics will NOT be transmitted to Apollo and are only available to the user via their APM. 
+
+> [!WARNING]
+> **Failure to add dynamic metrics for a feature will render it un-debuggable and un-monitorable by the user.**
+
+Adding a new dynamic instrument means:
+* Adding new selector(s) in the telemetry plugin.
+* Adding tests that assert that the selector can correctly obtain the value from the relevant request or response type.
+* (Optional) Adding new default instruments in the telemetry plugin.
+* Adding documentation for new instruments and selectors.
+
+An example of a new dynamic instrument is the [cost metrics and selectors](https://github.com/apollographql/router/blob/dev/apollo-router/src/plugins/telemetry/config_new/cost/mod.rs)
+
+When adding new dynamic metrics and attributes make sure to:
+* Include them in your design document.
+* Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) for guidance on naming.
+
+When defining new dynamic instruments use the following conventions:
+
+Name:
+`<feature>.<metric-name>` - (counter, gauge, histogram)
+> Note that even if a feature is experimental this should not be reflected in the metric name.
+
+Attributes:
+* `<feature>.<feature-specific-attribute>` - (selector)
+
+
+
+
+
+

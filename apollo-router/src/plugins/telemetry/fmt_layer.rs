@@ -126,7 +126,7 @@ where
                 extensions.insert(fields);
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("FmtLayer::on_new_span: Span not found, this is a bug");
         }
     }
 
@@ -140,10 +140,10 @@ where
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
                 }));
             } else {
-                eprintln!("cannot access to LogAttributes, this is a bug");
+                eprintln!("FmtLayer::on_record: cannot access to LogAttributes, this is a bug");
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("FmtLayer::on_record: Span not found, this is a bug");
         }
     }
 
@@ -175,7 +175,7 @@ where
             if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
                 let mut writer = self.make_writer.make_writer();
                 if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
-                    eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
+                    eprintln!("FmtLayer::on_event: cannot flush the logging buffer, this is a bug: {err:?}");
                 }
             }
             buf.clear();

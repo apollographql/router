@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use fred::error::RedisError;
-use fred::types::Scanner;
+use fred::error::Error as RedisError;
+use fred::types::scan::Scanner;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
@@ -133,7 +133,7 @@ impl Invalidation {
                             count += deleted;
                         }
                     }
-                    scan_res.next()?;
+                    scan_res.next();
                 }
             }
         }

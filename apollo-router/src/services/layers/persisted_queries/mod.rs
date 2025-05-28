@@ -44,9 +44,9 @@ pub(crate) struct UsedQueryIdFromManifest {
 /// This type actually consists of two conceptual layers that must both be applied at the supergraph
 /// service stage, at different points:
 /// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
-///    and validated.
+///   and validated.
 /// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
-///    GraphQL request is parsed and validated.
+///   GraphQL request is parsed and validated.
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current
@@ -93,6 +93,7 @@ impl PersistedQueryLayer {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -111,7 +112,13 @@ impl PersistedQueryLayer {
                 // If we don't have an ID and we require an ID, return an error immediately,
                 if log_unknown {
                     if let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
-                        log_unknown_operation(operation_body);
+                        // Note: it's kind of inconsistent that if we require
+                        // IDs and skip_enforcement is set, we don't call
+                        // log_unknown_operation on freeform GraphQL, but if we
+                        // *don't* require IDs and skip_enforcement is set, we
+                        // *do* call log_unknown_operation on unknown
+                        // operations.
+                        log_unknown_operation(operation_body, false);
                     }
                 }
                 Err(supergraph_err_pq_id_required(request))
@@ -129,6 +136,7 @@ impl PersistedQueryLayer {
     }
 
     /// Places an operation body on a [`SupergraphRequest`] if it has been persisted
+    #[allow(clippy::result_large_err)]
     pub(crate) fn replace_query_id_with_operation_body(
         &self,
         mut request: SupergraphRequest,
@@ -295,7 +303,7 @@ impl PersistedQueryLayer {
             ));
         }
         if freeform_graphql_action.should_log {
-            log_unknown_operation(operation_body);
+            log_unknown_operation(operation_body, skip_enforcement);
             metric_attributes.push(opentelemetry::KeyValue::new(
                 "persisted_queries.logged".to_string(),
                 true,
@@ -322,8 +330,12 @@ impl PersistedQueryLayer {
     }
 }
 
-fn log_unknown_operation(operation_body: &str) {
-    tracing::warn!(message = "unknown operation", operation_body);
+fn log_unknown_operation(operation_body: &str, enforcement_skipped: bool) {
+    tracing::warn!(
+        message = "unknown operation",
+        operation_body,
+        enforcement_skipped
+    );
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

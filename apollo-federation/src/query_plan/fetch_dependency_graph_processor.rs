@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
