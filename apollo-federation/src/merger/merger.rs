@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::Schema;
 use apollo_compiler::Name;
 use apollo_compiler::schema::Component;
@@ -9,9 +8,12 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
+use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::schema::position::EnumValueDefinitionPosition;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -56,7 +58,7 @@ impl Default for CompositionOptions {
 }
 
 #[allow(unused)]
-pub(crate) struct Merger<'a> {
+pub(crate) struct Merger {
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
     names: Vec<String>,
@@ -67,11 +69,11 @@ pub(crate) struct Merger<'a> {
     enum_usages: HashMap<String, EnumTypeUsage>,
     fields_with_from_context: HashSet<String>,
     fields_with_override: HashSet<String>,
-    inaccessible_directive_in_supergraph: Option<&'a DirectiveDefinition>,
+    inaccessible_directive_name_in_supergraph: Option<Name>,
 }
 
 #[allow(unused)]
-impl<'a> Merger<'a> {
+impl Merger {
     pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
 
@@ -86,7 +88,7 @@ impl<'a> Merger<'a> {
             enum_usages: HashMap::new(),
             fields_with_from_context: todo!(),
             fields_with_override: todo!(),
-            inaccessible_directive_in_supergraph: todo!(),
+            inaccessible_directive_name_in_supergraph: todo!(),
         }
     }
 
@@ -232,7 +234,7 @@ impl<'a> Merger<'a> {
     }
 
     /// Merge enum type from multiple subgraphs
-    pub(crate) fn merge_enum(&mut self, sources: Sources<&EnumType>, dest: &mut EnumType) {
+    pub(crate) fn merge_enum(&mut self, sources: Sources<&EnumType>, dest: &mut EnumType) -> Result<(), FederationError> {
         let usage = self.enum_usages.get(&dest.name.to_string()).cloned().unwrap_or_else(|| {
             // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
             // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
@@ -268,8 +270,19 @@ impl<'a> Merger<'a> {
 
         // Merge each enum value
         let value_names: Vec<Name> = dest.values.keys().cloned().collect();
-        for (value_name, value) in &dest.values {
-            self.merge_enum_value(&sources, dest, &value_name, &usage);
+        let mut values_to_remove = Vec::new();
+        for value_name in value_names {
+            if let Some(value) = dest.values.get_mut(&value_name) {
+                let should_remove = self.merge_enum_value(&sources, &dest.name, value, &usage)?;
+                if should_remove {
+                    values_to_remove.push(value_name);
+                }
+            }
+        }
+        
+        // Remove values that were marked for removal
+        for value_name in values_to_remove {
+            dest.values.shift_remove(&value_name);
         }
 
         // We could be left with an enum type with no values, and that's invalid in graphQL
@@ -281,38 +294,48 @@ impl<'a> Merger<'a> {
                 ),
             });
         }
+
+        Ok(())
     }
 
     /// Merge a specific enum value across subgraphs
+    /// Returns true if the value should be removed from the enum
     fn merge_enum_value(
         &mut self,
         sources: &Sources<&EnumType>,
-        dest: &EnumType,
-        value_name: &Name,
+        dest_name: &Name,
+        value: &mut Component<EnumValueDefinition>,
         usage: &EnumTypeUsage,
-    ) {
+    ) -> Result<bool, FederationError> {
         // We merge directives (and description while at it) on the value even though we might remove it later in that function,
         // but we do so because:
         // 1. this will catch any problems merging the description/directives (which feels like a good thing).
         // 2. it easier to see if the value is marked @inaccessible.
+        
         let value_sources: Sources<&Component<EnumValueDefinition>> = sources
             .iter()
             .map(|(&idx, s)| {
-                let value = s.and_then(|enum_type| {
-                    enum_type.values.get(value_name).map(|v| v)
+                let source_value = s.and_then(|enum_type| {
+                    enum_type.values.get(&value.node.value).map(|v| v)
                 });
-                (idx, value)
+                (idx, source_value)
             })
             .collect();
         
+        
         // TODO: Implement these helper methods - for now skip the actual merging
-        // self.merge_description(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
-        // self.record_applied_directives_to_merge(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
-        // self.add_join_enum_value(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
+        // self.merge_description(&value_sources, &mut value.node);
+        // self.record_applied_directives_to_merge(&value_sources, &mut value.node);
+        // self.add_join_enum_value(&value_sources, &mut value.node);
 
-        // let is_inaccessible = self.inaccessible_directive_in_supergraph.is_some() && dest.
-        let is_inaccessible: bool = todo!();
-        // self.is_inaccessible_directive_in_supergraph(&dest.values.get(value_name).unwrap().node);
+        let value_pos = EnumValueDefinitionPosition {
+            type_name: dest_name.clone(),
+            value_name: value.value.clone(),
+        };
+        let is_inaccessible = match &self.inaccessible_directive_name_in_supergraph {
+            Some(name) => value_pos.is_inaccessible(&self.merged, name)?,
+            None => false,
+        };
         
         // The merging strategy depends on the enum type usage:
         //  - if it is _only_ used in position of Input type, we merge it with an "intersection" strategy (like other input types/things).
@@ -323,7 +346,7 @@ impl<'a> Merger<'a> {
         // regardless of inconsistencies.
         if !is_inaccessible
             && usage.position != EnumUsagePosition::Output
-            && self.some_sources(sources, |source| source.is_some() && !source.unwrap().values.contains_key(value_name))
+            && sources.values().any(|source| source.is_some() && !source.unwrap().values.contains_key(&value.node.value))
         {
             // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
             // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
@@ -334,11 +357,11 @@ impl<'a> Merger<'a> {
                     SingleFederationError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                            dest.name, input_example, output_example, value_name, dest.name
+                            dest_name, input_example, output_example, value.node.value, dest_name
                         ),
                     },
                     sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(value_name) { "yes" } else { "no" },
+                    |source| if source.is_some() && source.unwrap().values.contains_key(&value.node.value) { "yes" } else { "no" },
                 );
                 // We leave the value in the merged output in that case because:
                 // 1. it's harmless to do so; we have an error so we won't return a supergraph.
@@ -348,19 +371,20 @@ impl<'a> Merger<'a> {
                     HintCode::InconsistentEnumValueForInputEnum,
                     format!(
                         "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
-                        value_name, dest.name, dest.name
+                        value.node.value, dest_name, dest_name
                     ),
                     sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(value_name) { "yes" } else { "no" },
+                    |source| if source.is_some() && source.unwrap().values.contains_key(&value.node.value) { "yes" } else { "no" },
                 );
                 // We remove the value after the generation of the hint/errors because `report_mismatch_hint` will show the message for the subgraphs that are "like" the supergraph
                 // first, and the message flows better if we say which subgraph defines the value first, so we want the value to still be present for the generation of the
                 // message.
-                dest.values.shift_remove(value_name);
+                return Ok(true); // Indicate that this value should be removed
             }
         } else if usage.position == EnumUsagePosition::Output {
-            self.hint_on_inconsistent_output_enum_value(sources, dest, value_name);
+            self.hint_on_inconsistent_output_enum_value(sources, dest_name, &value.node.value);
         }
+        Ok(false) // Don't remove the value
     }
 
     // Helper functions that need to be implemented as stubs
@@ -408,7 +432,7 @@ impl<'a> Merger<'a> {
     fn hint_on_inconsistent_output_enum_value(
         &mut self,
         _sources: &Sources<&EnumType>,
-        _dest: &EnumType,
+        _dest_name: &Name,
         _value_name: &Name,
     ) {
         todo!("Implement hint_on_inconsistent_output_enum_value")

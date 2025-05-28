@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
@@ -287,7 +288,7 @@ fn validate_inaccessible_in_default_value(
                     type_name: type_.name.clone(),
                     field_name: field_name.clone(),
                 };
-                if input_field_position.is_inaccessible(schema, inaccessible_directive)? {
+                if input_field_position.is_inaccessible(schema.schema(), inaccessible_directive)? {
                     errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                         message: format!("Input field `{input_field_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
                     }.into());
@@ -338,7 +339,7 @@ fn validate_inaccessible_in_default_value(
                 type_name: type_.name.clone(),
                 value_name: enum_value.value.clone(),
             };
-            if enum_value_position.is_inaccessible(schema, inaccessible_directive)? {
+            if enum_value_position.is_inaccessible(schema.schema(), inaccessible_directive)? {
                 errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                     message: format!("Enum value `{enum_value_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
                 }.into());
@@ -547,34 +548,34 @@ fn validate_inaccessible_in_fields(
 }
 
 /// Generic way to check for @inaccessible directives on a position or its parents.
-trait IsInaccessibleExt {
+pub(crate) trait IsInaccessibleExt {
     /// Does this element, or any of its parents, have an @inaccessible directive?
     ///
     /// May return Err if `self` is an element that does not exist in the schema.
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError>;
 }
 impl IsInaccessibleExt for position::ObjectTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let object = self.get(schema.schema())?;
+        let object = self.get(schema)?;
         Ok(object.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for ObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the field directly from there.
-        let field = self.get(schema.schema())?;
+        let field = self.get(schema)?;
         Ok(field.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -584,11 +585,11 @@ impl IsInaccessibleExt for ObjectFieldDefinitionPosition {
 impl IsInaccessibleExt for ObjectFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the field and argument directly from there.
-        let argument = self.get(schema.schema())?;
+        let argument = self.get(schema)?;
         Ok(argument.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -598,21 +599,21 @@ impl IsInaccessibleExt for ObjectFieldArgumentDefinitionPosition {
 impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let interface = self.get(schema.schema())?;
+        let interface = self.get(schema)?;
         Ok(interface.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for InterfaceFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the field directly from there.
-        let field = self.get(schema.schema())?;
+        let field = self.get(schema)?;
         Ok(field.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -622,11 +623,11 @@ impl IsInaccessibleExt for InterfaceFieldDefinitionPosition {
 impl IsInaccessibleExt for InterfaceFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the field and argument directly from there.
-        let argument = self.get(schema.schema())?;
+        let argument = self.get(schema)?;
         Ok(argument.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -636,21 +637,21 @@ impl IsInaccessibleExt for InterfaceFieldArgumentDefinitionPosition {
 impl IsInaccessibleExt for position::InputObjectTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let input_object = self.get(schema.schema())?;
+        let input_object = self.get(schema)?;
         Ok(input_object.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for InputObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the field directly from there.
-        let field = self.get(schema.schema())?;
+        let field = self.get(schema)?;
         Ok(field.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -660,41 +661,41 @@ impl IsInaccessibleExt for InputObjectFieldDefinitionPosition {
 impl IsInaccessibleExt for position::ScalarTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let scalar = self.get(schema.schema())?;
+        let scalar = self.get(schema)?;
         Ok(scalar.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for position::UnionTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let union_ = self.get(schema.schema())?;
+        let union_ = self.get(schema)?;
         Ok(union_.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for position::EnumTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let enum_ = self.get(schema.schema())?;
+        let enum_ = self.get(schema)?;
         Ok(enum_.directives.has(inaccessible_directive))
     }
 }
 impl IsInaccessibleExt for EnumValueDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
         // NOTE It'd be more efficient to start at parent and look up the value directly from there.
-        let value = self.get(schema.schema())?;
+        let value = self.get(schema)?;
         Ok(value.directives.has(inaccessible_directive)
             || self
                 .parent()
@@ -704,10 +705,10 @@ impl IsInaccessibleExt for EnumValueDefinitionPosition {
 impl IsInaccessibleExt for position::DirectiveArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
-        schema: &FederationSchema,
+        schema: &Schema,
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError> {
-        let argument = self.get(schema.schema())?;
+        let argument = self.get(schema)?;
         Ok(argument.directives.has(inaccessible_directive))
     }
 }
@@ -739,7 +740,7 @@ fn validate_inaccessible_type(
 
     macro_rules! check_inaccessible_reference {
         ( $ty:expr, $ref:expr ) => {
-            if !$ref.is_inaccessible(schema, inaccessible_directive)? {
+            if !$ref.is_inaccessible(schema.schema(), inaccessible_directive)? {
                 errors.push(SingleFederationError::ReferencedInaccessible {
                     message: format!("Type `{}` is @inaccessible but is referenced by `{}`, which is in the API schema.", $ty, $ref),
                 }.into())
