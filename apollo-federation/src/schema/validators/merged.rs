@@ -361,7 +361,6 @@ fn add_requires_error(
             application: requires_application.to_string(),
             message,
         }
-        .add_subgraph(subgraph_name.to_owned())
         .into(),
     );
     Ok(())

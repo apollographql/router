@@ -14,7 +14,6 @@ use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
-use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
@@ -342,7 +341,7 @@ pub struct SubgraphError {
 impl SubgraphError {
     pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
         let subgraph = subgraph.into();
-        let error = error.into().unwrap_subgraph_errors(&subgraph);
+        let error = error.into();
         SubgraphError { subgraph, error }
     }
 
@@ -379,11 +378,13 @@ impl Display for SubgraphError {
     }
 }
 
+/*
 impl From<SubgraphError> for FederationError {
     fn from(value: SubgraphError) -> Self {
         internal_error!("[{}] {}", value.subgraph, value.error)
     }
 }
+*/
 
 pub mod test_utils {
     use super::SubgraphError;
@@ -404,9 +405,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph
-                .into_fed2_test_subgraph()
-                .map_err(|e| SubgraphError::new(name, e))?
+            subgraph.into_fed2_test_subgraph()?
         } else {
             subgraph
         };
@@ -423,9 +422,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph
-                .into_fed2_test_subgraph()
-                .map_err(|e| SubgraphError::new(name, e))?
+            subgraph.into_fed2_test_subgraph()?
         } else {
             subgraph
         };
