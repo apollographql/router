@@ -620,8 +620,9 @@ impl Merger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use apollo_compiler::schema::ComponentOrigin;
+
+    use super::*;
     use crate::error::ErrorCode;
 
     // Helper function to create a minimal merger instance for testing
