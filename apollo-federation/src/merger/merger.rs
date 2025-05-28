@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::Schema;
 use apollo_compiler::Name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
@@ -54,7 +56,7 @@ impl Default for CompositionOptions {
 }
 
 #[allow(unused)]
-pub(crate) struct Merger {
+pub(crate) struct Merger<'a> {
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
     names: Vec<String>,
@@ -65,10 +67,11 @@ pub(crate) struct Merger {
     enum_usages: HashMap<String, EnumTypeUsage>,
     fields_with_from_context: HashSet<String>,
     fields_with_override: HashSet<String>,
+    inaccessible_directive_in_supergraph: Option<&'a DirectiveDefinition>,
 }
 
 #[allow(unused)]
-impl Merger {
+impl<'a> Merger<'a> {
     pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
 
@@ -83,6 +86,7 @@ impl Merger {
             enum_usages: HashMap::new(),
             fields_with_from_context: todo!(),
             fields_with_override: todo!(),
+            inaccessible_directive_in_supergraph: todo!(),
         }
     }
 
@@ -264,7 +268,7 @@ impl Merger {
 
         // Merge each enum value
         let value_names: Vec<Name> = dest.values.keys().cloned().collect();
-        for value_name in value_names {
+        for (value_name, value) in &dest.values {
             self.merge_enum_value(&sources, dest, &value_name, &usage);
         }
 
@@ -283,7 +287,7 @@ impl Merger {
     fn merge_enum_value(
         &mut self,
         sources: &Sources<&EnumType>,
-        dest: &mut EnumType,
+        dest: &EnumType,
         value_name: &Name,
         usage: &EnumTypeUsage,
     ) {
@@ -291,16 +295,24 @@ impl Merger {
         // but we do so because:
         // 1. this will catch any problems merging the description/directives (which feels like a good thing).
         // 2. it easier to see if the value is marked @inaccessible.
-        let value_sources = self.map_sources(sources, |s| {
-            s.and_then(|enum_type| enum_type.values.get(value_name).map(|v| &v.node))
-        });
+        let value_sources: Sources<&Component<EnumValueDefinition>> = sources
+            .iter()
+            .map(|(&idx, s)| {
+                let value = s.and_then(|enum_type| {
+                    enum_type.values.get(value_name).map(|v| v)
+                });
+                (idx, value)
+            })
+            .collect();
         
         // TODO: Implement these helper methods - for now skip the actual merging
         // self.merge_description(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
         // self.record_applied_directives_to_merge(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
         // self.add_join_enum_value(&value_sources, &mut dest.values.get_mut(value_name).unwrap().node);
 
-        let is_inaccessible = self.is_inaccessible_directive_in_supergraph(&dest.values.get(value_name).unwrap().node);
+        // let is_inaccessible = self.inaccessible_directive_in_supergraph.is_some() && dest.
+        let is_inaccessible: bool = todo!();
+        // self.is_inaccessible_directive_in_supergraph(&dest.values.get(value_name).unwrap().node);
         
         // The merging strategy depends on the enum type usage:
         //  - if it is _only_ used in position of Input type, we merge it with an "intersection" strategy (like other input types/things).
@@ -353,9 +365,6 @@ impl Merger {
 
     // Helper functions that need to be implemented as stubs
 
-    fn map_sources<T, R>(&self, _sources: &Sources<T>, _mapper: impl Fn(&Option<T>) -> Option<R>) -> Sources<R> {
-        todo!("Implement map_sources")
-    }
 
     fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
         todo!("Implement merge_description")
