@@ -139,6 +139,22 @@ impl Merger {
         })
     }
 
+    /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
+    pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
+        let subgraph_name = &self.names[subgraph_index];
+        self.subgraph_names_to_join_spec_name
+            .get(subgraph_name)
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Could not find join spec name for subgraph '{}'",
+                        subgraph_name
+                    ),
+                }
+                .into()
+            })
+    }
+
     fn get_latest_federation_version_used<'a>(
         subgraphs: &'a [Subgraph<Validated>],
         error_reporter: &mut ErrorReporter,
