@@ -1979,7 +1979,7 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
-#[derive(Debug, strum_macros::EnumIter)]
+#[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
     InvalidGraphQL,

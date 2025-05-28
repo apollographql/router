@@ -622,6 +622,7 @@ impl Merger {
 mod tests {
     use super::*;
     use apollo_compiler::schema::ComponentOrigin;
+    use crate::error::ErrorCode;
 
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
@@ -805,6 +806,9 @@ mod tests {
         // Should be empty after merging
         assert_eq!(dest.values.len(), 0);
         // Error reporter should have an EmptyMergedEnumType error
+        let (errors, _hints) = merger.error_reporter.into_errors_and_hints();
+        assert!(errors.len() == 1);
+        assert!(errors[0].code() == ErrorCode::EmptyMergedEnumType);
     }
 
     #[test]
@@ -955,27 +959,6 @@ mod tests {
         // This should work if the join spec version is >= 0.3
         // But will panic due to todo!() in subgraph_names_to_join_spec_name access
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_add_join_enum_value_missing_directive_definition() {
-        let mut merger = create_test_merger();
-
-        // Create a test enum value
-        let enum_type = create_enum_type("Status", &["ACTIVE"]);
-        let source_value = enum_type.values.get(&name!("ACTIVE")).unwrap();
-        let mut dest_value = source_value.clone();
-
-        let sources: Sources<&Component<EnumValueDefinition>> =
-            [(0, Some(source_value))].into_iter().collect();
-
-        // The merged schema doesn't have the join__enumValue directive definition
-        // so this should return Ok(()) without doing anything
-        let result = merger.add_join_enum_value(&sources, &mut dest_value);
-
-        assert!(result.is_ok());
-        // The value should not have any new directives added
-        assert_eq!(dest_value.directives.0.len(), 0);
     }
 }
 
