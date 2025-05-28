@@ -3478,3 +3478,53 @@ fn defer_test_the_path_in_defer_includes_traversed_fragments() {
     "###
     );
 }
+
+#[test]
+fn defer_on_renamed_root_type() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+          type MyQuery {
+            thing: Thing
+          }
+
+          type Thing {
+            i: Int
+          }
+
+          schema { query: MyQuery }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          ... @defer {
+            thing { i }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {}, [
+          Deferred(depends: [], path: "") {
+            { thing { i } }:
+            Flatten(path: "") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... {
+                    thing {
+                      i
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
