@@ -140,7 +140,7 @@ impl TransitionGraphPath {
 
     // PORT_NOTE: Named `findOverriddingSourcesIfOverridden()` in the JS codebase, but we've changed
     // sources to subgraphs here for clarity that we don't need to handle the federated root source.
-    fn find_overridding_subgraphs_if_overridden(
+    fn find_overriding_subgraphs_if_overridden(
         field_pos_in_subgraph: &FieldDefinitionPosition,
         field_subgraph: &Arc<str>,
         subgraphs: &IndexMap<Arc<str>, ValidFederationSchema>,
@@ -211,7 +211,7 @@ impl TransitionGraphPath {
         &self,
         transition: &QueryGraphEdgeTransition,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &Arc<EnabledOverrideConditions>,
     ) -> Result<Either<Vec<TransitionGraphPath>, UnadvanceableClosures>, FederationError> {
         ensure!(
             transition.collect_operation_elements(),
@@ -225,9 +225,8 @@ impl TransitionGraphPath {
         } = transition
         {
             let tail_weight = self.graph.node_weight(self.tail)?;
-            if let Ok(tail_type) = <QueryGraphNodeType as TryInto<
-                CompositeTypeDefinitionPosition,
-            >>::try_into(tail_weight.type_.clone())
+            if let Ok(tail_type) =
+                CompositeTypeDefinitionPosition::try_from(tail_weight.type_.clone())
             {
                 if field_definition_position.parent().type_name() != tail_type.type_name()
                     && !self.tail_is_interface_object()?
@@ -287,30 +286,32 @@ impl TransitionGraphPath {
                 continue;
             }
 
-            if let Some(override_condition) = &edge_weight.override_condition {
-                if !edge_weight.satisfies_override_conditions(override_conditions) {
-                    let graph = to_advance.graph.clone();
-                    let override_condition = override_condition.clone();
-                    let override_conditions = override_conditions.clone();
-                    dead_end_closures.push(Box::new(move || {
-                        let edge_weight = graph.edge_weight(edge)?;
-                        let (head, tail) = graph.edge_endpoints(edge)?;
-                        let head_weight = graph.node_weight(head)?;
-                        let tail_weight = graph.node_weight(tail)?;
-                        Ok(Unadvanceables(vec![Unadvanceable {
-                            reason: UnadvanceableReason::UnsatisfiableOverrideCondition,
-                            from_subgraph: head_weight.source.clone(),
-                            to_subgraph: tail_weight.source.clone(),
-                            details: format!(
-                                "Unable to take edge {} because override condition \"{}\" is {}",
-                                edge_weight,
-                                override_condition.label,
-                                override_conditions.contains(&override_condition.label)
-                            ),
-                        }]))
-                    }));
-                    continue;
-                }
+            if edge_weight.override_condition.is_some()
+                && !edge_weight.satisfies_override_conditions(override_conditions)
+            {
+                let graph = to_advance.graph.clone();
+                let override_conditions = override_conditions.clone();
+                dead_end_closures.push(Box::new(move || {
+                    let edge_weight = graph.edge_weight(edge)?;
+                    let Some(override_condition) = &edge_weight.override_condition else {
+                        bail!("Edge unexpectedly had no override condition");
+                    };
+                    let (head, tail) = graph.edge_endpoints(edge)?;
+                    let head_weight = graph.node_weight(head)?;
+                    let tail_weight = graph.node_weight(tail)?;
+                    Ok(Unadvanceables(vec![Unadvanceable {
+                        reason: UnadvanceableReason::UnsatisfiableOverrideCondition,
+                        from_subgraph: head_weight.source.clone(),
+                        to_subgraph: tail_weight.source.clone(),
+                        details: format!(
+                            "Unable to take edge {} because override condition \"{}\" is {}",
+                            edge_weight,
+                            override_condition.label,
+                            override_conditions.contains(&override_condition.label)
+                        ),
+                    }]))
+                }));
+                continue;
             }
 
             // Additionally, we can only take an edge if we can satisfy its conditions.
@@ -515,12 +516,17 @@ impl TransitionGraphPath {
                                 subgraph,
                             );
                         };
+                        // The field is external in the subgraph extracted from the supergraph, but
+                        // it might have been forced to be external due to being a "used" overridden
+                        // field, in which case we want to amend the message to avoid confusing the
+                        // user. Note that the subgraph extraction marks such "forced external due
+                        // to being overridden" fields by setting the "reason" to "[overridden]".
                         let external_reason = metadata
                             .federation_spec_definition()
                             .external_directive_arguments(application)?
                             .reason;
                         let overriding_subgraphs = if external_reason == Some("[overridden]") {
-                            Self::find_overridding_subgraphs_if_overridden(
+                            Self::find_overriding_subgraphs_if_overridden(
                                 &field_pos_in_subgraph,
                                 subgraph,
                                 graph.subgraph_schemas(),
