@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     Acquire, PgPool,
-    postgres::PgPoolOptions,
+    postgres::{PgConnectOptions, PgPoolOptions},
     types::chrono::{DateTime, Utc},
 };
 
@@ -98,14 +98,53 @@ pub(crate) struct PostgresCacheStorage {
     pg_pool: PgPool,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum PostgresCacheStorageError {
+    #[error("invalid configuration: {0}")]
+    BadConfiguration(String),
+    #[error("postgres error: {0}")]
+    PgError(#[from] sqlx::Error),
+}
+
 impl PostgresCacheStorage {
-    pub(crate) async fn new(conf: &PostgresCacheConfig) -> sqlx::Result<Self> {
-        let pg_pool = PgPoolOptions::new()
-            .max_connections(conf.pool_size)
-            .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
-            .connect(conf.url.as_ref())
-            .await?;
-        Ok(Self { pg_pool })
+    pub(crate) async fn new(conf: &PostgresCacheConfig) -> Result<Self, PostgresCacheStorageError> {
+        match (&conf.username, &conf.password) {
+            (None, None) => {
+                let pg_pool = PgPoolOptions::new()
+                    .max_connections(conf.pool_size)
+                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+                    .connect(conf.url.as_ref())
+                    .await?;
+                Ok(Self { pg_pool })
+            }
+            (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
+                "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
+            )),
+            (Some(user), Some(password)) => {
+                let host = conf
+                    .url
+                    .host_str()
+                    .ok_or_else(|| PostgresCacheStorageError::BadConfiguration("malformed postgres url, doesn't contain host".to_string()))?;
+                let port = conf
+                    .url
+                    .port()
+                    .ok_or_else(|| PostgresCacheStorageError::BadConfiguration("malformed postgres url, doesn't contain port".to_string()))?;
+                let db_name = conf.url.path();
+                let pg_pool = PgPoolOptions::new()
+                    .max_connections(conf.pool_size)
+                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+                    .connect_with(
+                        PgConnectOptions::new()
+                            .host(host)
+                            .port(port)
+                            .database(db_name)
+                            .username(user)
+                            .password(password),
+                    )
+                    .await?;
+                Ok(Self { pg_pool })
+            }
+        }
     }
 
     pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
