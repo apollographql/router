@@ -1,0 +1,7 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: s
+---
+type MyRandomServiceMessage1 {
+  field_0: ID!
+}

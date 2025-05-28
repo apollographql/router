@@ -1,0 +1,11 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: s
+---
+type Query {
+  getUser(input: GetUserRequest!): GetUserResponse!
+}
+
+type Mutation {
+  createUser(input: User!): CreatedUserResponse!
+}

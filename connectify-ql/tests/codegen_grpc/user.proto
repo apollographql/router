@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package com.example.users;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {}
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+enum Status {
+  Active = 0;
+  Inactive = 1;
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string email_address = 3;
+  optional Status statuc = 4;
+  repeated string children = 5;
+}

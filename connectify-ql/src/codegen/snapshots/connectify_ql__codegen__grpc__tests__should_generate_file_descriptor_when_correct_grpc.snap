@@ -1,0 +1,1381 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: proto
+---
+FileDescriptorSet {
+    file: [
+        FileDescriptorProto {
+            name: Some(
+                "src/codegen/fixture/user.proto",
+            ),
+            package: Some(
+                "com.example.users",
+            ),
+            dependency: [],
+            public_dependency: [],
+            weak_dependency: [],
+            message_type: [
+                DescriptorProto {
+                    name: Some(
+                        "GetUserRequest",
+                    ),
+                    field: [
+                        FieldDescriptorProto {
+                            name: Some(
+                                "user_id",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "userId",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                    ],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+                DescriptorProto {
+                    name: Some(
+                        "GetUserResponse",
+                    ),
+                    field: [
+                        FieldDescriptorProto {
+                            name: Some(
+                                "user",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                Message,
+                            ),
+                            type_name: Some(
+                                ".com.example.users.User",
+                            ),
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "user",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                    ],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+                DescriptorProto {
+                    name: Some(
+                        "CreatedUserResponse",
+                    ),
+                    field: [
+                        FieldDescriptorProto {
+                            name: Some(
+                                "user_id",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "userId",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                    ],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+                DescriptorProto {
+                    name: Some(
+                        "User",
+                    ),
+                    field: [
+                        FieldDescriptorProto {
+                            name: Some(
+                                "id",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "id",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                        FieldDescriptorProto {
+                            name: Some(
+                                "name",
+                            ),
+                            number: Some(
+                                2,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "name",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                        FieldDescriptorProto {
+                            name: Some(
+                                "email_address",
+                            ),
+                            number: Some(
+                                3,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "emailAddress",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                        FieldDescriptorProto {
+                            name: Some(
+                                "status",
+                            ),
+                            number: Some(
+                                4,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                Enum,
+                            ),
+                            type_name: Some(
+                                ".com.example.users.Status",
+                            ),
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: Some(
+                                0,
+                            ),
+                            json_name: Some(
+                                "status",
+                            ),
+                            options: None,
+                            proto3_optional: Some(
+                                true,
+                            ),
+                        },
+                        FieldDescriptorProto {
+                            name: Some(
+                                "children",
+                            ),
+                            number: Some(
+                                5,
+                            ),
+                            label: Some(
+                                Repeated,
+                            ),
+                            r#type: Some(
+                                String,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "children",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                    ],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [
+                        OneofDescriptorProto {
+                            name: Some(
+                                "_status",
+                            ),
+                            options: None,
+                        },
+                    ],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+            ],
+            enum_type: [
+                EnumDescriptorProto {
+                    name: Some(
+                        "Status",
+                    ),
+                    value: [
+                        EnumValueDescriptorProto {
+                            name: Some(
+                                "Active",
+                            ),
+                            number: Some(
+                                0,
+                            ),
+                            options: None,
+                        },
+                        EnumValueDescriptorProto {
+                            name: Some(
+                                "Inactive",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            options: None,
+                        },
+                    ],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+            ],
+            service: [
+                ServiceDescriptorProto {
+                    name: Some(
+                        "UserService",
+                    ),
+                    method: [
+                        MethodDescriptorProto {
+                            name: Some(
+                                "GetUser",
+                            ),
+                            input_type: Some(
+                                ".com.example.users.GetUserRequest",
+                            ),
+                            output_type: Some(
+                                ".com.example.users.GetUserResponse",
+                            ),
+                            options: None,
+                            client_streaming: None,
+                            server_streaming: None,
+                        },
+                        MethodDescriptorProto {
+                            name: Some(
+                                "CreateUser",
+                            ),
+                            input_type: Some(
+                                ".com.example.users.User",
+                            ),
+                            output_type: Some(
+                                ".com.example.users.CreatedUserResponse",
+                            ),
+                            options: None,
+                            client_streaming: None,
+                            server_streaming: None,
+                        },
+                    ],
+                    options: None,
+                },
+            ],
+            extension: [],
+            options: None,
+            source_code_info: Some(
+                SourceCodeInfo {
+                    location: [
+                        Location {
+                            path: [],
+                            span: [
+                                0,
+                                0,
+                                32,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                2,
+                            ],
+                            span: [
+                                2,
+                                0,
+                                26,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                            ],
+                            span: [
+                                9,
+                                0,
+                                11,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                9,
+                                8,
+                                22,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                10,
+                                2,
+                                21,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                10,
+                                9,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                10,
+                                19,
+                                20,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                5,
+                            ],
+                            span: [
+                                10,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                            ],
+                            span: [
+                                13,
+                                0,
+                                15,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                13,
+                                8,
+                                23,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                14,
+                                2,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                14,
+                                7,
+                                11,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                14,
+                                14,
+                                15,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                1,
+                                2,
+                                0,
+                                6,
+                            ],
+                            span: [
+                                14,
+                                2,
+                                6,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                            ],
+                            span: [
+                                17,
+                                0,
+                                19,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                17,
+                                8,
+                                27,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                18,
+                                2,
+                                21,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                18,
+                                9,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                18,
+                                19,
+                                20,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                2,
+                                2,
+                                0,
+                                5,
+                            ],
+                            span: [
+                                18,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                            ],
+                            span: [
+                                26,
+                                0,
+                                32,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                1,
+                            ],
+                            span: [
+                                26,
+                                8,
+                                12,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                27,
+                                2,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                27,
+                                9,
+                                11,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                27,
+                                14,
+                                15,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                0,
+                                5,
+                            ],
+                            span: [
+                                27,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                28,
+                                2,
+                                18,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                28,
+                                9,
+                                13,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                1,
+                                3,
+                            ],
+                            span: [
+                                28,
+                                16,
+                                17,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                1,
+                                5,
+                            ],
+                            span: [
+                                28,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                2,
+                            ],
+                            span: [
+                                29,
+                                2,
+                                27,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                29,
+                                9,
+                                22,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                2,
+                                3,
+                            ],
+                            span: [
+                                29,
+                                25,
+                                26,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                2,
+                                5,
+                            ],
+                            span: [
+                                29,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                3,
+                            ],
+                            span: [
+                                30,
+                                2,
+                                29,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                3,
+                                1,
+                            ],
+                            span: [
+                                30,
+                                18,
+                                24,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                3,
+                                3,
+                            ],
+                            span: [
+                                30,
+                                27,
+                                28,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                3,
+                                4,
+                            ],
+                            span: [
+                                30,
+                                2,
+                                10,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                3,
+                                6,
+                            ],
+                            span: [
+                                30,
+                                11,
+                                17,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                4,
+                            ],
+                            span: [
+                                31,
+                                2,
+                                31,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                4,
+                                1,
+                            ],
+                            span: [
+                                31,
+                                18,
+                                26,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                4,
+                                3,
+                            ],
+                            span: [
+                                31,
+                                29,
+                                30,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                4,
+                                4,
+                            ],
+                            span: [
+                                31,
+                                2,
+                                10,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                3,
+                                2,
+                                4,
+                                5,
+                            ],
+                            span: [
+                                31,
+                                11,
+                                17,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                            ],
+                            span: [
+                                21,
+                                0,
+                                24,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                21,
+                                5,
+                                11,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                22,
+                                2,
+                                13,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                22,
+                                2,
+                                8,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                0,
+                                2,
+                            ],
+                            span: [
+                                22,
+                                11,
+                                12,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                23,
+                                2,
+                                15,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                23,
+                                2,
+                                10,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                5,
+                                0,
+                                2,
+                                1,
+                                2,
+                            ],
+                            span: [
+                                23,
+                                13,
+                                14,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                            ],
+                            span: [
+                                4,
+                                0,
+                                7,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                4,
+                                8,
+                                19,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                5,
+                                2,
+                                58,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                5,
+                                6,
+                                13,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                2,
+                            ],
+                            span: [
+                                5,
+                                14,
+                                28,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                5,
+                                39,
+                                54,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                6,
+                                2,
+                                55,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                6,
+                                6,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                2,
+                            ],
+                            span: [
+                                6,
+                                17,
+                                21,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                3,
+                            ],
+                            span: [
+                                6,
+                                32,
+                                51,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                12,
+                            ],
+                            span: [
+                                0,
+                                0,
+                                18,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                    ],
+                },
+            ),
+            syntax: Some(
+                "proto3",
+            ),
+        },
+    ],
+}

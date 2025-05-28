@@ -1,0 +1,8 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: s
+---
+enum MyEnum {
+  ACTIVE
+  INACTIVE
+}

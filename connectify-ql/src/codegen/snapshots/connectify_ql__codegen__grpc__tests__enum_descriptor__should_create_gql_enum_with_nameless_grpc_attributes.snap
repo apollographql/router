@@ -1,0 +1,8 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: s
+---
+enum UserServiceEnum1 {
+  VALUE_0
+  VALUE_1
+}

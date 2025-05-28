@@ -1,0 +1,23 @@
+[package]
+name = "connectify-ql"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+indexmap = { version = "2.2.6", features = ["serde"] }
+logos = "0.15"
+codespan-reporting = { version = "0.12", features = ["serialization"] }
+serde = { version = "1.0", features = ["derive"] }
+toml-span = { version = "0.5.1", features = ["serde"] }
+protox = "0.8.0"
+prost-types = "0.13"
+thiserror = "2.0"
+convert_case = "0.8"
+sqlparser = "0.56.0"
+
+[dev-dependencies]
+insta = "1.43"
+serde_json = "1.0"
+
+[build-dependencies]
+lelwel = "0.8"

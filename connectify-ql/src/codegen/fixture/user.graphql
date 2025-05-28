@@ -1,0 +1,33 @@
+enum Status {
+  ACTIVE
+  INACTIVE
+}
+
+type GetUserRequest {
+  user_id: String!
+}
+
+type GetUserResponse {
+  user: User!
+}
+
+type CreatedUserResponse {
+  user_id: String!
+}
+
+type User {
+  id: String!
+  name: String!
+  email_address: String!
+  status: Status
+  children: String!
+}
+
+type Query {
+  getUser(input: GetUserRequest!): GetUserResponse!
+}
+
+type Mutation {
+  createUser(input: User!): CreatedUserResponse!
+}
+

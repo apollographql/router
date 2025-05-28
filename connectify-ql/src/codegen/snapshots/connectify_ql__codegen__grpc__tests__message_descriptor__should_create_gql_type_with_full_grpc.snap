@@ -1,0 +1,13 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: s
+---
+type MyMessage {
+  my_id: ID!
+  my_enum: Enum
+  my_user: User!
+  my_bool: Boolean!
+  my_int: Int!
+  my_float: Float!
+  my_string: String!
+}
