@@ -55,15 +55,9 @@ pub(crate) struct MergeResult {
     pub(crate) hints: Vec<CompositionHint>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
-}
-
-impl Default for CompositionOptions {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 #[allow(unused)]
@@ -335,8 +329,7 @@ impl Merger {
         let value_sources: Sources<&Component<EnumValueDefinition>> = sources
             .iter()
             .map(|(&idx, s)| {
-                let source_value =
-                    s.and_then(|enum_type| enum_type.values.get(&value.node.value).map(|v| v));
+                let source_value = s.and_then(|enum_type| enum_type.values.get(&value.node.value));
                 (idx, source_value)
             })
             .collect();
@@ -593,29 +586,36 @@ impl Merger {
         value_name: &Name,
     ) {
         // As soon as we find a subgraph that has the type but not the member, we hint.
-        for source in sources.values() {
-            if let Some(enum_type) = source {
-                if !enum_type.values.contains_key(value_name) {
-                    self.report_mismatch_hint(
-                        HintCode::InconsistentEnumValueForOutputEnum,
-                        format!(
-                            "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
-                            value_name, dest_name, dest_name
-                        ),
-                        sources,
-                        |source| {
-                            if let Some(enum_type) = source {
-                                if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
-                            } else {
-                                "no"
-                            }
-                        },
-                    );
-                    return;
-                }
+        for enum_type in sources.values().flatten() {
+            if !enum_type.values.contains_key(value_name) {
+                self.report_mismatch_hint(
+                    HintCode::InconsistentEnumValueForOutputEnum,
+                    format!(
+                        "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
+                        value_name, dest_name, dest_name
+                    ),
+                    sources,
+                    |source| {
+                        if let Some(enum_type) = source {
+                            if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
+                        } else {
+                            "no"
+                        }
+                    },
+                );
+                return;
             }
         }
     }
+}
+
+// Public function to start the merging process
+#[allow(dead_code)]
+pub(crate) fn merge_subgraphs(
+    subgraphs: Vec<Subgraph<Validated>>,
+    options: CompositionOptions,
+) -> MergeResult {
+    Merger::new(subgraphs, options).merge()
 }
 
 #[cfg(test)]
@@ -961,13 +961,4 @@ mod tests {
         // But will panic due to todo!() in subgraph_names_to_join_spec_name access
         assert!(result.is_ok());
     }
-}
-
-// Public function to start the merging process
-#[allow(dead_code)]
-pub(crate) fn merge_subgraphs(
-    subgraphs: Vec<Subgraph<Validated>>,
-    options: CompositionOptions,
-) -> MergeResult {
-    Merger::new(subgraphs, options).merge()
 }
