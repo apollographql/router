@@ -346,13 +346,23 @@ impl Merger {
         // regardless of inconsistencies.
         if !is_inaccessible
             && usage.position != EnumUsagePosition::Output
-            && sources.values().any(|source| source.is_some() && !source.unwrap().values.contains_key(&value.node.value))
+            && sources.values().any(|source| {
+                if let Some(enum_type) = source {
+                    !enum_type.values.contains_key(&value.node.value)
+                } else {
+                    false
+                }
+            })
         {
             // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
             // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
             if usage.position == EnumUsagePosition::Both {
-                let input_example = usage.examples.get(&EnumUsagePosition::Input).unwrap();
-                let output_example = usage.examples.get(&EnumUsagePosition::Output).unwrap();
+                let input_example = usage.examples.get(&EnumUsagePosition::Input)
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown field");
+                let output_example = usage.examples.get(&EnumUsagePosition::Output)
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown field");
                 self.report_mismatch_error_with_specifics(
                     SingleFederationError::EnumValueMismatch {
                         message: format!(
@@ -361,7 +371,13 @@ impl Merger {
                         ),
                     },
                     sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(&value.node.value) { "yes" } else { "no" },
+                    |source| {
+                        if let Some(enum_type) = source {
+                            if enum_type.values.contains_key(&value.node.value) { "yes" } else { "no" }
+                        } else {
+                            "no"
+                        }
+                    },
                 );
                 // We leave the value in the merged output in that case because:
                 // 1. it's harmless to do so; we have an error so we won't return a supergraph.
@@ -374,7 +390,13 @@ impl Merger {
                         value.node.value, dest_name, dest_name
                     ),
                     sources,
-                    |source| if source.is_some() && source.unwrap().values.contains_key(&value.node.value) { "yes" } else { "no" },
+                    |source| {
+                        if let Some(enum_type) = source {
+                            if enum_type.values.contains_key(&value.node.value) { "yes" } else { "no" }
+                        } else {
+                            "no"
+                        }
+                    },
                 );
                 // We remove the value after the generation of the hint/errors because `report_mismatch_hint` will show the message for the subgraphs that are "like" the supergraph
                 // first, and the message flows better if we say which subgraph defines the value first, so we want the value to still be present for the generation of the
