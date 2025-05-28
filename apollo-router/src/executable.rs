@@ -225,7 +225,7 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
-    /// The endpoint used to fetch the supergraph schema from the OCI registry.
+    /// An OCI reference to an image that contains the supergraph schema for the router.
     #[clap(long, env, action = ArgAction::Append)]
     // TODO: Update name to be final public name
      graph_artifact_reference: Option<String>,
