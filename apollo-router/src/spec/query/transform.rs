@@ -108,10 +108,9 @@ pub(crate) fn document(
                 used_fragments.extend(local_used_fragments);
 
                 // remove unused variables
-                new_def.variables.retain(|var| {
-                    let res = visitor.state().used_variables.contains(var.name.as_str());
-                    res
-                });
+                new_def
+                    .variables
+                    .retain(|var| visitor.state().used_variables.contains(var.name.as_str()));
 
                 new.definitions
                     .push(ast::Definition::OperationDefinition(new_def.into()));

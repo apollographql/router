@@ -199,6 +199,9 @@ pub(crate) enum Listener {
     },
 }
 
+// Though there is a large difference in variant sizes, only a few instances of this type will
+// exist ever, so it's not a big deal.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]

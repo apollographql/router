@@ -68,7 +68,7 @@ where
             let mut response = response.map(|body| {
                 let stream = body
                     .into_data_stream()
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             let content_encoding = response.headers().get("content-encoding");

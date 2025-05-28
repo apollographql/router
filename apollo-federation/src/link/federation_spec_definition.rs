@@ -216,7 +216,7 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
             )?
-            .unwrap_or(false),
+            .unwrap_or(Self::resolvable_argument_default_value()),
         })
     }
 
@@ -677,12 +677,16 @@ impl FederationSpecDefinition {
         }
     }
 
+    fn resolvable_argument_default_value() -> bool {
+        true
+    }
+
     fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
                 get_type: |_, _| Ok(ty!(Boolean)),
-                default_value: Some(Value::Boolean(true)),
+                default_value: Some(Value::Boolean(Self::resolvable_argument_default_value())),
             },
             composition_strategy: None,
         }

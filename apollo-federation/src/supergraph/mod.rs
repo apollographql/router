@@ -96,7 +96,10 @@ pub struct Supergraph<S> {
 impl Supergraph<Merged> {
     pub fn new(schema: Valid<Schema>) -> Self {
         Self {
-            state: Merged { schema },
+            state: Merged {
+                schema,
+                hints: vec![],
+            },
         }
     }
 
@@ -112,6 +115,10 @@ impl Supergraph<Merged> {
     pub fn schema(&self) -> &Valid<Schema> {
         &self.state.schema
     }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
 }
 
 impl Supergraph<Satisfiable> {
@@ -123,12 +130,25 @@ impl Supergraph<Satisfiable> {
     ) -> Result<ValidFederationSchema, FederationError> {
         api_schema::to_api_schema(self.state.schema.clone(), options)
     }
+
+    pub fn schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
+    pub fn metadata(&self) -> &SupergraphMetadata {
+        &self.state.metadata
+    }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
 }
 
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub struct Merged {
     schema: Valid<Schema>,
+    hints: Vec<CompositionHint>,
 }
 
 #[derive(Clone, Debug)]
@@ -157,7 +177,20 @@ pub struct SupergraphMetadata {
 #[allow(unused)]
 #[allow(unreachable_pub)]
 pub struct CompositionHint {
-    message: String,
+    pub message: String,
+    pub code: String,
+}
+
+impl CompositionHint {
+    #[allow(unused)]
+    pub(crate) fn code(&self) -> &str {
+        &self.code
+    }
+
+    #[allow(unused)]
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 /// Assumes the given schema has been validated.
@@ -1738,7 +1771,7 @@ pub(crate) const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
 pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
-const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
+pub(crate) const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
 pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
 pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
 pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");

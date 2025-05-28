@@ -1,3 +1,5 @@
+mod satisfiability_error;
+
 use crate::error::FederationError;
 use crate::supergraph::Merged;
 use crate::supergraph::Satisfiable;
