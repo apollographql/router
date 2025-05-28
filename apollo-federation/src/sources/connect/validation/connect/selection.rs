@@ -180,12 +180,11 @@ pub(super) fn validate_selection_variables<'a>(
                     namespace = reference.namespace.namespace.as_str(),
                     available = context.namespaces_joined(),
                 ),
-                locations: selection_str
-                    .line_col_for_subslice(
-                        reference.namespace.location.start..reference.namespace.location.end,
-                        schema,
-                    )
-                    .into_iter()
+                locations: reference
+                    .namespace
+                    .location
+                    .iter()
+                    .flat_map(|range| selection_str.line_col_for_subslice(range.clone(), schema))
                     .collect(),
             });
         }
@@ -373,14 +372,12 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
     /// Get all the fields for an object type / selection.
     /// Returns an error if a selection points at a field which does not exist on the schema.
     fn enter_group(&mut self, group: &Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
-        match group.definition {
-            Some(definition) => {
-                self.path.push(PathPart::Field {
-                    definition,
-                    ty: group.ty,
-                });
-            }
-            None => {} // this happens at the root of a connector on a type, and we've already added the root path part
+        // This is `None` at the root of a connector on a type, and we've already added the root path part
+        if let Some(definition) = group.definition {
+            self.path.push(PathPart::Field {
+                definition,
+                ty: group.ty,
+            });
         }
 
         group.selection.selections_iter().flat_map(|selection| {

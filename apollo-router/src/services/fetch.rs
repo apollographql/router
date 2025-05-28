@@ -24,6 +24,10 @@ const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
+// XXX(@goto-bus-stop): instead of two variants of wildly different
+// size, should there be two separate services with one request type
+// each?
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Request {
     Fetch(FetchRequest),
     Subscription(SubscriptionRequest),

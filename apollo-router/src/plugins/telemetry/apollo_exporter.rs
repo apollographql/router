@@ -103,6 +103,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        agent_id: String,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
@@ -116,6 +117,7 @@ impl ApolloExporter {
             runtime_version: "rust".to_string(),
             uname: get_uname()?,
             executable_schema_id: schema_id.to_string(),
+            agent_id,
             ..Default::default()
         };
 

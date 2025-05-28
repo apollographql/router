@@ -54,7 +54,7 @@ pub struct HttpJsonTransport {
 }
 
 impl HttpJsonTransport {
-    pub(super) fn from_directive(
+    pub fn from_directive(
         http: &ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {

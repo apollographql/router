@@ -27,14 +27,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http: {body:})` on `Query.ts`: `$batch` may only be used when `@connect` is applied to a type.",
         locations: [
             14:40..14:49,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `POST` in `@connect(http:)` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `POST` in `@connect(http:)` on `Query.ts`: `$batch` may only be used when `@connect` is applied to a type.",
         locations: [
             19:31..19:40,
         ],
@@ -98,9 +98,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `T.listRelationship`: $batch is not valid here, must be one of $args, $config, $context, $request, $this",
+        message: "In `GET` in `@connect(http:)` on `T.listRelationship`: `$batch` may only be used when `@connect` is applied to a type.",
         locations: [
-            88:28..88:37,
+            88:28..88:55,
         ],
     },
 ]

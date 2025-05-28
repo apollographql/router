@@ -1,13 +1,11 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::ty;
-use itertools::Itertools;
 
+use crate::CONTEXT_VERSIONS;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -15,8 +13,8 @@ use crate::error::SingleFederationError;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::DEFAULT_LINK_NAME;
-use crate::link::Import;
-use crate::link::Purpose;
+use crate::link::Link;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -24,56 +22,36 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::link_spec_definition::LinkSpecDefinition;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
-use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
-use crate::schema::field_set::parse_field_set;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::external::validate_external_directives;
 use crate::schema::validators::from_context::validate_from_context_directives;
+use crate::schema::validators::interface_object::validate_interface_object_directives;
 use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
+use crate::schema::validators::shareable::validate_shareable_directives;
 use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
-use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
-use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
-use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
-use crate::utils::human_readable::HumanReadableListOptions;
-use crate::utils::human_readable::HumanReadableListPrefix;
-use crate::utils::human_readable::human_readable_list;
 
-#[allow(dead_code)]
-struct CoreFeature {
-    url: Url,
-    name_in_schema: Name,
-    directive: Directive,
-    imports: Vec<Import>,
-    purpose: Option<Purpose>,
-}
-#[allow(dead_code)]
-pub(crate) struct FederationBlueprint {
-    with_root_type_renaming: bool,
-}
+pub(crate) struct FederationBlueprint {}
 
 #[allow(dead_code)]
 impl FederationBlueprint {
-    pub(crate) fn new(with_root_type_renaming: bool) -> Self {
-        Self {
-            with_root_type_renaming,
-        }
-    }
-
     pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
         directive: &Node<Directive>,
@@ -101,8 +79,6 @@ impl FederationBlueprint {
         }
         federation_spec.add_elements_to_schema(schema)?;
         Self::expand_known_features(schema)
-
-        // TODO (FED-428): Port `processUnappliedDirectives`.
     }
 
     pub(crate) fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
@@ -134,7 +110,7 @@ impl FederationBlueprint {
 
     fn on_added_core_feature(
         schema: &mut FederationSchema,
-        feature: &CoreFeature,
+        feature: &Link,
     ) -> Result<(), FederationError> {
         if feature.url.identity == Identity::federation_identity() {
             FEDERATION_VERSIONS
@@ -146,79 +122,35 @@ impl FederationBlueprint {
     }
 
     pub(crate) fn on_validation(
-        &self,
-        mut schema: FederationSchema,
-    ) -> Result<ValidFederationSchema, FederationError> {
+        schema: &ValidFederationSchema,
+        meta: &SubgraphMetadata,
+    ) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
-        if self.with_root_type_renaming {
-            let mut operation_types_to_rename = HashMap::new();
-            for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
-                let default_name = default_operation_name(&op_type);
-                if op_name.name != default_name {
-                    operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                    if schema.try_get_type(default_name.clone()).is_some() {
-                        error_collector.push(
-                            SingleFederationError::root_already_used(
-                                op_type,
-                                default_name,
-                                op_name.name.clone(),
-                            )
-                            .into(),
-                        );
-                    }
-                }
-            }
-            for (current_name, new_name) in operation_types_to_rename {
-                schema
-                    .get_type(current_name)?
-                    .rename(&mut schema, new_name)?;
-            }
-        }
 
-        let schema = schema.validate_or_return_self().map_err(|(schema, err)| {
-            // Specialize GraphQL validation errors.
-            let iter = err.into_errors().into_iter().map(|err| match err {
-                SingleFederationError::InvalidGraphQL { message } => {
-                    Self::on_invalid_graphql_error(&schema, message)
-                }
-                _ => err,
-            });
-            FederationError::from(MultipleFederationErrors::from_iter(iter))
-        })?;
-        let Some(meta) = schema.subgraph_metadata() else {
-            bail!("Federation schema should have had its metadata set on construction");
-        };
         // We skip the rest of validation for fed1 schemas because there is a number of validations that is stricter than what fed 1
         // accepted, and some of those issues are fixed by `SchemaUpgrader`. So insofar as any fed 1 schma is ultimately converted
         // to a fed 2 one before composition, then skipping some validation on fed 1 schema is fine.
         if !meta.is_fed_2_schema() {
-            return error_collector.into_result().map(|_| schema);
+            return error_collector.into_result();
         }
 
-        let context_map = validate_context_directives(&schema, &mut error_collector)?;
-        validate_from_context_directives(&schema, &context_map, &mut error_collector)?;
-        validate_key_directives(&schema, meta, &mut error_collector)?;
-        validate_provides_directives(&schema, meta, &mut error_collector)?;
-        validate_requires_directives(&schema, meta, &mut error_collector)?;
-        validate_external_directives(&schema, meta, &mut error_collector)?;
+        let context_map = validate_context_directives(schema, &mut error_collector)?;
+        validate_from_context_directives(schema, &context_map, &mut error_collector)?;
+        validate_key_directives(schema, meta, &mut error_collector)?;
+        validate_provides_directives(schema, meta, &mut error_collector)?;
+        validate_requires_directives(schema, meta, &mut error_collector)?;
+        validate_external_directives(schema, meta, &mut error_collector)?;
+        validate_interface_object_directives(schema, meta, &mut error_collector)?;
+        validate_shareable_directives(schema, meta, &mut error_collector)?;
+        validate_cost_directives(schema, &mut error_collector)?;
+        validate_list_size_directives(schema, &mut error_collector)?;
 
-        // TODO: Remaining validations
-        Self::validate_keys_on_interfaces_are_also_on_all_implementations(
-            &schema,
-            meta,
-            &mut error_collector,
-        )?;
-        Self::validate_interface_objects_are_on_entities(&schema, meta, &mut error_collector)?;
-
-        validate_cost_directives(&schema, &mut error_collector)?;
-        validate_list_size_directives(&schema, &mut error_collector)?;
-
-        error_collector.into_result().map(|_| schema)
+        error_collector.into_result()
     }
 
     // Allows to intercept some apollo-compiler error messages when we can provide additional
     // guidance to users.
-    fn on_invalid_graphql_error(
+    pub(crate) fn on_invalid_graphql_error(
         schema: &FederationSchema,
         message: String,
     ) -> SingleFederationError {
@@ -412,180 +344,105 @@ impl FederationBlueprint {
     }
 
     fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
+        fn unknown_version_error(
+            spec_name: &str,
+            version: &impl std::fmt::Display,
+            supported_versions: impl Iterator<Item = impl std::fmt::Display>,
+        ) -> SingleFederationError {
+            SingleFederationError::UnknownLinkVersion {
+                message: format!(
+                    "Detected unsupported {spec_name} specification version {version}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
+                    supported_versions
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        }
+
         let Some(links_metadata) = schema.metadata() else {
             return Ok(());
         };
 
         for link in links_metadata.links.clone() {
-            // TODO: Pick out known features by link identity and call `add_elements_to_schema`.
-            // JS calls coreFeatureDefinitionIfKnown here, but we don't have a feature registry yet.
-
-            if link.url.identity == Identity::cost_identity() {
-                let spec = COST_VERSIONS
+            if link.url.identity == Identity::authenticated_identity() {
+                let spec = AUTHENTICATED_VERSIONS
                     .find(&link.url.version)
-                    .ok_or_else(|| SingleFederationError::UnknownLinkVersion {
-                        message: format!("Detected unsupported cost specification version {}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.", link.url.version, COST_VERSIONS.versions().join(", "))
+                    .ok_or_else(|| {
+                        unknown_version_error(
+                            &link.url.identity.name,
+                            &link.url.version,
+                            AUTHENTICATED_VERSIONS.versions(),
+                        )
                     })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::context_identity() {
+                let spec = CONTEXT_VERSIONS.find(&link.url.version).ok_or_else(|| {
+                    unknown_version_error(
+                        &link.url.identity.name,
+                        &link.url.version,
+                        CONTEXT_VERSIONS.versions(),
+                    )
+                })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::cost_identity() {
+                let spec = COST_VERSIONS.find(&link.url.version).ok_or_else(|| {
+                    unknown_version_error(
+                        &link.url.identity.name,
+                        &link.url.version,
+                        COST_VERSIONS.versions(),
+                    )
+                })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::inaccessible_identity() {
+                let spec = INACCESSIBLE_VERSIONS
+                    .find(&link.url.version)
+                    .ok_or_else(|| {
+                        unknown_version_error(
+                            &link.url.identity.name,
+                            &link.url.version,
+                            INACCESSIBLE_VERSIONS.versions(),
+                        )
+                    })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::policy_identity() {
+                let spec = POLICY_VERSIONS.find(&link.url.version).ok_or_else(|| {
+                    unknown_version_error(
+                        &link.url.identity.name,
+                        &link.url.version,
+                        POLICY_VERSIONS.versions(),
+                    )
+                })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::requires_scopes_identity() {
+                let spec = REQUIRES_SCOPES_VERSIONS
+                    .find(&link.url.version)
+                    .ok_or_else(|| {
+                        unknown_version_error(
+                            &link.url.identity.name,
+                            &link.url.version,
+                            REQUIRES_SCOPES_VERSIONS.versions(),
+                        )
+                    })?;
+                spec.add_elements_to_schema(schema)?;
+            }
+            if link.url.identity == Identity::tag_identity() {
+                let spec = TAG_VERSIONS.find(&link.url.version).ok_or_else(|| {
+                    unknown_version_error(
+                        &link.url.identity.name,
+                        &link.url.version,
+                        TAG_VERSIONS.versions(),
+                    )
+                })?;
                 spec.add_elements_to_schema(schema)?;
             }
         }
         Ok(())
-    }
-
-    fn validate_keys_on_interfaces_are_also_on_all_implementations(
-        schema: &ValidFederationSchema,
-        metadata: &SubgraphMetadata,
-        error_collector: &mut MultipleFederationErrors,
-    ) -> Result<(), FederationError> {
-        let key_directive_definition_name = &metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?
-            .name;
-        for type_pos in schema.get_types() {
-            let Ok(type_pos): Result<InterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-            else {
-                continue;
-            };
-            let implementation_types = schema.possible_runtime_types(type_pos.clone().into())?;
-            let type_ = type_pos.get(schema.schema())?;
-            for application in type_.directives.get_all(key_directive_definition_name) {
-                let arguments = metadata
-                    .federation_spec_definition()
-                    .key_directive_arguments(application)?;
-                // Note that we will have validated all @key field sets by this point, so we skip
-                // re-validating here.
-                let fields = parse_field_set(schema, type_.name.clone(), arguments.fields, false)?;
-                let mut implementations_with_non_resolvable_keys = vec![];
-                let mut implementations_with_missing_keys = vec![];
-                for implementation_type_pos in &implementation_types {
-                    let implementation_type = implementation_type_pos.get(schema.schema())?;
-                    let mut matching_application_arguments = None;
-                    for implementation_application in implementation_type
-                        .directives
-                        .get_all(key_directive_definition_name)
-                    {
-                        let implementation_arguments = metadata
-                            .federation_spec_definition()
-                            .key_directive_arguments(implementation_application)?;
-                        let implementation_fields = parse_field_set(
-                            schema,
-                            implementation_type.name.clone(),
-                            implementation_arguments.fields,
-                            false,
-                        )?;
-                        if implementation_fields == fields {
-                            matching_application_arguments = Some(implementation_arguments);
-                            break;
-                        }
-                    }
-                    if let Some(matching_application_arguments) = matching_application_arguments {
-                        // TODO: This code assumes there's at most one matching application for a
-                        // given fieldset, but I'm not sure whether other validation code guarantees
-                        // this.
-                        if arguments.resolvable && !matching_application_arguments.resolvable {
-                            implementations_with_non_resolvable_keys.push(implementation_type_pos);
-                        }
-                    } else {
-                        implementations_with_missing_keys.push(implementation_type_pos);
-                    }
-
-                    if !implementations_with_missing_keys.is_empty() {
-                        let types_list = human_readable_list(
-                            implementations_with_missing_keys
-                                .iter()
-                                .map(|pos| format!("\"{}\"", pos)),
-                            HumanReadableListOptions {
-                                prefix: Some(HumanReadableListPrefix {
-                                    singular: "type",
-                                    plural: "types",
-                                }),
-                                ..Default::default()
-                            },
-                        );
-                        error_collector.errors.push(
-                            SingleFederationError::InterfaceKeyNotOnImplementation {
-                                message: format!(
-                                    "Key {} on interface type \"{}\" is missing on implementation {}",
-                                    application.serialize(),
-                                    type_pos,
-                                    types_list,
-                                )
-                            }
-                        )
-                    } else if !implementations_with_non_resolvable_keys.is_empty() {
-                        let types_list = human_readable_list(
-                            implementations_with_non_resolvable_keys
-                                .iter()
-                                .map(|pos| format!("\"{}\"", pos)),
-                            HumanReadableListOptions {
-                                prefix: Some(HumanReadableListPrefix {
-                                    singular: "type",
-                                    plural: "types",
-                                }),
-                                ..Default::default()
-                            },
-                        );
-                        error_collector.errors.push(
-                            SingleFederationError::InterfaceKeyNotOnImplementation {
-                                message: format!(
-                                    "Key {} on interface type \"{}\" should be resolvable on all implementation types, but is declared with argument \"@key(resolvable:)\" set to false in {}",
-                                    application.serialize(),
-                                    type_pos,
-                                    types_list,
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_interface_objects_are_on_entities(
-        schema: &ValidFederationSchema,
-        metadata: &SubgraphMetadata,
-        error_collector: &mut MultipleFederationErrors,
-    ) -> Result<(), FederationError> {
-        let Some(interface_object_directive_definition) = &metadata
-            .federation_spec_definition()
-            .interface_object_directive_definition(schema)?
-        else {
-            return Ok(());
-        };
-        let key_directive_definition_name = &metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?
-            .name;
-        for type_pos in &schema
-            .referencers
-            .get_directive(&interface_object_directive_definition.name)?
-            .object_types
-        {
-            if !type_pos
-                .get(schema.schema())?
-                .directives
-                .has(key_directive_definition_name)
-            {
-                error_collector.errors.push(
-                    SingleFederationError::InterfaceObjectUsageError {
-                        message: format!(
-                            "The @interfaceObject directive can only be applied to entity types but type \"{}\" has no @key in this subgraph.",
-                            type_pos
-                        )
-                    }
-                )
-            }
-        }
-        Ok(())
-    }
-}
-
-fn default_operation_name(op_type: &OperationType) -> Name {
-    match op_type {
-        OperationType::Query => GRAPHQL_QUERY_TYPE_NAME,
-        OperationType::Mutation => GRAPHQL_MUTATION_TYPE_NAME,
-        OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
     }
 }
 

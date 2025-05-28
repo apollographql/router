@@ -4,6 +4,7 @@ mod keys;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
@@ -258,7 +259,7 @@ impl Connector {
         )
     }
 
-    /// Create a field set for a `@key` using $args and $this variables.
+    /// Create a field set for a `@key` using `$args`, `$this`, or `$batch` variables.
     pub fn resolvable_key(&self, schema: &Schema) -> Result<Option<Valid<FieldSet>>, String> {
         match &self.entity_resolver {
             None => Ok(None),
@@ -322,6 +323,16 @@ impl Connector {
             .unwrap_or_else(|| self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
     }
+
+    /// Get the name of the `@connect` directive associated with this [`Connector`] instance.
+    ///
+    /// The [`Name`] can be used to help locate the connector within a source file.
+    pub fn name(&self) -> Name {
+        match &self.id.directive {
+            ConnectorPosition::Field(field_position) => field_position.directive_name.clone(),
+            ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
+        }
+    }
 }
 
 fn make_label(
@@ -365,29 +376,22 @@ fn determine_entity_resolver(
 fn extract_header_references(
     variable_references: HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
-    let headers: HashSet<String> = variable_references
+    variable_references
         .iter()
-        .filter_map(|var_ref| {
+        .flat_map(|var_ref| {
             if var_ref.namespace.namespace != Namespace::Request
                 && var_ref.namespace.namespace != Namespace::Response
             {
-                return None;
+                Vec::new()
+            } else {
+                var_ref
+                    .selection
+                    .get("headers")
+                    .map(|headers_subtrie| headers_subtrie.keys().cloned().collect())
+                    .unwrap_or_default()
             }
-
-            // We only care if the path references starts with "headers"
-            if var_ref
-                .path
-                .first()
-                .is_none_or(|path| path.part != "headers")
-            {
-                return None;
-            }
-
-            // Grab the name of the header from the path
-            var_ref.path.get(1).map(|path| path.part.to_string())
         })
-        .collect();
-    headers
+        .collect()
 }
 
 #[cfg(test)]

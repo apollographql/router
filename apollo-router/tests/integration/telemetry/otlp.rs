@@ -834,14 +834,7 @@ impl Verifier for OtlpTraceSpec<'_> {
                     bytes::Bytes::copy_from_slice(&r.body),
                 ) {
                     Ok(trace) => {
-                        match serde_json::to_value(trace) {
-                            Ok(trace) => {
-                                Some(trace)
-                            }
-                            Err(_) => {
-                                None
-                            }
-                        }
+                        serde_json::to_value(trace).ok()
                     }
                     Err(_) => {
                         None
@@ -965,13 +958,7 @@ impl Verifier for OtlpTraceSpec<'_> {
                 return Err(BoxError::from("missing sampling priority"));
             }
             for sampling_priority in binding {
-                assert_eq!(
-                    sampling_priority
-                        .as_i64()
-                        .expect("psr not an integer")
-                        .to_string(),
-                    psr
-                );
+                assert_eq!(sampling_priority.as_str().expect("psr not a string"), psr);
             }
         } else {
             assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.intValue")?.is_empty())

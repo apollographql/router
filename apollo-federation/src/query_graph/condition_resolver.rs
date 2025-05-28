@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
-use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
 
@@ -52,8 +52,6 @@ pub(crate) enum ConditionResolution {
         context_map: Option<IndexMap<Name, ContextMapEntry>>,
     },
     Unsatisfied {
-        // NOTE: This seems to be a false positive...
-        #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
 }
@@ -184,7 +182,7 @@ impl ConditionResolverCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query_graph::graph_path::OpGraphPathContext;
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
     //use crate::link::graphql_definition::{OperationConditional, OperationConditionalKind, BooleanOrVariable};
 
     #[test]

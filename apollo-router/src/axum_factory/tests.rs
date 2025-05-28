@@ -1901,10 +1901,8 @@ async fn http_compressed_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             },
         }))
         .unwrap()
@@ -1953,10 +1951,8 @@ async fn http_deferred_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             }
         }))
         .unwrap()
@@ -1981,7 +1977,7 @@ async fn http_deferred_service() -> impl Service<
                 // Convert from axum’s BoxBody to AsyncBufRead
                 let mut body = body.into_data_stream();
                 let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             response.map(|body| Box::pin(body) as _)

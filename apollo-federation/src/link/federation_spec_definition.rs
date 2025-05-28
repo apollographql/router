@@ -7,7 +7,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
@@ -23,14 +22,18 @@ use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
-use crate::link::link_spec_definition::LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cost_spec_definition::COST_VERSIONS;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::FederationSchema;
-use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -65,6 +68,10 @@ pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
     pub(crate) resolvable: bool,
+}
+
+pub(crate) struct ExternalDirectiveArguments<'doc> {
+    pub(crate) reason: Option<&'doc str>,
 }
 
 pub(crate) struct RequiresDirectiveArguments<'doc> {
@@ -213,7 +220,7 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
             )?
-            .unwrap_or(false),
+            .unwrap_or(Self::resolvable_argument_default_value()),
         })
     }
 
@@ -312,6 +319,18 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    pub(crate) fn external_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ExternalDirectiveArguments<'doc>, FederationError> {
+        Ok(ExternalDirectiveArguments {
+            reason: directive_optional_string_argument(
+                application,
+                &FEDERATION_REASON_ARGUMENT_NAME,
+            )?,
         })
     }
 
@@ -674,12 +693,16 @@ impl FederationSpecDefinition {
         }
     }
 
+    fn resolvable_argument_default_value() -> bool {
+        true
+    }
+
     fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
                 get_type: |_, _| Ok(ty!(Boolean)),
-                default_value: Some(Value::Boolean(true)),
+                default_value: Some(Value::Boolean(Self::resolvable_argument_default_value())),
             },
             composition_strategy: None,
         }
@@ -753,25 +776,6 @@ impl FederationSpecDefinition {
                 DirectiveLocation::FieldDefinition,
             ],
             false,
-            None,
-            None,
-        )
-    }
-
-    fn tag_directive_specification(&self) -> DirectiveSpecification {
-        DirectiveSpecification::new(
-            FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
-            &[],
-            self.version().ge(&Version { major: 2, minor: 0 }),
-            &[
-                DirectiveLocation::ArgumentDefinition,
-                DirectiveLocation::Scalar,
-                DirectiveLocation::Enum,
-                DirectiveLocation::EnumValue,
-                DirectiveLocation::InputObject,
-                DirectiveLocation::InputFieldDefinition,
-            ],
-            false, // TODO: Fix this
             None,
             None,
         )
@@ -859,15 +863,31 @@ impl SpecDefinition for FederationSpecDefinition {
             Box::new(Self::provides_directive_specification()),
             Box::new(Self::external_directive_specification()),
         ];
+        // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
+        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
+                specs.extend(tag_spec.directive_specs());
+            }
+        } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
+            specs.extend(tag_spec.directive_specs());
+        }
+        specs.push(Box::new(Self::extends_directive_specification()));
+
         if self.is_fed1() {
-            specs.push(Box::new(Self::extends_directive_specification()));
-            specs.push(Box::new(self.tag_directive_specification()));
+            // PORT_NOTE: Fed 1 has `@key`, `@requires`, `@provides`, `@external`, `@tag` (v0.2) and `@extends`.
+            // The specs we return at this point correspond to `legacyFederationDirectives` in JS.
             return specs;
         }
 
         specs.push(Box::new(self.shareable_directive_specification()));
+
+        if let Some(inaccessible_spec) =
+            INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
+        {
+            specs.extend(inaccessible_spec.directive_specs());
+        }
+
         specs.push(Box::new(self.override_directive_specification()));
-        specs.push(Box::new(self.tag_directive_specification()));
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
@@ -879,6 +899,23 @@ impl SpecDefinition for FederationSpecDefinition {
             ));
         }
 
+        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
+            if let Some(auth_spec) = AUTHENTICATED_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(auth_spec.directive_specs());
+            }
+            if let Some(requires_scopes_spec) =
+                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                specs.extend(requires_scopes_spec.directive_specs());
+            }
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
+            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(policy_spec.directive_specs());
+            }
+        }
+
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             let context_spec_definitions =
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
@@ -886,8 +923,11 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.extend(context_spec_definitions);
         }
 
-        // TODO: The remaining directives added in later versions are implemented in separate specs,
-        // which still need to be ported over
+        if self.version().satisfies(&Version { major: 2, minor: 9 }) {
+            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(cost_spec.directive_specs());
+            }
+        }
 
         specs
     }
@@ -897,6 +937,20 @@ impl SpecDefinition for FederationSpecDefinition {
             vec![Box::new(ScalarTypeSpecification {
                 name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
             })];
+
+        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
+            if let Some(requires_scopes_spec) =
+                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                type_specs.extend(requires_scopes_spec.type_specs());
+            }
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
+            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                type_specs.extend(policy_spec.type_specs());
+            }
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             type_specs.extend(
@@ -982,25 +1036,6 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
         // No federation link found in schema. The default is v1.0.
         Ok(&FED_1)
     }
-}
-
-/// Adds a bootstrap fed 1 link directive to the schema.
-pub(crate) fn add_fed1_link_to_schema(
-    schema: &mut FederationSchema,
-) -> Result<(), FederationError> {
-    // Insert `@core(feature: "http://specs.apollo.dev/federation/v1.0")`.
-    // We can't use `import` argument here since fed1 @core does not support `import`.
-    // We will add imports later (see `fed1_link_imports`).
-    SchemaDefinitionPosition.insert_directive(
-        schema,
-        Component::new(Directive {
-            name: Identity::core_identity().name,
-            arguments: vec![Node::new(Argument {
-                name: LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME,
-                value: FED_1.url.to_string().into(),
-            })],
-        }),
-    )
 }
 
 /// Creates a fake imports for fed 1 link directive.

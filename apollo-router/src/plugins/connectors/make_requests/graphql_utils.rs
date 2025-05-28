@@ -20,19 +20,10 @@ pub(super) fn field_arguments_map(
     let mut arguments = Map::new();
 
     for argument in field.arguments.iter() {
-        match &*argument.value {
-            apollo_compiler::schema::Value::Variable(name) => {
-                if let Some(value) = variables.get(name.as_str()) {
-                    arguments.insert(argument.name.as_str(), value.clone());
-                }
-            }
-            _ => {
-                arguments.insert(
-                    argument.name.as_str(),
-                    argument_value_to_json(&argument.value)?,
-                );
-            }
-        }
+        arguments.insert(
+            argument.name.as_str(),
+            argument_value_to_json(&argument.value, variables)?,
+        );
     }
 
     for argument_def in field.definition.arguments.iter() {
@@ -40,7 +31,7 @@ pub(super) fn field_arguments_map(
             if !arguments.contains_key(argument_def.name.as_str()) {
                 arguments.insert(
                     argument_def.name.as_str(),
-                    argument_value_to_json(value).map_err(|err| {
+                    argument_value_to_json(value, variables).map_err(|err| {
                         format!(
                             "failed to convert default value on {}({}:) to json: {}",
                             field.definition.name, argument_def.name, err
@@ -56,31 +47,36 @@ pub(super) fn field_arguments_map(
 
 pub(super) fn argument_value_to_json(
     value: &apollo_compiler::ast::Value,
+    variables: &Map<ByteString, JSONValue>,
 ) -> Result<JSONValue, BoxError> {
     match value {
         Value::Null => Ok(JSONValue::Null),
         Value::Enum(e) => Ok(JSONValue::String(e.as_str().into())),
-        Value::Variable(_) => Err(BoxError::from("variables not supported")),
+        Value::Variable(name) => variables.get(name.as_str()).cloned().ok_or_else(|| {
+            BoxError::from(format!(
+                "variable {name} used in operation but not defined in variables"
+            ))
+        }),
         Value::String(s) => Ok(JSONValue::String(s.as_str().into())),
         Value::Float(f) => Ok(JSONValue::Number(
             Number::from_f64(
                 f.try_to_f64()
-                    .map_err(|_| BoxError::from("try_to_f64 failed"))?,
+                    .map_err(|_| BoxError::from("Failed to parse float"))?,
             )
-            .ok_or_else(|| BoxError::from("Number::from_f64 failed"))?,
+            .ok_or_else(|| BoxError::from("Failed to parse float"))?,
         )),
         Value::Int(i) => Ok(JSONValue::Number(Number::from(
-            i.try_to_i32().map_err(|_| "invalid int")?,
+            i.try_to_i32().map_err(|_| "Failed to parse int")?,
         ))),
         Value::Boolean(b) => Ok(JSONValue::Bool(*b)),
         Value::List(l) => Ok(JSONValue::Array(
             l.iter()
-                .map(|v| argument_value_to_json(v))
+                .map(|v| argument_value_to_json(v, variables))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         Value::Object(o) => Ok(JSONValue::Object(
             o.iter()
-                .map(|(k, v)| argument_value_to_json(v).map(|v| (k.as_str().into(), v)))
+                .map(|(k, v)| argument_value_to_json(v, variables).map(|v| (k.as_str().into(), v)))
                 .collect::<Result<Map<_, _>, _>>()?,
         )),
     }

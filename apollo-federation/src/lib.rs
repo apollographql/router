@@ -27,12 +27,14 @@
 
 mod api_schema;
 mod compat;
+pub mod composition;
 #[cfg(feature = "correctness")]
 pub mod correctness;
 mod display_helpers;
 pub mod error;
 pub mod link;
 pub mod merge;
+mod merger;
 pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
