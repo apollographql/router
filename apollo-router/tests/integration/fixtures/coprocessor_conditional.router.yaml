@@ -12,3 +12,5 @@ coprocessor:
         eq:
           - on_graphql_error: true
           - true
+include_subgraph_errors:
+  all: true # Propagate errors (message + extensions) from all subgraphs
