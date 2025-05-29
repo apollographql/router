@@ -233,7 +233,7 @@ pub const DEFAULT_SUPPORTED_SUPERGRAPH_SPECS: [&str; 12] = [
     "https://specs.apollo.dev/inaccessible/v0.2",
 ];
 
-pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 20] = [
+pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 22] = [
     "https://specs.apollo.dev/core/v0.1",
     "https://specs.apollo.dev/core/v0.2",
     "https://specs.apollo.dev/join/v0.1",
@@ -248,6 +248,7 @@ pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 20] = [
     "https://specs.apollo.dev/inaccessible/v0.2",
     // Additional specs for Router below:
     "https://specs.apollo.dev/authenticated/v0.1",
+    "https://specs.apollo.dev/authenticated/v0.2",
     "https://specs.apollo.dev/requiresScopes/v0.1",
     "https://specs.apollo.dev/policy/v0.1",
     "https://specs.apollo.dev/source/v0.1",
@@ -255,6 +256,7 @@ pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 20] = [
     "https://specs.apollo.dev/cost/v0.1",
     "https://specs.apollo.dev/connect/v0.1",
     "https://specs.apollo.dev/connect/v0.2",
+    "https://specs.apollo.dev/connect/v0.3",
 ];
 
 fn is_core_version_zero_dot_one(url: &Url) -> bool {
