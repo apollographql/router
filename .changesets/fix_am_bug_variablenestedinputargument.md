@@ -1,8 +1,8 @@
-### Fix bug where connectors errored when using a variable in a nested input argument ([PR #7472](https://github.com/apollographql/router/pull/7472))
+### Prevent connectors error when using a variable in a nested input argument ([PR #7472](https://github.com/apollographql/router/pull/7472))
 
-Fixed bug where connectors errored when using a variable in a nested input argument. The following example would error prior to this change:
+The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
-```
+```graphql
 query Query ($query: String){
     complexInputType(filters: { inSpace: true, search: $query })
 }

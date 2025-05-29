@@ -1,6 +1,6 @@
-### add response body selector ([PR #7363](https://github.com/apollographql/router/pull/7363))
+### Add response body telemetry selector ([PR #7363](https://github.com/apollographql/router/pull/7363))
 
-Adds a new response body selector that allows accessing the response body in telemetry configurations.
+The Router now supports a `response_body` selector which provides access to the response body in telemetry configurations.
 This enables more detailed monitoring and logging of response data in the Router.
 
 Example configuration:

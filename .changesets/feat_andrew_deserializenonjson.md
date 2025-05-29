@@ -4,10 +4,10 @@ Connectors now inspect the `content-type` header of responses to determine how t
 
 The behavior is as follows:
 
-- If `content-type` ends with `/json` (like `application/json`) OR `+json` (like `application/vnd.foo+json`): Content is parsed as JSON
-- If no `content-type` header is provided: Content is assumed to be JSON and therefore parsed as JSON
-- If content is `text/plain`, content will be treated as a UTF-8 `string`. Content can be accessed in `selection` mapping via `$` variable.
-- If `content-type` is any other value, it will be treated as a JSON `null`
+- If `content-type` ends with `/json` (like `application/json`) OR `+json` (like `application/vnd.foo+json`): content is parsed as JSON.
+- If `content-type` is `text/plain`: content will be treated as a UTF-8 `string`. Content can be accessed in `selection` mapping via `$` variable.
+- If `content-type` is any other value: content will be treated as a JSON `null`.
+- If no `content-type` header is provided: content is assumed to be JSON and therefore parsed as JSON.
 
 If deserialization fails, an error message of `Response deserialization failed` with a error code of `CONNECTOR_DESERIALIZE` will be returned:
 
