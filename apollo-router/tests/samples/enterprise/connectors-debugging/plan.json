@@ -27,23 +27,21 @@
         "query": "query { post(id: 1) { id author { name } title } }"
       },
       "expected_response": {
-        "data": {
-          "post": {
-            "id": 1,
-            "author": { "name": "Leanne Graham" },
-            "title": null
-          }
-        },
+        "data": { "post": { "id": 1, "author": { "name": "Leanne Graham" }, "title": null } },
         "extensions": {
           "apolloConnectorsDebugging": {
-            "version": "1",
+            "version": "2",
             "data": [
               {
                 "request": {
                   "url": "http://127.0.0.1:61000/posts/1",
                   "method": "GET",
                   "headers": [["x-from", "client-value"]],
-                  "body": null
+                  "body": null,
+                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
+                  "connectUri": { "base": "/posts/{$args.id}", "path": null, "queryParams": null },
+                  "sourceHeaders": null,
+                  "connectHeaders": null
                 },
                 "response": {
                   "status": 200,
@@ -63,27 +61,28 @@
                     "selection": {
                       "source": "id\ntitle: postTitle\nbody\nauthor: {\n  id: userId\n}",
                       "transformed": "id\ntitle: postTitle\nauthor: {\n  __typename: $->echo(\"User\")\n  id: userId\n}",
-                      "result": {
-                        "id": 1,
-                        "author": { "__typename": "User", "id": 1 }
-                      },
-                      "errors": [
-                        {
-                          "message": "Property .postTitle not found in object",
-                          "path": "postTitle",
-                          "count": 1
-                        }
-                      ]
+                      "result": { "id": 1, "author": { "__typename": "User", "id": 1 } }
                     }
+                  },
+                  "errors": null
+                },
+                "problems": [
+                  {
+                    "location": "Selection",
+                    "details": { "message": "Property .postTitle not found in object", "path": "postTitle", "count": 1 }
                   }
-                }
+                ]
               },
               {
                 "request": {
                   "url": "http://127.0.0.1:61000/users/1",
                   "method": "GET",
                   "headers": [["x-from", "client-value"]],
-                  "body": null
+                  "body": null,
+                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
+                  "connectUri": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
+                  "sourceHeaders": null,
+                  "connectHeaders": null
                 },
                 "response": {
                   "status": 200,
@@ -117,11 +116,12 @@
                     "selection": {
                       "source": "id\nname\nusername",
                       "transformed": "name",
-                      "result": { "name": "Leanne Graham" },
-                      "errors": []
+                      "result": { "name": "Leanne Graham" }
                     }
-                  }
-                }
+                  },
+                  "errors": null
+                },
+                "problems": []
               }
             ]
           }
