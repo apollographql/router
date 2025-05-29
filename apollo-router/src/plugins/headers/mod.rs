@@ -1719,7 +1719,7 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         connector::request_service::Request {

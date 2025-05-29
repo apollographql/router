@@ -21,6 +21,7 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
+use super::ProblemLocation;
 use crate::error::FederationError;
 use crate::sources::connect::ApplyToError;
 use crate::sources::connect::JSONSelection;
@@ -45,7 +46,7 @@ pub struct HttpJsonTransport {
     pub source_url: Option<Uri>,
     pub connect_template: StringTemplate,
     pub method: HTTPMethod,
-    pub headers: IndexMap<HeaderName, HeaderSource>,
+    pub headers: IndexMap<HeaderName, (HeaderSource, OriginatingDirective)>,
     pub body: Option<JSONSelection>,
     pub source_path: Option<JSONSelection>,
     pub source_query_params: Option<JSONSelection>,
@@ -74,12 +75,24 @@ impl HttpJsonTransport {
 
         #[allow(clippy::mutable_key_type)]
         // HeaderName is internally mutable, but we don't mutate it
-        let mut headers = http.headers.clone();
+        let mut headers: IndexMap<HeaderName, (HeaderSource, OriginatingDirective)> = http
+            .headers
+            .iter()
+            .map(|(name, source)| {
+                (
+                    name.clone(),
+                    (source.clone(), OriginatingDirective::Connect),
+                )
+            })
+            .collect();
         for (header_name, header_source) in
             source.map(|source| &source.headers).into_iter().flatten()
         {
             if !headers.contains_key(header_name) {
-                headers.insert(header_name.clone(), header_source.clone());
+                headers.insert(
+                    header_name.clone(),
+                    (header_source.clone(), OriginatingDirective::Source),
+                );
             }
         }
 
@@ -110,7 +123,7 @@ impl HttpJsonTransport {
         let header_selections = self
             .headers
             .iter()
-            .flat_map(|(_, source)| source.expressions());
+            .flat_map(|(_, (source, _))| source.expressions());
         url_selections
             .chain(header_selections)
             .chain(self.body.iter())
@@ -125,12 +138,21 @@ impl HttpJsonTransport {
             })
     }
 
-    pub fn make_uri(&self, inputs: &IndexMap<String, Value>) -> Result<Uri, MakeUriError> {
+    pub fn make_uri(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Uri, Vec<(ProblemLocation, ApplyToError)>), MakeUriError> {
         let mut uri_parts = Parts::default();
-        // TODO: Return these warnings for both Sandbox debugging and mapping playground
         let mut warnings = Vec::new();
 
-        let connect_uri = self.connect_template.interpolate_uri(inputs)?;
+        let (connect_uri, connect_template_warnings) =
+            self.connect_template.interpolate_uri(inputs)?;
+        warnings.extend(
+            connect_template_warnings
+                .iter()
+                .cloned()
+                .map(|warning| (ProblemLocation::ConnectUri, warning)),
+        );
 
         if let Some(source_uri) = &self.source_url {
             uri_parts.scheme = source_uri.scheme().cloned();
@@ -146,7 +168,12 @@ impl HttpJsonTransport {
             path.write_without_encoding(source_uri_path)?;
         }
         if let Some(source_path) = self.source_path.as_ref() {
-            warnings.extend(extend_path_from_expression(&mut path, source_path, inputs)?);
+            warnings.extend(
+                extend_path_from_expression(&mut path, source_path, inputs)?
+                    .iter()
+                    .cloned()
+                    .map(|error| (ProblemLocation::SourcePath, error)),
+            );
         }
         let connect_path = connect_uri.path();
         if !connect_path.is_empty() && connect_path != "/" {
@@ -160,11 +187,12 @@ impl HttpJsonTransport {
             };
         }
         if let Some(connect_path) = self.connect_path.as_ref() {
-            warnings.extend(extend_path_from_expression(
-                &mut path,
-                connect_path,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_path_from_expression(&mut path, connect_path, inputs)?
+                    .iter()
+                    .cloned()
+                    .map(|error| (ProblemLocation::ConnectPath, error)),
+            );
         }
 
         let mut query = UriString::new();
@@ -177,11 +205,12 @@ impl HttpJsonTransport {
             query.write_without_encoding(source_uri_query)?;
         }
         if let Some(source_query) = self.source_query_params.as_ref() {
-            warnings.extend(extend_query_from_expression(
-                &mut query,
-                source_query,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_query_from_expression(&mut query, source_query, inputs)?
+                    .iter()
+                    .cloned()
+                    .map(|error| (ProblemLocation::SourceQueryParams, error)),
+            );
         }
         let connect_query = connect_uri.query().unwrap_or_default();
         if !connect_query.is_empty() {
@@ -191,11 +220,12 @@ impl HttpJsonTransport {
             query.write_without_encoding(connect_query)?;
         }
         if let Some(connect_query) = self.connect_query_params.as_ref() {
-            warnings.extend(extend_query_from_expression(
-                &mut query,
-                connect_query,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_query_from_expression(&mut query, connect_query, inputs)?
+                    .iter()
+                    .cloned()
+                    .map(|error| (ProblemLocation::ConnectQueryParams, error)),
+            );
         }
 
         let path = path.into_string();
@@ -208,7 +238,9 @@ impl HttpJsonTransport {
             (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,
         });
 
-        Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)
+        let uri = Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)?;
+
+        Ok((uri, warnings))
     }
 }
 
@@ -351,6 +383,12 @@ impl HeaderSource {
             HeaderSource::Value(value) => Either::Right(value.expressions().map(|e| &e.expression)),
         }
     }
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum OriginatingDirective {
+    Source,
+    Connect,
 }
 
 #[derive(Clone, Debug)]
@@ -556,7 +594,7 @@ mod test_make_uri {
                 "connectQuery": {"shared": "connectQuery", "connectQuery": "connectQuery"},
             }),
         )]);
-        let url = transport.make_uri(&inputs).unwrap();
+        let (url, _) = transport.make_uri(&inputs).unwrap();
         assert_eq!(
             url.to_string(),
             "http://example.com/sourceUri/sourcePath1/sourcePath2/connectUri/connectPath1/connectPath2\
@@ -596,7 +634,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello"
             );
         }
@@ -611,7 +653,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "http://localhost/1/2"
             );
         }
@@ -624,7 +670,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/"
             );
         }
@@ -637,7 +687,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/"
             );
         }
@@ -650,7 +704,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1"
             );
         }
@@ -663,7 +721,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello?something"
             );
         }
@@ -676,7 +738,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/?something"
             );
         }
@@ -689,7 +755,11 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! {"id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! {"id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/42?foo=bar&id=42"
             );
         }
@@ -707,7 +777,7 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users/123?a=b"
             );
         }
@@ -720,7 +790,7 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&c=d"
             )
         }
@@ -733,7 +803,7 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&c=d"
             )
         }
@@ -746,7 +816,7 @@ mod test_make_uri {
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&a=d"
             )
         }
@@ -765,7 +835,7 @@ mod test_make_uri {
                 }),
             )]);
             assert_eq!(
-                transport.make_uri(&inputs).unwrap(),
+                transport.make_uri(&inputs).unwrap().0,
                 "http://localhost?multi=first&multi=second"
             )
         }
@@ -779,7 +849,7 @@ mod test_make_uri {
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/source/connect?a=b&c=d"
         )
     }
@@ -794,7 +864,7 @@ mod test_make_uri {
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/source%20path/connect%20path?param=source%20param&param=connect%20param"
         )
     }
@@ -809,7 +879,7 @@ mod test_make_uri {
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/"
         )
     }
@@ -824,7 +894,7 @@ mod test_make_uri {
         };
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/"
         )
     }
@@ -839,7 +909,7 @@ mod test_make_uri {
         };
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/1/2"
         )
     }

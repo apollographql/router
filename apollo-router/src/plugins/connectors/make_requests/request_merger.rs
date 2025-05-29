@@ -93,8 +93,9 @@ impl MappingContextMerger<'_> {
     pub(crate) fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
-        if let (true, Some(config)) = (self.variables_used.contains(&Namespace::Config), config) {
-            self.config = Some(json!(config));
+        // We should always have a value for $config, even if it's an empty object, or we end up with "Variable $config not found" which is a confusing error for users
+        if self.variables_used.contains(&Namespace::Config) {
+            self.config = config.map(|c| json!(c)).or_else(|| Some(json!({})));
         }
         self
     }

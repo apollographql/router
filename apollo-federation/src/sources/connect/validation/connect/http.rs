@@ -438,7 +438,7 @@ fn validate_absolute_connect_url(
 
     // Evaluate the template, replacing all dynamic expressions with empty strings. This should result in a valid
     // URL because of the URL building logic in `interpolate_uri`, even if the result is illogical with missing values.
-    let url = url
+    let (url, _) = url
         .interpolate_uri(&Default::default())
         .map_err(|err| Message {
             message: format!("In {coordinate}: {err}"),

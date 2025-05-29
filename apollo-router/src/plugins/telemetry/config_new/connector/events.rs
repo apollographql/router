@@ -167,7 +167,7 @@ mod tests {
                 .insert("x-log-request", HeaderValue::from_static("log"));
             let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             });
             let connector = Connector {
                 id: ConnectId::new(
@@ -253,7 +253,7 @@ mod tests {
                 .insert("x-log-response", HeaderValue::from_static("log"));
             let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             });
             let connector = Connector {
                 id: ConnectId::new(

@@ -400,7 +400,7 @@ mod tests {
             service_name: Default::default(),
             transport_request: TransportRequest::Http(transport::http::HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             }),
             key: response_key(),
             mapping_problems,

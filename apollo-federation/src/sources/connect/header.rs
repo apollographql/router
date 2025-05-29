@@ -6,6 +6,7 @@ use std::str::FromStr;
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value;
 
+use super::ApplyToError;
 use crate::sources::connect::string_template;
 use crate::sources::connect::string_template::Part;
 use crate::sources::connect::string_template::StringTemplate;
@@ -19,11 +20,14 @@ impl HeaderValue {
     /// # Errors
     ///
     /// Returns an error any expression can't be evaluated, or evaluates to an unsupported type.
-    pub fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<http::HeaderValue, String> {
-        self.0
-            .interpolate(vars)
-            .map_err(|e| e.to_string())
-            .and_then(|s| http::HeaderValue::from_str(&s).map_err(|e| e.to_string()))
+    pub fn interpolate(
+        &self,
+        vars: &IndexMap<String, Value>,
+    ) -> Result<(http::HeaderValue, Vec<ApplyToError>), String> {
+        let (interpolated, apply_to_errors) =
+            self.0.interpolate(vars).map_err(|e| e.to_string())?;
+        let result = http::HeaderValue::from_str(&interpolated).map_err(|e| e.to_string())?;
+        Ok((result, apply_to_errors))
     }
 }
 
@@ -369,8 +373,8 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "foo"}));
         assert_eq!(
-            value.interpolate(&vars),
-            Ok(http::HeaderValue::from_static("before foo after"))
+            value.interpolate(&vars).unwrap().0,
+            http::HeaderValue::from_static("before foo after")
         );
     }
 
@@ -379,8 +383,8 @@ mod test_interpolate {
         let value = HeaderValue::from_str("{$config.one}").unwrap();
         let vars = IndexMap::default();
         assert_eq!(
-            value.interpolate(&vars),
-            Ok(http::HeaderValue::from_static(""))
+            value.interpolate(&vars).unwrap().0,
+            http::HeaderValue::from_static("")
         );
     }
 
@@ -401,8 +405,8 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": true}));
         assert_eq!(
-            Ok(http::HeaderValue::from_static("true")),
-            header_value.interpolate(&vars)
+            http::HeaderValue::from_static("true"),
+            header_value.interpolate(&vars).unwrap().0
         );
     }
 
@@ -412,8 +416,8 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": null}));
         assert_eq!(
-            Ok(http::HeaderValue::from_static("")),
-            header_value.interpolate(&vars)
+            http::HeaderValue::from_static(""),
+            header_value.interpolate(&vars).unwrap().0
         );
     }
 
@@ -423,8 +427,8 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": 1}));
         assert_eq!(
-            Ok(http::HeaderValue::from_static("1")),
-            header_value.interpolate(&vars)
+            http::HeaderValue::from_static("1"),
+            header_value.interpolate(&vars).unwrap().0
         );
     }
 
@@ -449,8 +453,8 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
         assert_eq!(
-            Ok(http::HeaderValue::from_static("string")),
-            header_value.interpolate(&vars)
+            http::HeaderValue::from_static("string"),
+            header_value.interpolate(&vars).unwrap().0
         );
     }
 }

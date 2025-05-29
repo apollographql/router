@@ -47,22 +47,28 @@ expression: "&connectors"
             },
             method: Get,
             headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+                "authtoken": (
+                    From(
+                        "x-auth-token",
                     ),
+                    Source,
+                ),
+                "user-agent": (
+                    Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                    Source,
                 ),
             },
             body: None,
@@ -179,22 +185,28 @@ expression: "&connectors"
             },
             method: Post,
             headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+                "authtoken": (
+                    From(
+                        "x-auth-token",
                     ),
+                    Source,
+                ),
+                "user-agent": (
+                    Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                    Source,
                 ),
             },
             body: Some(

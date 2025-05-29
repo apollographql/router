@@ -3067,7 +3067,7 @@ mod tests {
                                     let transport_request =
                                         TransportRequest::Http(transport::http::HttpRequest {
                                             inner: http_request,
-                                            debug: None,
+                                            debug: Default::default(),
                                         });
                                     let connector = Connector {
                                         id: ConnectId::new(

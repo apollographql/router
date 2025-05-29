@@ -1,5 +1,6 @@
 mod http_json_transport;
 mod keys;
+mod problem_location;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,6 +20,8 @@ pub(crate) use self::http_json_transport::HeaderParseError;
 pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::http_json_transport::OriginatingDirective;
+pub use self::problem_location::ProblemLocation;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
@@ -466,22 +469,28 @@ mod tests {
                     },
                     method: Get,
                     headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                        "authtoken": (
+                            From(
+                                "x-auth-token",
                             ),
+                            Source,
+                        ),
+                        "user-agent": (
+                            Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                            Source,
                         ),
                     },
                     body: None,
@@ -586,22 +595,28 @@ mod tests {
                     },
                     method: Get,
                     headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                        "authtoken": (
+                            From(
+                                "x-auth-token",
                             ),
+                            Source,
+                        ),
+                        "user-agent": (
+                            Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                            Source,
                         ),
                     },
                     body: None,

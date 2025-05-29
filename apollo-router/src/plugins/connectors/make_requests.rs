@@ -2366,7 +2366,10 @@ mod tests {
                         batch: []
                     },
                 },
-                None,
+                (
+                    None,
+                    [],
+                ),
             ),
         ]
         "#);

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::ApplyToError;
+use apollo_federation::sources::connect::ProblemLocation;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -43,6 +44,29 @@ pub(crate) fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<Problem>
             message: key.0.to_string(),
             path: key.1.clone(),
             count,
+        })
+        .collect()
+}
+
+/// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
+pub(crate) fn aggregate_apply_to_errors_with_problem_locations(
+    errors: &[(ProblemLocation, ApplyToError)],
+) -> Vec<(ProblemLocation, Problem)> {
+    errors
+        .iter()
+        .cloned()
+        .fold(
+            HashMap::new(),
+            |mut acc: HashMap<ProblemLocation, Vec<ApplyToError>>, (loc, err)| {
+                acc.entry(loc).or_default().push(err);
+                acc
+            },
+        )
+        .into_iter()
+        .flat_map(|(location, errors)| {
+            aggregate_apply_to_errors(&errors)
+                .into_iter()
+                .map(move |problem| (location.clone(), problem))
         })
         .collect()
 }
