@@ -35,14 +35,14 @@ use crate::spec::operation_limits::OperationLimits;
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SubgraphValue {
     Standard(Standard),
-    Custom(SubgraphSelector),
+    Custom(Box<SubgraphSelector>),
 }
 
 impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
     fn from(value: &SubgraphValue) -> Self {
         match value {
             SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SubgraphValue::Custom(selector) => InstrumentValue::Custom((**selector).clone()),
         }
     }
 }

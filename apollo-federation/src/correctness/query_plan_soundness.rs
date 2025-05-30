@@ -242,8 +242,8 @@ fn collect_require_condition(
 /// - `entity_require_shape`: the response shape of the `requires` item specified on the fetch node
 /// - `require_condition`: the response shape of the computed require condition (from `@requires`).
 /// - Note: `entity_require_shape`'s type condition only needs to be a subset of the
-///          `type_condition`. So, they don't have to be the same. It happens when the entity's
-///          subgraph type is an interface object type.
+///   `type_condition`. So, they don't have to be the same. It happens when the entity's
+///   subgraph type is an interface object type.
 /// - The key directive and `require_condition` put together must have the same set of response
 ///   keys as the `entity_require_shape`.
 fn key_directive_matches(

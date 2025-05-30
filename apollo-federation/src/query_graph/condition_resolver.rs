@@ -52,8 +52,6 @@ pub(crate) enum ConditionResolution {
         context_map: Option<IndexMap<Name, ContextMapEntry>>,
     },
     Unsatisfied {
-        // NOTE: This seems to be a false positive...
-        #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
 }

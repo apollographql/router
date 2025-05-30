@@ -360,7 +360,7 @@ impl From<UnadvanceableClosures> for () {
     fn from(_: UnadvanceableClosures) -> Self {}
 }
 
-pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Unadvanceables>;
+pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Result<Unadvanceables, FederationError>>;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct Unadvanceables(Vec<Unadvanceable>);
@@ -388,6 +388,30 @@ impl Unadvanceables {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Unadvanceable> {
         self.0.iter()
+    }
+}
+
+impl TryFrom<UnadvanceableClosure> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosure) -> Result<Self, Self::Error> {
+        value()
+    }
+}
+
+impl TryFrom<UnadvanceableClosures> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosures) -> Result<Self, Self::Error> {
+        Ok(Unadvanceables(
+            value
+                .0
+                .into_iter()
+                .map(|closure| closure())
+                .process_results(|iter| {
+                    iter.flat_map(|unadvanceables| unadvanceables.0).collect()
+                })?,
+        ))
     }
 }
 
@@ -764,7 +788,7 @@ where
 
         if matches!(
             edge_weight.transition,
-            QueryGraphEdgeTransition::KeyResolution { .. }
+            QueryGraphEdgeTransition::KeyResolution
         ) {
             // We're adding a `@key` edge. If the last edge to that point is an `@interfaceObject`
             // fake downcast, and if our destination type is not an `@interfaceObject` itself, then
