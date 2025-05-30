@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -29,14 +30,8 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
-type Sources<T> = HashMap<usize, Option<T>>;
+type Sources<T> = IndexMap<usize, Option<T>>;
 
-// /// Tracks how an enum type is used across the schema
-// #[derive(Debug, Clone)]
-// pub(crate) struct EnumTypeUsage {
-//     pub position: EnumTypeUsage,
-//     pub examples: HashMap<EnumTypeUsage, String>, // Example field coordinates
-// }
 #[derive(Debug, Clone)]
 enum EnumTypeUsage {
     #[allow(dead_code)]
@@ -262,10 +257,10 @@ impl Merger {
         sources: Sources<&EnumType>,
         dest: &EnumType,
     ) -> Result<(), FederationError> {
-        let usage = self.enum_usages.get(&dest.name.to_string()).cloned().unwrap_or_else(|| {
+        let usage = self.enum_usages.get(dest.name.as_str()).cloned().unwrap_or_else(|| {
             // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
             // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
-            // an "input-only" or as a "input/ouput" type, but the hints/errors generated in both those cases would be confusing in that case, and while we could amend them
+            // an "input-only" or as a "input/output" type, but the hints/errors generated in both those cases would be confusing in that case, and while we could amend them
             // for this case, it would complicate things and doesn't feel like it would feel very justified. So we merge it as an "output" type, which is the least contraining
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
@@ -281,18 +276,13 @@ impl Merger {
 
         let mut enum_values: IndexSet<Name> = Default::default();
 
-        // Add all values from all sources
-        for (_, source) in sources.iter() {
-            if let Some(source) = source {
-                for value in source.values.values() {
-                    // Note that we add all the values we see as a simple way to know which values there is to consider. But some of those value may
-                    // be removed later in `merge_enum_value`
-                    if !enum_values.contains(&value.node.value) {
-                        enum_values.insert(value.node.value.clone());
-                    }
-                }
-            }
-        }
+        enum_values.extend(
+        sources
+            .iter()
+            .filter_map(|(_, source)| source.as_ref())
+            .flat_map(|source| source.values.values())
+            .map(|value| value.node.value.clone())
+        );
 
         // Merge each enum value
         for value_name in enum_values {
