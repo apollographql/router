@@ -2,12 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Argument;
-use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Value;
-use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
@@ -16,10 +11,8 @@ use apollo_compiler::validation::Valid;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
-use crate::link::join_spec_definition::JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
-use crate::link::spec_definition::SpecDefinition;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -49,7 +42,7 @@ pub(crate) struct EnumTypeUsage {
 #[derive(Debug)]
 pub(crate) struct MergeResult {
     #[allow(dead_code)]
-    pub(crate) supergraph: Option<Valid<Schema>>,
+    pub(crate) supergraph: Option<Valid<FederationSchema>>,
     #[allow(dead_code)]
     pub(crate) errors: Vec<SingleFederationError>,
     #[allow(dead_code)]
@@ -67,7 +60,7 @@ pub(crate) struct Merger {
     options: CompositionOptions,
     names: Vec<String>,
     error_reporter: ErrorReporter,
-    merged: Schema,
+    merged: FederationSchema,
     subgraph_names_to_join_spec_name: HashMap<String, String>,
     merged_federation_directive_names: HashSet<String>,
     enum_usages: HashMap<String, EnumTypeUsage>,
@@ -79,7 +72,7 @@ pub(crate) struct Merger {
 
 #[allow(unused)]
 impl Merger {
-    pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
+    pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
 
         // TODO: In the future, get this from getLatestFederationVersionUsed() instead of using latest
@@ -87,12 +80,12 @@ impl Merger {
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
-        Self {
+        Ok(Self {
             subgraphs,
             options,
             names,
             error_reporter: ErrorReporter::new(),
-            merged: Schema::new(),
+            merged: FederationSchema::new(Schema::new())?,
             subgraph_names_to_join_spec_name: todo!(),
             merged_federation_directive_names: todo!(),
             enum_usages: HashMap::new(),
@@ -100,7 +93,7 @@ impl Merger {
             fields_with_override: todo!(),
             inaccessible_directive_name_in_supergraph: todo!(),
             join_spec_definition,
-        }
+        })
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -440,65 +433,25 @@ impl Merger {
         sources: &Sources<&Component<EnumValueDefinition>>,
         dest: &mut Component<EnumValueDefinition>,
     ) -> Result<(), FederationError> {
-        // Check if this join spec version supports @join__enumValue (added in v0.3)
-        if *self.join_spec_definition.version()
-            < (crate::link::spec::Version { major: 0, minor: 3 })
-        {
-            return Ok(());
-        }
-
-        // Get the directive name from the join spec definition
-        // In the merged schema, join spec directives are prefixed with "join__"
-        // TODO: We are somewhat limited by the fact that the merged schema is a Schema rather than a FederationSchema.
-        let spec_name = JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC;
-        let directive_name_str = format!("join__{}", spec_name);
-        let join_enum_value_directive_name =
-            Name::new(&directive_name_str).map_err(|_| SingleFederationError::Internal {
-                message: format!("Invalid directive name: {}", directive_name_str),
-            })?;
-
-        // Get the @join__enumValue directive from the merged schema and only proceed if it exists
-        if self
-            .merged
-            .directive_definitions
-            .get(&join_enum_value_directive_name)
-            .is_some()
-        {
-            for (&idx, source) in sources.iter() {
-                if source.is_none() {
-                    continue;
-                }
-
-                // Get the join spec name for this subgraph
-                let subgraph_name = &self.names[idx];
-                let join_spec_name = self
-                    .subgraph_names_to_join_spec_name
-                    .get(subgraph_name)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Could not find join spec name for subgraph '{}'",
-                            subgraph_name
-                        ),
-                    })?;
-
-                // Create the @join__enumValue directive with graph argument
-                let directive = Directive {
-                    name: join_enum_value_directive_name.clone(),
-                    arguments: vec![Node::new(Argument {
-                        name: name!("graph"),
-                        value: Node::new(Value::Enum(Name::new(join_spec_name).map_err(|_| {
-                            SingleFederationError::Internal {
-                                message: format!("Invalid graph name: {}", join_spec_name),
-                            }
-                        })?)),
-                    })],
-                };
-
-                // Apply the directive to the destination enum value
-                dest.make_mut().directives.0.push(Node::new(directive));
+        for (&idx, source) in sources.iter() {
+            if source.is_none() {
+                continue;
             }
-        }
 
+            // Get the join spec name for this subgraph
+            let subgraph_name = &self.names[idx];
+            let join_spec_name = self
+                .subgraph_names_to_join_spec_name
+                .get(subgraph_name)
+                .ok_or_else(|| SingleFederationError::Internal {
+                    message: format!(
+                        "Could not find join spec name for subgraph '{}'",
+                        subgraph_name
+                    ),
+                })?;
+
+            self.join_spec_definition.add_join_enum_value(dest, join_spec_name)?;
+        }
         Ok(())
     }
 
@@ -606,8 +559,8 @@ impl Merger {
 pub(crate) fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
-) -> MergeResult {
-    Merger::new(subgraphs, options).merge()
+) -> Result<MergeResult, FederationError> {
+    Ok(Merger::new(subgraphs, options)?.merge())
 }
 
 #[cfg(test)]
@@ -616,20 +569,22 @@ mod tests {
 
     use super::*;
     use crate::error::ErrorCode;
+    use apollo_compiler::Node;
+    use apollo_compiler::name;
 
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
-    fn create_test_merger() -> Merger {
+    fn create_test_merger() -> Result<Merger, FederationError> {
         let join_spec_definition = JOIN_VERSIONS
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
-        Merger {
+        Ok(Merger {
             subgraphs: vec![],
             options: CompositionOptions::default(),
             names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
             error_reporter: ErrorReporter::new(),
-            merged: Schema::new(),
+            merged: FederationSchema::new(Schema::new())?,
             subgraph_names_to_join_spec_name: [
                 ("subgraph1".to_string(), "SUBGRAPH1".to_string()),
                 ("subgraph2".to_string(), "SUBGRAPH2".to_string()),
@@ -642,7 +597,7 @@ mod tests {
             fields_with_override: HashSet::new(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition,
-        }
+        })
     }
 
     // Helper function to create enum type with values
@@ -680,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_output_only_enum_includes_all_values() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types from different subgraphs
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
@@ -709,7 +664,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_input_only_enum_includes_intersection() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types from different subgraphs
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
@@ -739,7 +694,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_both_input_output_requires_all_values_consistent() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types from different subgraphs with inconsistent values
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
@@ -777,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_empty_result_generates_error() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types that will result in empty enum after merging
         let enum1 = create_enum_type("Status", &["INACTIVE"]);
@@ -806,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_unused_enum_treated_as_output() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types from different subgraphs
         let enum1 = create_enum_type("UnusedStatus", &["ACTIVE", "INACTIVE"]);
@@ -833,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_identical_values_across_subgraphs() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create identical enum types from different subgraphs
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
@@ -862,7 +817,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_value_adds_join_directive() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types from different subgraphs
         let enum1 = create_enum_type("Status", &["ACTIVE"]);
@@ -888,7 +843,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_value_input_enum_removes_inconsistent_values() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types where one subgraph is missing the value
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
@@ -910,7 +865,7 @@ mod tests {
 
     #[test]
     fn test_merge_enum_value_output_enum_keeps_all_values() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create enum types where one subgraph is missing the value
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
@@ -932,7 +887,7 @@ mod tests {
 
     #[test]
     fn test_add_join_enum_value_with_supported_version() {
-        let mut merger = create_test_merger();
+        let mut merger = create_test_merger().expect("valid Merger object");
 
         // Create test enum values - separate instances to avoid borrowing conflicts
         let enum_type1 = create_enum_type("Status", &["ACTIVE"]);
