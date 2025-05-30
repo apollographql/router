@@ -198,12 +198,16 @@
         "query": "query { broken { id author { name } title } }"
       },
       "expected_response": {
-        "data": null,
+        "data": { "broken": null },
         "errors": [
           {
-            "message": "This is going to be something else",
+            "message": "",
+            "path": ["broken"],
             "extensions": {
-              "code": "BROKEN_THING"
+              "http": { "status": 500 },
+              "connector": { "coordinate": "connectors:Query.broken@connect[0]" },
+              "code": "BROKEN_THING",
+              "service": "connectors"
             }
           }
         ],
@@ -213,94 +217,66 @@
             "data": [
               {
                 "request": {
-                  "url": "http://127.0.0.1:61000/posts/1",
+                  "url": "http://127.0.0.1:61000/broken",
                   "method": "GET",
-                  "headers": [["x-from", "client-value"]],
+                  "headers": [
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
                   "body": null,
-                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
-                  "connectUri": { "base": "/posts/{$args.id}", "path": null, "queryParams": null },
-                  "sourceHeaders": null,
+                  "sourceUri": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
+                  "connectUri": { "base": "/broken", "path": null, "queryParams": null },
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
                   "connectHeaders": null
                 },
                 "response": {
-                  "status": 200,
+                  "status": 500,
                   "headers": [
                     ["content-type", "application/json; charset=utf-8"],
                     ["date", "Tue, 07 Jan 2025 18:34:52 GMT"],
-                    ["content-length", "275"]
+                    ["content-length", "50"]
                   ],
                   "body": {
                     "kind": "json",
-                    "content": {
-                      "userId": 1,
-                      "id": 1,
-                      "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                      "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                    },
-                    "selection": {
-                      "source": "id\ntitle: postTitle\nbody\nauthor: {\n  id: userId\n}",
-                      "transformed": "id\ntitle: postTitle\nauthor: {\n  __typename: $->echo(\"User\")\n  id: userId\n}",
-                      "result": { "id": 1, "author": { "__typename": "User", "id": 1 } }
-                    }
+                    "content": { "message": "It broke!", "errorCode": "BROKEN_THING" },
+                    "selection": null
                   },
-                  "errors": null
+                  "errors": {
+                    "message": "$config.bbbbb",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": "fromSource: $context.bbbbb\ncode: errorCode"
+                  }
                 },
                 "problems": [
                   {
-                    "location": "Selection",
-                    "details": { "message": "Property .postTitle not found in object", "path": "postTitle", "count": 1 }
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "ErrorsMessage",
+                    "details": { "message": "Property .bbbbb not found in object", "path": "$config.bbbbb", "count": 1 }
+                  },
+                  {
+                    "location": "SourceErrorsExtensions",
+                    "details": { "message": "Property .aaaaa not found in object", "path": "$config.aaaaa", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectErrorsExtensions",
+                    "details": {
+                      "message": "Property .bbbbb not found in object",
+                      "path": "$context.bbbbb",
+                      "count": 1
+                    }
                   }
                 ]
-              },
-              {
-                "request": {
-                  "url": "http://127.0.0.1:61000/users/1",
-                  "method": "GET",
-                  "headers": [["x-from", "client-value"]],
-                  "body": null,
-                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
-                  "connectUri": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
-                  "sourceHeaders": null,
-                  "connectHeaders": null
-                },
-                "response": {
-                  "status": 200,
-                  "headers": [
-                    ["content-type", "application/json; charset=utf-8"],
-                    ["date", "Tue, 07 Jan 2025 18:34:52 GMT"],
-                    ["content-length", "401"]
-                  ],
-                  "body": {
-                    "kind": "json",
-                    "content": {
-                      "id": 1,
-                      "name": "Leanne Graham",
-                      "username": "Bret",
-                      "email": "Sincere@april.biz",
-                      "address": {
-                        "street": "Kulas Light",
-                        "suite": "Apt. 556",
-                        "city": "Gwenborough",
-                        "zipcode": "92998-3874",
-                        "geo": { "lat": "-37.3159", "lng": "81.1496" }
-                      },
-                      "phone": "1-770-736-8031 x56442",
-                      "website": "hildegard.org",
-                      "company": {
-                        "name": "Romaguera-Crona",
-                        "catchPhrase": "Multi-layered client-server neural-net",
-                        "bs": "harness real-time e-markets"
-                      }
-                    },
-                    "selection": {
-                      "source": "id\nname\nusername",
-                      "transformed": "name",
-                      "result": { "name": "Leanne Graham" }
-                    }
-                  },
-                  "errors": null
-                },
-                "problems": []
               }
             ]
           }
