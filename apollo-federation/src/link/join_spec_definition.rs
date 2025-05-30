@@ -2,13 +2,10 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
-use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -752,7 +749,7 @@ impl JoinSpecDefinition {
     }
 
     /// @join__enumValue
-    fn enum_value_directive_spec(&self) -> Option<DirectiveSpecification> {
+    pub(crate) fn enum_value_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() < (Version { major: 0, minor: 3 }) {
             return None;
         }
@@ -777,29 +774,6 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
             None,
         ))
-    }
-
-    pub(crate) fn add_join_enum_value(
-        &self,
-        target: &mut Component<EnumValueDefinition>,
-        _subgraph_name: &str,
-    ) -> Result<(), FederationError> {
-        // Check if this join spec version supports @join__enumValue (added in v0.3)
-        if *self.version() < (Version { major: 0, minor: 3 }) {
-            return Ok(()); // Should this be an error?
-        }
-
-        let _join_str = format!("join__{}", JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC);
-        let join_enum_value_directive_name = name!(_join_str);
-        let directive = Directive {
-            name: join_enum_value_directive_name.clone(),
-            arguments: vec![Node::new(Argument {
-                name: name!("graph"),
-                value: Node::new(Value::Enum(name!(_subgraph_name))),
-            })],
-        };
-        target.make_mut().directives.0.push(Node::new(directive));
-        Ok(())
     }
 
     /// @join__directive
