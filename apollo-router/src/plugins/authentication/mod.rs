@@ -598,11 +598,29 @@ fn authenticate(
         }
         
         if let Some(configured_audiences) = audiences {
-            if let Some(token_audience) = token_data
-                .claims
-                .as_object()
-                .and_then(|o| o.get("aud"))
-                .and_then(|value| value.as_str())
+            let maybe_token_audiences = token_data
+                .claims.as_object().and_then(|o| o.get("aud"));
+            let Some(maybe_token_audiences) = maybe_token_audiences else {
+                let mut audiences_for_error: Vec<String> =
+                    configured_audiences.into_iter().collect();
+                audiences_for_error.sort(); // done to maintain consistent ordering in error message
+                return failure_message(
+                    request,
+                    config,
+                    AuthenticationError::InvalidAudience {
+                        expected: audiences_for_error
+                            .iter()
+                            .map(|audience| audience.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        actual: "<none>".to_string(),
+                    },
+                    StatusCode::UNAUTHORIZED,
+                    source_of_extracted_jwt,
+                );
+            };
+
+            if let Some(token_audience) = maybe_token_audiences.as_str()
             {
                 if !configured_audiences.contains(token_audience) {
                     let mut audiences_for_error: Vec<String> =
@@ -619,10 +637,30 @@ fn authenticate(
                                 .join(", "),
                             actual: token_audience.to_string(),
                         },
-                        StatusCode::INTERNAL_SERVER_ERROR,
+                        StatusCode::UNAUTHORIZED,
                         source_of_extracted_jwt,
                     );
                 }
+            } else {
+                // If the token has incorrectly configured audiences, we cannot validate it against 
+                // the configured audiences.
+                let mut audiences_for_error: Vec<String> =
+                    configured_audiences.into_iter().collect();
+                audiences_for_error.sort(); // done to maintain consistent ordering in error message
+                return failure_message(
+                    request,
+                    config,
+                    AuthenticationError::InvalidAudience {
+                        expected: audiences_for_error
+                            .iter()
+                            .map(|audience| audience.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        actual: maybe_token_audiences.to_string(),
+                    },
+                    StatusCode::UNAUTHORIZED,
+                    source_of_extracted_jwt,
+                );
             }
         }
 

@@ -15,6 +15,7 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
+use http_body_util::BodyExt;
 use insta::assert_yaml_snapshot;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::EncodingKey;
@@ -1420,16 +1421,13 @@ async fn audience_check() {
     });
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            panic!("unexpected response: {res:?}");
+            assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+            let body = res.response.into_body().collect().await.unwrap();
+            let body = String::from_utf8(body.to_bytes().to_vec()).unwrap();
+            assert_eq!(body, "{\"errors\":[{\"message\":\"Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected\",\"extensions\":{\"code\":\"AUTH_ERROR\"}}]}");
         }
-        ControlFlow::Continue(req) => {
-            println!("got req with audience check");
-            let claims: serde_json::Value = req
-                .context
-                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                .unwrap()
-                .unwrap();
-            println!("claims: {claims:?}");
+        ControlFlow::Continue(_req) => {
+            panic!("expected a rejection for a lack of audience");
         }
     }
 
@@ -1452,24 +1450,17 @@ async fn audience_check() {
         .unwrap();
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
-        ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-                .unwrap();
-            assert_eq!(response, graphql::Response::builder()
-                .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid audience: the token's `aud` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
+        ControlFlow::Break(_res) => {
+            panic!("expected audience to be valid");
         }
         ControlFlow::Continue(req) => {
-            println!("got req with audience check");
             let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
                 .unwrap();
-            println!("claims: {claims:?}");
+
+            assert_eq!(claims["aud"], "hello");
         }
     }
 
@@ -1500,7 +1491,12 @@ async fn audience_check() {
             )
                 .unwrap();
             assert_eq!(response, graphql::Response::builder()
-                .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected").build()]).build());
+                .errors(vec![
+                    graphql::Error::builder()
+                        .extension_code("AUTH_ERROR")
+                        .message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected")
+                        .build()
+                ]).build());
         }
         ControlFlow::Continue(_) => {
             panic!("audience check should have failed")
@@ -1527,24 +1523,16 @@ async fn audience_check() {
         .unwrap();
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
-        ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-                .unwrap();
-            assert_eq!(response, graphql::Response::builder()
-                .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid audience: the token's `aud` was 'AAAA', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
+        ControlFlow::Break(_res) => {
+            panic!("expected audience to be valid");
         }
         ControlFlow::Continue(req) => {
-            println!("got req with issuer check");
             let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
                 .unwrap();
-            println!("claims: {claims:?}");
+            assert_eq!(claims["aud"], "hello");
         }
     }
 }
