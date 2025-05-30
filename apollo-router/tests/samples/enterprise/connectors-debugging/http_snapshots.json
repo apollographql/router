@@ -2,10 +2,12 @@
   {
     "request": {
       "method": "GET",
-      "path": "posts/1",
+      "path": "posts/1?invalidInConnectUri=",
       "body": null,
       "headers": {
-        "x-test-from": "client-value"
+        "x-test-from": "client-value",
+        "x-invalid-from-connect": "",
+        "x-invalid-from-source": ""
       }
     },
     "response": {

@@ -14,7 +14,7 @@ schema
       name: "jsonPlaceholder"
       http: {
         baseURL: "https://jsonplaceholder.typicode.com/"
-        headers: [{ name: "x-from", from: "x-test-from" }, { name: "x-invalid-from-source", value: "$context.abcd" }]
+        headers: [{ name: "x-from", from: "x-test-from" }, { name: "x-invalid-from-source", value: "{$context.abcd}" }]
         queryParams: "invalidFromSource: $config.abcd"
       }
       errors: { message: "$context.aaaaa", extensions: "fromSource: $config.aaaaa" }
@@ -112,7 +112,7 @@ type Query @join__type(graph: CONNECTORS) {
         source: "jsonPlaceholder"
         http: {
           GET: "/posts/{$args.id}?invalidInConnectUri={$config.aaa}"
-          headers: [{ name: "x-invalid-from-connect", value: "$config.aaa" }]
+          headers: [{ name: "x-invalid-from-connect", value: "{$config.aaa}" }]
           queryParams: "invalidFromConnect: $config.abcdef"
         }
         selection: "id title: postTitle body author: { id: userId }"
