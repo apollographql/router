@@ -10,12 +10,13 @@ use apollo_compiler::validation::Valid;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
-use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::FederationSchema;
+use crate::schema::position::EnumValueDefinitionPosition;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -71,7 +72,10 @@ pub(crate) struct Merger {
 
 #[allow(unused)]
 impl Merger {
-    pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Result<Self, FederationError> {
+    pub(crate) fn new(
+        subgraphs: Vec<Subgraph<Validated>>,
+        options: CompositionOptions,
+    ) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
 
         // TODO: In the future, get this from getLatestFederationVersionUsed() instead of using latest
@@ -449,7 +453,8 @@ impl Merger {
                     ),
                 })?;
 
-            self.join_spec_definition.add_join_enum_value(dest, join_spec_name)?;
+            self.join_spec_definition
+                .add_join_enum_value(dest, join_spec_name)?;
         }
         Ok(())
     }
