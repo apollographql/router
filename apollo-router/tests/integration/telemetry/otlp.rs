@@ -1066,7 +1066,7 @@ async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockS
         .mount(&mock_server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/metrics"))
+        .and(path("/v1/metrics"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             ExportMetricsServiceResponse::default().encode_to_vec(),
             "application/x-protobuf",
