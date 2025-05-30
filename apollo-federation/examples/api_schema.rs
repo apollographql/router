@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     let schema = Schema::parse_and_validate(source, name).unwrap();
     let supergraph = Supergraph::from_schema(
         schema,
-        Some(&apollo_federation::DEFAULT_SUPPORTED_SUPERGRAPH_SPECS),
+        Some(apollo_federation::default_supported_supergraph_specs()),
     )
     .unwrap();
 

@@ -57,20 +57,27 @@ use crate::error::FederationError;
 use crate::error::MultiTryAll;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LinkSpecDefinition;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::spec::CONNECT_VERSIONS;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
@@ -144,7 +151,7 @@ pub struct Supergraph {
 impl Supergraph {
     pub fn new_with_spec_check(
         schema_str: &str,
-        supported_specs: &[&str],
+        supported_specs: impl Iterator<Item = Url>,
     ) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
         Self::from_schema(schema, Some(supported_specs))
@@ -152,12 +159,12 @@ impl Supergraph {
 
     /// Same as `new_with_spec_check(...)` with the default set of supported specs.
     pub fn new(schema_str: &str) -> Result<Self, FederationError> {
-        Self::new_with_spec_check(schema_str, &DEFAULT_SUPPORTED_SUPERGRAPH_SPECS)
+        Self::new_with_spec_check(schema_str, default_supported_supergraph_specs())
     }
 
     /// Same as `new_with_spec_check(...)` with the specs supported by Router.
     pub fn new_with_router_specs(schema_str: &str) -> Result<Self, FederationError> {
-        Self::new_with_spec_check(schema_str, &ROUTER_SUPPORTED_SUPERGRAPH_SPECS)
+        Self::new_with_spec_check(schema_str, router_supported_supergraph_specs())
     }
 
     /// Construct from a pre-validation supergraph schema, which will be validated.
@@ -165,7 +172,7 @@ impl Supergraph {
     ///   supported.
     pub fn from_schema(
         schema: Valid<Schema>,
-        supported_specs: Option<&[&str]>,
+        supported_specs: Option<impl Iterator<Item = Url>>,
     ) -> Result<Self, FederationError> {
         let schema: Schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
@@ -215,46 +222,34 @@ pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
 }
 
-pub const DEFAULT_SUPPORTED_SUPERGRAPH_SPECS: [&str; 12] = [
-    "https://specs.apollo.dev/core/v0.1",
-    "https://specs.apollo.dev/core/v0.2",
-    "https://specs.apollo.dev/join/v0.1",
-    "https://specs.apollo.dev/join/v0.2",
-    "https://specs.apollo.dev/join/v0.3",
-    "https://specs.apollo.dev/join/v0.4",
-    "https://specs.apollo.dev/join/v0.5",
-    "https://specs.apollo.dev/tag/v0.1",
-    "https://specs.apollo.dev/tag/v0.2",
-    "https://specs.apollo.dev/tag/v0.3",
-    "https://specs.apollo.dev/inaccessible/v0.1",
-    "https://specs.apollo.dev/inaccessible/v0.2",
-];
+pub fn default_supported_supergraph_specs() -> impl Iterator<Item = Url> {
+    fn urls(defs: &SpecDefinitions<impl SpecDefinition>) -> impl Iterator<Item = &Url> {
+        defs.iter().map(|(_, def)| def.url())
+    }
 
-pub const ROUTER_SUPPORTED_SUPERGRAPH_SPECS: [&str; 22] = [
-    "https://specs.apollo.dev/core/v0.1",
-    "https://specs.apollo.dev/core/v0.2",
-    "https://specs.apollo.dev/join/v0.1",
-    "https://specs.apollo.dev/join/v0.2",
-    "https://specs.apollo.dev/join/v0.3",
-    "https://specs.apollo.dev/join/v0.4",
-    "https://specs.apollo.dev/join/v0.5",
-    "https://specs.apollo.dev/tag/v0.1",
-    "https://specs.apollo.dev/tag/v0.2",
-    "https://specs.apollo.dev/tag/v0.3",
-    "https://specs.apollo.dev/inaccessible/v0.1",
-    "https://specs.apollo.dev/inaccessible/v0.2",
-    // Additional specs for Router below:
-    "https://specs.apollo.dev/authenticated/v0.1",
-    "https://specs.apollo.dev/authenticated/v0.2",
-    "https://specs.apollo.dev/requiresScopes/v0.1",
-    "https://specs.apollo.dev/policy/v0.1",
-    "https://specs.apollo.dev/source/v0.1",
-    "https://specs.apollo.dev/context/v0.1",
-    "https://specs.apollo.dev/cost/v0.1",
-    "https://specs.apollo.dev/connect/v0.1",
-    "https://specs.apollo.dev/connect/v0.2",
-    "https://specs.apollo.dev/connect/v0.3",
-];
+    urls(&CORE_VERSIONS)
+        .chain(urls(&JOIN_VERSIONS))
+        .chain(urls(&TAG_VERSIONS))
+        .chain(urls(&INACCESSIBLE_VERSIONS))
+        .cloned()
+}
+
+/// default_supported_supergraph_specs() + additional specs supported by Router
+pub fn router_supported_supergraph_specs() -> impl Iterator<Item = Url> {
+    fn urls(defs: &SpecDefinitions<impl SpecDefinition>) -> impl Iterator<Item = Url> {
+        defs.iter().map(|(_, def)| def.url()).cloned()
+    }
+
+    // PORT_NOTE: "https://specs.apollo.dev/source/v0.1" is listed in the JS version. But, it is
+    //            not ported here, since it has been fully deprecated.
+    default_supported_supergraph_specs()
+        .chain(urls(&AUTHENTICATED_VERSIONS))
+        .chain(urls(&REQUIRES_SCOPES_VERSIONS))
+        .chain(urls(&POLICY_VERSIONS))
+        .chain(urls(&CONTEXT_VERSIONS))
+        .chain(urls(&COST_VERSIONS))
+        .chain(CONNECT_VERSIONS.iter().map(|s| s.url()))
+}
 
 fn is_core_version_zero_dot_one(url: &Url) -> bool {
     CORE_VERSIONS
@@ -264,7 +259,7 @@ fn is_core_version_zero_dot_one(url: &Url) -> bool {
 
 fn check_spec_support(
     schema: &FederationSchema,
-    supported_specs: &[&str],
+    supported_specs: impl Iterator<Item = Url>,
 ) -> Result<(), FederationError> {
     let Some(metadata) = schema.metadata() else {
         // This can't happen since `validate_supergraph_for_query_planning` already checked.
@@ -292,7 +287,7 @@ fn check_spec_support(
         }
     }
 
-    let supported_specs: HashSet<_> = supported_specs.iter().copied().collect();
+    let supported_specs: HashSet<_> = supported_specs.collect();
     errors
         .and_try(metadata.all_links().iter().try_for_all(|link| {
             let Some(purpose) = link.purpose else {
@@ -305,8 +300,8 @@ fn check_spec_support(
                 return Ok(());
             }
 
-            let link_url = link.url.to_string();
-            if supported_specs.contains(link_url.as_str()) {
+            let link_url = &link.url;
+            if supported_specs.contains(link_url) {
                 Ok(())
             } else {
                 Err(SingleFederationError::UnsupportedLinkedFeature {
