@@ -34,14 +34,26 @@
             "data": [
               {
                 "request": {
-                  "url": "http://127.0.0.1:61000/posts/1",
+                  "url": "http://127.0.0.1:61000/posts/1?invalidInConnectUri=",
                   "method": "GET",
-                  "headers": [["x-from", "client-value"]],
+                  "headers": [
+                    ["x-invalid-from-connect", ""],
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
                   "body": null,
-                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
-                  "connectUri": { "base": "/posts/{$args.id}", "path": null, "queryParams": null },
-                  "sourceHeaders": null,
-                  "connectHeaders": null
+                  "sourceUri": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
+                  "connectUri": {
+                    "base": "/posts/{$args.id}?invalidInConnectUri={$config.aaa}",
+                    "path": null,
+                    "queryParams": "invalidFromConnect: $config.abcdef"
+                  },
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
+                  "connectHeaders": [["x-invalid-from-connect", "{$config.aaa}"]]
                 },
                 "response": {
                   "status": 200,
@@ -64,12 +76,40 @@
                       "result": { "id": 1, "author": { "__typename": "User", "id": 1 } }
                     }
                   },
-                  "errors": null
+                  "errors": {
+                    "message": "$context.aaaaa",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": null
+                  }
                 },
                 "problems": [
                   {
                     "location": "Selection",
                     "details": { "message": "Property .postTitle not found in object", "path": "postTitle", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectUri",
+                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
+                  },
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectQueryParams",
+                    "details": {
+                      "message": "Property .abcdef not found in object",
+                      "path": "$config.abcdef",
+                      "count": 1
+                    }
+                  },
+                  {
+                    "location": "ConnectHeaders",
+                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
                   }
                 ]
               },
@@ -77,11 +117,18 @@
                 "request": {
                   "url": "http://127.0.0.1:61000/users/1",
                   "method": "GET",
-                  "headers": [["x-from", "client-value"]],
+                  "headers": [
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
                   "body": null,
-                  "sourceUri": { "base": "http://127.0.0.1:61000/", "path": null, "queryParams": null },
+                  "sourceUri": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
                   "connectUri": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
-                  "sourceHeaders": null,
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
                   "connectHeaders": null
                 },
                 "response": {
@@ -119,9 +166,22 @@
                       "result": { "name": "Leanne Graham" }
                     }
                   },
-                  "errors": null
+                  "errors": {
+                    "message": "$context.aaaaa",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": null
+                  }
                 },
-                "problems": []
+                "problems": [
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
+                  }
+                ]
               }
             ]
           }
