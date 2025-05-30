@@ -9,7 +9,6 @@ use itertools::Itertools;
 use multimap::MultiMap;
 
 use crate::ApiSchemaOptions;
-use crate::ROUTER_SUPPORTED_SUPERGRAPH_SPECS;
 use crate::Supergraph;
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
@@ -62,8 +61,7 @@ pub fn expand_connectors(
         return Ok(ExpansionResult::Unchanged);
     }
 
-    let supergraph =
-        Supergraph::new_with_spec_check(supergraph_str, &ROUTER_SUPPORTED_SUPERGRAPH_SPECS)?;
+    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph

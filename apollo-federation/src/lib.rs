@@ -142,7 +142,6 @@ pub struct Supergraph {
 }
 
 impl Supergraph {
-    /// For tests only.
     pub fn new_with_spec_check(
         schema_str: &str,
         supported_specs: &[&str],
@@ -151,16 +150,14 @@ impl Supergraph {
         Self::from_schema(schema, Some(supported_specs))
     }
 
-    /// For tests only.
-    pub fn new_without_spec_check(schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
-        Self::from_schema(schema, None)
-    }
-
     /// Same as `new_with_spec_check(...)` with the default set of supported specs.
-    /// For tests only.
     pub fn new(schema_str: &str) -> Result<Self, FederationError> {
         Self::new_with_spec_check(schema_str, &DEFAULT_SUPPORTED_SUPERGRAPH_SPECS)
+    }
+
+    /// Same as `new_with_spec_check(...)` with the specs supported by Router.
+    pub fn new_with_router_specs(schema_str: &str) -> Result<Self, FederationError> {
+        Self::new_with_spec_check(schema_str, &ROUTER_SUPPORTED_SUPERGRAPH_SPECS)
     }
 
     /// Construct from a pre-validation supergraph schema, which will be validated.
