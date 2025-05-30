@@ -10,7 +10,6 @@ use apollo_compiler::validation::Valid;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::merger::error_reporter::ErrorReporter;

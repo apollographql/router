@@ -547,7 +547,7 @@ fn validate_inaccessible_in_fields(
 }
 
 /// Generic way to check for @inaccessible directives on a position or its parents.
-pub(crate) trait IsInaccessibleExt {
+trait IsInaccessibleExt {
     /// Does this element, or any of its parents, have an @inaccessible directive?
     ///
     /// May return Err if `self` is an element that does not exist in the schema.
