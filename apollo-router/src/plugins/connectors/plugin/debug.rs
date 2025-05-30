@@ -112,11 +112,17 @@ impl ConnectorContext {
         json!(
             self.items
                 .iter()
-                .map(|item| json!({
-                    "request": item.request,
-                    "response": item.response,
-                    "problems": item.problems.iter().map(|(location, details)| json!({ "location": location, "details": details })).collect::<Vec<_>>()
-                }))
+                .map(|item| {
+                    // Items should be sorted so that they always come out in the same order
+                    let mut problems = item.problems.clone();
+                    problems.sort_by_key(|(location, _)| location.clone());
+
+                    json!({
+                        "request": item.request,
+                        "response": item.response,
+                        "problems": problems.iter().map(|(location, details)| json!({ "location": location, "details": details })).collect::<Vec<_>>()
+                    })
+                })
                 .collect::<Vec<_>>()
         )
     }
