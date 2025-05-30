@@ -155,7 +155,7 @@ impl Schema {
 
         let implementers_map = definitions.implementers_map();
         let supergraph =
-            Supergraph::from_schema(definitions, Some(router_supported_supergraph_specs()))?;
+            Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
         let schema_id = Schema::schema_id(&raw_sdl.sdl);
 

@@ -151,7 +151,7 @@ pub struct Supergraph {
 impl Supergraph {
     pub fn new_with_spec_check(
         schema_str: &str,
-        supported_specs: impl Iterator<Item = Url>,
+        supported_specs: &[Url],
     ) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
         Self::from_schema(schema, Some(supported_specs))
@@ -159,12 +159,12 @@ impl Supergraph {
 
     /// Same as `new_with_spec_check(...)` with the default set of supported specs.
     pub fn new(schema_str: &str) -> Result<Self, FederationError> {
-        Self::new_with_spec_check(schema_str, default_supported_supergraph_specs())
+        Self::new_with_spec_check(schema_str, &default_supported_supergraph_specs())
     }
 
     /// Same as `new_with_spec_check(...)` with the specs supported by Router.
     pub fn new_with_router_specs(schema_str: &str) -> Result<Self, FederationError> {
-        Self::new_with_spec_check(schema_str, router_supported_supergraph_specs())
+        Self::new_with_spec_check(schema_str, &router_supported_supergraph_specs())
     }
 
     /// Construct from a pre-validation supergraph schema, which will be validated.
@@ -172,7 +172,7 @@ impl Supergraph {
     ///   supported.
     pub fn from_schema(
         schema: Valid<Schema>,
-        supported_specs: Option<impl Iterator<Item = Url>>,
+        supported_specs: Option<&[Url]>,
     ) -> Result<Self, FederationError> {
         let schema: Schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
@@ -222,20 +222,20 @@ pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
 }
 
-pub fn default_supported_supergraph_specs() -> impl Iterator<Item = Url> {
-    fn urls(defs: &SpecDefinitions<impl SpecDefinition>) -> impl Iterator<Item = &Url> {
-        defs.iter().map(|(_, def)| def.url())
+pub fn default_supported_supergraph_specs() -> Vec<Url> {
+    fn urls(defs: &SpecDefinitions<impl SpecDefinition>) -> impl Iterator<Item = Url> {
+        defs.iter().map(|(_, def)| def.url()).cloned()
     }
 
     urls(&CORE_VERSIONS)
         .chain(urls(&JOIN_VERSIONS))
         .chain(urls(&TAG_VERSIONS))
         .chain(urls(&INACCESSIBLE_VERSIONS))
-        .cloned()
+        .collect()
 }
 
 /// default_supported_supergraph_specs() + additional specs supported by Router
-pub fn router_supported_supergraph_specs() -> impl Iterator<Item = Url> {
+pub fn router_supported_supergraph_specs() -> Vec<Url> {
     fn urls(defs: &SpecDefinitions<impl SpecDefinition>) -> impl Iterator<Item = Url> {
         defs.iter().map(|(_, def)| def.url()).cloned()
     }
@@ -243,12 +243,14 @@ pub fn router_supported_supergraph_specs() -> impl Iterator<Item = Url> {
     // PORT_NOTE: "https://specs.apollo.dev/source/v0.1" is listed in the JS version. But, it is
     //            not ported here, since it has been fully deprecated.
     default_supported_supergraph_specs()
+        .into_iter()
         .chain(urls(&AUTHENTICATED_VERSIONS))
         .chain(urls(&REQUIRES_SCOPES_VERSIONS))
         .chain(urls(&POLICY_VERSIONS))
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
-        .chain(CONNECT_VERSIONS.iter().map(|s| s.url()))
+        .chain(CONNECT_VERSIONS.into_iter().map(|s| s.url()))
+        .collect()
 }
 
 fn is_core_version_zero_dot_one(url: &Url) -> bool {
@@ -259,7 +261,7 @@ fn is_core_version_zero_dot_one(url: &Url) -> bool {
 
 fn check_spec_support(
     schema: &FederationSchema,
-    supported_specs: impl Iterator<Item = Url>,
+    supported_specs: &[Url],
 ) -> Result<(), FederationError> {
     let Some(metadata) = schema.metadata() else {
         // This can't happen since `validate_supergraph_for_query_planning` already checked.
@@ -287,7 +289,7 @@ fn check_spec_support(
         }
     }
 
-    let supported_specs: HashSet<_> = supported_specs.collect();
+    let supported_specs: HashSet<_> = supported_specs.iter().collect();
     errors
         .and_try(metadata.all_links().iter().try_for_all(|link| {
             let Some(purpose) = link.purpose else {
