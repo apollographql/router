@@ -88,8 +88,8 @@
                     "details": { "message": "Property .postTitle not found in object", "path": "postTitle", "count": 1 }
                   },
                   {
-                    "location": "ConnectUri",
-                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
                   },
                   {
                     "location": "ConnectQueryParams",
@@ -100,8 +100,8 @@
                     }
                   },
                   {
-                    "location": "SourceQueryParams",
-                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                    "location": "ConnectUri",
+                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
                   },
                   {
                     "location": "ConnectHeaders",
