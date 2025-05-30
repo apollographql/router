@@ -285,6 +285,8 @@ pub(super) struct JWTCriteria {
     pub(super) kid: Option<String>,
 }
 
+pub(super) type SearchResult = (Option<Issuers>, Option<Audiences>, Jwk);
+
 /// Search the list of JWKS to find a key we can use to decode a JWT.
 ///
 /// The search criteria allow us to match a variety of keys depending on which criteria are provided
@@ -293,7 +295,7 @@ pub(super) struct JWTCriteria {
 pub(super) fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Option<Vec<(Option<Issuers>, Option<Audiences>, Jwk)>> {
+) -> Option<Vec<SearchResult>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
@@ -553,18 +555,17 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
     }
 }
 
+pub(super) type DecodedClaims = (
+    Option<Issuers>,
+    Option<Audiences>,
+    TokenData<serde_json::Value>,
+);
+
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<(Option<Issuers>, Option<Audiences>, Jwk)>,
+    keys: Vec<SearchResult>,
     criteria: JWTCriteria,
-) -> Result<
-    (
-        Option<Issuers>,
-        Option<Audiences>,
-        TokenData<serde_json::Value>,
-    ),
-    (AuthenticationError, StatusCode),
-> {
+) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
     let mut error = None;
     for (issuers, audiences, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
