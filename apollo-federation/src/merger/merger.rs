@@ -23,6 +23,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::FederationSchema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -387,11 +388,9 @@ impl Merger {
                     },
                     sources,
                     |source| {
-                        if let Some(enum_type) = source {
+                        source.map_or("no", |enum_type| {
                             if enum_type.values.contains_key(&value.node.value) { "yes" } else { "no" }
-                        } else {
-                            "no"
-                        }
+                        })
                     },
                 );
                 // We leave the value in the merged output in that case because:
@@ -406,11 +405,9 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        if let Some(enum_type) = source {
+                        source.map_or("no", |enum_type| {
                             if enum_type.values.contains_key(&value.node.value) { "yes" } else { "no" }
-                        } else {
-                            "no"
-                        }
+                        })
                     },
                 );
                 // We remove the value after the generation of the hint/errors because `report_mismatch_hint` will show the message for the subgraphs that are "like" the supergraph
@@ -460,49 +457,46 @@ impl Merger {
                 message: format!("Invalid directive name: {}", directive_name_str),
             })?;
 
-        // Get the @join__enumValue directive from the merged schema
-        let join_enum_value_directive = self
+        // Get the @join__enumValue directive from the merged schema and only proceed if it exists
+        if self
             .merged
             .directive_definitions
-            .get(&join_enum_value_directive_name);
+            .get(&join_enum_value_directive_name)
+            .is_some()
+        {
+            for (&idx, source) in sources.iter() {
+                if source.is_none() {
+                    continue;
+                }
 
-        // If the directive doesn't exist in the schema, we skip this
-        if join_enum_value_directive.is_none() {
-            return Ok(());
-        }
+                // Get the join spec name for this subgraph
+                let subgraph_name = &self.names[idx];
+                let join_spec_name = self
+                    .subgraph_names_to_join_spec_name
+                    .get(subgraph_name)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Could not find join spec name for subgraph '{}'",
+                            subgraph_name
+                        ),
+                    })?;
 
-        for (&idx, source) in sources.iter() {
-            if source.is_none() {
-                continue;
+                // Create the @join__enumValue directive with graph argument
+                let directive = Directive {
+                    name: join_enum_value_directive_name.clone(),
+                    arguments: vec![Node::new(Argument {
+                        name: name!("graph"),
+                        value: Node::new(Value::Enum(Name::new(join_spec_name).map_err(|_| {
+                            SingleFederationError::Internal {
+                                message: format!("Invalid graph name: {}", join_spec_name),
+                            }
+                        })?)),
+                    })],
+                };
+
+                // Apply the directive to the destination enum value
+                dest.make_mut().directives.0.push(Node::new(directive));
             }
-
-            // Get the join spec name for this subgraph
-            let subgraph_name = &self.names[idx];
-            let join_spec_name = self
-                .subgraph_names_to_join_spec_name
-                .get(subgraph_name)
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(
-                        "Could not find join spec name for subgraph '{}'",
-                        subgraph_name
-                    ),
-                })?;
-
-            // Create the @join__enumValue directive with graph argument
-            let directive = Directive {
-                name: join_enum_value_directive_name.clone(),
-                arguments: vec![Node::new(Argument {
-                    name: name!("graph"),
-                    value: Node::new(Value::Enum(Name::new(join_spec_name).map_err(|_| {
-                        SingleFederationError::Internal {
-                            message: format!("Invalid graph name: {}", join_spec_name),
-                        }
-                    })?)),
-                })],
-            };
-
-            // Apply the directive to the destination enum value
-            dest.make_mut().directives.0.push(Node::new(directive));
         }
 
         Ok(())
@@ -596,11 +590,9 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        if let Some(enum_type) = source {
+                        source.map_or("no", |enum_type| {
                             if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
-                        } else {
-                            "no"
-                        }
+                        })
                     },
                 );
                 return;
