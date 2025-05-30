@@ -95,6 +95,7 @@ pub(crate) struct Storage {
 }
 
 impl Storage {
+    // FIXME: why could it be None ?
     pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
         self.subgraphs.get(subgraph).or(self.all.as_ref())
     }
@@ -1128,7 +1129,7 @@ async fn cache_store_root_from_response(
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
-    invalidation_keys: Vec<String>,
+    mut invalidation_keys: Vec<String>,
     expose_keys_in_context: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
@@ -1138,6 +1139,16 @@ async fn cache_store_root_from_response(
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
+            // Support surrogate keys coming from subgraph response header
+            if let Some(surrogate_keys) = response
+                .response
+                .headers()
+                .get("Surrogate-Key")
+                .and_then(|h| h.to_str().ok())
+                .map(|h| h.split_whitespace())
+            {
+                invalidation_keys.extend(surrogate_keys.map(|s| s.to_string()));
+            }
             let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
             if expose_keys_in_context {
@@ -1147,6 +1158,7 @@ async fn cache_store_root_from_response(
                 response
                     .context
                     .upsert::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS, |mut val| {
+                        // TODO: enable for surrogate keys
                         match val.get_mut(&response_id) {
                             Some(v) => {
                                 v.push(CacheKeyContext {
@@ -1219,6 +1231,15 @@ async fn cache_store_entities_from_response(
             None
         };
 
+        // Support surrogate keys coming from subgraph response header
+        let surrogate_keys: Vec<String> = response
+            .response
+            .headers()
+            .get("Surrogate-Key")
+            .and_then(|h| h.to_str().ok())
+            .map(|h| h.split_whitespace().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
@@ -1233,6 +1254,7 @@ async fn cache_store_entities_from_response(
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
+            surrogate_keys,
         )
         .await?;
 
@@ -1744,6 +1766,7 @@ async fn insert_entities_in_result(
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
+    surrogate_keys: Vec<String>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl = cache_control
         .ttl()
@@ -1764,7 +1787,7 @@ async fn insert_entities_in_result(
         new_entity_idx,
         IntermediateResult {
             mut key,
-            invalidation_keys,
+            mut invalidation_keys,
             typename,
             cache_entry,
         },
@@ -1811,6 +1834,7 @@ async fn insert_entities_in_result(
                 }
 
                 if !has_errors && cache_control.should_store() && should_cache_private {
+                    invalidation_keys.extend(surrogate_keys.clone());
                     to_insert.push(BatchDocument {
                         control: serde_json::to_string(&cache_control)?,
                         data: serde_json::to_string(&value)?,

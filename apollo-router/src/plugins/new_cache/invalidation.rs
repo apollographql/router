@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
@@ -102,26 +104,53 @@ impl Invalidation {
         );
         let count = match request {
             InvalidationRequest::Subgraph { subgraph } => {
-                pg_storage
+                let count = pg_storage
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
-                    .await
+                    .await?;
+                u64_counter!(
+                    "apollo.router.operations.entity.invalidation.entry",
+                    "Entity cache counter for invalidated entries",
+                    count,
+                    "origin" = origin,
+                    "subgraph.name" = subgraph.clone()
+                );
+                count
             }
             InvalidationRequest::Entity { subgraph, .. }
             | InvalidationRequest::Type { subgraph, .. } => {
-                pg_storage
+                let count = pg_storage
                     .invalidate(vec![key_prefix], vec![subgraph.clone()])
-                    .await
-            }
-        }?;
+                    .await?;
 
-        let subgraph = request.subgraph_name();
-        u64_counter!(
-            "apollo.router.operations.entity.invalidation.entry",
-            "Entity cache counter for invalidated entries",
-            count,
-            "origin" = origin,
-            "subgraph.name" = subgraph.clone()
-        );
+                u64_counter!(
+                    "apollo.router.operations.entity.invalidation.entry",
+                    "Entity cache counter for invalidated entries",
+                    count,
+                    "origin" = origin,
+                    "subgraph.name" = subgraph.clone()
+                );
+                count
+            }
+            InvalidationRequest::CacheKey {
+                subgraphs,
+                cache_key,
+            } => {
+                pg_storage
+                    .invalidate(
+                        vec![cache_key.clone()],
+                        subgraphs.clone().into_iter().collect(),
+                    )
+                    .await?
+                // TODO: fixme
+                // u64_counter!(
+                //     "apollo.router.operations.entity.invalidation.entry",
+                //     "Entity cache counter for invalidated entries",
+                //     count,
+                //     "origin" = origin,
+                //     "subgraph.name" = subgraphs.clone()
+                // );
+            }
+        };
 
         u64_histogram!(
             "apollo.router.cache.invalidation.keys",
@@ -140,32 +169,52 @@ impl Invalidation {
         let mut count = 0;
         let mut errors = Vec::new();
         let mut futures = Vec::new();
-        for mut request in requests {
-            let pg_storage = match self.storage.get(request.subgraph_name()) {
-                Some(s) => s,
-                None => continue,
+        for request in requests {
+            let storages = match &request {
+                InvalidationRequest::Subgraph { subgraph }
+                | InvalidationRequest::Type { subgraph, .. }
+                | InvalidationRequest::Entity { subgraph, .. } => {
+                    match self.storage.get(&subgraph) {
+                        Some(s) => vec![s],
+                        None => continue,
+                    }
+                }
+                InvalidationRequest::CacheKey { subgraphs, .. } => {
+                    let mut storages = Vec::new();
+                    for subgraph in subgraphs {
+                        match self.storage.get(&subgraph) {
+                            Some(s) => storages.push(s),
+                            None => continue,
+                        }
+                    }
+
+                    storages
+                }
             };
 
-            let semaphore = self.semaphore.clone();
-            let f = async move {
-                // limit the number of invalidation requests executing at any point in time
-                let _ = semaphore.acquire().await;
+            for pg_storage in storages {
+                let semaphore = self.semaphore.clone();
+                let mut request = request.clone();
+                let f = async move {
+                    // limit the number of invalidation requests executing at any point in time
+                    let _ = semaphore.acquire().await;
 
-                let start = Instant::now();
+                    let start = Instant::now();
 
-                let res = self
-                    .handle_request(pg_storage, origin, &mut request)
-                    .instrument(tracing::info_span!("cache.invalidation.request"))
-                    .await;
+                    let res = self
+                        .handle_request(pg_storage, origin, &mut request)
+                        .instrument(tracing::info_span!("cache.invalidation.request"))
+                        .await;
 
-                f64_histogram!(
-                    "apollo.router.cache.invalidation.duration",
-                    "Duration of the invalidation event execution, in seconds.",
-                    start.elapsed().as_secs_f64()
-                );
-                res
-            };
-            futures.push(f);
+                    f64_histogram!(
+                        "apollo.router.cache.invalidation.duration",
+                        "Duration of the invalidation event execution, in seconds.",
+                        start.elapsed().as_secs_f64()
+                    );
+                    res
+                };
+                futures.push(f.boxed());
+            }
         }
         let mut stream: stream::FuturesUnordered<_> = futures.into_iter().collect();
         while let Some(res) = stream.next().await {
@@ -200,9 +249,23 @@ pub(crate) enum InvalidationRequest {
         r#type: String,
         key: serde_json_bytes::Map<ByteString, Value>,
     },
+    CacheKey {
+        subgraphs: HashSet<String>,
+        cache_key: String,
+    },
 }
 
 impl InvalidationRequest {
+    pub(crate) fn subgraph_names(&self) -> Vec<String> {
+        match self {
+            InvalidationRequest::Subgraph { subgraph }
+            | InvalidationRequest::Type { subgraph, .. }
+            | InvalidationRequest::Entity { subgraph, .. } => vec![subgraph.clone()],
+            InvalidationRequest::CacheKey { subgraphs, .. } => {
+                subgraphs.clone().into_iter().collect()
+            }
+        }
+    }
     /// Compute a cache key prefix. For entity keys, this destructively sorts all objects.
     fn key_prefix(&mut self) -> String {
         match self {
@@ -222,14 +285,7 @@ impl InvalidationRequest {
                     "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
                 )
             }
-        }
-    }
-
-    pub(super) fn subgraph_name(&self) -> &String {
-        match self {
-            InvalidationRequest::Subgraph { subgraph }
-            | InvalidationRequest::Type { subgraph, .. }
-            | InvalidationRequest::Entity { subgraph, .. } => subgraph,
+            InvalidationRequest::CacheKey { cache_key, .. } => cache_key.clone(),
         }
     }
 
@@ -238,6 +294,7 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
             InvalidationRequest::Entity { .. } => "entity",
+            InvalidationRequest::CacheKey { .. } => "cache_key",
         }
     }
 }

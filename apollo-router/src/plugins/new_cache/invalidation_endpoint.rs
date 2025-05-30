@@ -149,11 +149,13 @@ impl Service<router::Request> for InvalidationService {
                                         .collect::<Vec<&'static str>>()
                                         .join(", "),
                                 );
-                                let valid_shared_key =
-                                    body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
-                                        valid_shared_key(&config, shared_key, subgraph_name)
+                                let invalid_shared_key = body
+                                    .iter()
+                                    .flat_map(|b| b.subgraph_names())
+                                    .any(|subgraph_name| {
+                                        !valid_shared_key(&config, shared_key, &subgraph_name)
                                     });
-                                if !valid_shared_key {
+                                if invalid_shared_key {
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return Ok(router::Response {
