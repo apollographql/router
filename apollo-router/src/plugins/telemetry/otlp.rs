@@ -29,7 +29,8 @@ static DEFAULT_GRPC_ENDPOINT: LazyLock<Uri> =
 static DEFAULT_HTTP_ENDPOINT: LazyLock<Uri> =
     LazyLock::new(|| Uri::from_static("http://127.0.0.1:4318"));
 
-const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
+const DEFAULT_HTTP_ENDPOINT_METRICS_PATH: &str = "/v1/metrics";
+const DEFAULT_HTTP_ENDPOINT_TRACES_PATH: &str = "/v1/traces";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
@@ -89,9 +90,10 @@ impl Config {
             }
             Protocol::Http => {
                 let mut endpoint = self.endpoint.to_full_uri(&DEFAULT_HTTP_ENDPOINT);
-                if let TelemetryDataKind::Traces = kind {
-                    endpoint = add_missing_traces_path(endpoint)?;
-                }
+                endpoint = match kind {
+                    TelemetryDataKind::Metrics => add_missing_metrics_path(endpoint)?,
+                    TelemetryDataKind::Traces => add_missing_traces_path(endpoint)?,
+                };
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
@@ -105,24 +107,54 @@ impl Config {
     }
 }
 
-// Waiting for https://github.com/open-telemetry/opentelemetry-rust/issues/1618 to be fixed
-fn add_missing_traces_path(uri: Uri) -> Result<Uri, BoxError> {
+fn add_missing_metrics_path(uri: Uri) -> Result<Uri, BoxError> {
     let mut parts = uri.into_parts();
     parts.path_and_query = Some(match parts.path_and_query {
-        Some(path_and_query) if path_and_query.path().ends_with(DEFAULT_HTTP_ENDPOINT_PATH) => {
+        Some(path_and_query)
+            if path_and_query
+                .path()
+                .ends_with(DEFAULT_HTTP_ENDPOINT_METRICS_PATH) =>
+        {
             path_and_query
         }
         Some(path_and_query) => match path_and_query.query() {
             Some(query) => PathAndQuery::from_str(&format!(
-                "{}{DEFAULT_HTTP_ENDPOINT_PATH}?{query}",
+                "{}{DEFAULT_HTTP_ENDPOINT_METRICS_PATH}?{query}",
                 path_and_query.path().trim_end_matches('/')
             ))?,
             None => PathAndQuery::from_str(&format!(
-                "{}{DEFAULT_HTTP_ENDPOINT_PATH}",
+                "{}{DEFAULT_HTTP_ENDPOINT_METRICS_PATH}",
                 path_and_query.path().trim_end_matches('/')
             ))?,
         },
-        None => PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_PATH),
+        None => PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_METRICS_PATH),
+    });
+
+    Ok(Uri::from_parts(parts)?)
+}
+
+// Waiting for https://github.com/open-telemetry/opentelemetry-rust/issues/1618 to be fixed
+fn add_missing_traces_path(uri: Uri) -> Result<Uri, BoxError> {
+    let mut parts = uri.into_parts();
+    parts.path_and_query = Some(match parts.path_and_query {
+        Some(path_and_query)
+            if path_and_query
+                .path()
+                .ends_with(DEFAULT_HTTP_ENDPOINT_TRACES_PATH) =>
+        {
+            path_and_query
+        }
+        Some(path_and_query) => match path_and_query.query() {
+            Some(query) => PathAndQuery::from_str(&format!(
+                "{}{DEFAULT_HTTP_ENDPOINT_TRACES_PATH}?{query}",
+                path_and_query.path().trim_end_matches('/')
+            ))?,
+            None => PathAndQuery::from_str(&format!(
+                "{}{DEFAULT_HTTP_ENDPOINT_TRACES_PATH}",
+                path_and_query.path().trim_end_matches('/')
+            ))?,
+        },
+        None => PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_TRACES_PATH),
     });
 
     Ok(Uri::from_parts(parts)?)
