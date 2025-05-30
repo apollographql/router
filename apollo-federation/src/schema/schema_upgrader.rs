@@ -21,7 +21,7 @@ use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
-use crate::error::SingleCompositionError;
+use crate::error::CompositionError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -955,7 +955,7 @@ impl SchemaUpgrader {
 // However, those messages were never used, so we have omitted them here.
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Upgraded>>, Vec<SingleCompositionError>> {
+) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
@@ -966,7 +966,7 @@ pub fn upgrade_subgraphs_if_necessary(
 
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
-    let mut errors: Vec<SingleCompositionError> = vec![];
+    let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
     let upgraded_subgraphs: Vec<Subgraph<Upgraded>> = subgraphs
         .into_iter()
@@ -1007,7 +1007,7 @@ pub fn upgrade_subgraphs_if_necessary(
 
         let interface_object_subgraphs = format_subgraph_names(subgraphs_using_interface_object);
         let fed_v1_subgraphs = format_subgraph_names(fed_1_subgraphs);
-        return Err(vec![SingleCompositionError::InterfaceObjectUsageError {
+        return Err(vec![CompositionError::InterfaceObjectUsageError {
             message: format!(
                 "The @interfaceObject directive can only be used if all subgraphs have \
             federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" \

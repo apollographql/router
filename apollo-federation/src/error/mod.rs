@@ -116,7 +116,7 @@ pub enum UnsupportedFeatureKind {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum SingleCompositionError {
+pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
@@ -140,7 +140,7 @@ pub enum SingleCompositionError {
     InterfaceObjectUsageError { message: String },
 }
 
-impl From<SubgraphError> for SingleCompositionError {
+impl From<SubgraphError> for CompositionError {
     fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
         Self::SubgraphError { subgraph, error }
     }
