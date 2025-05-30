@@ -92,16 +92,16 @@
                     "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
                   },
                   {
-                    "location": "SourceQueryParams",
-                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
-                  },
-                  {
                     "location": "ConnectQueryParams",
                     "details": {
                       "message": "Property .abcdef not found in object",
                       "path": "$config.abcdef",
                       "count": 1
                     }
+                  },
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
                   },
                   {
                     "location": "ConnectHeaders",
