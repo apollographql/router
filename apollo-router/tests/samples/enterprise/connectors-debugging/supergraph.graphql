@@ -16,8 +16,8 @@ schema
         baseURL: "https://jsonplaceholder.typicode.com/"
         headers: [{ name: "x-from", from: "x-test-from" }, { name: "x-invalid-from-source", value: "$context.abcd" }]
         queryParams: "invalidFromSource: $config.abcd"
-        errors: { message: "$context.aaaaa", extensions: "fromSource: $config.aaaaa" }
       }
+      errors: { message: "$context.aaaaa", extensions: "fromSource: $config.aaaaa" }
     }
   ) {
   query: Query
