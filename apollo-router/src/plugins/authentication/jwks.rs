@@ -557,7 +557,14 @@ pub(super) fn decode_jwt(
     jwt: &str,
     keys: Vec<(Option<Issuers>, Option<Audiences>, Jwk)>,
     criteria: JWTCriteria,
-) -> Result<(Option<Issuers>, Option<Audiences>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+) -> Result<
+    (
+        Option<Issuers>,
+        Option<Audiences>,
+        TokenData<serde_json::Value>,
+    ),
+    (AuthenticationError, StatusCode),
+> {
     let mut error = None;
     for (issuers, audiences, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {

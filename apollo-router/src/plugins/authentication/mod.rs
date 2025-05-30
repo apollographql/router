@@ -36,7 +36,8 @@ use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::error::ErrorContext;
-use crate::plugins::authentication::jwks::{Audiences, Issuers};
+use crate::plugins::authentication::jwks::Audiences;
+use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
@@ -126,11 +127,11 @@ struct JwksConf {
     #[schemars(with = "String", default = "default_poll_interval")]
     poll_interval: Duration,
     /// Expected issuers for tokens verified by that JWKS
-    /// 
+    ///
     /// If not specified, the issuer will not be checked.
     issuers: Option<Issuers>,
     /// Expected audiences for tokens verified by that JWKS
-    /// 
+    ///
     /// If not specified, the audience will not be checked.
     audiences: Option<Audiences>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -596,10 +597,9 @@ fn authenticate(
                 }
             }
         }
-        
+
         if let Some(configured_audiences) = audiences {
-            let maybe_token_audiences = token_data
-                .claims.as_object().and_then(|o| o.get("aud"));
+            let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
             let Some(maybe_token_audiences) = maybe_token_audiences else {
                 let mut audiences_for_error: Vec<String> =
                     configured_audiences.into_iter().collect();
@@ -620,8 +620,7 @@ fn authenticate(
                 );
             };
 
-            if let Some(token_audience) = maybe_token_audiences.as_str()
-            {
+            if let Some(token_audience) = maybe_token_audiences.as_str() {
                 if !configured_audiences.contains(token_audience) {
                     let mut audiences_for_error: Vec<String> =
                         configured_audiences.into_iter().collect();
@@ -642,7 +641,7 @@ fn authenticate(
                     );
                 }
             } else {
-                // If the token has incorrectly configured audiences, we cannot validate it against 
+                // If the token has incorrectly configured audiences, we cannot validate it against
                 // the configured audiences.
                 let mut audiences_for_error: Vec<String> =
                     configured_audiences.into_iter().collect();

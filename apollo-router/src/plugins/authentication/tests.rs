@@ -53,7 +53,8 @@ use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::plugin::test;
 use crate::plugins::authentication::Issuers;
-use crate::plugins::authentication::jwks::{Audiences, JWTCriteria};
+use crate::plugins::authentication::jwks::Audiences;
+use crate::plugins::authentication::jwks::JWTCriteria;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::jwks::JwksManager;
 use crate::plugins::authentication::jwks::parse_jwks;
@@ -1407,7 +1408,7 @@ async fn audience_check() {
         },
         &encoding_key,
     )
-        .unwrap();
+    .unwrap();
 
     let request = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
@@ -1424,7 +1425,10 @@ async fn audience_check() {
             assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
             let body = res.response.into_body().collect().await.unwrap();
             let body = String::from_utf8(body.to_bytes().to_vec()).unwrap();
-            assert_eq!(body, "{\"errors\":[{\"message\":\"Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected\",\"extensions\":{\"code\":\"AUTH_ERROR\"}}]}");
+            assert_eq!(
+                body,
+                "{\"errors\":[{\"message\":\"Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected\",\"extensions\":{\"code\":\"AUTH_ERROR\"}}]}"
+            );
         }
         ControlFlow::Continue(_req) => {
             panic!("expected a rejection for a lack of audience");
@@ -1442,7 +1446,7 @@ async fn audience_check() {
         },
         &encoding_key,
     )
-        .unwrap();
+    .unwrap();
 
     let request = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
@@ -1475,7 +1479,7 @@ async fn audience_check() {
         },
         &encoding_key,
     )
-        .unwrap();
+    .unwrap();
 
     let request = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
@@ -1489,7 +1493,7 @@ async fn audience_check() {
                     .await
                     .unwrap(),
             )
-                .unwrap();
+            .unwrap();
             assert_eq!(response, graphql::Response::builder()
                 .errors(vec![
                     graphql::Error::builder()
@@ -1515,7 +1519,7 @@ async fn audience_check() {
         },
         &encoding_key,
     )
-        .unwrap();
+    .unwrap();
 
     let request = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
