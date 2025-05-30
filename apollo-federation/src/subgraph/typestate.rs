@@ -183,9 +183,9 @@ impl Subgraph<Initial> {
     /// - It is assumed to have no federation spec link.
     /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
     /// - Similar to `into_fed2_test_subgraph`, but more robust.
-    pub fn into_fed2_subgraph(self) -> Result<Self, FederationError> {
+    pub fn into_fed2_subgraph(self, version: &Version) -> Result<Self, FederationError> {
         let schema = new_federation_subgraph_schema(self.state.schema)?;
-        let inner_schema = schema_as_fed2_subgraph(schema, false)?;
+        let inner_schema = schema_as_fed2_subgraph(schema, version)?;
         Ok(Self::new(&self.name, &self.url, inner_schema))
     }
 
@@ -483,7 +483,7 @@ pub(crate) fn add_fed1_link_to_schema(
 //            the input and returns the updated inner Schema.
 fn schema_as_fed2_subgraph(
     mut schema: FederationSchema,
-    use_latest: bool,
+    version: &Version,
 ) -> Result<Schema, FederationError> {
     let (link_spec, metadata) = if let Some(metadata) = schema.metadata() {
         let spec = metadata.link_spec_definition()?;
@@ -512,11 +512,11 @@ fn schema_as_fed2_subgraph(
         bail!("Core schema is missing @link directive");
     };
 
-    let fed_spec = if use_latest {
-        FederationSpecDefinition::latest()
-    } else {
-        FederationSpecDefinition::auto_expanded_federation_spec()
-    };
+    let fed_spec = FEDERATION_VERSIONS.find(version).ok_or_else(|| {
+        SingleFederationError::UnknownFederationLinkVersion {
+            message: format!("Unknown federation spec version: {}", version),
+        }
+    })?;
     ensure!(
         metadata.for_identity(fed_spec.identity()).is_none(),
         "Schema already set as a federation subgraph"
@@ -528,10 +528,16 @@ fn schema_as_fed2_subgraph(
     // we want to maintain backward compatibility for those who have already upgraded and we had
     // been upgrading the url to latest, but we never automatically import directives that exist
     // past 2.4
-    let imports: Vec<_> = FederationSpecDefinition::auto_expanded_federation_spec()
+    let imports: Vec<_> = fed_spec
         .directive_specs()
         .iter()
         .map(|d| format!("@{}", d.name()).into())
+        .chain(
+            fed_spec
+                .type_specs()
+                .iter()
+                .map(|t| t.name().to_string().into()),
+        )
         .collect();
 
     // PORT_NOTE: We are adding the fed spec link to the schema definition unconditionally, not
@@ -615,7 +621,7 @@ fn new_federation_subgraph_schema(
 #[allow(unused)]
 pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<Schema, FederationError> {
     let mut schema = new_federation_subgraph_schema(Schema::new())?;
-    schema_as_fed2_subgraph(schema, true)
+    schema_as_fed2_subgraph(schema, FEDERATION_VERSIONS.versions().last().unwrap())
 }
 
 /// Expands schema with all imported federation definitions.
