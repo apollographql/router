@@ -39,6 +39,7 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::subgraph::typestate::Subgraph;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
@@ -112,6 +113,35 @@ impl FederationSpecDefinition {
                 version,
             },
         }
+    }
+
+    pub(crate) fn federation_spec_to_string(&self) -> Result<String, FederationError> {
+        // Parse a simple schema to get an expanded subgraph
+        let subgraph = Subgraph::parse("S", "http://S", "type Query { hello: String }")?
+            .into_fed2_subgraph(self.version())?
+            .expand_links()?;
+        let mut result = String::new();
+
+        let directive_definitions = self.directive_specs();
+        for dir_def in directive_definitions {
+            if let Some(dir_def) = subgraph
+                .schema()
+                .schema()
+                .directive_definitions
+                .get(dir_def.name())
+            {
+                result.push_str(&dir_def.to_string());
+                result.push('\n');
+            }
+        }
+
+        let type_definitions = self.type_specs();
+        for type_def in type_definitions {
+            if let Some(type_def) = subgraph.schema().schema().types.get(type_def.name()) {
+                result.push_str(&type_def.to_string());
+            }
+        }
+        Ok(result)
     }
 
     // PORT_NOTE: a port of `federationSpec` from JS
@@ -1064,4 +1094,250 @@ pub(crate) fn fed1_link_imports() -> Vec<Arc<link::Import>> {
         .chain(directive_imports)
         .map(Arc::new)
         .collect()
+}
+
+pub fn get_federation_spec_definition_string_from_version(
+    version: Version,
+) -> Result<String, FederationError> {
+    let fed_spec_definition = FEDERATION_VERSIONS.find(&version).ok_or_else(|| {
+        SingleFederationError::UnknownFederationLinkVersion {
+            message: format!("Unknown federation spec version: {}", version),
+        }
+    })?;
+
+    fed_spec_definition.federation_spec_to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::link::federation_spec_definition::get_federation_spec_definition_string_from_version;
+    use crate::link::spec::Version;
+
+    // Note that all the tests of get_federation_spec_definition_string_from_version() currently exclude the
+    // @link directive and its associated types. The following has been omitted from each snapshot:
+    // "directive @link(url: String!, as: String, import: [Import], for: Purpose) repeatable on SCHEMA
+    // scalar Import
+    // enum Purpose {
+    //     SECURITY
+    //     EXECUTION
+    // }"
+    #[test]
+    fn test_display_federation_spec_2_0() {
+        // Added optional `resolvable` argument to @key directive.
+        // Introduced @shareable, inaccessible, @override and @link directives.
+        let fed2_0_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 0 });
+        insta::assert_snapshot!((fed2_0_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @extends on OBJECT | INTERFACE
+directive @shareable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+scalar FieldSet
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_1() {
+        let fed2_1_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 1 });
+        insta::assert_snapshot!((fed2_1_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @extends on OBJECT | INTERFACE
+directive @shareable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+scalar FieldSet
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_2() {
+        let fed2_2_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 2 });
+        insta::assert_snapshot!((fed2_2_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+scalar FieldSet
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_3() {
+        let fed2_3_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 3 });
+        insta::assert_snapshot!((fed2_3_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+scalar FieldSet
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_4() {
+        // Should be the same spec as 2.3
+        let fed2_4_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 4 });
+        insta::assert_snapshot!((fed2_4_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+scalar FieldSet
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_5() {
+        let fed2_5_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 5 });
+        insta::assert_snapshot!((fed2_5_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+scalar FieldSet
+scalar Scope
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_6() {
+        let fed2_6_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 6 });
+        insta::assert_snapshot!((fed2_6_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+scalar FieldSet
+scalar Scope
+scalar Policy
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_7() {
+        let fed2_7_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 7 });
+        insta::assert_snapshot!((fed2_7_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!, label: String) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+scalar FieldSet
+scalar Scope
+scalar Policy
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_8() {
+        let fed2_8_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 8 });
+        insta::assert_snapshot!((fed2_8_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!, label: String) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+directive @fromContext(field: ContextFieldValue) on ARGUMENT_DEFINITION
+scalar FieldSet
+scalar Scope
+scalar Policy
+scalar ContextFieldValue
+");
+    }
+
+    #[test]
+    fn test_display_federation_spec_2_9() {
+        let fed2_9_spec =
+            get_federation_spec_definition_string_from_version(Version { major: 2, minor: 9 });
+        insta::assert_snapshot!((fed2_9_spec.unwrap()), @"directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @extends on OBJECT | INTERFACE
+directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @override(from: String!, label: String) on FIELD_DEFINITION
+directive @composeDirective(name: String!) repeatable on SCHEMA
+directive @interfaceObject on OBJECT
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+directive @fromContext(field: ContextFieldValue) on ARGUMENT_DEFINITION
+directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+scalar FieldSet
+scalar Scope
+scalar Policy
+scalar ContextFieldValue
+");
+    }
 }
