@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
@@ -13,15 +14,24 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
-use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
-use crate::subgraph::spec::FEDERATION_V2_ELEMENT_NAMES;
+use crate::link::spec_definition::SpecDefinition;
 
 fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
-    let federation_directives: HashSet<_> = FEDERATION_V2_DIRECTIVE_NAMES.into_iter().collect();
-    let federation_elements: HashSet<_> = FEDERATION_V2_ELEMENT_NAMES.into_iter().collect();
+    let federation_spec = FEDERATION_VERSIONS.find(&link.url.version).unwrap();
+    let federation_directives: HashSet<Name> = federation_spec
+        .directive_specs()
+        .into_iter()
+        .map(|d| d.name().clone())
+        .collect();
+    let federation_types: HashSet<Name> = federation_spec
+        .type_specs()
+        .into_iter()
+        .map(|t| t.name().clone())
+        .collect();
 
     for imp in &link.imports {
         if imp.is_directive && !federation_directives.contains(&imp.element) {
@@ -29,7 +39,7 @@ fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
                 "Cannot import unknown federation directive \"@{}\".",
                 imp.element,
             )));
-        } else if !imp.is_directive && !federation_elements.contains(&imp.element) {
+        } else if !imp.is_directive && !federation_types.contains(&imp.element) {
             return Err(LinkError::InvalidImport(format!(
                 "Cannot import unknown federation element \"{}\".",
                 imp.element,
@@ -122,8 +132,8 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
             let imported_name = import.imported_name();
             let element_map = if import.is_directive {
                 // the name of each spec (in the schema) acts as an implicit import for a
-                // directive of the same name. So one cannot import a direcitive with the
-                // same name than a linked spec.
+                // directive of the same name. So one cannot import a directive with the
+                // same name as a linked spec.
                 if let Some(other) = by_name_in_schema.get(imported_name) {
                     if !Arc::ptr_eq(other, link) {
                         return Err(LinkError::BootstrapError(format!(
