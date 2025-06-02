@@ -51,6 +51,7 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
+use strum::IntoEnumIterator;
 
 pub use crate::api_schema::ApiSchemaOptions;
 use crate::error::FederationError;
@@ -77,7 +78,6 @@ use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::ConnectSpec;
-use crate::sources::connect::spec::CONNECT_VERSIONS;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
@@ -249,7 +249,7 @@ pub fn router_supported_supergraph_specs() -> Vec<Url> {
         .chain(urls(&POLICY_VERSIONS))
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
-        .chain(CONNECT_VERSIONS.into_iter().map(|s| s.url()))
+        .chain(ConnectSpec::iter().map(|s| s.url()))
         .collect()
 }
 

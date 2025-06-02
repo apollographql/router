@@ -186,6 +186,3 @@ impl From<ConnectSpec> for Version {
         }
     }
 }
-
-pub(crate) const CONNECT_VERSIONS: [ConnectSpec; 3] =
-    [ConnectSpec::V0_1, ConnectSpec::V0_2, ConnectSpec::V0_3];
