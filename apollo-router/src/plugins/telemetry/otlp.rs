@@ -72,14 +72,14 @@ impl Config {
                     .map_or("", |v| if v == "default" { "" } else { v })
                     .to_string();
                 // let tls_config = self.grpc.clone().to_tls_config(&endpoint)?;
-                let tls_config = if endpoint != "" {
+                let tls_config = if !endpoint.is_empty() {
                     self.grpc
                         .clone()
                         .to_tls_config(&Uri::try_from(&endpoint).unwrap())?
                 } else {
                     let tls_config_str = match kind {
-                        TelemetryDataKind::Traces => format!("http://127.0.0.1/v1/traces"),
-                        TelemetryDataKind::Metrics => format!("http://127.0.0.1/v1/metrics"),
+                        TelemetryDataKind::Traces => "http://127.0.0.1/v1/traces".to_string(),
+                        TelemetryDataKind::Metrics => "http://127.0.0.1/v1/metrics".to_string(),
                     };
                     self.grpc
                         .clone()
