@@ -660,7 +660,7 @@ mod tests {
             type_name: Name::new_unchecked(enum_name),
         };
         Ok(enum_pos
-            .get(&merger.merged.schema())?
+            .get(merger.merged.schema())?
             .values
             .keys()
             .map(|key| key.to_string())
@@ -711,7 +711,7 @@ mod tests {
         let sources: Sources<&EnumType> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
-        let mut dest = create_enum_type("Status", &[]);
+        let dest = create_enum_type("Status", &[]);
 
         // Set up usage as input-only (intersection strategy)
         merger.enum_usages.insert(
@@ -722,7 +722,7 @@ mod tests {
         );
 
         // Merge should only include common values for input-only enum
-        let result = merger.merge_enum(sources, &mut dest);
+        let result = merger.merge_enum(sources, &dest);
 
         assert!(result.is_ok());
         // Only ACTIVE should remain (intersection)
@@ -744,7 +744,7 @@ mod tests {
         let sources: Sources<&EnumType> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
-        let mut dest = create_enum_type("Status", &[]);
+        let dest = create_enum_type("Status", &[]);
 
         // Set up usage as both input and output (requires consistency)
         let usage = EnumTypeUsage::Both {
@@ -755,7 +755,7 @@ mod tests {
         merger.enum_usages.insert("Status".to_string(), usage);
 
         // This should generate an error for inconsistent values
-        let result = merger.merge_enum(sources, &mut dest);
+        let result = merger.merge_enum(sources, &dest);
 
         // The function should complete but the error reporter should have errors
         assert!(result.is_ok());
@@ -776,7 +776,7 @@ mod tests {
         let sources: Sources<&EnumType> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
-        let mut dest = create_enum_type("Status", &[]);
+        let dest = create_enum_type("Status", &[]);
 
         // Set up usage as input-only (intersection strategy)
         merger.enum_usages.insert(
@@ -786,7 +786,7 @@ mod tests {
             },
         );
 
-        let result = merger.merge_enum(sources, &mut dest);
+        let result = merger.merge_enum(sources, &dest);
 
         assert!(result.is_ok());
         // Should be empty after merging
@@ -811,12 +811,12 @@ mod tests {
         let sources: Sources<&EnumType> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
-        let mut dest = create_enum_type("UnusedStatus", &[]);
+        let dest = create_enum_type("UnusedStatus", &[]);
 
         // Don't set usage - this should trigger the unused enum path
         // which treats it as output-only
 
-        let result = merger.merge_enum(sources, &mut dest);
+        let result = merger.merge_enum(sources, &dest);
 
         assert!(result.is_ok());
         // Should include all values (treated as output-only)
@@ -840,7 +840,7 @@ mod tests {
         let sources: Sources<&EnumType> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
-        let mut dest = create_enum_type("Status", &[]);
+        let dest = create_enum_type("Status", &[]);
 
         // Set up usage as both input and output
         merger.enum_usages.insert(
@@ -851,7 +851,7 @@ mod tests {
             },
         );
 
-        let result = merger.merge_enum(sources, &mut dest);
+        let result = merger.merge_enum(sources, &dest);
 
         assert!(result.is_ok());
         // Should include all values since they're consistent
