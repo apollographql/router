@@ -17,6 +17,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
+use itertools::Itertools;
 use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
@@ -807,18 +808,15 @@ impl FederationSchema {
         Ok(features)
     }
 
-    fn unknown_version_error(
+    fn unknown_version_error<'a>(
         spec_name: &str,
         version: &impl std::fmt::Display,
-        supported_versions: impl Iterator<Item = impl std::fmt::Display>,
+        mut supported_versions: impl Iterator<Item = &'a Version>,
     ) -> SingleFederationError {
         SingleFederationError::UnknownLinkVersion {
             message: format!(
                 "Detected unsupported {spec_name} specification version {version}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
-                supported_versions
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                supported_versions.join(", ")
             ),
         }
     }
