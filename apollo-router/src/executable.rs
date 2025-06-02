@@ -228,7 +228,7 @@ pub struct Opt {
     /// An OCI reference to an image that contains the supergraph schema for the router.
     #[clap(long, env, action = ArgAction::Append)]
     // TODO: Update name to be final public name
-     graph_artifact_reference: Option<String>,
+    graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
@@ -297,7 +297,7 @@ impl Opt {
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
             reference: self
-                . graph_artifact_reference
+                .graph_artifact_reference
                 .clone()
                 .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
         })
@@ -639,7 +639,7 @@ impl Executable {
                             return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
                     };
-                    match opt. graph_artifact_reference {
+                    match opt.graph_artifact_reference {
                         None => SchemaSource::Registry(opt.uplink_config()?),
                         Some(_) => SchemaSource::OCI(opt.oci_config()?),
                     }
@@ -648,7 +648,7 @@ impl Executable {
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                match opt. graph_artifact_reference {
+                match opt.graph_artifact_reference {
                     None => SchemaSource::Registry(opt.uplink_config()?),
                     Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
