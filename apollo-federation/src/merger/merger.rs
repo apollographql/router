@@ -297,7 +297,7 @@ impl Merger {
             type_name: dest.name.clone(),
         };
         // We could be left with an enum type with no values, and that's invalid in graphQL
-        if pos.get(&self.merged.schema())?.values.is_empty() {
+        if pos.get(self.merged.schema())?.values.is_empty() {
             self.error_reporter.add_error(SingleFederationError::EmptyMergedEnumType {
                 message: format!(
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
@@ -341,7 +341,7 @@ impl Merger {
         // TODO: Implement these helper methods - for now skip the actual merging
         // self.merge_description(&value_sources, &mut dest);
         // self.record_applied_directives_to_merge(&value_sources, &mut dest);
-        self.add_join_enum_value(&value_sources, &value_pos)?;
+        self.add_join_enum_value(&value_sources, value_pos)?;
 
         let is_inaccessible = match &self.inaccessible_directive_name_in_supergraph {
             Some(name) => value_pos.is_inaccessible(&self.merged, name)?,
@@ -359,9 +359,8 @@ impl Merger {
             && !matches!(usage, EnumTypeUsage::Output { .. })
             && !matches!(usage, EnumTypeUsage::Unused)
             && sources.values().any(|source| {
-                source.map_or(false, |enum_type| {
-                    !enum_type.values.contains_key(&value_pos.value_name)
-                })
+                source
+                    .is_some_and(|enum_type| !enum_type.values.contains_key(&value_pos.value_name))
             })
         {
             // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
@@ -436,7 +435,7 @@ impl Merger {
         value_pos: &EnumValueDefinitionPosition,
     ) -> Result<(), FederationError> {
         if let Some(spec) = self.join_spec_definition.enum_value_directive_spec() {
-            let dest = value_pos.get(&self.merged.schema())?;
+            let dest = value_pos.get(self.merged.schema())?;
 
             for (&idx, source) in sources.iter() {
                 if source.is_some() {
