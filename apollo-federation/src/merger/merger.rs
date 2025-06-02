@@ -117,15 +117,9 @@ impl Merger {
         let linked_federation_version = subgraph.metadata().federation_spec_definition().version();
 
         let linked_features = subgraph.schema().all_features().unwrap_or_default();
-        let spec_with_max_implied_version = linked_features.iter().reduce(|a, b| {
-            if a.minimum_federation_version()
-                .gt(b.minimum_federation_version())
-            {
-                a
-            } else {
-                b
-            }
-        });
+        let spec_with_max_implied_version = linked_features
+            .iter()
+            .max_by_key(|spec| spec.minimum_federation_version());
 
         if let Some(spec) = spec_with_max_implied_version {
             if spec
