@@ -567,6 +567,7 @@ pub(crate) fn merge_subgraphs(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Name;
     use apollo_compiler::Node;
     use apollo_compiler::name;
     use apollo_compiler::schema::ComponentOrigin;
@@ -671,10 +672,12 @@ mod tests {
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
         let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
 
-        let sources: Sources<&EnumType> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+        let sources: Sources<Node<EnumType>> =
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("Status", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("Status").expect("Valid enum name"),
+        };
 
         // Set up usage as output-only (union strategy)
         merger.enum_usages.insert(
@@ -704,10 +707,12 @@ mod tests {
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
         let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
 
-        let sources: Sources<&EnumType> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+        let sources: Sources<Node<EnumType>> =
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("Status", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("Status").expect("Valid enum name"),
+        };
 
         // Set up usage as input-only (intersection strategy)
         merger.enum_usages.insert(
@@ -737,10 +742,12 @@ mod tests {
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
         let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
 
-        let sources: Sources<&EnumType> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+        let sources: Sources<Node<EnumType>> =
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("Status", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("Status").expect("Valid enum name"),
+        };
 
         // Set up usage as both input and output (requires consistency)
         let usage = EnumTypeUsage::Both {
@@ -769,10 +776,12 @@ mod tests {
         let enum1 = create_enum_type("Status", &["INACTIVE"]);
         let enum2 = create_enum_type("Status", &["PENDING"]);
 
-        let sources: Sources<&EnumType> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+        let sources: Sources<Node<EnumType>> =
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("Status", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("Status").expect("Valid enum name"),
+        };
 
         // Set up usage as input-only (intersection strategy)
         merger.enum_usages.insert(
@@ -804,10 +813,12 @@ mod tests {
         let enum1 = create_enum_type("UnusedStatus", &["ACTIVE", "INACTIVE"]);
         let enum2 = create_enum_type("UnusedStatus", &["ACTIVE", "PENDING"]);
 
-        let sources: Sources<&EnumType> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+        let sources: Sources<Node<EnumType>> =
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("UnusedStatus", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("UnusedStatus").expect("Valid enum name"),
+        };
 
         // Don't set usage - this should trigger the unused enum path
         // which treats it as output-only
@@ -834,9 +845,11 @@ mod tests {
         let enum2 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
 
         let sources: Sources<Node<EnumType>> =
-            [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
+            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
 
-        let dest = create_enum_type("Status", &[]);
+        let dest = EnumTypeDefinitionPosition {
+            type_name: Name::new("Status").expect("Valid enum name"),
+        };
 
         // Set up usage as both input and output
         merger.enum_usages.insert(
