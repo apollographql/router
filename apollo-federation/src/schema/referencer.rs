@@ -198,4 +198,31 @@ impl DirectiveReferencers {
                     .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
             )
     }
+
+    pub(crate) fn extend(&mut self, other: &Self) {
+        if let Some(schema) = other.schema.clone() {
+            self.schema = Some(schema);
+        }
+        self.scalar_types.extend(other.scalar_types.iter().cloned());
+        self.object_types.extend(other.object_types.iter().cloned());
+        self.object_fields
+            .extend(other.object_fields.iter().cloned());
+        self.object_field_arguments
+            .extend(other.object_field_arguments.iter().cloned());
+        self.interface_types
+            .extend(other.interface_types.iter().cloned());
+        self.interface_fields
+            .extend(other.interface_fields.iter().cloned());
+        self.interface_field_arguments
+            .extend(other.interface_field_arguments.iter().cloned());
+        self.union_types.extend(other.union_types.iter().cloned());
+        self.enum_types.extend(other.enum_types.iter().cloned());
+        self.enum_values.extend(other.enum_values.iter().cloned());
+        self.input_object_types
+            .extend(other.input_object_types.iter().cloned());
+        self.input_object_fields
+            .extend(other.input_object_fields.iter().cloned());
+        self.directive_arguments
+            .extend(other.directive_arguments.iter().cloned());
+    }
 }

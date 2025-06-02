@@ -130,6 +130,13 @@ impl Identity {
             name: name!("policy"),
         }
     }
+
+    pub fn connect_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("connect"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

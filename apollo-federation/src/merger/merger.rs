@@ -5,8 +5,17 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
+use crate::JOIN_VERSIONS;
 use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
+use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -31,32 +40,138 @@ pub(crate) struct Merger {
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
     names: Vec<String>,
+    compose_directive_manager: ComposeDirectiveManager,
     error_reporter: ErrorReporter,
     merged: Schema,
     subgraph_names_to_join_spec_name: HashMap<String, String>,
     merged_federation_directive_names: HashSet<String>,
     enum_usages: HashMap<String, String>, // Simplified for now
-    fields_with_from_context: HashSet<String>,
-    fields_with_override: HashSet<String>,
+    fields_with_from_context: DirectiveReferencers,
+    fields_with_override: DirectiveReferencers,
+    schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    join_directive_identities: HashSet<Identity>,
 }
 
 #[allow(unused)]
 impl Merger {
     pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
+        let latest_federation_version_used = Self::get_latest_federation_version_used(&subgraphs);
+        let join_spec = JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
+        let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
+
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        let schema_to_import_to_feature_url = subgraphs
+            .iter()
+            .map(|s| {
+                (
+                    s.name.clone(),
+                    s.schema()
+                        .metadata()
+                        .map(|l| l.import_to_feature_url_map())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        let subgraph_names_to_join_spec_name = Self::prepare_supergraph();
+        let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
         Self {
             subgraphs,
             options,
             names,
+            compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter: ErrorReporter::new(),
             merged: Schema::new(),
-            subgraph_names_to_join_spec_name: todo!(),
+            subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
             enum_usages: HashMap::new(),
-            fields_with_from_context: todo!(),
-            fields_with_override: todo!(),
+            fields_with_from_context,
+            fields_with_override,
+            schema_to_import_to_feature_url,
+            join_directive_identities,
         }
+    }
+
+    fn get_latest_federation_version_used(subgraphs: &[Subgraph<Validated>]) -> &Version {
+        subgraphs
+            .iter()
+            .map(Self::get_latest_federation_version_used_in_subgraph)
+            .max()
+            .unwrap_or_else(|| FEDERATION_VERSIONS.latest().version())
+    }
+
+    fn get_latest_federation_version_used_in_subgraph(subgraph: &Subgraph<Validated>) -> &Version {
+        let linked_federation_version = subgraph.metadata().federation_spec_definition().version();
+
+        let linked_features = subgraph.schema().all_features().unwrap_or_default();
+        let spec_with_max_implied_version = linked_features.iter().reduce(|a, b| {
+            if a.minimum_federation_version()
+                .gt(b.minimum_federation_version())
+            {
+                a
+            } else {
+                b
+            }
+        });
+
+        if let Some(spec) = spec_with_max_implied_version {
+            if spec
+                .minimum_federation_version()
+                .satisfies(linked_federation_version)
+                && spec
+                    .minimum_federation_version()
+                    .gt(linked_federation_version)
+            {
+                // TODO: Report implicit upgrade hint here
+                return spec.minimum_federation_version();
+            }
+        }
+        linked_federation_version
+    }
+
+    fn get_fields_with_from_context_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn get_fields_with_override_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn prepare_supergraph() -> HashMap<String, String> {
+        // Note: this likely has to return a Result, which will also change the signature of Merger::new
+        todo!("Prepare supergraph")
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
