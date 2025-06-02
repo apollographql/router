@@ -254,10 +254,10 @@ impl Merger {
     /// Merge enum type from multiple subgraphs
     pub(crate) fn merge_enum(
         &mut self,
-        sources: Sources<&EnumType>,
-        dest: &EnumType,
+        sources: Sources<Node<EnumType>>,
+        dest: &EnumTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
-        let usage = self.enum_usages.get(dest.name.as_str()).cloned().unwrap_or_else(|| {
+        let usage = self.enum_usages.get(dest.type_name.as_str()).cloned().unwrap_or_else(|| {
             // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
             // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
             // an "input-only" or as a "input/output" type, but the hints/errors generated in both those cases would be confusing in that case, and while we could amend them
@@ -268,7 +268,7 @@ impl Merger {
                 code: HintCode::UnusedEnumType.code().to_string(),
                 message: format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
-                    dest.name
+                    dest.type_name
                 ),
             });
             usage
@@ -286,22 +286,16 @@ impl Merger {
 
         // Merge each enum value
         for value_name in enum_values {
-            let value_pos = EnumValueDefinitionPosition {
-                type_name: dest.name.clone(),
-                value_name,
-            };
+            let value_pos = dest.value(value_name);
             self.merge_enum_value(&sources, &value_pos, &usage)?;
         }
 
-        let pos = EnumTypeDefinitionPosition {
-            type_name: dest.name.clone(),
-        };
         // We could be left with an enum type with no values, and that's invalid in graphQL
-        if pos.get(self.merged.schema())?.values.is_empty() {
+        if dest.get(self.merged.schema())?.values.is_empty() {
             self.error_reporter.add_error(SingleFederationError::EmptyMergedEnumType {
                 message: format!(
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
-                    dest.name
+                    dest.type_name
                 ),
             });
         }
@@ -313,7 +307,7 @@ impl Merger {
     /// Returns true if the value should be removed from the enum
     fn merge_enum_value(
         &mut self,
-        sources: &Sources<&EnumType>,
+        sources: &Sources<Node<EnumType>>,
         value_pos: &EnumValueDefinitionPosition,
         usage: &EnumTypeUsage,
     ) -> Result<(), FederationError> {
@@ -324,9 +318,10 @@ impl Merger {
 
         let value_sources: Sources<&Component<EnumValueDefinition>> = sources
             .iter()
-            .map(|(&idx, s)| {
-                let source_value =
-                    s.and_then(|enum_type| enum_type.values.get(&value_pos.value_name));
+            .map(|(&idx, source)| {
+                let source_value = source
+                    .as_ref()
+                    .and_then(|enum_type| enum_type.values.get(&value_pos.value_name));
                 (idx, source_value)
             })
             .collect();
@@ -360,6 +355,7 @@ impl Merger {
             && !matches!(usage, EnumTypeUsage::Unused)
             && sources.values().any(|source| {
                 source
+                    .as_ref()
                     .is_some_and(|enum_type| !enum_type.values.contains_key(&value_pos.value_name))
             })
         {
@@ -379,7 +375,7 @@ impl Merger {
                         },
                         sources,
                         |source| {
-                            source.map_or("no", |enum_type| {
+                            source.as_ref().map_or("no", |enum_type| {
                                 if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
                             })
                         },
@@ -394,7 +390,7 @@ impl Merger {
                         ),
                         sources,
                         |source| {
-                            source.map_or("no", |enum_type| {
+                            source.as_ref().map_or("no", |enum_type| {
                                 if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
                             })
                         },
@@ -534,7 +530,7 @@ impl Merger {
 
     fn hint_on_inconsistent_output_enum_value(
         &mut self,
-        sources: &Sources<&EnumType>,
+        sources: &Sources<Node<EnumType>>,
         dest_name: &Name,
         value_name: &Name,
     ) {
@@ -549,7 +545,7 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.map_or("no", |enum_type| {
+                        source.as_ref().map_or("no", |enum_type| {
                             if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
                         })
                     },
@@ -628,7 +624,7 @@ mod tests {
     }
 
     // Helper function to create enum type with values
-    fn create_enum_type(name: &str, values: &[&str]) -> EnumType {
+    fn create_enum_type(name: &str, values: &[&str]) -> Node<EnumType> {
         let mut enum_type = EnumType {
             name: Name::new(name).expect("Valid enum type name"),
             description: None,
@@ -649,7 +645,7 @@ mod tests {
             enum_type.values.insert(value_name_obj, value_def);
         }
 
-        enum_type
+        Node::new(enum_type)
     }
 
     fn get_enum_values(
@@ -837,7 +833,7 @@ mod tests {
         let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
         let enum2 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
 
-        let sources: Sources<&EnumType> =
+        let sources: Sources<Node<EnumType>> =
             [(0, Some(&enum1)), (1, Some(&enum2))].into_iter().collect();
 
         let dest = create_enum_type("Status", &[]);
