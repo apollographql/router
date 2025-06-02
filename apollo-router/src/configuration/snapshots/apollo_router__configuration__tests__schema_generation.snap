@@ -1526,8 +1526,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
