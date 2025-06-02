@@ -1424,11 +1424,18 @@ async fn audience_check() {
         ControlFlow::Break(res) => {
             assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
             let body = res.response.into_body().collect().await.unwrap();
-            let body = String::from_utf8(body.to_bytes().to_vec()).unwrap();
-            assert_eq!(
-                body,
-                "{\"errors\":[{\"message\":\"Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected\",\"extensions\":{\"code\":\"AUTH_ERROR\"}}]}"
-            );
+            let body: serde_json::Value = serde_json::from_slice(&body.to_bytes()).unwrap();
+            let expected_body = serde_json::json!({
+                "errors": [
+                    {
+                        "message": "Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected",
+                        "extensions": {
+                            "code": "AUTH_ERROR"
+                        }
+                    }
+                ]
+            });
+            assert_eq!(body, expected_body);
         }
         ControlFlow::Continue(_req) => {
             panic!("expected a rejection for a lack of audience");
