@@ -571,14 +571,14 @@ pub(crate) fn merge_subgraphs(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Node;
+    use apollo_compiler::name;
     use apollo_compiler::schema::ComponentOrigin;
 
     use super::*;
     use crate::error::ErrorCode;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-    use apollo_compiler::Node;
-    use apollo_compiler::name;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
