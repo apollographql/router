@@ -378,14 +378,6 @@ impl Display for SubgraphError {
     }
 }
 
-/*
-impl From<SubgraphError> for FederationError {
-    fn from(value: SubgraphError) -> Self {
-        internal_error!("[{}] {}", value.subgraph, value.error)
-    }
-}
-*/
-
 pub mod test_utils {
     use super::SubgraphError;
     use super::typestate::Expanded;
