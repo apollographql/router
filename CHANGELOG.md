@@ -309,7 +309,7 @@ To help users to diagnose when connections are keeping pipelines hanging around,
   - `config.hash` - The hash of the configuration.
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
-  - `state` - Either `active` or `terminating`.
+  - `http.connection.state` - Either `active` or `terminating`.
 
 You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 
