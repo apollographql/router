@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -277,11 +277,11 @@ impl Merger {
         let mut enum_values: IndexSet<Name> = Default::default();
 
         enum_values.extend(
-        sources
-            .iter()
-            .filter_map(|(_, source)| source.as_ref())
-            .flat_map(|source| source.values.values())
-            .map(|value| value.node.value.clone())
+            sources
+                .iter()
+                .filter_map(|(_, source)| source.as_ref())
+                .flat_map(|source| source.values.values())
+                .map(|value| value.node.value.clone()),
         );
 
         // Merge each enum value
