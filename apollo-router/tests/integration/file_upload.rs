@@ -9,6 +9,7 @@ use tower::BoxError;
 
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
+const FILE_CONFIG_WITH_RHAI: &str = include_str!("../fixtures/file_upload/rhai.router.yaml");
 
 /// Create a valid handler for the [helper::FileUploadTestServer].
 macro_rules! make_handler {
@@ -155,6 +156,39 @@ async fn it_uploads_a_single_file() -> Result<(), BoxError> {
     // Run the test
     helper::FileUploadTestServer::builder()
         .config(FILE_CONFIG)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "example.txt",
+                  "body": "Hello, world!"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_uploads_a_single_file_while_adding_a_header_from_rhai_script() -> Result<(), BoxError> {
+    const FILE: &str = "Hello, world!";
+    const FILE_NAME: &str = "example.txt";
+
+    // Construct the parts of the multipart request as defined by the schema
+    let request = helper::create_request(
+        vec![FILE_NAME],
+        vec![tokio_stream::once(Ok(Bytes::from_static(FILE.as_bytes())))],
+    );
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_WITH_RHAI)
         .handler(make_handler!(helper::echo_single_file))
         .request(request)
         .subgraph_mapping("uploads", "/")
