@@ -15,6 +15,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
+use crate::merger::hints::HintCode;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -55,7 +56,9 @@ pub(crate) struct Merger {
 #[allow(unused)]
 impl Merger {
     pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
-        let latest_federation_version_used = Self::get_latest_federation_version_used(&subgraphs);
+        let mut error_reporter = ErrorReporter::new();
+        let latest_federation_version_used =
+            Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
         let join_spec = JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used);
         let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
@@ -82,7 +85,7 @@ impl Merger {
             options,
             names,
             compose_directive_manager: ComposeDirectiveManager::new(),
-            error_reporter: ErrorReporter::new(),
+            error_reporter,
             merged: Schema::new(),
             subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
@@ -94,15 +97,23 @@ impl Merger {
         }
     }
 
-    fn get_latest_federation_version_used(subgraphs: &[Subgraph<Validated>]) -> &Version {
+    fn get_latest_federation_version_used<'a>(
+        subgraphs: &'a [Subgraph<Validated>],
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
         subgraphs
             .iter()
-            .map(Self::get_latest_federation_version_used_in_subgraph)
+            .map(|subgraph| {
+                Self::get_latest_federation_version_used_in_subgraph(subgraph, error_reporter)
+            })
             .max()
             .unwrap_or_else(|| FEDERATION_VERSIONS.latest().version())
     }
 
-    fn get_latest_federation_version_used_in_subgraph(subgraph: &Subgraph<Validated>) -> &Version {
+    fn get_latest_federation_version_used_in_subgraph<'a>(
+        subgraph: &'a Subgraph<Validated>,
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
         let linked_federation_version = subgraph.metadata().federation_spec_definition().version();
 
         let linked_features = subgraph.schema().all_features().unwrap_or_default();
@@ -124,7 +135,17 @@ impl Merger {
                     .minimum_federation_version()
                     .gt(linked_federation_version)
             {
-                // TODO: Report implicit upgrade hint here
+                error_reporter.add_hint(CompositionHint {
+                    code: HintCode::ImplicitlyUpgradedFederationVersion
+                        .code()
+                        .to_string(),
+                    message: format!(
+                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                        subgraph.name,
+                        linked_federation_version,
+                        spec.minimum_federation_version()
+                    ),
+                });
                 return spec.minimum_federation_version();
             }
         }
