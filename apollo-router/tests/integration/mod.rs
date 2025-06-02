@@ -20,6 +20,7 @@ mod supergraph;
 mod traffic_shaping;
 mod typename;
 
+mod postgres;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
 mod rhai;
