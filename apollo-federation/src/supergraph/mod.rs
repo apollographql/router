@@ -181,6 +181,18 @@ pub struct CompositionHint {
     pub code: String,
 }
 
+impl CompositionHint {
+    #[allow(unused)]
+    pub(crate) fn code(&self) -> &str {
+        &self.code
+    }
+
+    #[allow(unused)]
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 /// Assumes the given schema has been validated.
 ///
 /// TODO: A lot of common data gets passed around in the functions called by this one, considering
