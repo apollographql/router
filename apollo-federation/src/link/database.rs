@@ -14,6 +14,7 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::spec::Identity;
@@ -21,7 +22,17 @@ use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 
 fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
-    let federation_spec = FEDERATION_VERSIONS.find(&link.url.version).unwrap();
+    let federation_spec = FEDERATION_VERSIONS
+        .find(&link.url.version)
+        .unwrap_or_else(|| {
+            if &link.url.version != FED_1.version() {
+                tracing::debug!(
+                    "Unexpected federation version: {}, defaulting to fed1",
+                    link.url.version
+                );
+            }
+            &FED_1
+        });
     let federation_directives: HashSet<Name> = federation_spec
         .directive_specs()
         .into_iter()
