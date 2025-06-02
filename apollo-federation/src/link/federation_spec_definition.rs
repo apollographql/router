@@ -70,6 +70,10 @@ pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) resolvable: bool,
 }
 
+pub(crate) struct ExternalDirectiveArguments<'doc> {
+    pub(crate) reason: Option<&'doc str>,
+}
+
 pub(crate) struct RequiresDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
 }
@@ -315,6 +319,18 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    pub(crate) fn external_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ExternalDirectiveArguments<'doc>, FederationError> {
+        Ok(ExternalDirectiveArguments {
+            reason: directive_optional_string_argument(
+                application,
+                &FEDERATION_REASON_ARGUMENT_NAME,
+            )?,
         })
     }
 
