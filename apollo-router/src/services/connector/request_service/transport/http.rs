@@ -1,5 +1,5 @@
 //! HTTP transport for Apollo Connectors
-use apollo_federation::sources::connect::ProblemLocation;
+use apollo_federation::connectors::ProblemLocation;
 
 use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;

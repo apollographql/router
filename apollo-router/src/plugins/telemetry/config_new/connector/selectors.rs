@@ -297,12 +297,12 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderValue;
     use http::StatusCode;
     use opentelemetry::Array;

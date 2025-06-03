@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use apollo_federation::sources::connect::ApplyToError;
-use apollo_federation::sources::connect::ProblemLocation;
+use apollo_federation::connectors::ApplyToError;
+use apollo_federation::connectors::ProblemLocation;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;

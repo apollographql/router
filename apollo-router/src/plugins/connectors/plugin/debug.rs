@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use apollo_federation::sources::connect::ConnectorErrorsSettings;
-use apollo_federation::sources::connect::HeaderSource;
-use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::OriginatingDirective;
-use apollo_federation::sources::connect::ProblemLocation;
+use apollo_federation::connectors::ConnectorErrorsSettings;
+use apollo_federation::connectors::HeaderSource;
+use apollo_federation::connectors::HttpJsonTransport;
+use apollo_federation::connectors::OriginatingDirective;
+use apollo_federation::connectors::ProblemLocation;
 use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;

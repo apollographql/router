@@ -1,0 +1,118 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"/location/{$this.lat},{$this.lon}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "location",
+                            location: 1..9,
+                        },
+                    ),
+                ],
+            },
+            StringTemplate {
+                parts: [
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "lat",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
+                                },
+                            ),
+                            location: 11..20,
+                        },
+                    ),
+                    Constant(
+                        Constant {
+                            value: ",",
+                            location: 21..22,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "lon",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
+                                },
+                            ),
+                            location: 23..32,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: [],
+    },
+)
