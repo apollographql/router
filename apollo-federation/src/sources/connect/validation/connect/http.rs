@@ -59,21 +59,13 @@ impl<'schema> Http<'schema> {
         coordinate: ConnectDirectiveCoordinate<'schema>,
         source_name: Option<&'schema SourceName>,
         schema: &'schema SchemaInfo,
-    ) -> Result<Self, Vec<Message>> {
+    ) -> Result<Option<Self>, Vec<Message>> {
         let Some((http_arg, http_arg_node)) = coordinate
             .directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| Some((arg.as_object()?, arg)))
         else {
-            return Err(vec![Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
-                locations: coordinate
-                    .directive
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }]);
+            return Ok(None);
         };
 
         Body::parse(http_arg, coordinate, schema)
@@ -93,11 +85,11 @@ impl<'schema> Http<'schema> {
                 schema,
             ))
             .map_err(|nested| nested.into_iter().flatten().collect())
-            .map(|(body, headers, transport)| Self {
+            .map(|(body, headers, transport)| Some(Self {
                 body,
                 headers,
                 transport,
-            })
+            }))
     }
 
     /// Type-check the `@connect(http:)` directive.

@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/no_transport.graphql
+---
+[
+    Message {
+        code: UndefinedField,
+        message: "In `@connect(selection:)` on `Query.thisInvalid`: `Query` does not have a field named `x`",
+        locations: [
+            16:47..16:48,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "In `@connect(selection:)` on `Query.batchInvalid`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $request, $response, $status, $this",
+        locations: [
+            17:42..17:48,
+        ],
+    },
+]

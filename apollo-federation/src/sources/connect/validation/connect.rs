@@ -72,7 +72,7 @@ pub(super) fn fields_seen_by_all_connects(
 /// A parsed `@connect` directive
 struct Connect<'schema> {
     selection: Selection<'schema>,
-    http: Http<'schema>,
+    http: Option<Http<'schema>>,
     errors: Errors<'schema>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo<'schema>,
@@ -199,7 +199,7 @@ impl<'schema> Connect<'schema> {
         let all_variables = self
             .selection
             .variables()
-            .chain(self.http.variables())
+            .chain(self.http.iter().map(|http| http.variables()).flatten())
             .chain(self.errors.variables())
             .collect::<HashSet<_>>();
         if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
@@ -221,8 +221,8 @@ impl<'schema> Connect<'schema> {
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
         messages.extend(
             self.http
-                .type_check(self.schema)
-                .err()
+                .map(|http| http.type_check(self.schema).err())
+                .flatten()
                 .into_iter()
                 .flatten(),
         );
