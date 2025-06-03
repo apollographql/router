@@ -294,4 +294,63 @@ mod tests {
         let domain = exporter.default_tls_domain(&url);
         assert_eq!(domain, Some("foo.bar"));
     }
+
+    #[test]
+    fn test_process_endpoint() {
+        // Traces
+        let endpoint = None;
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("default".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/v1/traces".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(
+            Some("https://api.apm.com:433/v1/traces".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433/".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/traces".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(endpoint, processed_endpoint);
+
+        // Metrics
+        let endpoint = None;
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("default".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/v1/metrics".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(
+            Some("https://api.apm.com:433/v1/metrics".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433/".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/metrics".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(endpoint, processed_endpoint);
+    }
 }
