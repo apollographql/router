@@ -900,6 +900,41 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
+
+    /// A timeout for query planning. This option requires that `experimental_enable_cooperative_cancellation` is set to true.
+    /// Otherwise, it will be ignored.
+    pub(crate) experimental_timeout_in_seconds: Option<f64>,
+
+    /// Enable cooperative cancellation of query planning
+    ///
+    /// When enabled, query planning will be cancelled if the client waiting on the QP closes their connection.
+    pub(crate) experimental_enable_cooperative_cancellation: bool,
+}
+
+#[buildstructor::buildstructor]
+impl QueryPlanning {
+    #[builder]
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        cache: Option<QueryPlanCache>,
+        warmed_up_queries: Option<usize>,
+        experimental_plans_limit: Option<u32>,
+        experimental_paths_limit: Option<u32>,
+        experimental_reuse_query_plans: Option<bool>,
+        experimental_timeout_in_seconds: Option<f64>,
+        experimental_enable_cooperative_cancellation: Option<bool>,
+    ) -> Self {
+        Self {
+            cache: cache.unwrap_or_default(),
+            warmed_up_queries,
+            experimental_plans_limit,
+            experimental_paths_limit,
+            experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
+            experimental_timeout_in_seconds,
+            experimental_enable_cooperative_cancellation: experimental_enable_cooperative_cancellation
+                .unwrap_or_default(),
+        }
+    }
 }
 
 /// Cache configuration

@@ -292,6 +292,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
+
+    /// Query planning timed out: {0}
+    Timeout(String),
 }
 
 impl From<FederationErrorBridge> for QueryPlannerError {
