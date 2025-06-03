@@ -178,11 +178,10 @@ mod tests {
                     0,
                     "label",
                 ),
-                transport: HttpJsonTransport {
-                    source_url: None,
+                transport: Some(HttpJsonTransport {
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -264,11 +263,10 @@ mod tests {
                     0,
                     "label",
                 ),
-                transport: HttpJsonTransport {
-                    source_url: None,
+                transport: Some(HttpJsonTransport {
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,

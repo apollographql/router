@@ -237,8 +237,12 @@ fn request_params_to_requests(
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
+        let transport = connector
+            .transport
+            .as_ref()
+            .ok_or_else(|| MakeRequestError::UnsupportedOperation("TODO FIX THIS ERROR".into()))?;
         let (transport_request, mapping_problems) = make_request(
-            &connector.transport,
+            transport,
             response_key
                 .inputs()
                 .clone()
@@ -752,7 +756,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -761,20 +764,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -837,7 +841,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -846,20 +849,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -948,7 +952,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -957,20 +960,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1071,7 +1075,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1080,20 +1083,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
-            entity_resolver: Some(super::EntityResolver::Explicit),
+            entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1193,7 +1197,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1202,20 +1205,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
-            entity_resolver: Some(super::EntityResolver::Explicit),
+            entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1296,7 +1300,6 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1305,20 +1308,21 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field { field }").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1421,29 +1425,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
-                name!(field),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1581,29 +1585,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
-                name!(field),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1738,29 +1742,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
-                name!(field),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -1867,40 +1871,50 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
+            id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
-            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
-            BatchEntity {
-                selection: "id\nfield\nalias: field",
-                key_selection: "id",
+            Entity {
+                index: 0,
+                selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {},
-                    this: {},
-                    batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"}]
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
+                },
+            },
+            Entity {
+                index: 1,
+                selection: "field\nalias: field",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
         ]
@@ -1982,28 +1996,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
+            id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
-            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
             error_settings: Default::default(),
         };
 
@@ -2102,28 +2117,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
+            id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
-            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
             error_settings: Default::default(),
         };
 
@@ -2226,28 +2242,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
+            id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
+                name!(Query),
                 name!(Entity),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 
@@ -2303,29 +2320,29 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
                 name!(Query),
-                name!(users),
+                name!(a),
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            batch_settings: None,
             error_settings: Default::default(),
         };
 

@@ -534,7 +534,7 @@ mod test_make_uri {
     /// Take data from all the places it can come from and make sure they combine in the right order
     #[test]
     fn merge_all_sources() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: Uri::from_str(
                 "http://example.com/sourceUri?shared=sourceUri&sourceUri=sourceUri",
             )
@@ -545,7 +545,7 @@ mod test_make_uri {
             source_query_params: JSONSelection::parse("$args.sourceQuery").ok(),
             connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
             ..Default::default()
-        };
+        });
         let inputs = IndexMap::from_iter([(
             "$args".to_string(),
             json!({
@@ -556,7 +556,7 @@ mod test_make_uri {
                 "connectQuery": {"shared": "connectQuery", "connectQuery": "connectQuery"},
             }),
         )]);
-        let url = transport.make_uri(&inputs).unwrap();
+        let url = transport.unwrap().make_uri(&inputs).unwrap();
         assert_eq!(
             url.to_string(),
             "http://example.com/sourceUri/sourcePath1/sourcePath2/connectUri/connectPath1/connectPath2\
@@ -590,13 +590,17 @@ mod test_make_uri {
             #[case] source_uri: &str,
             #[case] connect_path: &str,
         ) {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str(source_uri).ok(),
                 connect_template: connect_path.parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/hello"
             );
         }
@@ -605,91 +609,119 @@ mod test_make_uri {
         #[case::when_base_has_trailing("http://localhost/")]
         #[case::when_base_does_not_have_trailing("http://localhost")]
         fn handle_slashes_when_adding_path_expression(#[case] base: &str) {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str(base).ok(),
                 source_path: JSONSelection::parse("$([1, 2])").ok(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .to_string(),
                 "http://localhost/1/2"
             );
         }
 
         #[test]
         fn preserve_trailing_slash_from_connect() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1").ok(),
                 connect_template: "/hello/".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/hello/"
             );
         }
 
         #[test]
         fn preserve_trailing_slash_from_source() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1/").ok(),
                 connect_template: "/".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/"
             );
         }
 
         #[test]
         fn preserve_no_trailing_slash_from_source() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1").ok(),
                 connect_template: "/".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1"
             );
         }
 
         #[test]
         fn add_path_before_query_params() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1?something").ok(),
                 connect_template: "/hello".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/hello?something"
             );
         }
 
         #[test]
         fn trailing_slash_plus_query_params() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1/?something").ok(),
                 connect_template: "/hello/".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/hello/?something"
             );
         }
 
         #[test]
         fn with_trailing_slash_in_base_plus_query_params() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
                 connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&this! {"id": 42 }).unwrap().to_string(),
+                transport
+                    .unwrap()
+                    .make_uri(&this! {"id": 42 })
+                    .unwrap()
+                    .to_string(),
                 "https://localhost:8080/v1/hello/42?foo=bar&id=42"
             );
         }
@@ -701,63 +733,63 @@ mod test_make_uri {
         use super::*;
         #[test]
         fn source_only() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "/123".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.unwrap().make_uri(&Default::default()).unwrap(),
                 "http://localhost/users/123?a=b"
             );
         }
 
         #[test]
         fn connect_only() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users").ok(),
                 connect_template: "?a=b&c=d".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.unwrap().make_uri(&Default::default()).unwrap(),
                 "http://localhost/users?a=b&c=d"
             )
         }
 
         #[test]
         fn combine_from_both_uris() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?c=d".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.unwrap().make_uri(&Default::default()).unwrap(),
                 "http://localhost/users?a=b&c=d"
             )
         }
 
         #[test]
         fn source_and_connect_have_same_param() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?a=d".parse().unwrap(),
                 ..Default::default()
-            };
+            });
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.unwrap().make_uri(&Default::default()).unwrap(),
                 "http://localhost/users?a=b&a=d"
             )
         }
 
         #[test]
         fn repeated_params_from_array() {
-            let transport = HttpJsonTransport {
+            let transport = Some(HttpJsonTransport {
                 connect_template: "http://localhost".parse().unwrap(),
                 connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
                 ..Default::default()
-            };
+            });
             let inputs = IndexMap::from_iter([(
                 "$args".to_string(),
                 json!({
@@ -765,7 +797,7 @@ mod test_make_uri {
                 }),
             )]);
             assert_eq!(
-                transport.make_uri(&inputs).unwrap(),
+                transport.unwrap().make_uri(&inputs).unwrap(),
                 "http://localhost?multi=first&multi=second"
             )
         }
@@ -773,13 +805,13 @@ mod test_make_uri {
 
     #[test]
     fn fragments_are_dropped() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: Uri::from_str("http://localhost/source?a=b#SourceFragment").ok(),
             connect_template: "/connect?c=d#connectFragment".parse().unwrap(),
             ..Default::default()
-        };
+        });
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.unwrap().make_uri(&Default::default()).unwrap(),
             "http://localhost/source/connect?a=b&c=d"
         )
     }
@@ -788,13 +820,13 @@ mod test_make_uri {
     /// This double-checks that we never _double_ encode pieces.
     #[test]
     fn pieces_are_not_double_encoded() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: Uri::from_str("http://localhost/source%20path?param=source%20param").ok(),
             connect_template: "/connect%20path?param=connect%20param".parse().unwrap(),
             ..Default::default()
-        };
+        });
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.unwrap().make_uri(&Default::default()).unwrap(),
             "http://localhost/source%20path/connect%20path?param=source%20param&param=connect%20param"
         )
     }
@@ -803,43 +835,43 @@ mod test_make_uri {
     /// because we did _too little_ work.
     #[test]
     fn empty_path_and_query() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: None,
             connect_template: "http://localhost/".parse().unwrap(),
             ..Default::default()
-        };
+        });
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.unwrap().make_uri(&Default::default()).unwrap(),
             "http://localhost/"
         )
     }
 
     #[test]
     fn skip_null_query_params() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: None,
             connect_template: "http://localhost/".parse().unwrap(),
             connect_query_params: JSONSelection::parse("something: $(null)").ok(),
             ..Default::default()
-        };
+        });
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.unwrap().make_uri(&Default::default()).unwrap(),
             "http://localhost/"
         )
     }
 
     #[test]
     fn skip_null_path_params() {
-        let transport = HttpJsonTransport {
+        let transport = Some(HttpJsonTransport {
             source_url: None,
             connect_template: "http://localhost/".parse().unwrap(),
             connect_path: JSONSelection::parse("$([1, null, 2])").ok(),
             ..Default::default()
-        };
+        });
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.unwrap().make_uri(&Default::default()).unwrap(),
             "http://localhost/1/2"
         )
     }

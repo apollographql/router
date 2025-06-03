@@ -159,7 +159,10 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
-            let transport = &connector.transport;
+            let transport = connector
+                .transport
+                .as_ref()
+                .ok_or_else(|| BoxError::from("Missing transport configuration for connector"))?;
             if let Ok(detail) = serde_json::to_string(
                 &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
             ) {

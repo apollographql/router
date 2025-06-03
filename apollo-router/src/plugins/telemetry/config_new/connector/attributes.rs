@@ -120,7 +120,12 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
         {
             attrs.push(KeyValue::new(
                 key,
-                request.connector.transport.method.as_str().to_string(),
+                request
+                    .connector
+                    .transport
+                    .as_ref()
+                    .map(|t| t.method.as_str().to_string())
+                    .unwrap_or_default(),
             ));
         }
         if let Some(key) = self
@@ -130,7 +135,12 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
         {
             attrs.push(KeyValue::new(
                 key,
-                request.connector.transport.connect_template.to_string(),
+                request
+                    .connector
+                    .transport
+                    .as_ref()
+                    .map(|t| t.connect_template.to_string())
+                    .unwrap_or_default(),
             ));
         }
 

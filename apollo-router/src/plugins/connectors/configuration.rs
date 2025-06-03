@@ -125,7 +125,9 @@ pub(crate) fn apply_config(
         if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector) {
             if let Some(source_config) = config.sources.get(&source_ref.to_string()) {
                 if let Some(uri) = source_config.override_url.as_ref() {
-                    connector.transport.source_url = Some(uri.clone());
+                    if let Some(transport) = &mut connector.transport {
+                        transport.source_url = Some(uri.clone());
+                    }
                 }
                 if let Some(max_requests) = source_config.max_requests_per_operation {
                     connector.max_requests = Some(max_requests);
@@ -146,7 +148,9 @@ pub(crate) fn apply_config(
             .and_then(|source_name| subgraph_config.sources.get(source_name))
         {
             if let Some(uri) = source_config.override_url.as_ref() {
-                connector.transport.source_url = Some(uri.clone());
+                if let Some(transport) = &mut connector.transport {
+                    transport.source_url = Some(uri.clone());
+                }
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);

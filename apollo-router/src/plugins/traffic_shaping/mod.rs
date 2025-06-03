@@ -132,7 +132,7 @@ impl Merge for SubgraphShaping {
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields)]
 struct ConnectorsShapingConfig {
     /// Applied on all connectors
     all: Option<ConnectorShaping>,
@@ -573,7 +573,6 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -584,7 +583,6 @@ mod test {
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
     use http::HeaderMap;
-    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -775,11 +773,10 @@ mod test {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/api").ok(),
+            transport: Some(HttpJsonTransport {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),

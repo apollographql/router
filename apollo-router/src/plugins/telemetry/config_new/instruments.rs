@@ -2546,7 +2546,7 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            // Skip the `Object` type alias in order to use buildstructor's map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -2590,7 +2590,7 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            // Skip the `Object` type alias in order to use buildstructor's map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -3078,15 +3078,12 @@ mod tests {
                                             0,
                                             "label",
                                         ),
-                                        transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
-                                                url_template.as_str(),
-                                            )
-                                            .unwrap(),
+                                        transport: Some(HttpJsonTransport {
+                                            connect_template: StringTemplate::from_str(url_template.as_str()).unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
                                             ..Default::default()
-                                        },
+                                        }),
                                         selection: JSONSelection::empty(),
                                         config: None,
                                         max_requests: None,
@@ -3143,7 +3140,7 @@ mod tests {
                                             0,
                                             "label",
                                         ),
-                                        transport: HttpJsonTransport {
+                                        transport: Some(HttpJsonTransport {
                                             connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
@@ -3151,7 +3148,7 @@ mod tests {
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
                                             ..Default::default()
-                                        },
+                                        }),
                                         selection: JSONSelection::empty(),
                                         config: None,
                                         max_requests: None,

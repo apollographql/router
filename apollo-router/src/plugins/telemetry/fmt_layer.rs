@@ -827,10 +827,10 @@ connector:
                         0,
                         "label",
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -1180,10 +1180,10 @@ subgraph:
                         0,
                         "label",
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,

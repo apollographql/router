@@ -74,11 +74,11 @@ mod tests {
                 0,
                 "label",
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),

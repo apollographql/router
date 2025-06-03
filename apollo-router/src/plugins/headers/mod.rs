@@ -617,7 +617,6 @@ mod test {
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
@@ -1592,11 +1591,6 @@ mod test {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1607,6 +1601,10 @@ mod test {
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),
+            transport: Some(HttpJsonTransport {
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1680,11 +1678,6 @@ mod test {
                 0,
                 "test label",
             ),
-            transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1695,6 +1688,10 @@ mod test {
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),
+            transport: Some(HttpJsonTransport {
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),

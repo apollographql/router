@@ -41,7 +41,7 @@ use crate::sources::connect::spec::extract_source_directive_arguments;
 #[derive(Debug, Clone)]
 pub struct Connector {
     pub id: ConnectId,
-    pub transport: HttpJsonTransport,
+    pub transport: Option<HttpJsonTransport>,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
@@ -193,7 +193,10 @@ impl Connector {
             .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+        let transport = Some(HttpJsonTransport::from_directive(
+            connect_http,
+            source_http,
+        )?);
 
         // Get our batch and error settings
         let batch_settings = ConnectorBatchSettings::from_directive(&connect);
@@ -203,7 +206,7 @@ impl Connector {
 
         // Calculate which variables and headers are in use in the request
         let request_references: HashSet<VariableReference<Namespace>> =
-            transport.variable_references().collect();
+            transport.as_ref().unwrap().variable_references().collect();
         let request_variables: HashSet<Namespace> = request_references
             .iter()
             .map(|var_ref| var_ref.namespace.namespace)
@@ -225,7 +228,12 @@ impl Connector {
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
         let id = ConnectId {
-            label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
+            label: make_label(
+                subgraph_name,
+                &source_name,
+                transport.as_ref().unwrap(),
+                &entity_resolver,
+            ),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
             directive: connect.position,
@@ -251,12 +259,17 @@ impl Connector {
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
-        self.transport.variable_references().chain(
-            self.selection
-                .external_var_paths()
-                .into_iter()
-                .flat_map(PathSelection::variable_reference),
-        )
+        self.transport
+            .as_ref()
+            .map(|t| t.variable_references())
+            .into_iter()
+            .flatten()
+            .chain(
+                self.selection
+                    .external_var_paths()
+                    .into_iter()
+                    .flat_map(PathSelection::variable_reference),
+            )
     }
 
     /// Create a field set for a `@key` using `$args`, `$this`, or `$batch` variables.
@@ -450,7 +463,7 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
@@ -489,7 +502,7 @@ mod tests {
                     source_query_params: None,
                     connect_path: None,
                     connect_query_params: None,
-                },
+                }),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -570,7 +583,7 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
@@ -609,7 +622,7 @@ mod tests {
                     source_query_params: None,
                     connect_path: None,
                     connect_query_params: None,
-                },
+                }),
                 selection: Named(
                     SubSelection {
                         selections: [

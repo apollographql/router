@@ -131,14 +131,18 @@ impl Selector for ConnectorSelector {
                 .map(opentelemetry::Value::from),
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
-            } if *connector_http_method => Some(opentelemetry::Value::from(
-                request.connector.transport.method.as_str().to_string(),
-            )),
+            } if *connector_http_method => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.method.as_str().to_string())),
             ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
-            } if *connector_url_template => Some(opentelemetry::Value::from(
-                request.connector.transport.connect_template.to_string(),
-            )),
+            } if *connector_url_template => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.connect_template.to_string())),
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
                 default,
@@ -346,11 +350,10 @@ mod tests {
                 0,
                 "label",
             ),
-            transport: HttpJsonTransport {
-                source_url: None,
-                connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
+            transport: Some(HttpJsonTransport {
+                connect_template: StringTemplate::from_str("/test").unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::empty(),
             config: None,
             max_requests: None,
