@@ -326,7 +326,7 @@ mod test_supergraph {
         let res = Supergraph::new(
             r#"
         extend schema @link(url: "https://specs.apollo.dev/connect/v99.99")
-        
+
         # Required stuff for the supergraph to parse at all, not what we're testing
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -338,7 +338,7 @@ mod test_supergraph {
           `SECURITY` features provide metadata necessary to securely resolve fields.
           """
           SECURITY
-        
+
           """
           `EXECUTION` features provide metadata necessary for operation execution.
           """

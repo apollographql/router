@@ -17,6 +17,7 @@ use crate::error::SingleFederationError;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::error::CompositionError;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::FederationSchema;
@@ -52,7 +53,7 @@ pub(crate) struct MergeResult {
     #[allow(dead_code)]
     pub(crate) supergraph: Option<Valid<FederationSchema>>,
     #[allow(dead_code)]
-    pub(crate) errors: Vec<SingleFederationError>,
+    pub(crate) errors: Vec<CompositionError>,
     #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
 }
