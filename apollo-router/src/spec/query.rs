@@ -921,14 +921,19 @@ impl Query {
                     let value = request
                         .variables
                         .get(name.as_str())
-                        .or(default_value.as_ref())
-                        .unwrap_or(&Value::Null);
-                    ty.validate_input_value(value, schema).err().map(|_| {
-                        FetchError::ValidationInvalidTypeVariable {
-                            name: name.as_str().to_string(),
-                        }
-                        .to_graphql_error(None)
-                    })
+                        .or(default_value.as_ref());
+                    let path = super::JsonValuePath::Variable {
+                        name: name.as_str(),
+                    };
+                    ty.validate_input_value(value, schema, &path)
+                        .err()
+                        .map(|message| {
+                            FetchError::ValidationInvalidTypeVariable {
+                                name: name.clone(),
+                                message,
+                            }
+                            .to_graphql_error(None)
+                        })
                 },
             )
             .collect::<Vec<_>>();
