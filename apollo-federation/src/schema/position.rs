@@ -2234,29 +2234,6 @@ pub(crate) enum FieldArgumentDefinitionPosition {
     Object(ObjectFieldArgumentDefinitionPosition),
 }
 
-impl FieldArgumentDefinitionPosition {
-    pub(crate) fn type_name(&self) -> &Name {
-        match self {
-            Self::Interface(p) => &p.type_name,
-            Self::Object(p) => &p.type_name,
-        }
-    }
-
-    pub(crate) fn field_name(&self) -> &Name {
-        match self {
-            Self::Interface(p) => &p.field_name,
-            Self::Object(p) => &p.field_name,
-        }
-    }
-
-    pub(crate) fn argument_name(&self) -> &Name {
-        match self {
-            Self::Interface(p) => &p.argument_name,
-            Self::Object(p) => &p.argument_name,
-        }
-    }
-}
-
 impl Debug for FieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

@@ -15,42 +15,6 @@ static TAG_NAME_PATTERN: LazyLock<Regex> =
 
 const MAX_TAG_LENGTH: usize = 128;
 
-// TODO: Move this into the Position module
-fn get_position_coordinate(position: &TagDirectiveTargetPosition) -> String {
-    match position {
-        TagDirectiveTargetPosition::ObjectField(pos) => {
-            format!("{}.{}", pos.type_name, pos.field_name)
-        }
-        TagDirectiveTargetPosition::InterfaceField(pos) => {
-            format!("{}.{}", pos.type_name, pos.field_name)
-        }
-        TagDirectiveTargetPosition::UnionField(pos) => {
-            format!("{}.{}", pos.type_name, pos.field_name())
-        }
-        TagDirectiveTargetPosition::Object(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::Interface(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::Union(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::ArgumentDefinition(pos) => {
-            format!(
-                "{}.{}({}:)",
-                pos.type_name(),
-                pos.field_name(),
-                pos.argument_name()
-            )
-        }
-        TagDirectiveTargetPosition::Scalar(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::Enum(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::EnumValue(pos) => {
-            format!("{}.{}", pos.type_name, pos.value_name)
-        }
-        TagDirectiveTargetPosition::InputObject(pos) => pos.type_name.to_string(),
-        TagDirectiveTargetPosition::InputObjectFieldDefinition(pos) => {
-            format!("{}.{}", pos.type_name, pos.field_name)
-        }
-        TagDirectiveTargetPosition::Schema(_) => "Schema".to_string(),
-    }
-}
-
 pub(crate) fn validate_tag_directives(
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
@@ -67,7 +31,6 @@ pub(crate) fn validate_tag_directives(
         };
 
         let tag_name = tag_directive.arguments.name;
-        let coordinate = get_position_coordinate(&tag_directive.target);
 
         // Validate tag name length and pattern
         if tag_name.len() > MAX_TAG_LENGTH || !TAG_NAME_PATTERN.is_match(tag_name) {
@@ -79,7 +42,7 @@ pub(crate) fn validate_tag_directives(
             } else {
                 format!(
                     "Schema element {} has invalid @tag directive value '{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                    coordinate, tag_name
+                    tag_directive.target, tag_name
                 )
             };
             errors.push(SingleFederationError::InvalidTagName { message }.into());
