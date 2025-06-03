@@ -11,6 +11,7 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::router_supported_supergraph_specs;
 use apollo_federation::schema::ValidFederationSchema;
 use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
@@ -153,7 +154,8 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
-        let supergraph = Supergraph::from_schema(definitions)?;
+        let supergraph =
+            Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
         let schema_id = Schema::schema_id(&raw_sdl.sdl);
 

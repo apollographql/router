@@ -61,7 +61,7 @@ pub fn expand_connectors(
         return Ok(ExpansionResult::Unchanged);
     }
 
-    let supergraph = Supergraph::new(supergraph_str)?;
+    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
