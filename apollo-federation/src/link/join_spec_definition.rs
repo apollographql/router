@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::ast::Argument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveLocation;
@@ -418,6 +419,25 @@ impl JoinSpecDefinition {
     ) -> Result<EnumValueDirectiveArguments, FederationError> {
         Ok(EnumValueDirectiveArguments {
             graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
+        })
+    }
+    
+    pub(crate) fn enum_value_directive(
+        &self,
+        schema: &FederationSchema,
+        subgraph_name: &Name,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find enumValue directive in schema".to_owned(),
+            })?;
+        Ok(Directive {
+            name: name_in_schema,
+            arguments: vec![Node::new(Argument {
+                name: name!(JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC),
+                value: Node::new(Value::Enum(subgraph_name.clone())),
+            })],
         })
     }
 

@@ -4,17 +4,14 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Argument;
-use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
@@ -72,7 +69,7 @@ pub(crate) struct Merger {
     names: Vec<String>,
     error_reporter: ErrorReporter,
     merged: FederationSchema,
-    subgraph_names_to_join_spec_name: HashMap<String, String>,
+    subgraph_names_to_join_spec_name: HashMap<String, Name>,
     merged_federation_directive_names: HashSet<String>,
     enum_usages: HashMap<String, EnumTypeUsage>,
     fields_with_from_context: HashSet<String>,
@@ -351,8 +348,7 @@ impl Merger {
         // Note that (like for input object fields), manually marking the value as @inaccessible let's use skips any check and add the value
         // regardless of inconsistencies.
         if !is_inaccessible
-            && !matches!(usage, EnumTypeUsage::Output { .. })
-            && !matches!(usage, EnumTypeUsage::Unused)
+            && !matches!(usage, EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused)
             && sources.values().any(|source| {
                 source
                     .as_ref()
@@ -397,11 +393,9 @@ impl Merger {
                     );
                     value_pos.remove(&mut self.merged)?;
                 }
-                _ => todo!(),
+                _ => bail!("Unexpected enum type usage"),
             }
-        } else if matches!(usage, EnumTypeUsage::Output { .. })
-            || matches!(usage, EnumTypeUsage::Unused)
-        {
+        } else if matches!(usage, EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused) {
             self.hint_on_inconsistent_output_enum_value(
                 sources,
                 &value_pos.type_name,
@@ -430,36 +424,20 @@ impl Merger {
         sources: &Sources<&Component<EnumValueDefinition>>,
         value_pos: &EnumValueDefinitionPosition,
     ) -> Result<(), FederationError> {
-        if let Some(spec) = self.join_spec_definition.enum_value_directive_spec() {
-            let dest = value_pos.get(self.merged.schema())?;
+        let dest = value_pos.get(self.merged.schema())?;
 
-            for (&idx, source) in sources.iter() {
-                if source.is_some() {
-                    // Get the join spec name for this subgraph
-                    let subgraph_name = &self.names[idx];
-                    let join_spec_name = self
-                        .subgraph_names_to_join_spec_name
-                        .get(subgraph_name)
-                        .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Could not find join spec name for subgraph '{}'",
-                            subgraph_name
-                        ),
-                    })?;
-
-                    let directive = Node::new(Directive {
-                        name: spec.name.clone(),
-                        arguments: vec![Node::new(Argument {
-                            name: name!(JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC),
-                            value: Node::new(Value::Enum(name!(join_spec_name))),
-                        })],
-                    });
-                    let value_pos = EnumValueDefinitionPosition {
-                        type_name: value_pos.type_name.clone(),
-                        value_name: value_pos.value_name.clone(),
+        for (&idx, source) in sources.iter() {
+            if source.is_some() {
+                // Get the join spec name for this subgraph
+                let subgraph_name = &self.names[idx];
+                let Some(join_spec_name) = self
+                    .subgraph_names_to_join_spec_name
+                    .get(subgraph_name) else {
+                        bail!( "Could not find join spec name for subgraph '{}'", subgraph_name );
                     };
-                    value_pos.insert_directive(&mut self.merged, directive);
-                }
+
+                let directive = self.join_spec_definition.enum_value_directive(&self.merged, join_spec_name)?;
+                value_pos.insert_directive(&mut self.merged, Node::new(directive));
             }
         }
         Ok(())
@@ -576,7 +554,8 @@ mod tests {
     use crate::error::ErrorCode;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-
+    use crate::subgraph::typestate::expand_schema;
+    
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
             type_name: name.clone(),
@@ -599,7 +578,14 @@ mod tests {
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
-        let mut schema = FederationSchema::new(Schema::new())?;
+        let schema = Schema::builder().adopt_orphan_extensions().parse(r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+            
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+            "#, "").build()?;
+        let mut schema = expand_schema(schema)?;
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
 
@@ -610,8 +596,8 @@ mod tests {
             error_reporter: ErrorReporter::new(),
             merged: schema,
             subgraph_names_to_join_spec_name: [
-                ("subgraph1".to_string(), "SUBGRAPH1".to_string()),
-                ("subgraph2".to_string(), "SUBGRAPH2".to_string()),
+                ("subgraph1".to_string(), Name::new("SUBGRAPH1").expect("Valid name")),
+                ("subgraph2".to_string(), Name::new("SUBGRAPH2").expect("Valid name")),
             ]
             .into_iter()
             .collect(),
