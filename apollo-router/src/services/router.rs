@@ -238,10 +238,17 @@ impl Response {
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
-        protocol_mode: Option<ProtocolMode>
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            let context = Self::update_error_context(context, errors);
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            // This will ONLY capture errors if any were added during router service processing.
+            // We will avoid this path if no router service errors exist, even if errors were passed
+            // from the supergraph service, because that path builds the router::Response using the
+            // constructor instead of new(). This is ok because we only need this context to count
+            // errors introduced in the router service.
+            context
+                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .expect("Unable to serialize router response errors list for context");
         }
         // Build a response
         let b = graphql::Response::builder()
@@ -267,24 +274,6 @@ impl Response {
         let body_string = serde_json::to_string(&res)?;
 
         let body = body::from_bytes(body_string.clone());
-        let body = match protocol_mode {
-            None => { body }
-            Some(mode) => {
-                context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(mode));
-                let response_multipart = match mode {
-                    ProtocolMode::Subscription => {
-                        // TODO RouterBody doesn't implement stream trait
-                        crate::protocols::multipart::Multipart::new(body, mode)
-                    }
-                    ProtocolMode::Defer => {
-                        crate::protocols::multipart::Multipart::new(once(ready(res)).chain(body), mode)
-                    }
-                };
-                body::from_result_stream(response_multipart)
-            }
-        };
         let response = builder.body(body)?;
         // Stash the body in the extensions so we can access it later
         let mut response = Self { response, context };
@@ -295,27 +284,20 @@ impl Response {
 
     #[builder(visibility = "pub")]
     fn parts_new(
-        response: http::Response<Body>,
+        parts: Parts,
+        body: Body,
         context: Context,
+        body_to_stash: Option<String>,
     ) -> Result<Self, BoxError>  {
-        if !response.body(). {
-            Self::update_error_context()
+        let response =  http::Response::from_parts(parts, body);
+        let mut res = Self {
+            response,
+            context
+        };
+        if body_to_stash.is_some() {
+            res.stash_the_body_in_extensions(body_to_stash.unwrap())
         }
-        let response = http::Response::from_parts(parts, body);
-    }
-
-    fn update_error_context(context: Context, errors: Vec<graphql::Error>) -> Context {
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-        // This will ONLY capture errors if any were added during router service processing.
-        // We will avoid this path if no router service errors exist, even if errors were passed
-        // from the supergraph service, because that path builds the router::Response using the
-        // constructor instead of new(). This is ok because we only need this context to count
-        // errors introduced in the router service.
-        context
-            .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
-            .expect("Unable to serialize router response errors list for context");
-
-        context
+        Ok(res)
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.

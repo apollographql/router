@@ -550,14 +550,13 @@ mod tests {
             .unwrap();
 
         let endpoint = service_fn(|req: router::Request| async move {
-            Ok::<_, BoxError>(router::Response {
-                response: http::Response::builder()
-                    .body::<crate::services::router::Body>(body::from_bytes(
-                        "this is a test".to_string(),
-                    ))
-                    .unwrap(),
-                context: req.context,
-            })
+            Ok::<_, BoxError>(
+                router::Response::builder()
+                    .data("this is a test")
+                    .context(req.context)
+                    .build()
+                    .unwrap()
+            )
         })
         .boxed();
 
@@ -591,14 +590,10 @@ mod tests {
             .build()
             .unwrap();
         let endpoint = service_fn(|req: router::Request| async move {
-            Ok::<_, BoxError>(router::Response {
-                response: http::Response::builder()
-                    .body::<crate::services::router::Body>(body::from_bytes(
-                        "this is a test".to_string(),
-                    ))
-                    .unwrap(),
-                context: req.context,
-            })
+            router::Response::builder()
+                .data("this is a test")
+                .context(req.context)
+                .build()
         })
         .boxed();
 

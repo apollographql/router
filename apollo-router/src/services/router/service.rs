@@ -291,8 +291,7 @@ impl RouterService {
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
-                // TODO Ideally this would be done as a different from_parts builder
-                Ok(router::Response::builder()
+                router::Response::error_builder()
                     .error(
                         graphql::Error::builder()
                             .message(String::from("router service is not available to process request"))
@@ -300,28 +299,31 @@ impl RouterService {
                             .build(),
                     )
                     .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                    .data(json!({"message": "router service is not available to process request"}))
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .context(context)
                     .build()
-                    .expect("cannot fail")
-                )
             }
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    // TODO we will now ALWAYS stash body
-                    // TODO we are no longer generating a body ser trace
-                    router::Response::builder()
-                        .and_label(response.label.clone())
-                        .data(response.data.clone())
-                        .and_path(response.path.clone())
-                        .errors(response.errors.clone())
-                        .extensions(response.extensions.clone())
-                        .headers(parts.headers.clone().into())
-                        .context(context.clone())
+                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
+                        .in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            Ok(body)
+                        });
+                    let body = body?;
+                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                    let display_router_response = context
+                        .extensions()
+                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
+
+                    router::Response::parts_builder()
+                        .parts(parts)
+                        .body(router::body::from_bytes(body.clone()))
+                        .and_body_to_stash(if display_router_response { Some(body) } else { None })
+                        .context(context)
                         .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
@@ -338,16 +340,21 @@ impl RouterService {
                     } else {
                         ProtocolMode::Defer
                     };
+                    context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(protocol_mode));
 
-                    router::Response::builder()
-                        .and_label(response.label.clone())
-                        .data(response.data.clone())
-                        .and_path(response.path.clone())
-                        .errors(response.errors.clone())
-                        .extensions(response.extensions.clone())
-                        .headers(parts.headers.clone().into())
-                        .context(context.clone())
-                        .protocol_mode(protocol_mode)
+                    let response_multipart = match protocol_mode {
+                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
+                        ProtocolMode::Defer => {
+                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
+                        }
+                    };
+
+                    RouterResponse::parts_builder()
+                        .parts(parts)
+                        .body(router::body::from_result_stream(response_multipart))
+                        .context(context)
                         .build()
                 } else {
                     // this should be unreachable due to a previous check, but just to be sure...

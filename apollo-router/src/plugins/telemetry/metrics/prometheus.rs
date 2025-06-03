@@ -186,14 +186,13 @@ impl Service<router::Request> for PrometheusService {
             // Let's remove any problems they may have created for us.
             let stats = String::from_utf8_lossy(&result);
             let modified_stats = stats.replace("_total_total", "_total");
-            Ok(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::OK)
-                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body(router::body::from_bytes(modified_stats))
-                    .map_err(BoxError::from)?,
-                context: req.context,
-            })
+
+            router::Response::builder()
+                .status_code(StatusCode::OK)
+                .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+                .data(modified_stats)
+                .context(req.context)
+                .build()
         })
     }
 }
