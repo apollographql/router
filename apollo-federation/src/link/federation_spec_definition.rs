@@ -765,7 +765,14 @@ impl FederationSpecDefinition {
     fn external_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
-            &[],
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_REASON_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
             false,
             &[
                 DirectiveLocation::Object,

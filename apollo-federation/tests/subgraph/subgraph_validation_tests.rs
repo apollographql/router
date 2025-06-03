@@ -974,7 +974,7 @@ directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITI
 
 directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-directive @federation__external on OBJECT | FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
 
 directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
@@ -1138,7 +1138,9 @@ type Query {
                   k: ID!
                 }
 
-                directive @federation__external on OBJECT | FIELD_DEFINITION
+                directive @federation__external(
+                  reason: String
+                ) on OBJECT | FIELD_DEFINITION
             "#,
             r#"
                 extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
@@ -1302,7 +1304,9 @@ type Query {
                 k: ID!
             }
 
-            directive @federation__external on OBJECT | FIELD_DEFINITION | SCHEMA
+            directive @federation__external(
+                reason: String
+            ) on OBJECT | FIELD_DEFINITION | SCHEMA
             "#;
         assert_errors!(
             build_for_errors_with_option(doc, BuildOption::AsIs),
