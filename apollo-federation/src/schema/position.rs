@@ -901,7 +901,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
@@ -1053,12 +1053,13 @@ pub(crate) enum TagDirectiveTargetPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
-    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    ArgumentDefinition(FieldArgumentDefinitionPosition),
     Scalar(ScalarTypeDefinitionPosition),
     Enum(EnumTypeDefinitionPosition),
     EnumValue(EnumValueDefinitionPosition),
     InputObject(InputObjectTypeDefinitionPosition),
     InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+    Schema(SchemaDefinitionPosition),
 }
 
 impl Debug for TagDirectiveTargetPosition {
@@ -1076,6 +1077,7 @@ impl Debug for TagDirectiveTargetPosition {
             Self::EnumValue(p) => write!(f, "EnumValue({p})"),
             Self::InputObject(p) => write!(f, "InputObject({p})"),
             Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+            Self::Schema(p) => write!(f, "Schema({p})"),
         }
     }
 }
@@ -2230,6 +2232,29 @@ impl Debug for ObjectTypeDefinitionPosition {
 pub(crate) enum FieldArgumentDefinitionPosition {
     Interface(InterfaceFieldArgumentDefinitionPosition),
     Object(ObjectFieldArgumentDefinitionPosition),
+}
+
+impl FieldArgumentDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            Self::Interface(p) => &p.type_name,
+            Self::Object(p) => &p.type_name,
+        }
+    }
+
+    pub(crate) fn field_name(&self) -> &Name {
+        match self {
+            Self::Interface(p) => &p.field_name,
+            Self::Object(p) => &p.field_name,
+        }
+    }
+
+    pub(crate) fn argument_name(&self) -> &Name {
+        match self {
+            Self::Interface(p) => &p.argument_name,
+            Self::Object(p) => &p.argument_name,
+        }
+    }
 }
 
 impl Debug for FieldArgumentDefinitionPosition {

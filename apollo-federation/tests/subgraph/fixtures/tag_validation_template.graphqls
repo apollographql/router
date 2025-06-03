@@ -1,0 +1,22 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@tag"])
+  @tag(name: "test{symbol}")
+
+type Query {
+  foo: Foo @tag(name: "{symbol}test")
+  bar: Bar @tag(name: "test{symbol}")
+  baz: Baz @tag(name: "test{symbol}test")
+}
+interface Foo @tag(name: "test{symbol}") {
+  name: String
+  foo1: String @tag(name: "test{symbol}")
+  foo2(arg: String @tag(name: "test{symbol}")): String
+}
+type Bar implements Foo @tag(name: "test{symbol}") {
+  name: String
+  foo1: String
+  foo2(arg: String): String
+  bar1: String @tag(name: "test{symbol}")
+  bar2(arg: String @tag(name: "test{symbol}")): String
+}
+union Baz @tag(name: "test{symbol}") = Bar
