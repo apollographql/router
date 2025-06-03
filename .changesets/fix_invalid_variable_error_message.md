@@ -1,6 +1,6 @@
 ### Improve error message for invalid variables  ([Issue #2984](https://github.com/apollographql/router/issues/2984))
 
-Example:
+When a variable in a GraphQL request is missing or contains an invalid value, the router now returns more useful error messages. Example:
 
 ```diff
 -invalid type for variable: 'x'
