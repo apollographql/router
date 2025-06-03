@@ -248,7 +248,7 @@ fn load_supergraph_file(
     file_path: &Path,
 ) -> Result<apollo_federation::Supergraph, FederationError> {
     let doc_str = read_input(file_path);
-    apollo_federation::Supergraph::new(&doc_str)
+    apollo_federation::Supergraph::new_with_router_specs(&doc_str)
 }
 
 /// Load either single supergraph schema file or compose one from multiple subgraph files.
@@ -341,8 +341,10 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .file_name()
         .and_then(|name| name.to_str().map(|x| x.to_string()));
     let name = name.unwrap_or("subgraph".to_string());
-    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)?
-        .expand_links()?
+    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
+        .map_err(|e| e.into_inner())?
+        .expand_links()
+        .map_err(|e| e.into_inner())?
         .assume_upgraded()
         .validate()
         .map_err(|e| e.into_inner())?;
@@ -402,7 +404,7 @@ fn cmd_expand(
     // what specific portion of the expansion process failed. Work will need to be
     // done to expansion to allow for returning an error type that carries the error
     // and the expanded subgraph as seen until the error.
-    let expanded = Supergraph::new(&raw_sdl)?;
+    let expanded = Supergraph::new_with_router_specs(&raw_sdl)?;
 
     let subgraphs = expanded.extract_subgraphs()?;
     if let Some(dest) = dest {

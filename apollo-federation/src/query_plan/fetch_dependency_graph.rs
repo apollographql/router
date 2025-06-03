@@ -48,12 +48,12 @@ use crate::operation::VariableCollector;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_graph::graph_path::OpGraphPathContext;
-use crate::query_graph::graph_path::OpGraphPathTrigger;
-use crate::query_graph::graph_path::OpPath;
-use crate::query_graph::graph_path::OpPathElement;
-use crate::query_graph::graph_path::concat_op_paths;
-use crate::query_graph::graph_path::concat_paths_in_parents;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
+use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+use crate::query_graph::graph_path::operation::OpPath;
+use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::query_graph::graph_path::operation::concat_op_paths;
+use crate::query_graph::graph_path::operation::concat_paths_in_parents;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::path_tree::PathTreeChild;
 use crate::query_plan::FetchDataPathElement;
@@ -2922,7 +2922,8 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        if !self.context_inputs.iter().any(|c| *c == renamer) {
+        // XXX(@goto-bus-stop): this looks like it should be an IndexSet!
+        if !self.context_inputs.contains(&renamer) {
             self.context_inputs.push(renamer);
         }
     }

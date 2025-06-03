@@ -22,7 +22,11 @@ use crate::link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -64,6 +68,10 @@ pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
     pub(crate) resolvable: bool,
+}
+
+pub(crate) struct ExternalDirectiveArguments<'doc> {
+    pub(crate) reason: Option<&'doc str>,
 }
 
 pub(crate) struct RequiresDirectiveArguments<'doc> {
@@ -212,7 +220,7 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
             )?
-            .unwrap_or(false),
+            .unwrap_or(Self::resolvable_argument_default_value()),
         })
     }
 
@@ -311,6 +319,18 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    pub(crate) fn external_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ExternalDirectiveArguments<'doc>, FederationError> {
+        Ok(ExternalDirectiveArguments {
+            reason: directive_optional_string_argument(
+                application,
+                &FEDERATION_REASON_ARGUMENT_NAME,
+            )?,
         })
     }
 
@@ -673,12 +693,16 @@ impl FederationSpecDefinition {
         }
     }
 
+    fn resolvable_argument_default_value() -> bool {
+        true
+    }
+
     fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
                 get_type: |_, _| Ok(ty!(Boolean)),
-                default_value: Some(Value::Boolean(true)),
+                default_value: Some(Value::Boolean(Self::resolvable_argument_default_value())),
             },
             composition_strategy: None,
         }
@@ -875,6 +899,23 @@ impl SpecDefinition for FederationSpecDefinition {
             ));
         }
 
+        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
+            if let Some(auth_spec) = AUTHENTICATED_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(auth_spec.directive_specs());
+            }
+            if let Some(requires_scopes_spec) =
+                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                specs.extend(requires_scopes_spec.directive_specs());
+            }
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
+            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(policy_spec.directive_specs());
+            }
+        }
+
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             let context_spec_definitions =
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
@@ -882,8 +923,11 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.extend(context_spec_definitions);
         }
 
-        // TODO: The remaining directives added in later versions are implemented in separate specs,
-        // which still need to be ported over
+        if self.version().satisfies(&Version { major: 2, minor: 9 }) {
+            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(cost_spec.directive_specs());
+            }
+        }
 
         specs
     }
@@ -893,6 +937,20 @@ impl SpecDefinition for FederationSpecDefinition {
             vec![Box::new(ScalarTypeSpecification {
                 name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
             })];
+
+        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
+            if let Some(requires_scopes_spec) =
+                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                type_specs.extend(requires_scopes_spec.type_specs());
+            }
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
+            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                type_specs.extend(policy_spec.type_specs());
+            }
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             type_specs.extend(

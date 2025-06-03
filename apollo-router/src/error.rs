@@ -39,10 +39,10 @@ const MAX_VALIDATION_ERRORS: usize = 100;
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
 pub(crate) enum FetchError {
-    /// invalid type for variable: '{name}'
+    /// {message}
     ValidationInvalidTypeVariable {
-        /// Name of the variable.
-        name: String,
+        name: serde_json_bytes::ByteString,
+        message: crate::spec::InvalidInputValue,
     },
 
     /// query could not be planned: {reason}
@@ -117,6 +117,8 @@ pub(crate) enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        // FIXME(SimonSapin): this causes every Rust field to be included in `extensions`,
+        // do we really want that?
         let mut value: Value = serde_json_bytes::to_value(self).unwrap_or_default();
         if let Some(extensions) = value.as_object_mut() {
             extensions
@@ -145,10 +147,11 @@ impl FetchError {
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
                 }
-                FetchError::ValidationInvalidTypeVariable { name } => {
+                FetchError::ValidationInvalidTypeVariable { name, .. } => {
+                    extensions.remove("message");
                     extensions
                         .entry("name")
-                        .or_insert_with(|| name.clone().into());
+                        .or_insert_with(|| Value::String(name.clone()));
                 }
                 _ => (),
             }

@@ -43,13 +43,12 @@ All cache metrics listed above have the following attributes:
 
 ### Coprocessor
 
-- `apollo.router.operations.coprocessor.total` - Total operations with coprocessors enabled.
+- `apollo.router.operations.coprocessor` - Total operations with coprocessors enabled.
+  - `coprocessor.succeeded`: bool
+  - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
+
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
-
-The coprocessor operations metric has the following attributes:
-
-- `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
-- `coprocessor.succeeded`: bool
+  - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
 ### Performance
 

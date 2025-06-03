@@ -14,6 +14,7 @@ accepted = [
     "Unicode-DFS-2016",
     "Zlib",
     "NCSA", # similar to MIT/BSD-3-Clause, used by libfuzzer
+    "CDLA-Permissive-2.0", # webpki-roots
 ]
 
 # See https://github.com/EmbarkStudios/cargo-about/pull/216
