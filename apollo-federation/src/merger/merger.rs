@@ -451,6 +451,7 @@ impl Merger {
         todo!("Implement is_inaccessible_directive_in_supergraph")
     }
 
+    // TODO: These error reporting functions are not yet fully implemented
     fn report_mismatch_error_with_specifics<T>(
         &mut self,
         error: SingleFederationError,
@@ -499,6 +500,7 @@ impl Merger {
         self.error_reporter.add_error(enhanced_error);
     }
 
+    // TODO: These error reporting functions are not yet fully implemented
     fn report_mismatch_hint<T>(
         &mut self,
         code: HintCode,
@@ -510,6 +512,7 @@ impl Merger {
         println!("HINT [{}]: {}", code.definition().code(), message);
     }
 
+    // TODO: These error reporting functions are not yet fully implemented
     fn hint_on_inconsistent_output_enum_value(
         &mut self,
         sources: &Sources<Node<EnumType>>,
