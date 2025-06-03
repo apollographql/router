@@ -122,8 +122,8 @@ impl Config {
             Protocol::Grpc => {
                 let endpoint = process_endpoint(&self.endpoint, &kind)?;
                 // Figure out if we need to set tls config for our exporter
-                let tls_url = Uri::try_from(&endpoint)?;
                 let tls_config_opt = if !endpoint.is_empty() {
+                    let tls_url = Uri::try_from(&endpoint)?;
                     Some(self.grpc.clone().to_tls_config(&tls_url)?)
                 } else {
                     None
