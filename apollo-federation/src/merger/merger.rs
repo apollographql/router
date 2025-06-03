@@ -12,12 +12,12 @@ use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
 use crate::bail;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
-use crate::error::CompositionError;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::FederationSchema;
