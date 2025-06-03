@@ -16,10 +16,9 @@ When logging unknown operations encountered during safe-listing, include informa
 
 By [@DaleSeo](https://github.com/DaleSeo) in https://github.com/apollographql/router/pull/7509
 
-### add response body selector ([PR #7363](https://github.com/apollographql/router/pull/7363))
+### Add response body telemetry selector ([PR #7363](https://github.com/apollographql/router/pull/7363))
 
-Adds a new response body selector that allows accessing the response body in telemetry configurations.
-This enables more detailed monitoring and logging of response data in the Router.
+The Router now supports a `response_body` selector which provides access to the response body in telemetry configurations. This enables more detailed monitoring and logging of response data in the Router.
 
 Example configuration:
 ```yaml
@@ -40,10 +39,10 @@ Connectors now inspect the `content-type` header of responses to determine how t
 
 The behavior is as follows:
 
-- If `content-type` ends with `/json` (like `application/json`) OR `+json` (like `application/vnd.foo+json`): Content is parsed as JSON
-- If no `content-type` header is provided: Content is assumed to be JSON and therefore parsed as JSON
-- If content is `text/plain`, content will be treated as a UTF-8 `string`. Content can be accessed in `selection` mapping via `$` variable.
-- If `content-type` is any other value, it will be treated as a JSON `null`
+- If `content-type` ends with `/json` (like `application/json`) OR `+json` (like `application/vnd.foo+json`): content is parsed as JSON.
+- If `content-type` is `text/plain`: content will be treated as a UTF-8 `string`. Content can be accessed in `selection` mapping via `$` variable.
+- If `content-type` is any other value: content will be treated as a JSON `null`.
+- If no `content-type` header is provided: content is assumed to be JSON and therefore parsed as JSON.
 
 If deserialization fails, an error message of `Response deserialization failed` with a error code of `CONNECTOR_DESERIALIZE` will be returned:
 
@@ -66,11 +65,11 @@ For errors pertaining to connectors and demand control features, Apollo telemetr
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7378
 
-### Allow ignoring irrelevant headers during subscriptions de-duplication ([PR #7070](https://github.com/apollographql/router/pull/7070))
+### Support ignoring specific headers during subscriptions deduplication ([PR #7070](https://github.com/apollographql/router/pull/7070))
 
-The router now supports ignoring specific headers when deduplicating requests to subgraphs providing subscription events.. Previously, any differing headers which didn't actually affect the subscription response (e.g., `user-agent`) would prevent or limit the potential of deduplication.
+The Router now supports ignoring specific headers when deduplicating requests to subgraphs which provide subscription events. Previously, any differing headers which didn't actually affect the subscription response (e.g., `user-agent`) would prevent or limit the potential of deduplication.
 
-Now, the introduction of the `ignored_headers` option allows you to specify headers to ignore during deduplication, enabling you to benefit from subscription deduplication even when requests include headers with unique or varying values that don't affect the subscription's event data.
+The introduction of the `ignored_headers` option allows you to specify headers to ignore during deduplication, enabling you to benefit from subscription deduplication even when requests include headers with unique or varying values that don't affect the subscription's event data.
 
 Configuration example:
 
