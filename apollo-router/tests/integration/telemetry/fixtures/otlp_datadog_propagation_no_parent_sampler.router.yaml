@@ -13,7 +13,7 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>/v1/traces
+        endpoint: <otel-collector-endpoint>
         batch_processor:
           scheduled_delay: 10ms
     metrics:
@@ -21,7 +21,7 @@ telemetry:
         service_name: router
       otlp:
         enabled: true
-        endpoint: <otel-collector-endpoint>/v1/metrics
+        endpoint: <otel-collector-endpoint>
         protocol: http
         batch_processor:
           scheduled_delay: 10ms

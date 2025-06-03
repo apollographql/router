@@ -58,6 +58,36 @@ pub(crate) enum TelemetryDataKind {
     Metrics,
 }
 
+fn process_endpoint(endpoint: &Option<String>, kind: &TelemetryDataKind) -> String {
+    endpoint.as_ref().map_or("".to_string(), |v| {
+        let base = if v == "default" {
+            "".to_string()
+        } else {
+            v.to_string()
+        };
+        match kind {
+            TelemetryDataKind::Traces => {
+                if base.is_empty() || base.ends_with("/v1/traces") || base.ends_with("/v1/traces/")
+                {
+                    base.to_string()
+                } else {
+                    format!("{base}/v1/traces")
+                }
+            }
+            TelemetryDataKind::Metrics => {
+                if base.is_empty()
+                    || base.ends_with("/v1/metrics")
+                    || base.ends_with("/v1/metrics/")
+                {
+                    base.to_string()
+                } else {
+                    format!("{base}/v1/metrics")
+                }
+            }
+        }
+    })
+}
+
 impl Config {
     pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
@@ -65,13 +95,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                // let endpoint = self.endpoint.to_full_uri(&DEFAULT_GRPC_ENDPOINT);
-                let endpoint = self
-                    .endpoint
-                    .as_ref()
-                    .map_or("", |v| if v == "default" { "" } else { v })
-                    .to_string();
-                // let tls_config = self.grpc.clone().to_tls_config(&endpoint)?;
+                let endpoint = process_endpoint(&self.endpoint, &kind);
                 let tls_config = if !endpoint.is_empty() {
                     self.grpc
                         .clone()
@@ -96,11 +120,7 @@ impl Config {
                 Ok(exporter)
             }
             Protocol::Http => {
-                let endpoint = self
-                    .endpoint
-                    .as_ref()
-                    .map_or("", |v| if v == "default" { "" } else { v })
-                    .to_string();
+                let endpoint = process_endpoint(&self.endpoint, &kind);
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
