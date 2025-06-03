@@ -104,7 +104,9 @@ impl Service<ConnectorRequest> for MockConnector {
         if let Some(map_request_fn) = &self.map_request_fn {
             req = map_request_fn.clone()(req);
         }
-        let TransportRequest::Http(http) = req.transport_request;
+        let TransportRequest::Http(http) = req.transport_request else {
+            panic!("Only HTTP transport requests are supported");
+        };
         let body = http.inner.body();
 
         let response = if let Some(response) = self.mocks.get(body) {

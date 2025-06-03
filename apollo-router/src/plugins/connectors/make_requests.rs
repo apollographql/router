@@ -23,6 +23,7 @@ use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
+use crate::services::connector::request_service::TransportRequest;
 
 pub(crate) mod request_merger;
 
@@ -237,26 +238,27 @@ fn request_params_to_requests(
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
-        let transport = connector
-            .transport
-            .as_ref()
-            .ok_or_else(|| MakeRequestError::UnsupportedOperation("TODO FIX THIS ERROR".into()))?;
-        let (transport_request, mapping_problems) = make_request(
-            transport,
-            response_key
-                .inputs()
-                .clone()
-                .merger(&connector.request_variables)
-                .config(connector.config.as_ref())
-                .context(&original_request.context)
-                .request(
-                    &connector.request_headers,
-                    &original_request.supergraph_request,
-                )
-                .merge(),
-            &original_request,
-            debug,
-        )?;
+        let (transport_request, mapping_problems) =
+            if let Some(transport) = connector.transport.as_ref() {
+                make_request(
+                    transport,
+                    response_key
+                        .inputs()
+                        .clone()
+                        .merger(&connector.request_variables)
+                        .config(connector.config.as_ref())
+                        .context(&original_request.context)
+                        .request(
+                            &connector.request_headers,
+                            &original_request.supergraph_request,
+                        )
+                        .merge(),
+                    &original_request,
+                    debug,
+                )?
+            } else {
+                (TransportRequest::None, vec![])
+            };
 
         results.push(Request {
             context: context.clone(),
@@ -2356,11 +2358,14 @@ mod tests {
         .unwrap()
         .into_iter()
         .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
-            let (parts, _body) = http_request.inner.into_parts();
-            let new_req =
-                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
-            (new_req, req.key, http_request.debug)
+            if let TransportRequest::Http(http_request) = req.transport_request {
+                let (parts, _body) = http_request.inner.into_parts();
+                let new_req =
+                    http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
+                (new_req, req.key, http_request.debug)
+            } else {
+                panic!("Expected HTTP transport request")
+            }
         })
         .collect();
 

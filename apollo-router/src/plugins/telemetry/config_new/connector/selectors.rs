@@ -148,14 +148,17 @@ impl Selector for ConnectorSelector {
                 default,
                 ..
             } => {
-                let TransportRequest::Http(ref http_request) = request.transport_request;
-                http_request
-                    .inner
-                    .headers()
-                    .get(connector_request_header)
-                    .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                    .or_else(|| default.clone())
-                    .map(opentelemetry::Value::from)
+                if let TransportRequest::Http(ref http_request) = request.transport_request {
+                    http_request
+                        .inner
+                        .headers()
+                        .get(connector_request_header)
+                        .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                        .or_else(|| default.clone())
+                        .map(opentelemetry::Value::from)
+                } else {
+                    None
+                }
             }
             ConnectorSelector::RequestMappingProblems {
                 connector_request_mapping_problems: mapping_problems,
@@ -401,10 +404,10 @@ mod tests {
             context: context(),
             connector: Arc::new(connector()),
             service_name: Default::default(),
-            transport_request: TransportRequest::Http(transport::http::HttpRequest {
+            transport_request: TransportRequest::Http(Box::new(transport::http::HttpRequest {
                 inner: http_request,
                 debug: None,
-            }),
+            })),
             key: response_key(),
             mapping_problems,
             supergraph_request: Default::default(),

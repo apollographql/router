@@ -398,7 +398,10 @@ impl<S> HeadersService<S> {
     fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+        let http_request = match &mut req.transport_request {
+            TransportRequest::Http(http_request) => http_request,
+            _ => return,
+        };
         let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
@@ -1770,13 +1773,15 @@ mod test {
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
-            let TransportRequest::Http(ref http_request) = self.transport_request;
-            let actual_headers = http_request
-                .inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
-                .collect::<HashSet<_>>();
+            let actual_headers = match self.transport_request {
+                TransportRequest::Http(ref http_request) => http_request
+                    .inner
+                    .headers()
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+                    .collect::<HashSet<_>>(),
+                TransportRequest::None => return false,
+            };
             assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
 
             true

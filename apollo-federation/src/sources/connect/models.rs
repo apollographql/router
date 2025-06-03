@@ -30,7 +30,6 @@ use super::spec::schema::SourceDirectiveArguments;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
-use crate::internal_error;
 use crate::link::Link;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
@@ -187,16 +186,16 @@ impl Connector {
             .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
         let source_name = source.map(|s| s.name.clone());
 
-        // Create our transport
-        let connect_http = connect
-            .http
-            .as_ref()
-            .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
-        let source_http = source.map(|s| &s.http);
-        let transport = Some(HttpJsonTransport::from_directive(
-            connect_http,
-            source_http,
-        )?);
+        // Create our transport - now optional
+        let transport = if let Some(connect_http) = connect.http.as_ref() {
+            let source_http = source.map(|s| &s.http);
+            Some(HttpJsonTransport::from_directive(
+                connect_http,
+                source_http,
+            )?)
+        } else {
+            None
+        };
 
         // Get our batch and error settings
         let batch_settings = ConnectorBatchSettings::from_directive(&connect);
@@ -205,8 +204,10 @@ impl Connector {
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
         // Calculate which variables and headers are in use in the request
-        let request_references: HashSet<VariableReference<Namespace>> =
-            transport.as_ref().unwrap().variable_references().collect();
+        let request_references: HashSet<VariableReference<Namespace>> = transport
+            .as_ref()
+            .map(|t| t.variable_references().collect())
+            .unwrap_or_default();
         let request_variables: HashSet<Namespace> = request_references
             .iter()
             .map(|var_ref| var_ref.namespace.namespace)
@@ -228,12 +229,7 @@ impl Connector {
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
         let id = ConnectId {
-            label: make_label(
-                subgraph_name,
-                &source_name,
-                transport.as_ref().unwrap(),
-                &entity_resolver,
-            ),
+            label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
             directive: connect.position,
@@ -351,7 +347,7 @@ impl Connector {
 fn make_label(
     subgraph_name: &str,
     source: &Option<String>,
-    transport: &HttpJsonTransport,
+    transport: &Option<HttpJsonTransport>,
     entity_resolver: &Option<EntityResolver>,
 ) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
@@ -359,7 +355,18 @@ fn make_label(
         Some(EntityResolver::TypeBatch) => "[BATCH] ",
         _ => "",
     };
-    format!("{}{}{} {}", batch, subgraph_name, source, transport.label())
+    let inline = transport
+        .is_none()
+        .then_some(" [INLINE]")
+        .unwrap_or_default();
+    let transport_label = transport
+        .as_ref()
+        .map(|t| format!(" {}", t.label()))
+        .unwrap_or_default();
+    format!(
+        "{}{}{}{} {}",
+        inline, batch, subgraph_name, source, transport_label
+    )
 }
 
 fn determine_entity_resolver(

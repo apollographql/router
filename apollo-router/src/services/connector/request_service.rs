@@ -26,6 +26,7 @@ use crate::graphql::ErrorExtension;
 use crate::json_ext::Path;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::MappedResponse;
+use crate::plugins::connectors::handle_responses::process_mapping;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::mapping::Problem;
@@ -169,7 +170,9 @@ impl Response {
 #[non_exhaustive]
 pub(crate) enum TransportRequest {
     /// A request to an HTTP transport
-    Http(HttpRequest),
+    Http(Box<HttpRequest>),
+    /// No transport is required
+    None,
 }
 
 /// Response from an underlying transport
@@ -178,11 +181,13 @@ pub(crate) enum TransportRequest {
 pub(crate) enum TransportResponse {
     /// A response from an HTTP transport
     Http(HttpResponse),
+    /// No transport is required
+    None,
 }
 
 impl From<HttpRequest> for TransportRequest {
     fn from(value: HttpRequest) -> Self {
-        Self::Http(value)
+        Self::Http(Box::new(value))
     }
 }
 
@@ -349,6 +354,19 @@ impl tower::Service<Request> for ConnectorRequestService {
 
         Box::pin(async move {
             let mut debug_request: Option<Box<ConnectorDebugHttpRequest>> = None;
+
+            if let TransportRequest::None = request.transport_request {
+                return Ok(process_mapping(
+                    request.key.clone(),
+                    request.connector.clone(),
+                    &request.context,
+                    None,
+                    &debug,
+                    request.supergraph_request.clone(),
+                )
+                .await);
+            }
+
             let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                 Err(Error::RequestLimitExceeded)
             } else {
@@ -384,6 +402,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                             Err(Error::TransportFailure("no http client found".into()))
                         }
                     }
+                    TransportRequest::None => unreachable!(),
                 };
 
                 u64_counter!(

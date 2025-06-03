@@ -118,10 +118,10 @@ pub(crate) fn make_request(
     });
 
     Ok((
-        TransportRequest::Http(HttpRequest {
+        TransportRequest::Http(Box::new(HttpRequest {
             inner: request,
             debug: debug_request,
-        }),
+        })),
         mapping_problems,
     ))
 }
@@ -307,9 +307,11 @@ mod tests {
         )
         "#);
 
-        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
-        let body = body::into_string(req.into_body()).await.unwrap();
-        insta::assert_snapshot!(body, @r#"{"a":42}"#);
+        if let TransportRequest::Http(req) = req.0 {
+            let req = req.inner;
+            let body = body::into_string(req.into_body()).await.unwrap();
+            insta::assert_snapshot!(body, @r#"{"a":42}"#);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -367,8 +369,10 @@ mod tests {
         )
         "#);
 
-        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
-        let body = body::into_string(req.into_body()).await.unwrap();
-        insta::assert_snapshot!(body, @r#"a=42"#);
+        if let TransportRequest::Http(req) = req.0 {
+            let req = req.inner;
+            let body = body::into_string(req.into_body()).await.unwrap();
+            insta::assert_snapshot!(body, @r#"a=42"#);
+        }
     }
 }

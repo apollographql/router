@@ -3065,10 +3065,10 @@ mod tests {
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
                                     let transport_request =
-                                        TransportRequest::Http(transport::http::HttpRequest {
+                                        TransportRequest::Http(Box::new(transport::http::HttpRequest {
                                             inner: http_request,
                                             debug: None,
-                                        });
+                                        }));
                                     let connector = Connector {
                                         id: ConnectId::new(
                                             subgraph_name,

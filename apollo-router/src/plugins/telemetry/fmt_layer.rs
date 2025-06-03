@@ -814,10 +814,11 @@ connector:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
-                    inner: http_request,
-                    debug: None,
-                });
+                let transport_request =
+                    TransportRequest::Http(Box::new(transport::http::HttpRequest {
+                        inner: http_request,
+                        debug: None,
+                    }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
@@ -1167,10 +1168,11 @@ subgraph:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
-                    inner: http_request,
-                    debug: None,
-                });
+                let transport_request =
+                    TransportRequest::Http(Box::new(transport::http::HttpRequest {
+                        inner: http_request,
+                        debug: None,
+                    }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),

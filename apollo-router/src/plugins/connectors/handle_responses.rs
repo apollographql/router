@@ -524,6 +524,34 @@ pub(crate) async fn process_response<T: HttpBody>(
     }
 }
 
+pub(crate) async fn process_mapping(
+    response_key: ResponseKey,
+    connector: Arc<Connector>,
+    context: &Context,
+    _debug_request: Option<Box<ConnectorDebugHttpRequest>>,
+    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+) -> connector::request_service::Response {
+    let (parts, _) = http::response::Builder::new()
+        .status(200)
+        .body(())
+        .unwrap()
+        .into_parts();
+    let raw = RawResponse::Data {
+        parts,
+        data: Value::Null,
+        key: response_key,
+        debug_request: None,
+    };
+    raw.map_response(
+        Ok(connector::request_service::TransportResponse::None),
+        connector,
+        context,
+        debug_context,
+        supergraph_request,
+    )
+}
+
 pub(crate) fn aggregate_responses(
     responses: Vec<MappedResponse>,
 ) -> Result<Response, HandleResponseError> {
