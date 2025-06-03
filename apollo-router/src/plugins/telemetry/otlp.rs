@@ -58,32 +58,47 @@ pub(crate) enum TelemetryDataKind {
     Metrics,
 }
 
+// In older versions of `opentelemetry_otlp` the crate would "helpfully" try to make sure that the
+// path for metrics or tracing was correct. This didn't always work consistently and so we added
+// some code to the router to try and make this work better. We also implemented configuration so
+// that:
+//  - "default" would result in the default from the specification
+//  - "<host>:<port>" would be an acceptable value even though no path was specified.
+//
+// The latter is particularly problematic, since this used to work in version 0.13, but had stopped
+// working by the time we updated to 0.17.
+//
+// Our previous implementation didn't perform endpoint manipulation for metrics, so this
+// implementation unifies the processing of endpoints.
+//
+// The processing does the following:
+//  - If an endpoint is not specified, this results in `""`
+//  - If an endpoint is specified as "default", this results in `""`
+//  - If an endpoint does not end in "/v1/<type>" or "/v1/<type>/", then we append "/v1/<type>"
+//    (where type is either "metrics" or "traces"
+//
+// Note: "" is the empty string and is thus interpreted by any opentelemetry sdk as indicating that
+// the default endpoint should be used.
+//
+// If you are interested in learning more about opentelemetry endpoints:
+//  https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
+// contains the details.
 fn process_endpoint(endpoint: &Option<String>, kind: &TelemetryDataKind) -> String {
+    let kind_s = match kind {
+        TelemetryDataKind::Metrics => "/v1/metrics",
+        TelemetryDataKind::Traces => "/v1/traces",
+    };
+
     endpoint.as_ref().map_or("".to_string(), |v| {
         let base = if v == "default" {
             "".to_string()
         } else {
             v.to_string()
         };
-        match kind {
-            TelemetryDataKind::Traces => {
-                if base.is_empty() || base.ends_with("/v1/traces") || base.ends_with("/v1/traces/")
-                {
-                    base.to_string()
-                } else {
-                    format!("{base}/v1/traces")
-                }
-            }
-            TelemetryDataKind::Metrics => {
-                if base.is_empty()
-                    || base.ends_with("/v1/metrics")
-                    || base.ends_with("/v1/metrics/")
-                {
-                    base.to_string()
-                } else {
-                    format!("{base}/v1/metrics")
-                }
-            }
+        if base.is_empty() || base.ends_with(kind_s) || base.ends_with(&format!("{kind_s}/")) {
+            base.to_string()
+        } else {
+            format!("{base}{kind_s}")
         }
     })
 }
@@ -96,28 +111,25 @@ impl Config {
         match self.protocol {
             Protocol::Grpc => {
                 let endpoint = process_endpoint(&self.endpoint, &kind);
-                let tls_config = if !endpoint.is_empty() {
-                    self.grpc
-                        .clone()
-                        .to_tls_config(&Uri::try_from(&endpoint).unwrap())?
+                let tls_config_opt = if !endpoint.is_empty() {
+                    Some(
+                        self.grpc
+                            .clone()
+                            .to_tls_config(&Uri::try_from(&endpoint).unwrap())?,
+                    )
                 } else {
-                    let tls_config_str = match kind {
-                        TelemetryDataKind::Traces => "http://127.0.0.1/v1/traces".to_string(),
-                        TelemetryDataKind::Metrics => "http://127.0.0.1/v1/metrics".to_string(),
-                    };
-                    self.grpc
-                        .clone()
-                        .to_tls_config(&Uri::try_from(&tls_config_str).unwrap())?
+                    None
                 };
 
-                let exporter = opentelemetry_otlp::new_exporter()
+                let mut exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_endpoint(endpoint)
-                    .with_tls_config(tls_config)
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()))
-                    .into();
-                Ok(exporter)
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                if let Some(tls_config) = tls_config_opt {
+                    exporter = exporter.with_tls_config(tls_config);
+                }
+                Ok(exporter.into())
             }
             Protocol::Http => {
                 let endpoint = process_endpoint(&self.endpoint, &kind);
