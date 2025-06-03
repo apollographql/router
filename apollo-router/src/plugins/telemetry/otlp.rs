@@ -74,8 +74,8 @@ pub(crate) enum TelemetryDataKind {
 // The processing does the following:
 //  - If an endpoint is not specified, this results in `""`
 //  - If an endpoint is specified as "default", this results in `""`
-//  - If an endpoint does not end in "/v1/<type>" or "/v1/<type>/", then we append "/v1/<type>"
-//    (where type is either "metrics" or "traces"
+//  - If an endpoint is not `""` and does not end in "/v1/<type>" or "/", then we append "/v1/<type>"
+//    (where type is either "metrics" or "traces")
 //
 // Note: "" is the empty string and is thus interpreted by any opentelemetry sdk as indicating that
 // the default endpoint should be used.
@@ -83,22 +83,32 @@ pub(crate) enum TelemetryDataKind {
 // If you are interested in learning more about opentelemetry endpoints:
 //  https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
 // contains the details.
-fn process_endpoint(endpoint: &Option<String>, kind: &TelemetryDataKind) -> String {
+fn process_endpoint(
+    endpoint: &Option<String>,
+    kind: &TelemetryDataKind,
+) -> Result<String, BoxError> {
     let kind_s = match kind {
         TelemetryDataKind::Metrics => "/v1/metrics",
         TelemetryDataKind::Traces => "/v1/traces",
     };
 
-    endpoint.as_ref().map_or("".to_string(), |v| {
+    endpoint.as_ref().map_or(Ok("".to_string()), |v| {
         let base = if v == "default" {
             "".to_string()
         } else {
             v.to_string()
         };
-        if base.is_empty() || base.ends_with(kind_s) || base.ends_with(&format!("{kind_s}/")) {
-            base.to_string()
+        if base.is_empty() || base.ends_with(kind_s) || base.ends_with("/") {
+            Ok(base)
         } else {
-            format!("{base}{kind_s}")
+            let uri = http::Uri::try_from(&base)?;
+            // Note: If our endpoint is host:port, then the path will be "/".
+            // We already checked that our base does not end with "/", so we must append `kind_s`
+            if uri.path() == "/" {
+                Ok(format!("{base}{kind_s}"))
+            } else {
+                Ok(base)
+            }
         }
     })
 }
@@ -110,13 +120,11 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = process_endpoint(&self.endpoint, &kind);
+                let endpoint = process_endpoint(&self.endpoint, &kind)?;
+                // Figure out if we need to set tls config for our exporter
+                let tls_url = Uri::try_from(&endpoint)?;
                 let tls_config_opt = if !endpoint.is_empty() {
-                    Some(
-                        self.grpc
-                            .clone()
-                            .to_tls_config(&Uri::try_from(&endpoint).unwrap())?,
-                    )
+                    Some(self.grpc.clone().to_tls_config(&tls_url)?)
                 } else {
                     None
                 };
@@ -132,7 +140,7 @@ impl Config {
                 Ok(exporter.into())
             }
             Protocol::Http => {
-                let endpoint = process_endpoint(&self.endpoint, &kind);
+                let endpoint = process_endpoint(&self.endpoint, &kind)?;
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
