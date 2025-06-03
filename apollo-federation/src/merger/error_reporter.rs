@@ -1,4 +1,5 @@
-use crate::error::{CompositionError, FederationError};
+use crate::error::CompositionError;
+use crate::error::FederationError;
 use crate::subgraph::SubgraphError;
 use crate::supergraph::CompositionHint;
 
