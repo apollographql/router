@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
 
-use apollo_compiler::ast::Argument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
@@ -421,7 +421,7 @@ impl JoinSpecDefinition {
             graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
         })
     }
-    
+
     pub(crate) fn enum_value_directive(
         &self,
         schema: &FederationSchema,

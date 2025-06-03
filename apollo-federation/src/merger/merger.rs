@@ -430,13 +430,17 @@ impl Merger {
             if source.is_some() {
                 // Get the join spec name for this subgraph
                 let subgraph_name = &self.names[idx];
-                let Some(join_spec_name) = self
-                    .subgraph_names_to_join_spec_name
-                    .get(subgraph_name) else {
-                        bail!( "Could not find join spec name for subgraph '{}'", subgraph_name );
-                    };
+                let Some(join_spec_name) = self.subgraph_names_to_join_spec_name.get(subgraph_name)
+                else {
+                    bail!(
+                        "Could not find join spec name for subgraph '{}'",
+                        subgraph_name
+                    );
+                };
 
-                let directive = self.join_spec_definition.enum_value_directive(&self.merged, join_spec_name)?;
+                let directive = self
+                    .join_spec_definition
+                    .enum_value_directive(&self.merged, join_spec_name)?;
                 value_pos.insert_directive(&mut self.merged, Node::new(directive));
             }
         }
@@ -555,7 +559,7 @@ mod tests {
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
     use crate::subgraph::typestate::expand_schema;
-    
+
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
             type_name: name.clone(),
@@ -578,13 +582,19 @@ mod tests {
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
-        let schema = Schema::builder().adopt_orphan_extensions().parse(r#"
+        let schema = Schema::builder()
+            .adopt_orphan_extensions()
+            .parse(
+                r#"
             schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
             
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-            "#, "").build()?;
+            "#,
+                "",
+            )
+            .build()?;
         let mut schema = expand_schema(schema)?;
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
@@ -596,8 +606,14 @@ mod tests {
             error_reporter: ErrorReporter::new(),
             merged: schema,
             subgraph_names_to_join_spec_name: [
-                ("subgraph1".to_string(), Name::new("SUBGRAPH1").expect("Valid name")),
-                ("subgraph2".to_string(), Name::new("SUBGRAPH2").expect("Valid name")),
+                (
+                    "subgraph1".to_string(),
+                    Name::new("SUBGRAPH1").expect("Valid name"),
+                ),
+                (
+                    "subgraph2".to_string(),
+                    Name::new("SUBGRAPH2").expect("Valid name"),
+                ),
             ]
             .into_iter()
             .collect(),
