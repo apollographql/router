@@ -1,5 +1,6 @@
+use super::safe_json::Value as SafeJSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
+
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -36,6 +37,7 @@ pub(super) enum ArrowMethod {
     Entries,
     JsonStringify,
     JoinNotNull,
+    UrlSafe,
 
     // Future methods:
     TypeOf,
@@ -65,10 +67,13 @@ macro_rules! impl_arrow_method {
                 &self,
                 method_name: &WithRange<String>,
                 method_args: Option<&MethodArgs>,
-                data: &JSON,
+                data: &$crate::sources::connect::json_selection::safe_json::Value,
                 vars: &VarsWithPathsMap,
-                input_path: &InputPath<JSON>,
-            ) -> (Option<JSON>, Vec<ApplyToError>) {
+                input_path: &InputPath<$crate::sources::connect::json_selection::safe_json::Value>,
+            ) -> (
+                Option<$crate::sources::connect::json_selection::safe_json::Value>,
+                Vec<ApplyToError>,
+            ) {
                 $impl_fn_name(method_name, method_args, data, vars, input_path)
             }
 
@@ -100,10 +105,10 @@ pub(super) trait ArrowMethodImpl {
         &self,
         method_name: &WithRange<String>,
         method_args: Option<&MethodArgs>,
-        data: &JSON,
+        data: &SafeJSON,
         vars: &VarsWithPathsMap,
-        input_path: &InputPath<JSON>,
-    ) -> (Option<JSON>, Vec<ApplyToError>);
+        input_path: &InputPath<SafeJSON>,
+    ) -> (Option<SafeJSON>, Vec<ApplyToError>);
 
     fn shape(
         &self,
@@ -149,6 +154,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Entries => &public::EntriesMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
+            Self::UrlSafe => &public::UrlSafeMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -204,6 +210,7 @@ impl ArrowMethod {
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
+            "urlSafe" => Some(Self::UrlSafe),
             _ => None,
         };
 
@@ -229,6 +236,7 @@ impl ArrowMethod {
                 | Self::Entries
                 | Self::JsonStringify
                 | Self::JoinNotNull
+                | Self::UrlSafe
         )
     }
 }

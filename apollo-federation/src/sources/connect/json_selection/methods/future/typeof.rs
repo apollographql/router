@@ -1,5 +1,5 @@
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -70,27 +70,65 @@ fn typeof_shape(
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::json;
+    mod type_of {
+        use crate::selection;
+        use serde_json_bytes::json;
 
-    use super::*;
-    use crate::selection;
-
-    #[test]
-    fn typeof_should_return_appropriate_when_applied_to_data() {
-        fn check(selection: &str, data: &JSON, expected_type: &str) {
+        #[test]
+        fn should_return_typeof_null() {
             assert_eq!(
-                selection!(selection).apply_to(data),
-                (Some(json!(expected_type)), vec![]),
+                selection!("$->typeof").apply_to(&json!(null)),
+                (Some(json!("null")), Vec::new()),
             );
         }
-
-        check("$->typeof", &json!(null), "null");
-        check("$->typeof", &json!(true), "boolean");
-        check("@->typeof", &json!(false), "boolean");
-        check("$->typeof", &json!(123), "number");
-        check("$->typeof", &json!(123.45), "number");
-        check("$->typeof", &json!("hello"), "string");
-        check("$->typeof", &json!([1, 2, 3]), "array");
-        check("$->typeof", &json!({ "key": "value" }), "object");
+        #[test]
+        fn should_return_typeof_true() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!(true)),
+                (Some(json!("boolean")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_false() {
+            assert_eq!(
+                selection!("@->typeof").apply_to(&json!(false)),
+                (Some(json!("boolean")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_int() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!(123)),
+                (Some(json!("number")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_float() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!(123.45)),
+                (Some(json!("number")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_string() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!("hello")),
+                (Some(json!("string")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_array() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!([1, 2, 3])),
+                (Some(json!("array")), Vec::new()),
+            );
+        }
+        #[test]
+        fn should_return_typeof_object() {
+            assert_eq!(
+                selection!("$->typeof").apply_to(&json!({ "key": "value" })),
+                (Some(json!("object")), Vec::new()),
+            );
+        }
     }
 }

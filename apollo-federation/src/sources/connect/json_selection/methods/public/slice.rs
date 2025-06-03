@@ -1,7 +1,7 @@
 use std::iter::empty;
 
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;

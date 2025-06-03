@@ -1,5 +1,5 @@
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -72,45 +72,97 @@ fn json_stringify_shape(
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::json;
+    mod json_stringify {
+        use serde_json_bytes::json;
 
-    use super::*;
-    use crate::selection;
-    use crate::sources::connect::ApplyToError;
+        use crate::selection;
+        use crate::sources::connect::ApplyToError;
 
-    #[rstest::rstest]
-    #[case(json!(null), json!("null"), vec![])]
-    #[case(json!(true), json!("true"), vec![])]
-    #[case(json!(false), json!("false"), vec![])]
-    #[case(json!(42), json!("42"), vec![])]
-    #[case(json!(10.8), json!("10.8"), vec![])]
-    #[case(json!("hello world"), json!("\"hello world\""), vec![])]
-    #[case(json!([1, 2, 3]), json!("[1,2,3]"), vec![])]
-    #[case(json!({ "key": "value" }), json!("{\"key\":\"value\"}"), vec![])]
-    #[case(json!([1, "two", true, null]), json!("[1,\"two\",true,null]"), vec![])]
-    fn json_stringify_should_stringify_various_structures(
-        #[case] input: JSON,
-        #[case] expected: JSON,
-        #[case] errors: Vec<ApplyToError>,
-    ) {
-        assert_eq!(
-            selection!("$->jsonStringify").apply_to(&input),
-            (Some(expected), errors),
-        );
-    }
+        #[test]
+        fn should_stringify_null() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!(null)),
+                (Some(json!("null")), Vec::new()),
+            );
+        }
 
-    #[test]
-    fn json_stringify_should_error_when_provided_argument() {
-        assert_eq!(
-            selection!("$->jsonStringify(1)").apply_to(&json!(null)),
-            (
-                None,
-                vec![ApplyToError::new(
-                    "Method ->jsonStringify does not take any arguments".to_string(),
-                    vec![json!("->jsonStringify")],
-                    Some(3..16)
-                )]
-            ),
-        );
+        #[test]
+        fn should_stringify_true() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!(true)),
+                (Some(json!("true")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_false() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!(false)),
+                (Some(json!("false")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_integer() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!(42)),
+                (Some(json!("42")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_float() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!(10.8)),
+                (Some(json!("10.8")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_string() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!("hello world")),
+                (Some(json!("\"hello world\"")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_array() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!([1, 2, 3])),
+                (Some(json!("[1, 2, 3]")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_object() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!({ "key": "value" })),
+                (Some(json!("{ \"key\": \"value\" }")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_stringify_complex() {
+            assert_eq!(
+                selection!("$->jsonStringify").apply_to(&json!([1, "two", true, null])),
+                (Some(json!("[1, \"two\", true, null]")), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn should_error_when_provided_argument() {
+            assert_eq!(
+                selection!("$->jsonStringify(1)").apply_to(&json!(null)),
+                (
+                    None,
+                    vec![ApplyToError::new(
+                        "Method ->jsonStringify does not take any arguments".to_string(),
+                        vec![json!("->jsonStringify").into()],
+                        Some(3..16)
+                    )]
+                ),
+            );
+        }
     }
 }

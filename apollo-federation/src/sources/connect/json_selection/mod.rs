@@ -21,3 +21,4 @@ pub(crate) use pretty::*;
 pub(crate) use selection_trie::SelectionTrie;
 #[cfg(test)]
 mod fixtures;
+pub(crate) mod safe_json;
