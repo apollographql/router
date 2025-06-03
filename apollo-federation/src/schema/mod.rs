@@ -889,6 +889,28 @@ impl FederationSchema {
                 Err(error) => applications.push(Err(error.into())),
             }
         }
+        // Directive definition arguments
+        for directive_definition_position in &tag_directive_referencers.directive_arguments {
+            match directive_definition_position.get(self.schema()) {
+                Ok(directive_definition) => {
+                    let directives = &directive_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::DirectiveArgumentDefinition(
+                                directive_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
 
         Ok(applications)
     }

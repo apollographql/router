@@ -2231,6 +2231,13 @@ mod tag_tests {
                             symbol
                         )
                     ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element @custom(arg:) has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
+                            symbol
+                        )
+                    ),
                 ]
             );
         }

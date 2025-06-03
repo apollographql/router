@@ -1060,6 +1060,7 @@ pub(crate) enum TagDirectiveTargetPosition {
     InputObject(InputObjectTypeDefinitionPosition),
     InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
     Schema(SchemaDefinitionPosition),
+    DirectiveArgumentDefinition(DirectiveArgumentDefinitionPosition),
 }
 
 impl Debug for TagDirectiveTargetPosition {
@@ -1078,6 +1079,9 @@ impl Debug for TagDirectiveTargetPosition {
             Self::InputObject(p) => write!(f, "InputObject({p})"),
             Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
             Self::Schema(p) => write!(f, "Schema({p})"),
+            Self::DirectiveArgumentDefinition(p) => {
+                write!(f, "DirectiveArgumentDefinition({p})")
+            }
         }
     }
 }
