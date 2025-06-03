@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
+**Connectors improvements**: Router 2.3.0 supports Connect spec v0.2, including batch requests, error customization, and direct access to HTTP headers. To use these features: upgrade your Router to 2.3, update your version of Federation to 2.11, and update the @link directives in your subgraphs to https://specs.apollo.dev/connect/v0.2.
+
+See the [Connectors changelog](https://www.apollographql.com/docs/graphos/connectors/reference/changelog) for more details.
+
 ### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
 
 When logging unknown operations encountered during safe-listing, include information about whether enforcement was skipped. This will help distinguish between truly problematic external operations (where `enforcement_skipped` is false) and internal operations that are intentionally allowed to bypass safelisting (where `enforcement_skipped` is true).
