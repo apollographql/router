@@ -20,3 +20,8 @@ type Bar implements Foo @tag(name: "test{symbol}") {
   bar2(arg: String @tag(name: "test{symbol}")): String
 }
 union Baz @tag(name: "test{symbol}") = Bar
+
+enum TestEnum @tag(name: "test{symbol}") {
+  VALUE1 @tag(name: "test{symbol}")
+  VALUE2
+}
