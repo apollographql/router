@@ -931,8 +931,8 @@ impl QueryPlanning {
             experimental_paths_limit,
             experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_timeout_in_seconds,
-            experimental_enable_cooperative_cancellation: experimental_enable_cooperative_cancellation
-                .unwrap_or_default(),
+            experimental_enable_cooperative_cancellation:
+                experimental_enable_cooperative_cancellation.unwrap_or_default(),
         }
     }
 }

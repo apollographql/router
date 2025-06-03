@@ -402,8 +402,7 @@ impl CachingQueryPlanner<QueryPlannerService> {
     }
 }
 
-impl<T: Clone + Send + 'static> Service<query_planner::CachingRequest>
-    for CachingQueryPlanner<T>
+impl<T: Clone + Send + 'static> Service<query_planner::CachingRequest> for CachingQueryPlanner<T>
 where
     T: Service<
             QueryPlannerRequest,
@@ -770,7 +769,8 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
-    use crate::configuration::{QueryPlanning, Supergraph};
+    use crate::configuration::QueryPlanning;
+    use crate::configuration::Supergraph;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -898,7 +898,10 @@ mod tests {
             type Error = MaybeBackPressureError<QueryPlannerError>;
             type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-            fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
                 task::Poll::Ready(Ok(()))
             }
 
@@ -910,14 +913,19 @@ mod tests {
             }
         }
 
-        let configuration = Configuration::builder().and_supergraph(Some(
-            Supergraph::builder().query_planning(
-                QueryPlanning::builder()
-                    .experimental_enable_cooperative_cancellation(true)
-                    .experimental_timeout_in_seconds(0.1)
-                    .build()
-            ).build()
-        )).build().expect("configuration is valid");
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_enable_cooperative_cancellation(true)
+                            .experimental_timeout_in_seconds(0.1)
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
@@ -928,8 +936,8 @@ mod tests {
             &configuration,
             IndexMap::default(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         let configuration = Configuration::default();
 
@@ -939,7 +947,7 @@ mod tests {
             &schema,
             &configuration,
         )
-            .unwrap();
+        .unwrap();
 
         let context = Context::new();
         context
