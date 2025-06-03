@@ -10,6 +10,7 @@ use static_assertions::assert_impl_all;
 
 use super::layers::query_analysis::ParsedDocument;
 use crate::Context;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
@@ -33,6 +34,7 @@ pub(crate) struct Request {
     pub(crate) document: ParsedDocument,
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    pub(crate) compute_job_type: ComputeJobType,
 }
 
 #[buildstructor::buildstructor]
@@ -47,6 +49,7 @@ impl Request {
         document: ParsedDocument,
         metadata: crate::plugins::authorization::CacheKeyMetadata,
         plan_options: PlanOptions,
+        compute_job_type: ComputeJobType,
     ) -> Request {
         Self {
             query,
@@ -54,6 +57,7 @@ impl Request {
             document,
             metadata,
             plan_options,
+            compute_job_type,
         }
     }
 }

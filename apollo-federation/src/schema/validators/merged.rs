@@ -28,6 +28,11 @@ use crate::utils::human_readable::human_readable_subgraph_names;
 // TODO: The code here largely duplicates logic that is in subgraph schema validation, except that
 // when it detects an error, it provides an error in terms of subgraph inputs (rather than what the
 // merged/supergraph schema). We could try to avoid that duplication in the future.
+// TODO: This code is currently unused. When it is eventually used, it will likely need to return
+// `CompositionError` (the `MultipleFederationErrors` might also need to be replace with
+// `Vec<CompositionError>`). This will likely require adding variants to the comp error and a way
+// to convert fed errors into comp errors (though, there are probably better ways to implement this
+// besides conversion from fed to comp errors).
 #[allow(dead_code)]
 pub(crate) fn validate_merged_schema(
     supergraph_schema: &ValidFederationSchema,
@@ -299,6 +304,9 @@ static APOLLO_COMPILER_REQUIRED_ARGUMENT_PATTERN: LazyLock<Regex> = LazyLock::ne
     .unwrap()
 });
 
+// TODO: This method is transtively not used. Once `validate_merged_schema` is used and transformed
+// to handle composition errors rather than (or in conjunction with) federation errors, this
+// function will need to be able to return either SubgraphErrors or composition errors.
 #[allow(clippy::too_many_arguments)]
 fn add_requires_error(
     requires_parent_field_pos: &ObjectFieldDefinitionPosition,
@@ -361,7 +369,6 @@ fn add_requires_error(
             application: requires_application.to_string(),
             message,
         }
-        .add_subgraph(subgraph_name.to_owned())
         .into(),
     );
     Ok(())
