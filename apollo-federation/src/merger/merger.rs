@@ -14,7 +14,6 @@ use apollo_compiler::validation::Valid;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -290,7 +289,7 @@ impl Merger {
 
         // We could be left with an enum type with no values, and that's invalid in graphQL
         if dest.get(self.merged.schema())?.values.is_empty() {
-            self.error_reporter.add_error(SingleFederationError::EmptyMergedEnumType {
+            self.error_reporter.add_error(CompositionError::EmptyMergedEnumType {
                 message: format!(
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
                     dest.type_name
@@ -362,7 +361,7 @@ impl Merger {
                 output_example,
             } if violates_intersection_requirement => {
                 self.report_mismatch_error_with_specifics(
-                    SingleFederationError::EnumValueMismatch {
+                    CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
                             &value_pos.type_name, input_example, output_example, &value_pos.value_name, &value_pos.type_name
@@ -455,7 +454,7 @@ impl Merger {
     // TODO: These error reporting functions are not yet fully implemented
     fn report_mismatch_error_with_specifics<T>(
         &mut self,
-        error: SingleFederationError,
+        error: CompositionError,
         sources: &Sources<T>,
         accessor: impl Fn(&Option<T>) -> &str,
     ) {
@@ -489,8 +488,8 @@ impl Merger {
 
         // Create the enhanced error with details
         let enhanced_error = match error {
-            SingleFederationError::EnumValueMismatch { message } => {
-                SingleFederationError::EnumValueMismatch {
+            CompositionError::EnumValueMismatch { message } => {
+                CompositionError::EnumValueMismatch {
                     message: format!("{}{}", message, details.join(" ")),
                 }
             }
