@@ -594,8 +594,7 @@ async fn test_intercept_subgraph_network_requests() {
 /// # Examples
 ///
 /// ```rust
-/// #[test]
-/// fn logs_are_captured() {
+/// fn test_logs_are_captured() {
 ///     let subscriber = tracing_test_subscriber();
 ///     let _guard = tracing::dispatcher::set_default(&subscriber);
 ///
@@ -615,6 +614,5 @@ async fn test_intercept_subgraph_network_requests() {
 #[cfg(test)]
 pub(crate) fn tracing_test_subscriber() -> tracing_core::Dispatch {
     let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, "apollo_router=trace");
-    subscriber
+    tracing_test::internal::get_subscriber(mock_writer, "apollo_router=trace")
 }
