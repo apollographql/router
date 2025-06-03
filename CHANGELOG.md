@@ -87,7 +87,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Disabling the health endpoint in 2.0 is now supported ([PR #7519](https://github.com/apollographql/router/pull/7519))
+### Support disabling the health check endpoint ([PR #7519](https://github.com/apollographql/router/pull/7519))
 
 During the development of Router 2.0, the health check endpoint support was converted to be a plugin. Unfortunately, the support for disabling the health check endpoint was lost during the conversion.
 
@@ -97,17 +97,17 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Propagate client name and version modifications through telemetry ([PR #7369](https://github.com/apollographql/router/pull/7369))
 
-The router accepts modifications to the client name and version (`apollo::telemetry::client_name` and `apollo::telemetry::client_version`), but those modifications are not currently propagated through the telemetry layers to update spans and traces.
+The Router accepts modifications to the client name and version (`apollo::telemetry::client_name` and `apollo::telemetry::client_version`), but those modifications were not propagated through the telemetry layers to update spans and traces.
 
-This PR moves where the client name and version are bound to the span, so that the modifications from plugins **on the `router` service** are propagated.
+After this change, the modifications from plugins **on the `router` service** are propagated through the telemetry layers.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7369
 
-### Fix bug where connectors errored when using a variable in a nested input argument ([PR #7472](https://github.com/apollographql/router/pull/7472))
+### Prevent connectors error when using a variable in a nested input argument ([PR #7472](https://github.com/apollographql/router/pull/7472))
 
-Fixed bug where connectors errored when using a variable in a nested input argument. The following example would error prior to this change:
+The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
-```
+```graphql
 query Query (: String){
     complexInputType(filters: { inSpace: true, search:  })
 }
@@ -119,7 +119,7 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
 
-The router currently sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). After this change, the router will only include the path (`/graphql`).
+Prior to this change, the Router sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). The Router will now only include the path (`/graphql`).
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7390
 
@@ -129,7 +129,7 @@ A recent change increased the log level of JWT authentication failures from `inf
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7396
 
-### Headers propagated with Router YAML config take precedence over headers from Connector directives ([PR #7499](https://github.com/apollographql/router/pull/7499))
+### Prefer headers propagated with Router YAML config over headers from Connector directives ([PR #7499](https://github.com/apollographql/router/pull/7499))
 
 When configuring the same header name in both `@connect(http: { headers: })` (or `@source(http: { headers: })`) in SDL and `propagate` in Router YAML configuration, the request had both headers, even if the value is the same. After this change, Router YAML configuration always wins.
 
@@ -139,8 +139,7 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 ### Add timeouts and connection health checks to Redis connections ([Issue #6855](https://github.com/apollographql/router/issues/6855))
 
-This PR updates the internal Redis configuration to improve client resiliency under various failure modes (TCP failures 
-and timeouts, unresponsive sockets, Redis server failures, etc.). It also adds heartbeats (a PING every 10 seconds) to the Redis clients.
+The Router's internal Redis configuration has been improved to increase client resiliency under various failure modes (TCP failures and timeouts, unresponsive sockets, Redis server failures, etc.). It also adds heartbeats (a PING every 10 seconds) to the Redis clients.
 
 By [@aembke](https://github.com/aembke), [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7526
 
@@ -148,16 +147,16 @@ By [@aembke](https://github.com/aembke), [@carodewig](https://github.com/carodew
 
 ### Fix coprocessor metrics documentation ([PR #7359](https://github.com/apollographql/router/pull/7359))
 
-The docs for standard metric instruments for [coprocessors](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#coprocessor) has been updated:
+The documentation for standard metric instruments for [coprocessors](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#coprocessor) has been updated:
 
 - Renamed `apollo.router.operations.coprocessor.total` to `apollo.router.operations.coprocessor`
 - Clarified that `coprocessor.succeeded` attribute applies to `apollo.router.operations.coprocessor` only.
 
 By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/7359
 
-### Rhai script examples for returning Demand Control metrics as response headers ([PR #7564](https://github.com/apollographql/router/pull/7564))
+### Add example Rhai script for returning Demand Control metrics as response headers ([PR #7564](https://github.com/apollographql/router/pull/7564))
 
-Added a new section to the [demand control documentation](https://www.apollographql.com/docs/graphos/routing/security/demand-control#accessing-programmatically) showing how to use Rhai scripts to expose cost estimation data in response headers. This allows clients to see the estimated cost, actual cost, and other demand control metrics directly in HTTP responses, which is useful for debugging and client-side optimization.
+A new section has been added to the [demand control documentation](https://www.apollographql.com/docs/graphos/routing/security/demand-control#accessing-programmatically) to demonstrate how to use Rhai scripts to expose cost estimation data in response headers. This allows clients to see the estimated cost, actual cost, and other demand control metrics directly in HTTP responses, which is useful for debugging and client-side optimization.
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/7564
 
