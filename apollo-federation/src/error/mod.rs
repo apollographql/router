@@ -760,6 +760,16 @@ impl MultipleFederationErrors {
         }
     }
 
+    pub(crate) fn and_try(mut self, other: Result<(), FederationError>) -> Self {
+        match other {
+            Ok(_) => self,
+            Err(e) => {
+                self.push(e);
+                self
+            }
+        }
+    }
+
     pub(crate) fn unwrap_subgraph_errors(self, expected_subgraph: &str) -> Self {
         Self {
             errors: self
