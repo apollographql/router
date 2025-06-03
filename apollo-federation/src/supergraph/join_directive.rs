@@ -11,12 +11,12 @@ use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
+use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::sources::connect::ConnectSpec;
 
 static JOIN_DIRECTIVE: &str = "join__directive";
 
