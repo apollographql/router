@@ -204,6 +204,10 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.keys()
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Version, &T)> {
+        self.definitions.iter()
+    }
+
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,

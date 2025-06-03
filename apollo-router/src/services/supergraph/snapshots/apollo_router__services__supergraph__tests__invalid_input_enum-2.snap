@@ -5,7 +5,7 @@ expression: response
 {
   "errors": [
     {
-      "message": "invalid type for variable: 'input'",
+      "message": "invalid variable `$input`: found JSON string for GraphQL type `InputEnum`",
       "extensions": {
         "name": "input",
         "code": "VALIDATION_INVALID_TYPE_VARIABLE"
