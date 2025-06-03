@@ -348,60 +348,60 @@ impl Merger {
         // So in particular, the value will be in the supergraph only if it is either an "output only" enum, or if the value is in all subgraphs.
         // Note that (like for input object fields), manually marking the value as @inaccessible let's use skips any check and add the value
         // regardless of inconsistencies.
-        if !is_inaccessible
-            && !matches!(usage, EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused)
+        let violates_intersection_requirement = !is_inaccessible
             && sources.values().any(|source| {
                 source
                     .as_ref()
                     .is_some_and(|enum_type| !enum_type.values.contains_key(&value_pos.value_name))
-            })
-        {
-            // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
-            // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
-            match usage {
-                EnumTypeUsage::Both {
-                    input_example,
-                    output_example,
-                } => {
-                    self.report_mismatch_error_with_specifics(
-                        SingleFederationError::EnumValueMismatch {
-                            message: format!(
-                                "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                                &value_pos.type_name, input_example, output_example, &value_pos.value_name, &value_pos.type_name
-                            ),
-                        },
-                        sources,
-                        |source| {
-                            source.as_ref().map_or("no", |enum_type| {
-                                if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
-                            })
-                        },
-                    );
-                }
-                EnumTypeUsage::Input { input_example } => {
-                    self.report_mismatch_hint(
-                        HintCode::InconsistentEnumValueForInputEnum,
-                        format!(
-                            "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
-                            &value_pos.value_name, &value_pos.type_name, &value_pos.type_name
+            });
+        // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
+        // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
+        match usage {
+            EnumTypeUsage::Both {
+                input_example,
+                output_example,
+            } if violates_intersection_requirement => {
+                self.report_mismatch_error_with_specifics(
+                    SingleFederationError::EnumValueMismatch {
+                        message: format!(
+                            "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
+                            &value_pos.type_name, input_example, output_example, &value_pos.value_name, &value_pos.type_name
                         ),
-                        sources,
-                        |source| {
-                            source.as_ref().map_or("no", |enum_type| {
-                                if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
-                            })
-                        },
-                    );
-                    value_pos.remove(&mut self.merged)?;
-                }
-                _ => bail!("Unexpected enum type usage"),
+                    },
+                    sources,
+                    |source| {
+                        source.as_ref().map_or("no", |enum_type| {
+                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        })
+                    },
+                );
             }
-        } else if matches!(usage, EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused) {
-            self.hint_on_inconsistent_output_enum_value(
-                sources,
-                &value_pos.type_name,
-                &value_pos.value_name,
-            );
+            EnumTypeUsage::Input { input_example } if violates_intersection_requirement => {
+                self.report_mismatch_hint(
+                    HintCode::InconsistentEnumValueForInputEnum,
+                    format!(
+                        "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
+                        &value_pos.value_name, &value_pos.type_name, &value_pos.type_name
+                    ),
+                    sources,
+                    |source| {
+                        source.as_ref().map_or("no", |enum_type| {
+                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        })
+                    },
+                );
+                value_pos.remove(&mut self.merged)?;
+            }
+            EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused => {
+                self.hint_on_inconsistent_output_enum_value(
+                    sources,
+                    &value_pos.type_name,
+                    &value_pos.value_name,
+                );
+            }
+            _ => {
+                // will get here if violates_intersection_requirement is false and usage is either Both or Input.
+            }
         }
         Ok(())
     }
