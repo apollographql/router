@@ -889,7 +889,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_zelda() {
+    async fn test_cooperative_cancellation_timeout() {
         #[derive(Clone)]
         struct SlowQueryPlanner;
 
