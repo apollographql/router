@@ -3,6 +3,7 @@ resolver = "2"
 default-members = ["apollo-router", "apollo-federation"]
 members = [
     "apollo-router",
+    "apollo-router-core",
     "apollo-router-benchmarks",
     "apollo-federation",
     "apollo-federation/cli",

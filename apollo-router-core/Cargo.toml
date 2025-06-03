@@ -1,0 +1,20 @@
+[package]
+name = "apollo-router-core"
+version = "0.1.0"
+authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
+repository = "https://github.com/apollographql/router-core/"
+documentation = "https://docs.rs/apollo-router-core"
+description = "A configurable, high-performance routing runtime for Apollo Federation 🚀"
+license = "Elastic-2.0"
+
+[dependencies]
+apollo-compiler = "1.28.0"
+tower = "0.5.2"
+thiserror = "2.0"
+apollo-federation = "2.3.0-rc.0"
+futures = "0.3"
+serde_json = "1.0"
+bytes = "1.10.1"
+http-body = "1.0.1"
+http = "1.3.1"
+http-body-util = "0.1.3"
