@@ -5,7 +5,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
-use crate::error::SingleFederationError;
+use crate::error::CompositionError;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -16,7 +16,7 @@ pub(crate) struct MergeResult {
     #[allow(dead_code)]
     pub(crate) supergraph: Option<Valid<Schema>>,
     #[allow(dead_code)]
-    pub(crate) errors: Vec<SingleFederationError>,
+    pub(crate) errors: Vec<CompositionError>,
     #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
 }
