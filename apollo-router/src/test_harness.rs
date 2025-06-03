@@ -586,3 +586,35 @@ async fn test_intercept_subgraph_network_requests() {
     }
     "###);
 }
+
+/// Create and return a `tracing` subscriber to be used in tests.
+///
+/// Prefer using this function over the `tracing_test::traced_test` macro.
+///
+/// # Examples
+///
+/// ```rust
+/// #[test]
+/// fn logs_are_captured() {
+///     let subscriber = tracing_test_subscriber();
+///     let _guard = tracing::dispatcher::set_default(&subscriber);
+///
+///     // explicit call, but this could also be a router call etc
+///     tracing::info!("hello world");
+///
+///     assert!(tracing_test::internal::logs_with_scope_contain("apollo_router", "hello world"));
+/// }
+/// ```
+///
+/// # Notes
+/// This relies on the internal implementation details of the `tracing_test` crate.
+///
+/// This is done to avoid using the public interface of `tracing_test` which installs a global
+/// subscriber; using the global subscriber breaks other tests in our stack which also insert a
+/// global subscriber.
+#[cfg(test)]
+pub(crate) fn tracing_test_subscriber() -> tracing_core::Dispatch {
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
+    let subscriber = tracing_test::internal::get_subscriber(mock_writer, "apollo_router=trace");
+    subscriber
+}
