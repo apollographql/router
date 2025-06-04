@@ -74,6 +74,7 @@ pub(crate) enum TelemetryDataKind {
 // The processing does the following:
 //  - If an endpoint is not specified, this results in `""`
 //  - If an endpoint is specified as "default", this results in `""`
+//  - If an endpoint has no scheme, we prepend "http://"
 //  - If an endpoint is not `""` and does not end in "/v1/<type>" or "/", then we append "/v1/<type>"
 //    (where type is either "metrics" or "traces")
 //
@@ -93,7 +94,7 @@ fn process_endpoint(
     };
 
     endpoint.as_ref().map_or(Ok("".to_string()), |v| {
-        let base = if v == "default" {
+        let mut base = if v == "default" {
             "".to_string()
         } else {
             v.to_string()
@@ -101,8 +102,13 @@ fn process_endpoint(
         if base.is_empty() || base.ends_with(kind_s) || base.ends_with("/") {
             Ok(base)
         } else {
+            // We require a scheme on our endpoint or we can't parse it as a Uri.
+            // If we don't have one, prepend with "http://"
+            if !base.starts_with("http") {
+                base = format!("http://{base}");
+            }
             let uri = http::Uri::try_from(&base)?;
-            // Note: If our endpoint is host:port, then the path will be "/".
+            // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
             // We already checked that our base does not end with "/", so we must append `kind_s`
             if uri.path() == "/" {
                 Ok(format!("{base}{kind_s}"))
@@ -325,6 +331,13 @@ mod tests {
         let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
         assert_eq!(endpoint, processed_endpoint);
 
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        assert_eq!(
+            Some("http://localhost:4317/v1/traces".to_string()),
+            processed_endpoint
+        );
+
         // Metrics
         let endpoint = None;
         let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
@@ -352,5 +365,12 @@ mod tests {
         let endpoint = Some("https://api.apm.com:433/metrics".to_string());
         let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
         assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        assert_eq!(
+            Some("http://localhost:4317/v1/metrics".to_string()),
+            processed_endpoint
+        );
     }
 }
