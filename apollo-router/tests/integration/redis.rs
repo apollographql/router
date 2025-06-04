@@ -48,11 +48,6 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
-#[cfg(target_os = "windows")]
-const PROCESS_EXECUTABLE_NAME: &str = "router.exe";
-#[cfg(not(target_os = "windows"))]
-const PROCESS_EXECUTABLE_NAME: &str = "router";
-
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
     if !graph_os_enabled() {

@@ -9,11 +9,6 @@ use crate::integration::common::graph_os_enabled;
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 
-#[cfg(target_os = "windows")]
-const PROCESS_EXECUTABLE_NAME: &str = "router.exe";
-#[cfg(not(target_os = "windows"))]
-const PROCESS_EXECUTABLE_NAME: &str = "router";
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
     if !graph_os_enabled() {
