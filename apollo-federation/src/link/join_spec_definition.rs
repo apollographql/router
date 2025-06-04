@@ -435,7 +435,7 @@ impl JoinSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments: vec![Node::new(Argument {
-                name: name!(JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC),
+                name: JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
                 value: Node::new(Value::Enum(subgraph_name.clone())),
             })],
         })
