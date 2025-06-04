@@ -117,14 +117,18 @@ pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
     Introspection,
+    QueryParsingWarmup,
+    QueryPlanningWarmup,
 }
 
 impl From<ComputeJobType> for Priority {
     fn from(job_type: ComputeJobType) -> Self {
         match job_type {
-            ComputeJobType::QueryPlanning => Self::P8, // high
-            ComputeJobType::QueryParsing => Self::P4,  // medium
-            ComputeJobType::Introspection => Self::P1, // low
+            ComputeJobType::QueryPlanning => Self::P8,       // high
+            ComputeJobType::QueryParsing => Self::P4,        // medium
+            ComputeJobType::Introspection => Self::P3,       // low
+            ComputeJobType::QueryParsingWarmup => Self::P1,  // low
+            ComputeJobType::QueryPlanningWarmup => Self::P2, // low
         }
     }
 }
@@ -318,14 +322,23 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
 
-    #[tokio::test]
-    async fn test_observability() {
-        // make sure that the queue has been initialized by calling `execute`. if this
-        // step is skipped, the queue will _sometimes_ be initialized in the step below,
-        // which causes an additional log line and a snapshot mismatch.
+    /// Send a request to the compute queue to make sure it is initialized.
+    ///
+    /// The queue is (a) wrapped in a `OnceLock`, so it is shared between tests, and (b) only
+    /// initialized after receiving and processing a request.
+    /// These two properties can lead to inconsistent behavior.
+    async fn ensure_queue_is_initialized() {
         execute(ComputeJobType::Introspection, |_| {})
             .unwrap()
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_observability() {
+        // make sure that the queue has been initialized - if this step is skipped, the
+        // queue will _sometimes_ be initialized in the step below, which causes an
+        // additional log line and a snapshot mismatch.
+        ensure_queue_is_initialized().await;
 
         async {
             let span = info_span!("test_observability");
@@ -398,5 +411,48 @@ mod tests {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
         };
+    }
+
+    #[tokio::test]
+    async fn test_relative_priorities() {
+        let pool_size = thread_pool_size();
+        ensure_queue_is_initialized().await;
+
+        let start = Instant::now();
+
+        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
+        // low priority requests.
+        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
+        // before the high priority requests, since the workers would start on the low priority
+        // requests immediately.
+        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
+        // low priority requests to complete before the high priority request.
+        let low_priority_handles: Vec<_> = (0..pool_size * 2 - 1)
+            .map(|_| {
+                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
+                    let inner_start = start;
+                    std::thread::sleep(Duration::from_millis(10));
+                    inner_start.elapsed()
+                })
+                .unwrap()
+            })
+            .collect();
+        let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
+            let inner_start = start;
+            std::thread::sleep(Duration::from_millis(5));
+            inner_start.elapsed()
+        })
+        .unwrap();
+
+        let low_priority_durations =
+            futures::future::join_all(low_priority_handles.into_iter()).await;
+        let high_priority_duration = high_priority_handle.await;
+
+        let low_before_high_count = low_priority_durations
+            .iter()
+            .filter(|d| d < &&high_priority_duration)
+            .count();
+
+        assert!(low_before_high_count <= pool_size);
     }
 }

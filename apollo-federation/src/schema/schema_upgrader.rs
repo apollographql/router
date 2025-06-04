@@ -19,6 +19,7 @@ use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -160,7 +161,9 @@ impl SchemaUpgrader {
 
         let upgraded_subgraph =
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
-                .assume_expanded()?
+                // This error will be wrapped up as a SubgraphError in `Self::upgrade`
+                .assume_expanded()
+                .map_err(|err| err.error)?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
     }
@@ -952,7 +955,7 @@ impl SchemaUpgrader {
 // However, those messages were never used, so we have omitted them here.
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Upgraded>>, Vec<FederationError>> {
+) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
@@ -963,7 +966,7 @@ pub fn upgrade_subgraphs_if_necessary(
 
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
-    let mut errors: Vec<FederationError> = vec![];
+    let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
     let upgraded_subgraphs: Vec<Subgraph<Upgraded>> = subgraphs
         .into_iter()
@@ -1004,12 +1007,14 @@ pub fn upgrade_subgraphs_if_necessary(
 
         let interface_object_subgraphs = format_subgraph_names(subgraphs_using_interface_object);
         let fed_v1_subgraphs = format_subgraph_names(fed_1_subgraphs);
-        return Err(vec![SingleFederationError::InterfaceObjectUsageError {
-            message: format!("The @interfaceObject directive can only be used if all subgraphs have \
+        return Err(vec![CompositionError::InterfaceObjectUsageError {
+            message: format!(
+                "The @interfaceObject directive can only be used if all subgraphs have \
             federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" \
             version 2.0 or newer): @interfaceObject is used in {interface_object_subgraphs} but \
-            {fed_v1_subgraphs} is not a federation 2 subgraph schema.")
-        }.into()]);
+            {fed_v1_subgraphs} is not a federation 2 subgraph schema."
+            ),
+        }]);
     }
     Ok(upgraded_subgraphs)
 }
@@ -1083,7 +1088,7 @@ mod tests {
             upc: ID!
             name: String
             description: String
-            }            
+            }
         "#,
         )
         .expect("parses schema")
@@ -1118,7 +1123,7 @@ mod tests {
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
         directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-        
+
         directive @override(from: String!) on FIELD_DEFINITION
 
         directive @composeDirective(name: String!) repeatable on SCHEMA
@@ -1190,7 +1195,7 @@ mod tests {
             type A @key(fields: id) @key(fields: ["id", "x"]) {
                 id: String
                 x: Int
-            }  
+            }
         "#,
         )
         .expect("parses schema")
@@ -1515,7 +1520,7 @@ mod tests {
 
             type Subscription {
                 update: String!
-            }   
+            }
         "#,
         )
         .expect("parses schema")

@@ -181,7 +181,7 @@ impl GrpcExporter {
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
-        let domain_name = match (&self.domain_name, endpoint) {
+        match (&self.domain_name, endpoint) {
             // If the URL contains the https scheme then default the tls config to use the domain from the URL. We know it's TLS.
             // If the URL contains no scheme and the port is 443 emit a warning suggesting that they may have forgotten to configure TLS domain.
             (Some(domain), _) => Some(domain.as_str()),
@@ -193,8 +193,7 @@ impl GrpcExporter {
                 None
             }
             _ => None,
-        };
-        domain_name
+        }
     }
 }
 

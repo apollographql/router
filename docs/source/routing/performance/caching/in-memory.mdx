@@ -72,7 +72,7 @@ To get more information on the planning and warm-up process use the following me
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
-  * `apollo.router.schema.loading.time`: time spent loading a schema
+  * `apollo.router.schema.load.duration`: time spent loading a schema
   * `apollo.router.cache.hit.time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
   * `apollo.router.cache.miss.time{kind="query planner", storage="<storage>"}`
 
@@ -81,7 +81,7 @@ To get more information on the planning and warm-up process use the following me
   * `apollo.router.cache.storage.estimated_size{kind="query planner", storage="memory"}`: estimated storage size of the cache (only for in-memory query planner cache)
 
 Typically, we would look at `apollo.router.cache.size` and the cache hit rate to define the right size of the in memory cache,
-then look at `apollo.router.schema.loading.time` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.
+then look at `apollo.router.schema.load.duration` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.
 
 #### Cache warm-up with distributed caching
 

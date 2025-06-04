@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/all_fields_selected_repro.graphql
+---
+[
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Cart.items`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            13:3..13:19,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Variant.id`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            17:3..17:10,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Variant.price`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            18:3..18:27,
+        ],
+    },
+    Message {
+        code: MissingEntityConnector,
+        message: "Entity resolution for `@key(fields: \"userId\")` on `Cart` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
+        locations: [
+            11:11..11:33,
+        ],
+    },
+]

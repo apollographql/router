@@ -839,14 +839,7 @@ impl Verifier for OtlpTraceSpec<'_> {
                     bytes::Bytes::copy_from_slice(&r.body),
                 ) {
                     Ok(trace) => {
-                        match serde_json::to_value(trace) {
-                            Ok(trace) => {
-                                Some(trace)
-                            }
-                            Err(_) => {
-                                None
-                            }
-                        }
+                        serde_json::to_value(trace).ok()
                     }
                     Err(_) => {
                         None
