@@ -1,0 +1,59 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/request_headers.graphql
+---
+[
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)`: array values aren't valid here",
+        locations: [
+            5:101..5:111,
+            5:101..5:111,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.failOnArray`: array values aren't valid here",
+        locations: [
+            28:68..28:78,
+            28:68..28:78,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.failOnArray`: array values aren't valid here",
+        locations: [
+            27:61..27:71,
+            27:61..27:71,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
+        locations: [
+            36:60..36:61,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
+        locations: [
+            35:53..35:54,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.failOnInvalidObject`: object values aren't valid here",
+        locations: [
+            44:60..44:67,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidObject`: object values aren't valid here",
+        locations: [
+            43:53..43:60,
+        ],
+    },
+]

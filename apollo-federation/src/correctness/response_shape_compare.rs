@@ -103,7 +103,7 @@ pub fn compare_response_shapes(
 /// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
 /// type conditions in `other`.
 /// - `assumption`: Boolean literals that are assumed to be true. This may affect the
-///                 interpretation of the `this` and `other` response shapes.
+///   interpretation of the `this` and `other` response shapes.
 pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
     path_constraint: &T,
     assumption: &Clause,

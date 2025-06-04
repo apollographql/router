@@ -1191,47 +1191,41 @@ impl Telemetry {
         custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
-        let res = match result {
-            Ok(response) => {
-                let ctx = context.clone();
-                // Wait for the first response of the stream
-                let (parts, stream) = response.response.into_parts();
-                let config_cloned = config.clone();
-                let stream = stream.inspect(move |resp| {
-                    let has_errors = !resp.errors.is_empty();
-                    // Useful for selector in spans/instruments/events
-                    ctx.insert_json_value(
-                        CONTAINS_GRAPHQL_ERROR,
-                        serde_json_bytes::Value::Bool(has_errors),
-                    );
-                    let span = Span::current();
-                    span.set_span_dyn_attributes(
-                        config_cloned
-                            .instrumentation
-                            .spans
-                            .supergraph
-                            .attributes
-                            .on_response_event(resp, &ctx),
-                    );
-                    custom_instruments.on_response_event(resp, &ctx);
-                    custom_events.on_response_event(resp, &ctx);
-                    custom_graphql_instruments.on_response_event(resp, &ctx);
-                });
-                let (first_response, rest) = StreamExt::into_future(stream).await;
+        let response = result?;
+        let ctx = context.clone();
+        // Wait for the first response of the stream
+        let (parts, stream) = response.response.into_parts();
+        let config_cloned = config.clone();
+        let stream = stream.inspect(move |resp| {
+            let has_errors = !resp.errors.is_empty();
+            // Useful for selector in spans/instruments/events
+            ctx.insert_json_value(
+                CONTAINS_GRAPHQL_ERROR,
+                serde_json_bytes::Value::Bool(has_errors),
+            );
+            let span = Span::current();
+            span.set_span_dyn_attributes(
+                config_cloned
+                    .instrumentation
+                    .spans
+                    .supergraph
+                    .attributes
+                    .on_response_event(resp, &ctx),
+            );
+            custom_instruments.on_response_event(resp, &ctx);
+            custom_events.on_response_event(resp, &ctx);
+            custom_graphql_instruments.on_response_event(resp, &ctx);
+        });
+        let (first_response, rest) = StreamExt::into_future(stream).await;
 
-                let response = http::Response::from_parts(
-                    parts,
-                    once(ready(first_response.unwrap_or_default()))
-                        .chain(rest)
-                        .boxed(),
-                );
+        let response = http::Response::from_parts(
+            parts,
+            once(ready(first_response.unwrap_or_default()))
+                .chain(rest)
+                .boxed(),
+        );
 
-                Ok(SupergraphResponse { context, response })
-            }
-            Err(err) => Err(err),
-        };
-
-        res
+        Ok(SupergraphResponse { context, response })
     }
 
     fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
