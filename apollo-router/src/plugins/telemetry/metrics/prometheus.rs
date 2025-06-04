@@ -128,7 +128,13 @@ impl MetricsConfigurator for Config {
                     .record_min_max(true)
                     .build(),
             )
-            .with_resource_selector(ResourceSelector::All)
+            .with_resource_selector(ResourceSelector::KeyAllowList(
+                metrics_config
+                    .resource
+                    .keys()
+                    .map(|k| k.clone().into())
+                    .collect(),
+            ))
             .with_registry(registry.clone())
             .build()?;
 

@@ -64,17 +64,11 @@ async fn test_metrics_reloading() {
 
     check_metrics_contains(
         &metrics,
-        &format!(
-            r#"apollo_router_cache_hit_time_count{{kind="query planner",storage="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 4"#,
-            std::env!("CARGO_PKG_VERSION")
-        ),
+        r#"apollo_router_cache_hit_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
     );
     check_metrics_contains(
         &metrics,
-        &format!(
-            r#"apollo_router_cache_miss_time_count{{kind="query planner",storage="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 2"#,
-            std::env!("CARGO_PKG_VERSION")
-        ),
+        r#"apollo_router_cache_miss_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
     check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
     check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
@@ -85,10 +79,10 @@ async fn test_metrics_reloading() {
 
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
         router.assert_metrics_contains_multiple(vec![
-                &format!(r#"apollo_router_telemetry_studio_reports_total{{report_type="metrics",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 2"#, std::env!("CARGO_PKG_VERSION")),
-                &format!(r#"apollo_router_telemetry_studio_reports_total{{report_type="traces",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 2"#, std::env!("CARGO_PKG_VERSION")),
-                &format!(r#"apollo_router_uplink_fetch_duration_seconds_count{{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}}"#, std::env!("CARGO_PKG_VERSION")),
-                &format!(r#"apollo_router_uplink_fetch_count_total{{query="License",status="success",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}}"#, std::env!("CARGO_PKG_VERSION"))
+            r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
+            r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
+            r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
+            r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
             ], Some(Duration::from_secs(10)))
             .await;
     }
@@ -139,7 +133,7 @@ async fn test_subgraph_auth_metrics() {
                 .unwrap()
     );
 
-    router.assert_metrics_contains(&format!(r#"apollo_router_operations_authentication_aws_sigv4_total{{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 2"#, std::env!("CARGO_PKG_VERSION")), None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -159,7 +153,7 @@ async fn test_metrics_bad_query() {
     router
         .execute_query(Query::default().with_bad_query())
         .await;
-    router.assert_metrics_contains(&format!(r#"apollo_router_operations_total{{http_response_status_code="400",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_total{http_response_status_code="400",otel_scope_name="apollo/router"} 1"#, None).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -178,7 +172,7 @@ async fn test_bad_queries() {
     router.execute_default_query().await;
     router
         .assert_metrics_contains(
-            &format!(r#"http_server_request_duration_seconds_count{{http_request_method="POST",status="200",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -193,7 +187,7 @@ async fn test_bad_queries() {
 
     router
             .assert_metrics_contains(
-                &format!(r#"http_server_request_duration_seconds_count{{error_type="Unsupported Media Type",http_request_method="POST",status="415",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+                r#"http_server_request_duration_seconds_count{error_type="Unsupported Media Type",http_request_method="POST",status="415",otel_scope_name="apollo/router"} 1"#,
                 None,
             )
             .await;
@@ -203,7 +197,7 @@ async fn test_bad_queries() {
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"http_server_request_duration_seconds_count{{error_type="Bad Request",http_request_method="POST",status="400",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"http_server_request_duration_seconds_count{error_type="Bad Request",http_request_method="POST",status="400",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -213,7 +207,7 @@ async fn test_bad_queries() {
         .await;
     router
         .assert_metrics_contains(
-           &format!( r#"http_server_request_duration_seconds_count{{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+           r#"http_server_request_duration_seconds_count{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -243,57 +237,57 @@ async fn test_graphql_metrics() {
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"my_custom_router_instrument_total{{my_response_body="{{\"data\":{{\"topProducts\":[{{\"name\":\"Table\"}},{{\"name\":\"Couch\"}},{{\"name\":\"Chair\"}}]}}}}",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"my_custom_router_instrument_total{my_response_body="{\"data\":{\"topProducts\":[{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"oplimits_aliases_sum{{otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 0"#, std::env!("CARGO_PKG_VERSION")),
+            r#"oplimits_aliases_sum{otel_scope_name="apollo/router"} 0"#,
             None,
         )
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"oplimits_root_fields_sum{{otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"oplimits_root_fields_sum{otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"oplimits_depth_sum{{otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 2"#, std::env!("CARGO_PKG_VERSION")),
+            r#"oplimits_depth_sum{otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
     router
-            .assert_metrics_contains(&format!(r#"graphql_field_list_length_sum{{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 3"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-            .assert_metrics_contains(&format!(r#"graphql_field_list_length_bucket{{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}",le="5"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-            .assert_metrics_contains(&format!(r#"graphql_field_execution_total{{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 3"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-            .assert_metrics_contains(&format!(r#"graphql_field_execution_total{{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-            .assert_metrics_contains(&format!(r#"custom_counter_total{{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 3"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-            .assert_metrics_contains(&format!(r#"custom_histogram_sum{{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 3"#, std::env!("CARGO_PKG_VERSION")), None)
-            .await;
-    router
-        .assert_metrics_contains(&format!(r#"apollo_router_compute_jobs_duration_seconds_count{{job_outcome="executed_ok",job_type="query_parsing",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
+        .assert_metrics_contains(r#"graphql_field_list_length_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
         .await;
     router
-        .assert_metrics_contains(&format!(r#"apollo_router_compute_jobs_duration_seconds_count{{job_outcome="executed_ok",job_type="query_planning",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
+        .assert_metrics_contains(r#"graphql_field_list_length_bucket{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",le="5"} 1"#, None)
         .await;
     router
-        .assert_metrics_contains(&format!(r#"apollo_router_compute_jobs_queue_wait_duration_seconds_count{{job_type="query_parsing",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
+        .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
         .await;
     router
-        .assert_metrics_contains(&format!(r#"apollo_router_compute_jobs_execution_duration_seconds_count{{job_type="query_planning",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
+        .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"custom_counter_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_seconds_count{job_outcome="executed_ok",job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_seconds_count{job_outcome="executed_ok",job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_queue_wait_duration_seconds_count{job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_execution_duration_seconds_count{job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
         .await;
 }
 
@@ -328,41 +322,41 @@ async fn test_gauges_on_reload() {
         .await;
 
     router
-        .assert_metrics_contains(&format!(r#"apollo_router_cache_storage_estimated_size{{kind="query planner",type="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} "#, std::env!("CARGO_PKG_VERSION")), None)
+        .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_cache_size{{kind="APQ",type="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_cache_size{{kind="query planner",type="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
     router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_cache_size{{kind="introspection",type="memory",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")),
-            None,
-        )
-        .await;
-
-    router
-        .assert_metrics_contains(&format!(r#"apollo_router_pipelines{{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 1"#, std::env!("CARGO_PKG_VERSION")), None)
-        .await;
-
-    router
-        .assert_metrics_contains(
-            &format!(r#"apollo_router_compute_jobs_queued{{otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 0"#, std::env!("CARGO_PKG_VERSION")),
+            r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
 
     router
+        .assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+
+    router
         .assert_metrics_contains(
-            &format!(r#"apollo_router_compute_jobs_active_jobs{{job_type="query_parsing",otel_scope_name="apollo/router",process_executable_name="{PROCESS_EXECUTABLE_NAME}",service_name="unknown_service:{PROCESS_EXECUTABLE_NAME}",service_version="{}"}} 0"#, std::env!("CARGO_PKG_VERSION")),
+            r#"apollo_router_compute_jobs_queued{otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_compute_jobs_active_jobs{job_type="query_parsing",otel_scope_name="apollo/router"} 0"#,
             None,
         )
         .await;
