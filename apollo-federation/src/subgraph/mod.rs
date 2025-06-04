@@ -420,6 +420,7 @@ pub mod test_utils {
         };
         subgraph.expand_links()
     }
+    
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
         build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
     }
