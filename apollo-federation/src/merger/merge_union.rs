@@ -54,23 +54,16 @@ impl Merger {
         dest: &UnionTypeDefinitionPosition,
         member_name: &ComponentName,
     ) -> Result<(), FederationError> {
-        // Check if this join spec version supports @join__unionMember (added in v0.3)
-        if *self.join_spec_definition.version()
-            < (crate::link::spec::Version { major: 0, minor: 3 })
-        {
-            return Ok(());
-        }
-
         // Add @join__unionMember directive for each subgraph that has this member
         for (&idx, source) in sources.iter() {
             if let Some(union_type) = source {
                 if union_type.members.contains(member_name) {
                     // Get the join spec name for this subgraph
-                    let join_spec_name = self.join_spec_name(idx)?;
+                    let name_in_join_spec = self.join_spec_name(idx)?;
 
                     let directive = self.join_spec_definition.union_member_directive(
                         &self.merged,
-                        join_spec_name,
+                        name_in_join_spec,
                         member_name.as_ref(),
                     )?;
 
