@@ -174,7 +174,7 @@ impl Invalidation {
                 InvalidationRequest::Subgraph { subgraph }
                 | InvalidationRequest::Type { subgraph, .. }
                 | InvalidationRequest::Entity { subgraph, .. } => {
-                    match self.storage.get(&subgraph) {
+                    match self.storage.get(subgraph) {
                         Some(s) => vec![s],
                         None => continue,
                     }
@@ -182,7 +182,7 @@ impl Invalidation {
                 InvalidationRequest::CacheKey { subgraphs, .. } => {
                     let mut storages = Vec::new();
                     for subgraph in subgraphs {
-                        match self.storage.get(&subgraph) {
+                        match self.storage.get(subgraph) {
                             Some(s) => storages.push(s),
                             None => continue,
                         }
@@ -235,7 +235,7 @@ impl Invalidation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
         subgraph: String,
