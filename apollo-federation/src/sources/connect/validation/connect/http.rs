@@ -85,11 +85,13 @@ impl<'schema> Http<'schema> {
                 schema,
             ))
             .map_err(|nested| nested.into_iter().flatten().collect())
-            .map(|(body, headers, transport)| Some(Self {
-                body,
-                headers,
-                transport,
-            }))
+            .map(|(body, headers, transport)| {
+                Some(Self {
+                    body,
+                    headers,
+                    transport,
+                })
+            })
     }
 
     /// Type-check the `@connect(http:)` directive.
