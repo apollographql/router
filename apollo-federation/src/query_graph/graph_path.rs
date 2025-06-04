@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic;
 
 use apollo_compiler::Name;
@@ -353,17 +354,21 @@ where
     dead_ends: TDeadEnds,
 }
 
-#[allow(dead_code)]
 pub(crate) struct UnadvanceableClosures(Vec<UnadvanceableClosure>);
 
 impl From<UnadvanceableClosures> for () {
     fn from(_: UnadvanceableClosures) -> Self {}
 }
 
-pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Unadvanceables>;
+type UnadvanceableClosure = Arc<
+    LazyLock<
+        Result<Unadvanceables, FederationError>,
+        Box<dyn FnOnce() -> Result<Unadvanceables, FederationError> + Send + Sync>,
+    >,
+>;
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct Unadvanceables(Vec<Unadvanceable>);
+pub(crate) struct Unadvanceables(Vec<Arc<Unadvanceable>>);
 
 impl Display for Unadvanceables {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -386,8 +391,32 @@ impl Unadvanceables {
         self.0.is_empty()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Unadvanceable> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Arc<Unadvanceable>> {
         self.0.iter()
+    }
+}
+
+impl TryFrom<UnadvanceableClosure> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosure) -> Result<Self, Self::Error> {
+        (*value).clone()
+    }
+}
+
+impl TryFrom<UnadvanceableClosures> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosures) -> Result<Self, Self::Error> {
+        Ok(Unadvanceables(
+            value
+                .0
+                .into_iter()
+                .map(|closure| (*closure).clone())
+                .process_results(|iter| {
+                    iter.flat_map(|unadvanceables| unadvanceables.0).collect()
+                })?,
+        ))
     }
 }
 
@@ -764,7 +793,7 @@ where
 
         if matches!(
             edge_weight.transition,
-            QueryGraphEdgeTransition::KeyResolution { .. }
+            QueryGraphEdgeTransition::KeyResolution
         ) {
             // We're adding a `@key` edge. If the last edge to that point is an `@interfaceObject`
             // fake downcast, and if our destination type is not an `@interfaceObject` itself, then

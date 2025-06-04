@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use apollo_federation::sources::connect::ApplyToError;
+use apollo_federation::connectors::ApplyToError;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;

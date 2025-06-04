@@ -233,7 +233,7 @@ fn generate_event_stream(
 ) -> impl Stream<Item = Event> {
     let reload_source = ReloadSource::default();
 
-    let stream = stream::select_all(vec![
+    stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
@@ -255,8 +255,7 @@ fn generate_event_stream(
     .take_while(|msg| future::ready(!matches!(msg, Event::Shutdown)))
     // Chain is required so that the final shutdown message is sent.
     .chain(stream::iter(vec![Event::Shutdown]))
-    .boxed();
-    stream
+    .boxed()
 }
 
 #[cfg(test)]
@@ -412,7 +411,7 @@ mod tests {
 
         // let's push a valid configuration to the state machine, so it can start up
         router_handle
-            .send_event(UpdateConfiguration(configuration))
+            .send_event(UpdateConfiguration(Arc::new(configuration)))
             .await
             .unwrap();
         router_handle
@@ -455,10 +454,10 @@ mod tests {
         let mut router_handle = TestRouterHttpServer::new();
         // let's push a valid configuration to the state machine, so it can start up
         router_handle
-            .send_event(UpdateConfiguration(
+            .send_event(UpdateConfiguration(Arc::new(
                 Configuration::from_str(include_str!("../testdata/supergraph_config.router.yaml"))
                     .unwrap(),
-            ))
+            )))
             .await
             .unwrap();
         router_handle

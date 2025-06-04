@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -348,7 +348,7 @@ impl tower::Service<Request> for ConnectorRequestService {
         });
 
         Box::pin(async move {
-            let mut debug_request: Option<ConnectorDebugHttpRequest> = None;
+            let mut debug_request: Option<Box<ConnectorDebugHttpRequest>> = None;
             let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                 Err(Error::RequestLimitExceeded)
             } else {

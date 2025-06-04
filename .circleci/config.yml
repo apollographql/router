@@ -53,7 +53,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "15.4.0"
-    resource_class: macos.m1.large.gen1
+    resource_class: m2pro.large
     environment:
       MISE_ENV: ci,ci-mac
   macos_test: &macos_test_executor
@@ -62,7 +62,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "15.4.0"
-    resource_class: macos.m1.large.gen1
+    resource_class: m2pro.large
     environment:
       MISE_ENV: ci,ci-mac
   windows_build: &windows_build_executor
@@ -92,6 +92,9 @@ parameters:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   nightly:
+    type: boolean
+    default: false
+  coverage:
     type: boolean
     default: false
   # quick_nightly will skip testing and only build the release artifacts.
@@ -408,6 +411,25 @@ commands:
   # fuzz_build:
   #   steps:
   #     - run: cargo +nightly fuzz build
+  do_coverage:
+    parameters:
+      variant:
+        type: string
+        default: "default"
+    steps:
+      - run:
+          name: Run coverage
+          environment:
+            # Use the settings from the "ci" profile in nextest configuration.
+            NEXTEST_PROFILE: ci
+          command: cargo llvm-cov nextest --ignore-run-fail --codecov --output-path codecov_report.json
+      - run:
+          name: Upload coverage report
+          command: |
+            # Upload the coverage report to Codecov.
+            codecov-cli --auto-load-params-from CircleCI upload-process --file ./codecov_report.json --token "${CODECOV_TOKEN}"
+      - store_artifacts:
+          path: ./codecov_report.json
 
 jobs:
   lint:
@@ -462,6 +484,9 @@ jobs:
       fuzz:
         type: boolean
         default: false
+      coverage:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -476,6 +501,18 @@ jobs:
       #         - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
       #     steps:
       #       - fuzz_build
+  coverage:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - do_coverage
 
   test_updated:
     environment:
@@ -915,7 +952,6 @@ workflows:
             parameters:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
-
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
@@ -928,6 +964,14 @@ workflows:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+  coverage_only:
+    when: << pipeline.parameters.coverage >>
+    jobs:
+      - coverage:
+          matrix:
+            parameters:
+              platform:
+                [ macos_test ]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -950,9 +994,15 @@ workflows:
             parameters:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+      - coverage:
+          matrix:
+            parameters:
+              platform:
+                [ macos_test ]
       - build_release:
           requires:
             - test
+            - coverage
             - check_helm
             - check_compliance
           nightly: true

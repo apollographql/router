@@ -16,6 +16,7 @@ use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -321,6 +322,56 @@ impl QueryGraphEdgeTransition {
             QueryGraphEdgeTransition::SubgraphEnteringTransition => false,
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => true,
         }
+    }
+
+    pub(crate) fn matches_supergraph_transition(
+        &self,
+        other: &Self,
+    ) -> Result<bool, FederationError> {
+        Ok(match self {
+            QueryGraphEdgeTransition::FieldCollection {
+                field_definition_position,
+                ..
+            } => {
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position: other_field_definition_position,
+                    ..
+                } = other
+                else {
+                    return Ok(false);
+                };
+                field_definition_position.field_name()
+                    == other_field_definition_position.field_name()
+            }
+            QueryGraphEdgeTransition::Downcast {
+                to_type_position, ..
+            } => {
+                let QueryGraphEdgeTransition::Downcast {
+                    to_type_position: other_to_type_position,
+                    ..
+                } = other
+                else {
+                    return Ok(false);
+                };
+                to_type_position.type_name() == other_to_type_position.type_name()
+            }
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
+                let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
+                    to_type_name: other_to_type_name,
+                    ..
+                } = other
+                else {
+                    return Ok(false);
+                };
+                to_type_name == other_to_type_name
+            }
+            _ => {
+                bail!(
+                    "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
+                    other,
+                );
+            }
+        })
     }
 }
 

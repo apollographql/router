@@ -34,11 +34,7 @@ fuzz_target!(|data: &[u8]| {
     debug!("========================");
     debug!("======= RESPONSE =======");
     if router_response.is_ok() != gateway_response.is_ok() {
-        let router_error = if let Err(err) = &router_response {
-            Some(err)
-        } else {
-            None
-        };
+        let router_error = router_response.as_ref().err();
         let gateway_error = if let Err(err) = &gateway_response {
             if err.is_decode() {
                 return;
