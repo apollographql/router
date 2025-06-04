@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/batch/batch_nested_keys.graphql
+---
+[
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `A.c`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            23:3..23:9,
+        ],
+    },
+    Message {
+        code: ConnectorsBatchKeyNotInSelection,
+        message: "The `@connect` directive on `T` specifies a `$batch` entity resolver, but the field `c` could not be found in `@connect(selection: ...)`",
+        locations: [
+            12:4..12:11,
+        ],
+    },
+]

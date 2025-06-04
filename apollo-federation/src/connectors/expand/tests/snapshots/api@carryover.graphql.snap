@@ -1,0 +1,48 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryover.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  ts: [T]
+  t(id: ID): T
+  z: Z
+}
+
+type R {
+  id: ID!
+}
+
+type T {
+  id: ID!
+  tagged: TEnum
+  custom: String
+  authenticated: String
+  requiresScopes: String
+  policy: String
+  overridden: String
+  r: R
+}
+
+type X {
+  id: ID!
+  w: String
+}
+
+type Z {
+  id: ID!
+  y: String
+  x: X
+}
+
+enum TEnum {
+  ONE
+  TWO
+}
+
+input UnusedInput {
+  one: String
+  two: TEnum
+}

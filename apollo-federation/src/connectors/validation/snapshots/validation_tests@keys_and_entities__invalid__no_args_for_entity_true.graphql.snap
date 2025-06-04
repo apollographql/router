@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/no_args_for_entity_true.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`Query.product` must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/entity-rules",
+        locations: [
+            10:7..10:19,
+        ],
+    },
+]

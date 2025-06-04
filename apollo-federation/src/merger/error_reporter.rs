@@ -1,8 +1,10 @@
-use crate::error::SingleFederationError;
+use crate::error::CompositionError;
+use crate::error::FederationError;
+use crate::subgraph::SubgraphError;
 use crate::supergraph::CompositionHint;
 
 pub(crate) struct ErrorReporter {
-    errors: Vec<SingleFederationError>,
+    errors: Vec<CompositionError>,
     hints: Vec<CompositionHint>,
 }
 
@@ -15,7 +17,17 @@ impl ErrorReporter {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn add_error(&mut self, error: SingleFederationError) {
+    pub(crate) fn add_subgraph_error(&mut self, name: &str, error: impl Into<FederationError>) {
+        let error = error.into();
+        let error = SubgraphError {
+            subgraph: name.into(),
+            error,
+        };
+        self.errors.push(error.into());
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn add_error(&mut self, error: CompositionError) {
         self.errors.push(error);
     }
 
@@ -28,9 +40,7 @@ impl ErrorReporter {
         !self.errors.is_empty()
     }
 
-    pub(crate) fn into_errors_and_hints(
-        self,
-    ) -> (Vec<SingleFederationError>, Vec<CompositionHint>) {
+    pub(crate) fn into_errors_and_hints(self) -> (Vec<CompositionError>, Vec<CompositionHint>) {
         (self.errors, self.hints)
     }
 }

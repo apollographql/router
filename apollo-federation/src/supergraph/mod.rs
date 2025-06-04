@@ -1933,8 +1933,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
         }
 
         // Ignore non-object/interface types.
-        let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-        else {
+        let Ok(type_pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos) else {
             continue;
         };
 

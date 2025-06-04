@@ -140,7 +140,7 @@ impl Identity {
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Version {
     /// The major number part of the version.
     pub major: u32,
@@ -216,7 +216,7 @@ impl Version {
 }
 
 /// A `@link` specification url, which identifies a specific version of a specification.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Url {
     /// The identity of the `@link` specification pointed by this url.
     pub identity: Identity,

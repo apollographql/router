@@ -177,6 +177,13 @@ impl FederationSchema {
         self.get_type(type_name).ok()
     }
 
+    pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
+        self.schema()
+            .schema_definition
+            .iter_root_operations()
+            .any(|op| *op.1 == *type_name)
+    }
+
     /// Return the possible runtime types for a definition.
     ///
     /// For a union, the possible runtime types are its members.

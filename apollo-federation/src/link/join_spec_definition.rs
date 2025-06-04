@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
@@ -421,6 +422,25 @@ impl JoinSpecDefinition {
         })
     }
 
+    pub(crate) fn enum_value_directive(
+        &self,
+        schema: &FederationSchema,
+        subgraph_name: &Name,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find enumValue directive in schema".to_owned(),
+            })?;
+        Ok(Directive {
+            name: name_in_schema,
+            arguments: vec![Node::new(Argument {
+                name: JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
+                value: Node::new(Value::Enum(subgraph_name.clone())),
+            })],
+        })
+    }
+
     /// @join__graph
     fn graph_directive_specification(&self) -> DirectiveSpecification {
         DirectiveSpecification::new(
@@ -446,7 +466,7 @@ impl JoinSpecDefinition {
             false,
             &[DirectiveLocation::EnumValue],
             false,
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -523,7 +543,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::Scalar,
             ],
             false,
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -667,7 +687,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::InputFieldDefinition,
             ],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -705,7 +725,7 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -743,13 +763,13 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::Union],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
 
     /// @join__enumValue
-    fn enum_value_directive_spec(&self) -> Option<DirectiveSpecification> {
+    pub(crate) fn enum_value_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() < (Version { major: 0, minor: 3 }) {
             return None;
         }
@@ -771,7 +791,7 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::EnumValue],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -828,7 +848,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::FieldDefinition,
             ],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -856,7 +876,7 @@ impl JoinSpecDefinition {
             false, // not repeatable
             &[DirectiveLocation::Object],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

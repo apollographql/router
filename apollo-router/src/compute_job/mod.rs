@@ -117,14 +117,18 @@ pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
     Introspection,
+    QueryParsingWarmup,
+    QueryPlanningWarmup,
 }
 
 impl From<ComputeJobType> for Priority {
     fn from(job_type: ComputeJobType) -> Self {
         match job_type {
-            ComputeJobType::QueryPlanning => Self::P8, // high
-            ComputeJobType::QueryParsing => Self::P4,  // medium
-            ComputeJobType::Introspection => Self::P1, // low
+            ComputeJobType::QueryPlanning => Self::P8,       // high
+            ComputeJobType::QueryParsing => Self::P4,        // medium
+            ComputeJobType::Introspection => Self::P3,       // low
+            ComputeJobType::QueryParsingWarmup => Self::P1,  // low
+            ComputeJobType::QueryPlanningWarmup => Self::P2, // low
         }
     }
 }
@@ -313,19 +317,31 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    use futures::FutureExt;
+    use futures::StreamExt;
+    use futures::stream::FuturesUnordered;
     use tracing_futures::WithSubscriber;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
 
-    #[tokio::test]
-    async fn test_observability() {
-        // make sure that the queue has been initialized by calling `execute`. if this
-        // step is skipped, the queue will _sometimes_ be initialized in the step below,
-        // which causes an additional log line and a snapshot mismatch.
+    /// Send a request to the compute queue to make sure it is initialized.
+    ///
+    /// The queue is (a) wrapped in a `OnceLock`, so it is shared between tests, and (b) only
+    /// initialized after receiving and processing a request.
+    /// These two properties can lead to inconsistent behavior.
+    async fn ensure_queue_is_initialized() {
         execute(ComputeJobType::Introspection, |_| {})
             .unwrap()
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_observability() {
+        // make sure that the queue has been initialized - if this step is skipped, the
+        // queue will _sometimes_ be initialized in the step below, which causes an
+        // additional log line and a snapshot mismatch.
+        ensure_queue_is_initialized().await;
 
         async {
             let span = info_span!("test_observability");
@@ -398,5 +414,48 @@ mod tests {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
         };
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_relative_priorities() {
+        let pool_size = thread_pool_size();
+        ensure_queue_is_initialized().await;
+
+        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
+        // low priority requests.
+        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
+        // before the high priority requests, since the workers would start on the low priority
+        // requests immediately.
+        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
+        // low priority requests to complete before the high priority request.
+        let mut handles: FuturesUnordered<_> = (0..pool_size * 2 - 1)
+            .map(|_| {
+                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
+                    std::thread::sleep(Duration::from_millis(10));
+                    0
+                })
+                .unwrap()
+                .boxed()
+            })
+            .collect();
+        handles.push(
+            execute(ComputeJobType::QueryPlanning, move |_| {
+                std::thread::sleep(Duration::from_millis(5));
+                1
+            })
+            .unwrap()
+            .boxed(),
+        );
+
+        let mut results = vec![];
+        while let Some(result) = handles.next().await {
+            results.push(result);
+        }
+
+        // `results` is ordered by completion.  Our `low_before_high_count` is calculated using
+        // the finishing position of our high priority request.
+        let low_before_high_count = results.iter().position(|&d| d == 1).unwrap();
+
+        assert!(low_before_high_count <= pool_size);
     }
 }
