@@ -4182,6 +4182,15 @@ expression: "&schema"
           "nullable": true,
           "type": "array"
         },
+        "audiences": {
+          "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array",
+          "uniqueItems": true
+        },
         "headers": {
           "description": "List of headers to add to the JWKS request",
           "items": {
@@ -4191,7 +4200,7 @@ expression: "&schema"
           "type": "array"
         },
         "issuers": {
-          "description": "Expected issuers for tokens verified by that JWKS",
+          "description": "Expected issuers for tokens verified by that JWKS\n\nIf not specified, the issuer will not be checked.",
           "items": {
             "type": "string"
           },

@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/invalid_selection_syntax.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.something` is not valid: nom::error::ErrorKind::Eof: &how",
+        locations: [
+            8:87..8:88,
+        ],
+    },
+]

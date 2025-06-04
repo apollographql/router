@@ -30,7 +30,7 @@ impl IncompatiblePlugin for RhaiIncompatPlugin {
     fn inform_incompatibilities(
         &self,
         subgraphs: std::collections::HashSet<&String>,
-        _connectors: &apollo_federation::sources::connect::expand::Connectors,
+        _connectors: &apollo_federation::connectors::expand::Connectors,
     ) {
         tracing::info!(
             subgraphs = subgraphs.into_iter().join(","),

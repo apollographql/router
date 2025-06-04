@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::connectors::expand::Connectors;
 use itertools::Itertools;
 
 use super::ConfiguredSubgraphs;

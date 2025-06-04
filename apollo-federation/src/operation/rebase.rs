@@ -398,6 +398,17 @@ impl InlineFragment {
                 CompositeTypeDefinitionPosition::try_from(rebased_condition_position)
             })
         {
+            // Root types can always be rebased and the type condition is unnecessary.
+            // Moreover, the actual subgraph might have renamed the root types, but the
+            // supergraph schema does not contain that information.
+            // Note: We only handle when the rebased condition is the same as the parent type. They
+            //       could be different in rare cases, but that will be fixed after the
+            //       source-awareness initiative is complete.
+            if rebased_condition == *parent_type
+                && parent_schema.is_root_type(rebased_condition.type_name())
+            {
+                return (true, None);
+            }
             // chained if let chains are not yet supported
             // see https://github.com/rust-lang/rust/issues/53667
             if runtime_types_intersect(parent_type, &rebased_condition, parent_schema) {
