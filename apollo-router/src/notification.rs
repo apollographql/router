@@ -1010,9 +1010,8 @@ mod tests {
     use tokio_stream::StreamExt;
     use uuid::Uuid;
 
-    use crate::metrics::FutureMetricsExt;
-
     use super::*;
+    use crate::metrics::FutureMetricsExt;
 
     #[tokio::test]
     async fn subscribe() {
