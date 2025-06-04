@@ -1,0 +1,21 @@
+---
+title: Supergraph Security with GraphOS Router
+subtitle: Protect your supergraph at its entry point, the router
+---
+
+As the public endpoint of a federated GraphQL API, a GraphOS Router has the responsibility for protecting its downstream subgraphs from malicious clients and their requests.
+
+Its security features contribute to a defense-in-depth approach, where different authentication and authorization measures are applied in various places, from clients to the router itself to subgraphs. The supergraph can also be secured by having the router accept GraphQL operations from validated safelists of operations.
+
+The features covered in this section include:
+
+- [**Authorization**](/graphos/routing/security/authorization) - define authorized access to GraphQL fields and types by annotating schemas with authorization primitives
+- [**Persisted Queries**](/graphos/routing/security/persisted-queries) - configure the router to allow clients to register and persist cached lists of safe GraphQL queries and operations 
+- [**Best Practices**](/graphos/platform/security/overview) - best practices for securing supergraphs
+- [**CORS**](/graphos/routing/security/cors) - control router access from browser-based clients 
+- [**CSRF Prevention**](/graphos/routing/security/csrf) - configure cross-site request forgery (CSRF) prevention in the router 
+- [**Request Limits**](/graphos/routing/security/request-limits) - protect your router from requests exceeding network, parser, and operation-based limits
+- [**Demand Control**](/graphos/routing/security/demand-control) - protect your graph from high-cost GraphQL operations
+- [**JWT Authentication**](/graphos/routing/security/jwt) - restrict access to credentialed users and systems with JSON Web Tokens (JWT)
+- [**Router Authentication**](/graphos/routing/security/router-authentication) - authorization and authentication strategies to secure your graph
+- [**Subgraph Authentication**](/graphos/routing/security/subgraph-authentication) - implement subgraph authentication by using AWS SigV4

@@ -48,7 +48,7 @@ mod tests {
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
+        mock_service.expect_clone().returning(move || {
             let mut mock_service = test::MockSubgraphService::new();
             mock_service
                 .expect_call()

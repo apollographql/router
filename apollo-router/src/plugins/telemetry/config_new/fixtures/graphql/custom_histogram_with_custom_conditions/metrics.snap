@@ -25,5 +25,6 @@ info:
   data:
     datapoints:
       - sum: 1
+        count: 1
         attributes:
           graphql.field.name: products

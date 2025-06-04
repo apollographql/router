@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::graphql::ResponseVisitor;
+use crate::json_ext::Object;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalFieldStat;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
@@ -22,6 +23,7 @@ impl ResponseVisitor for LocalTypeStatRecorder {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &serde_json_bytes::Value,
@@ -61,11 +63,17 @@ impl ResponseVisitor for LocalTypeStatRecorder {
                     .record(Some(items.len() as u64), 1);
 
                 for item in items {
-                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                    self.visit_list_item(
+                        request,
+                        variables,
+                        field.ty().inner_named_type(),
+                        field,
+                        item,
+                    );
                 }
             }
             serde_json_bytes::Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}
         }

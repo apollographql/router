@@ -1,0 +1,348 @@
+---
+title: Amazon VPC Lattice Configuration
+subtitle: Securely communicate with subgraphs on your Amazon VPC
+description: Configure Amazon VPC Lattice to send traffic to and receive traffic from your Apollo GraphOS cloud router.
+redirectFrom:
+    - /graphos/cloud-routing/lattice
+---
+
+<CloudPlanPause />
+
+Cloud Dedicated uses [Amazon VPC Lattice](https://aws.amazon.com/vpc/lattice/) to send traffic to subgraphs running in an Amazon VPC without exposing them to the internet.
+
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph "Apollo Cloud";
+    router(["Cloud <br/> router"]);
+  end;
+  subgraph "Amazon Virtual Private Cloud"
+    lattice[Amazon VPC <br/> Lattice service]
+    service1[Subgraph 1];
+    service2[Subgraph 2];
+    service3[Subgraph 3];
+  end;
+
+  router --> lattice
+  lattice --> service1 & service2 & service3;
+
+  clients -->|Requests| router;
+```
+
+This guide shows how to create Lattice services and share them with GraphOS. This configuration lets your GraphOS cloud routers securely communicate with your private subgraphs.
+
+<Note>
+
+Using Amazon VPC Lattice incurs costs outside of your GraphOS Dedicated spend. Refer to the [Lattice pricing page](https://aws.amazon.com/vpc/lattice/pricing/) to learn more.
+
+</Note>
+
+
+## How GraphOS ensures subgraph security through Lattice
+
+When you first share Lattice services with GraphOS, it scans the Lattice services to retrieve their ARNs and domain names.
+Then, when you add a private subgraph to a cloud supergraph, GraphOS checks that the subgraph's domain matches one of the Lattice services associated with your GraphOS organization.
+
+As a second line of defense, supergraphs use AWS IAM permissions and SigV4 to only allow traffic to subgraphs in the same GraphOS organization.
+
+## Configuration overview
+
+To allow GraphOS cloud routers to send traffic to private subgraphs in an Amazon VPC, you must:
+
+1. Create a Lattice target group for each subgraph hosted in your Amazon VPC.
+2. Create a Lattice service for each graph variant in GraphOS.
+3. Share your Lattice service(s) with the Apollo AWS Organization via a resource share.
+4. Link the resource share in GraphOS Studio.
+
+This guide offers instructions for each step.
+
+You can also use the [Apollo Terraform module](https://github.com/apollographql/terraform-graphos-aws) to provision Lattice target groups, services, and resource shares.
+The module completes steps 1 - 3 of this configuration guide. Once you've set it up, you can skip to [step 4](#step-4-link-resource-share)—linking the provisioned resource share in GraphOS Studio.
+Refer to the [module's README](https://github.com/apollographql/terraform-graphos-aws#apollo-graphos-cloud-private-subgraphs-module) for more information.
+
+<Note>
+
+- You can use Amazon VPC Lattice in your organization for other uses than routing GraphOS traffic to subgraphs. A Lattice service can be associated with multiple service networks, and GraphOS associates your Lattice services with its own service network.
+- You can only use Lattice for subgraphs in the same AWS region as your cloud router. If you need to run subgraphs in different AWS regions or run your workloads in a region not yet supported by Dedicated, please <TrackableLink href="https://www.apollographql.com/contact-sales?type=dedicated&referrer=docs" eventName="content_contact_cloud">get in touch</TrackableLink>.
+
+</Note>
+
+## Step 1. Create a target group
+
+A VPC Lattice _target group_ is a collection of targets, or compute resources, that run your application or service.
+In the GraphOS context, a target group maps to a subgraph.
+If you have multiple subgraphs, repeat these steps for each subgraph.
+
+
+1. In the AWS Console for your region of choice, go to the VPC service page:
+
+- [US East (N. Virginia) - us-east-1](https://us-east-1.console.aws.amazon.com/vpc/home?region=us-east-1)
+- [Europe (Ireland) - eu-west-1](https://eu-west-1.console.aws.amazon.com/vpc/home?region=eu-west-1)
+
+2. In the left navigation, scroll down and open **VPC Lattice > Target groups**.
+3. Click **Create target group** on the top right.
+4. In the **Basic configuration** section, set the properties that match your subgraph resources.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC service page"
+    src="../../images/cloud-dedicated/target-group-configuration.jpg"
+  />
+
+5. (Optional) If you use a target type with health checks, ensure you configure your health checks. Otherwise, Lattice can't send traffic to your subgraphs.
+6. Register the targets based on your chosen target type. For example, if you selected **IP addresses** as your target type, add each IP address.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC service page"
+    src="../../images/cloud-dedicated/register-targets.jpg"
+  />
+
+7. Review your targets to make sure all information is correct.
+8. Click **Create target group** at the bottom right corner of the page.
+
+Congratulations! You've created an Amazon VPC Lattice target group.
+Repeat this process for each subgraph you want to share with GraphOS.
+
+## Step 2. Create a Lattice service
+
+In Lattice, a _service_ represents a self-contained software module.
+A VPC Lattice service has a listener that uses rules, called listener rules, that you can configure to help route traffic to your targets.
+In this step, you create a single VPC Lattice service with listener rules for each of your target groups.
+
+In the GraphOS context, a Lattice service maps to a graph variant.
+Create one service for each of your variants.
+
+1. In the AWS Console for your region, go to the VPC service page:
+
+- [US East (N. Virginia) - us-east-1](https://us-east-1.console.aws.amazon.com/vpc/home?region=us-east-1)
+- [Europe (Ireland) - eu-west-1](https://eu-west-1.console.aws.amazon.com/vpc/home?region=eu-west-1)
+
+2. In the left navigation, scroll down and open **VPC Lattice > Services**.
+3. Click **Create service** in the top right.
+4. In the **Identifiers** section, enter a descriptive name for the service. Optionally, enter a description and tags.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC service page"
+    src="../../images/cloud-dedicated/service-identifiers.jpg"
+  />
+
+5. In the **Custom domain configuration** section, leave **Specify a custom domain configuration** unchecked.
+6. In the **Service access** section, select the **AWS IAM** authentication type and paste the following authorization policy. This policy ensures that only the Apollo AWS Organization can send traffic to your subgraphs.
+
+  ```json showLineNumbers=false
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": "*",
+        "Action": "vpc-lattice-svcs:Invoke",
+        "Resource": "*",
+        "Condition": {
+          "ForAnyValue:StringLike": {
+            "aws:PrincipalOrgPaths": "o-9vaxczew6u/*/ou-leyb-l9pccq2t/ou-leyb-fvqz35yo/*"
+          }
+        }
+      }
+    ]
+  }
+  ```
+
+7. (Optional) For extra security, you can audit all the traffic coming to your subgraph by enabling **Access logs** in the **Monitoring** section.
+8. Once you've configured the service, click **Next** on the bottom right of the page.
+9. Define routing information to the target group you created in [Step 1](#step-1-create-lattice-target-group). Set the protocol to **HTTPS** and the port to **443**.
+
+  <Note>
+
+  For security reasons, Apollo requires you to use HTTPS for your listener. Using HTTPS enforces encryption in transit of the traffic between your GraphOS cloud router and your Lattice service.
+
+  </Note>
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC service page"
+    src="../../images/cloud-dedicated/http-listener.jpg"
+  />
+
+10. If you have multiple target groups, add a **Listener rule** for each target group.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC service page"
+    src="../../images/cloud-dedicated/service-rules.jpg"
+  />
+
+11. Click **Next** at the bottom right of the page once you've configured your listener.
+12. Don't select a VPC Lattice service network. Your subgraphs will integrate with a service network managed by Apollo. Instead, click the **Next** button at the bottom right of the page.
+13. Ensure the information you've entered is correct. Then click **Create VPC Lattice service** at the bottom right of the page.
+
+Congratulations! You've now created a Lattice service with listeners for your subgraphs.
+
+## Step 3. Share Lattice service
+
+For GraphOS to access your Lattice service, you must share it with the Apollo AWS organization.
+You do this through a _resource share_ in AWS Resource Access Manager (AWS RAM).
+A resource share specifies the resources to share and the consumers with whom to share them.
+
+```mermaid
+flowchart LR;
+  apollo(Apollo Cloud)
+  subgraph "Amazon Virtual Private Cloud"
+    lattice[Amazon VPC <br/> Lattice service]
+    service1[Subgraph 1];
+    service2[Subgraph 2];
+    service3[Subgraph 3];
+  end;
+
+  apollo-. AWS RAM <br/> resource share .- lattice
+  lattice --> service1 & service2 & service3;
+```
+
+If you have multiple Lattice services, you can share them all through one resource share.
+
+1. In the AWS Console for your region of choice, go to the Resource Access Manager service page:
+
+- [US East (N. Virginia) - us-east-1](https://us-east-1.console.aws.amazon.com/ram/home?region=us-east-1)
+- [Europe (Ireland) - eu-west-1](https://eu-west-1.console.aws.amazon.com/ram/home?region=eu-west-1)
+
+2. In the left navigation, scroll down and open **Shared by me > Resource shares**.
+3. Click **Create resource share** in the top right corner.
+4. In the **Resource share name** section, enter a name for your resource share.
+5. In the **Resources section**, select the **VPC Lattice Services** resource type.
+6. Select all the Lattice services that contain subgraphs.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC shared resources page"
+    src="../../images/cloud-dedicated/resource-selection.jpg"
+  />
+
+7. (Optional) Set tags for your resource share.
+8. Click the **Next** button at the bottom right corner of the page.
+9. Verify that the **Managed permissions** give access to associate the Lattice services with a service network (`vpc-lattice:CreateServiceNetworkServiceAssociation` and `vpc-lattice:GetService`). Then click the **Next** button at the bottom right of the page.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC shared resources page"
+    src="../../images/cloud-dedicated/managed-permissions.jpg"
+  />
+
+10. In the **Principals** section, select **Allow sharing with anyone** with a **principal type** of `AWS account`. Enter the following value for the account ID: `282421723282`, then click the **Add** button.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC shared resources page"
+    src="../../images/cloud-dedicated/resource-principal.jpg"
+  />
+
+11. Confirm that `282421723282` is the only selected principal for this resource share, then click the **Next** button on the bottom right corner.
+12. Confirm that all the information is correct, then click **Create resource share** at the bottom right of the page.
+
+Congratulations! You've now shared your Lattice service(s) with Apollo's AWS organization.
+
+The last step is associating your resource share with a graph in GraphOS.
+
+<Note>
+
+- You have 12 hours to associate your resource share. Otherwise, AWS RAM will fail to process the invitation, and you must restart this step.
+- For security purposes, we recommend you continue to the next step immediately after creating the resource share. If you see that the resource share was **Accepted** or **Failed** in the AWS console and you didn't follow [step 4](#step-4-link-resource-share) of this guide, follow the steps to [remove access to private subgraphs](/graphos/routing/cloud/lattice-management#remove-access) and restart this step.
+
+</Note>
+
+## Step 4. Link resource share
+
+At this point, you've shared your Lattice service(s) with the Apollo AWS organization. In this step, you link each service to a particular cloud router in GraphOS Studio.
+The cloud router can then route client requests.
+
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph "Apollo Cloud";
+    router(["Cloud <br/> router"]);
+  end;
+  subgraph "Amazon Virtual Private Cloud"
+    lattice[Amazon VPC <br/> Lattice service]
+    service1[Subgraph 1];
+    service2[Subgraph 2];
+    service3[Subgraph 3];
+  end;
+
+  router --> lattice
+  lattice --> service1 & service2 & service3;
+
+  clients -->|Requests| router;
+```
+
+1. In the AWS Console for your region of choice, go to the Resource Access Manager service page:
+
+- [US East (N. Virginia) - us-east-1](https://us-east-1.console.aws.amazon.com/ram/home?region=us-east-1)
+- [Europe (Ireland) - eu-west-1](https://eu-west-1.console.aws.amazon.com/ram/home?region=eu-west-1)
+
+2. In the left navigation, scroll down and open **Shared by me > Resource shares**.
+3. Click the resource share you created in the previous step.
+4. Copy the **ARN** for the resource share.
+
+  <img
+    className="screenshot"
+    alt="Amazon VPC resource share page"
+    src="../../images/cloud-dedicated/resource-share-summary.jpg"
+  />
+
+The next steps differ depending on whether you're creating a [new graph](#setup-for-new-graphs) in GraphOS or adding this [service to an existing graph](#setup-for-existing-graphs).
+
+### Setup for new graphs
+
+1. Go to [GraphOS Studio](https://studio.apollographql.com?referrer=docs-content).
+2. Click the **Create New Graph** tab at the top right of the screen.
+3. Follow Studio's onboarding steps to create a graph with a new private subgraph.
+4. When prompted to **Provide your GraphQL API endpoint**, select **My endpoint is not directly accessible** at the bottom of the page.
+5. Choose the backend provider you want to use for your private subgraph and the region where your subgraph should be provisioned.
+
+  <Note>
+  
+  All private subgraphs connected to a GraphOS cloud router must be in the same region.
+
+  </Note>
+
+6. Paste the ARN of the resource share you created and copied from your AWS Console, then click **Link my Resource** and **Next** to continue.
+7. From the dropdown menu, select the Lattice service that you want to connect to your GraphOS router. The URL automatically appends a default path of `/api/graphql`, but you can change this path if you want to.
+8. Add a **Service Name** to describe your Lattice service. GraphOS Studio uses this name to identify your Lattice service.
+9. Paste the GraphQL schema for this subgraph in the **Schema** field. You can also upload a schema file by clicking the **Upload Schema** button.
+
+<ExpansionPanel title="Why do I need to provide a GraphQL Schema?">
+
+When your AWS resource is set to private, it isn't accessible by external services by default. This ensures a high level of security for your data, but it also means extra steps are needed to enable communication between your resource and our system. GraphOS needs your GraphQL API's schema so it can generate the correct queries and mutations to send to your subgraph.
+
+</ExpansionPanel>
+
+10. Update the ID and the name of the supergraph that you want to add this private subgraph to. An ID and name are automatically generated based on your GraphOS organization's name, but you can change both as needed.
+11. To finish, click **Create GraphOS Router**.
+
+Congratulations! You've now created a GraphOS cloud router with a private subgraph.
+
+### Setup for existing graphs
+
+1. Go to the graph you want to connect in [GraphOS Studio](https://studio.apollographql.com?referrer=docs-content).
+2. From the left sidebar, open the **Subgraphs** tab of your graph.
+3. Click **Add a Subgraph** on the right of the page.
+4. In the dialog, select the **Private** option, then select the AWS service you want to add from the dropdown menu. The URL automatically appends a default path of `/api/graphql`, but you can change this path if you want to.
+5. Add a **Service Name** to describe your Lattice service. GraphOS Studio uses this name to identify your Lattice service.
+6. Paste the GraphQL schema for this subgraph in the **Schema** field. You can also upload a schema file by clicking the **Upload Schema** button.
+
+<ExpansionPanel title="Why do I need to provide a GraphQL Schema?">
+
+When your AWS resource is set to private, it isn't accessible by external services by default. This ensures a high level of security for your data, but it also means extra steps are needed to enable communication between your resource and our system. GraphOS needs your GraphQL API's schema so it can generate the correct queries and mutations to send to your subgraph.
+
+</ExpansionPanel>
+
+7. To finish, click **Add Subgraph**.
+
+Congratulations! You've now added a private subgraph to your GraphOS cloud router.
+
+## Next steps
+
+After you've linked your VPC Lattice services with your cloud router, you may want to set up monitoring.
+The [Lattice management page](/graphos/routing/cloud/lattice-management) provides information on monitoring and how to further restrict and remove access to subgraphs.
+See the [troubleshooting guide](/graphos/routing/cloud/lattice-troubleshooting) if you're having issues with your Lattice setup.

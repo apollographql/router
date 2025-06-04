@@ -1,21 +1,19 @@
-use std::collections::HashSet;
 use std::io::Read;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-use apollo_federation::query_plan::query_planner::QueryPlanner;
-use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_compiler::collections::IndexSet;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
-use apollo_federation::schema::ValidFederationSchema;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use sha1::Digest;
 
-const ROVER_FEDERATION_VERSION: &str = "2.7.4";
+const ROVER_FEDERATION_VERSION: &str = "2.9.0";
 
-// TODO: use 2.7 when join v0.4 is fully supported in this crate
-const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@context", "@fromContext", "@cost", "@listSize"])"#;
 
 /// Runs composition on the given subgraph schemas and return `(api_schema, query_planner)`
 ///
@@ -33,7 +31,7 @@ macro_rules! planner {
         $( $subgraph_name: tt: $subgraph_schema: expr),+
         $(,)?
     ) => {{
-        $crate::query_plan::build_query_plan_support::api_schema_and_planner(
+        $crate::query_plan::build_query_plan_support::test_planner(
             insta::_function_name!(),
             $config,
             &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
@@ -60,35 +58,43 @@ macro_rules! subgraph_name {
 /// formatted query plan string.
 /// Run `cargo insta review` to diff and accept changes to the generated query plan.
 macro_rules! assert_plan {
-    ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
-        let (api_schema, planner) = $api_schema_and_planner;
+    (validate_correctness = $validate_correctness: expr, $api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, Default::default(), $validate_correctness, @$expected)
+    }};
+    ($planner: expr, $operation: expr, $options: expr, $validate_correctness: expr, @$expected: literal) => {{
+        let api_schema = $planner.api_schema();
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
             api_schema.schema(),
             $operation,
             "operation.graphql",
         )
-        .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        .expect("valid graphql document");
+        let plan = $planner.build_query_plan(&document, None, $options).expect("query plan generated");
         insta::assert_snapshot!(plan, @$expected);
+        // temporary workaround for correctness errors such as FED-515
+        if $validate_correctness {
+            apollo_federation::correctness::check_plan($planner.api_schema(), $planner.supergraph_schema(), $planner.subgraph_schemas(), &document, &plan).expect("generated correct plan");
+        }
         plan
+    }};
+    ($api_schema_and_planner: expr, $operation: expr, $options: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, $options, true, @$expected)
+    }};
+    ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, Default::default(), true, @$expected)
     }};
 }
 
 #[track_caller]
-pub(crate) fn api_schema_and_planner(
+pub(crate) fn test_planner(
     function_path: &'static str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
-) -> (ValidFederationSchema, QueryPlanner) {
+) -> QueryPlanner {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
-    let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
-    let planner = QueryPlanner::new(&supergraph, config).unwrap();
-    let api_schema_config = apollo_federation::ApiSchemaOptions {
-        include_defer: true,
-        include_stream: false,
-    };
-    let api_schema = supergraph.to_api_schema(api_schema_config).unwrap();
-    (api_schema, planner)
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    QueryPlanner::new(&supergraph, config).expect("can create query planner")
 }
 
 #[track_caller]
@@ -96,7 +102,7 @@ pub(crate) fn compose(
     function_path: &'static str,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> String {
-    let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
+    let unique_names: IndexSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
         .collect();
@@ -110,7 +116,7 @@ pub(crate) fn compose(
         .map(|(name, schema)| {
             (
                 *name,
-                format!("extend schema {IMPLICIT_LINK_DIRECTIVE}\n\n{}", schema,),
+                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{}", schema,),
             )
         })
         .collect();
@@ -127,7 +133,7 @@ pub(crate) fn compose(
     let prefix = "# Composed from subgraphs with hash: ";
 
     let test_name = function_path.rsplit("::").next().unwrap();
-    static SEEN_TEST_NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<IndexSet<&'static str>>> = OnceLock::new();
     let new = SEEN_TEST_NAMES
         .get_or_init(Default::default)
         .lock()
@@ -211,12 +217,12 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
     if let Some(node) = &plan.node {
         match node {
             TopLevelPlanNode::Fetch(inner) => {
-                if inner.subgraph_name == subgraph_name {
+                if inner.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&**inner)
                 }
             }
             TopLevelPlanNode::Subscription(inner) => {
-                if inner.primary.subgraph_name == subgraph_name {
+                if inner.primary.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&inner.primary);
                 }
                 visit_node(subgraph_name, &mut fetch_nodes, inner.rest.as_deref())
@@ -261,7 +267,7 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
             let Some(node) = node else { return };
             match node {
                 PlanNode::Fetch(inner) => {
-                    if inner.subgraph_name == subgraph_name {
+                    if inner.subgraph_name.as_ref() == subgraph_name {
                         fetch_nodes.push(&**inner)
                     }
                 }

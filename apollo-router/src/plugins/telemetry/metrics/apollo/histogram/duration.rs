@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use num_traits::AsPrimitive;
 use num_traits::FromPrimitive;
-use serde::ser::SerializeMap;
 use serde::Serialize;
+use serde::ser::SerializeMap;
 
 use crate::plugins::telemetry::metrics::apollo::histogram::Histogram;
 use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;
@@ -36,8 +36,8 @@ where
 
     fn bucket(value: Self::Value) -> usize {
         const EXPONENT_LOG: f64 = 0.09531017980432493f64; // ln(1.1) Update when ln() is a const fn (see: https://github.com/rust-lang/rust/issues/57241)
-                                                          // If you use as_micros() here to avoid the divide, tests will fail
-                                                          // Because, internally, as_micros() is losing remainders
+        // If you use as_micros() here to avoid the divide, tests will fail
+        // Because, internally, as_micros() is losing remainders
         let float_value = value.as_nanos() as f64 / 1000.0;
         let log_duration = f64::ln(float_value);
         let unbounded_bucket = f64::ceil(log_duration / EXPONENT_LOG);

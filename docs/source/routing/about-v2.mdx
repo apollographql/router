@@ -1,0 +1,71 @@
+---
+title: What's New in GraphOS Router v2.x
+subtitle: ""
+description: What's new in Apollo GraphOS Router version 2.x, including Long Term Release (LTS) status, key features, and how to upgrade
+---
+
+GraphOS Router v{products.router.version("lts_2_latest").version} is the latest Apollo runtime platform. This release introduces changes and enhancements that improve the router’s overall quality and establishes a strong foundation for new innovations, such as Apollo Connectors for REST. It also ships with the new Native Query Planner, optimized for efficiency and performance for high scale mission critical workloads. 
+
+## Release status of router v2.x
+
+GraphOS Router v2.x is an **Active** release with latest version {products.router.version("lts_2_latest").version}.
+
+| Current Status | Release Date | Latest Minor | Active Date    | Maintenance Date | End of Life Date |
+| -------------- | ------------ | ------------ | -------------- | ---------------- | ---------------- |
+| Active    | July 2024  | v{products.router.version("lts_2_latest").version}  |  February 2025 | -     | -     |
+
+As an [active](/graphos/reference/router-release-lifecycle#active) release:
+
+- Backwards-compatible minor releases are planned to ship monthly.
+- Minor releases can contain new features, bug fixes, and security patches.
+- Breaking changes may be required in extenuating circumstances.
+- [Support](https://www.apollographql.com/enterprise/support) is provided via paid support plans until end-of-life. 
+
+## What's new in router v2.x
+
+Below are the key highlights of the new and updated capabilities in router v2.x.
+
+> For detailed descriptions of updates in router v2.x, go to the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1). 
+
+### Simplified integration and API orchestration of REST services using Apollo Connectors
+
+The router v2.x introduces Apollo Connectors for REST, a declarative way to integrate REST services into supergraphs. By defining REST API integrations in GraphQL schema, you can orchestrate calls across your fleet of APIs and other services to produce a single response from a federated GraphQL API.
+
+> Follow the [quickstart](/graphos/get-started/guides/rest-quickstart) to orchestrate your first REST API calls with Apollo Connectors.
+
+### Improved query planner performance
+
+The router is powered by a new **Native Query Planner** that achieves performance at scale with demonstrable improvement in CPU and memory utilization. It's written in Rust and replaces the legacy query planner written in JavaScript, thereby utilizing a simplified architecture and ensuring more efficient and performant query execution.
+
+> Learn more about the [native query planner](/graphos/routing/query-planning/native-query-planner).
+
+### Predictable resource utilization and availability with back-pressure management
+
+The router introduces **back-pressure management** that enables more predictable memory and CPU consumption. It's especially beneficial for Kubernetes deployments, where the router can now provide timely signals to trigger Horizontal Pod Autoscaling (HPA) and maintain availability. 
+
+### Secure and stable ecosystem
+
+The router depends on various external libraries, or crates, in the Rust ecosystem for networking, JSON processing, error handling, and more. With router v2.x, these dependencies have been updated to provide the most secure, stable, and performant runtime platform. 
+
+Updated crates include `axum`, `http`, `hyper`, `opentelemetry`, and `redis`. Note that some updates may cause breaking changes, please see [upgrade guide](https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1) for more details.
+
+### Improvements for consistency and usability 
+
+Several smaller but significant changes have been introduced to reduce or eliminate inconsistencies in observability and configuration:
+
+- Updated Apollo operation usage reporting to use OpenTelemetry by default
+- Renamed metrics to conform to OpenTelemetry naming conventions
+- Improved validation of CORS configurations, preventing silent failures
+- Added documentation for context keys, improving usability for advanced customers
+
+## Removals and deprecations
+
+Several configuration options, interfaces, and metrics were deprecated or removed in router v2.x, including:
+
+- Removed the `--apollo-uplink-poll-interval` flag due to its ineffectiveness
+- Removed various metrics as part of evolving towards OpenTelemetry metrics and conventions 
+- Removed interfaces deprecated in router v1.x 
+
+## Upgrading to router 2.x
+
+To upgrade to the latest router v{products.router.version("lts_2_latest").version}, including resolving breaking changes and using new capabilities, follow the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1).

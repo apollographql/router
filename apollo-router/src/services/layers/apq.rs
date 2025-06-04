@@ -1,14 +1,14 @@
-//!  (A)utomatic (P)ersisted (Q)ueries cache.
+//! (A)utomatic (P)ersisted (Q)ueries cache.
 //!
-//!  For more information on APQ see:
-//!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
+//! For more information on APQ see:
+//! <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header::CACHE_CONTROL;
 use serde::Deserialize;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -18,6 +18,10 @@ use crate::services::SupergraphResponse;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 static DONT_CACHE_HEADER_VALUE: HeaderValue = HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE);
+pub(crate) const PERSISTED_QUERY_CACHE_HIT: &str = "apollo::apq::cache_hit";
+pub(crate) const DEPRECATED_PERSISTED_QUERY_CACHE_HIT: &str = "persisted_query_hit";
+pub(crate) const PERSISTED_QUERY_REGISTERED: &str = "apollo::apq::registered";
+pub(crate) const DEPRECATED_PERSISTED_QUERY_REGISTERED: &str = "persisted_query_register";
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -47,11 +51,19 @@ impl PersistedQuery {
     }
 }
 
-/// [`Layer`] for APQ implementation.
+/// A layer-like type implementing Automatic Persisted Queries.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
     /// set to None if APQ is disabled
     cache: Option<DeduplicatingCache<String, String>>,
+}
+
+impl APQLayer {
+    pub(crate) fn activate(&self) {
+        if let Some(cache) = &self.cache {
+            cache.activate();
+        }
+    }
 }
 
 impl APQLayer {
@@ -63,6 +75,20 @@ impl APQLayer {
         Self { cache: None }
     }
 
+    /// Supergraph service implementation for Automatic Persisted Queries.
+    ///
+    /// For more information about APQ:
+    /// https://www.apollographql.com/docs/apollo-server/performance/apq.
+    ///
+    /// If APQ is disabled, it rejects requests that try to use a persisted query hash.
+    /// If APQ is enabled, requests using APQ will populate the cache and use the cache as needed,
+    /// see [`apq_request`] for details.
+    ///
+    /// This must happen before GraphQL query parsing.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -74,6 +100,15 @@ impl APQLayer {
     }
 }
 
+/// Used when APQ is enabled.
+///
+/// If the request contains a hash and a query string, that query is added to the APQ cache.
+/// Then, the client can submit only the hash and not the query string on subsequent requests.
+/// The request is rejected if the hash does not match the query string.
+///
+/// If the request contains only a hash, attempts to read the query from the APQ cache, and
+/// populates the query string in the request body.
+/// The request is rejected if the hash is not present in the cache.
 async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
     mut request: SupergraphRequest,
@@ -87,7 +122,7 @@ async fn apq_request(
         (Some((query_hash, query_hash_bytes)), Some(query)) => {
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
-                let _ = request.context.insert("persisted_query_register", true);
+                let _ = request.context.insert(PERSISTED_QUERY_REGISTERED, true);
                 let query = query.to_owned();
                 let cache = cache.clone();
                 tokio::spawn(async move {
@@ -122,12 +157,12 @@ async fn apq_request(
                 .get()
                 .await
             {
-                let _ = request.context.insert("persisted_query_hit", true);
+                let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, true);
                 tracing::trace!("apq: cache hit");
                 request.supergraph_request.body_mut().query = Some(cached_query);
                 Ok(request)
             } else {
-                let _ = request.context.insert("persisted_query_hit", false);
+                let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);
                 tracing::trace!("apq: cache miss");
                 let errors = vec![crate::error::Error {
                     message: "PersistedQueryNotFound".to_string(),
@@ -172,6 +207,7 @@ pub(crate) fn calculate_hash_for_query(query: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Used when APQ is disabled. Rejects requests that try to use a persisted query hash anyways.
 async fn disabled_apq_request(
     request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {
@@ -211,15 +247,16 @@ mod apq_tests {
     use http::StatusCode;
     use serde_json_bytes::json;
     use tower::Service;
+    use tower::ServiceExt;
 
     use super::*;
-    use crate::error::Error;
-    use crate::graphql::Response;
-    use crate::services::router::service::from_supergraph_mock_callback;
-    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
-    use crate::services::router::ClientRequestAccepts;
     use crate::Configuration;
     use crate::Context;
+    use crate::error::Error;
+    use crate::graphql::Response;
+    use crate::plugins::content_negotiation::ClientRequestAccepts;
+    use crate::services::router::service::from_supergraph_mock_callback;
+    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 
     #[tokio::test]
     async fn it_works() {
@@ -273,7 +310,13 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
-        let apq_response = router_service.call(hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(hash_only)
+            .await
+            .unwrap();
 
         // make sure clients won't cache apq missed response
         assert_eq!(
@@ -300,14 +343,22 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let full_response = router_service.call(with_query).await.unwrap();
+        let full_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         // the cache control header shouldn't have been tampered with
-        assert!(full_response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .is_none());
+        assert!(
+            full_response
+                .response
+                .headers()
+                .get(CACHE_CONTROL)
+                .is_none()
+        );
 
         // We need to yield here to make sure the router
         // runs the Drop implementation of the deduplicating cache Entry.
@@ -321,7 +372,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let apq_response = router_service.call(second_hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(second_hash_only)
+            .await
+            .unwrap();
 
         // the cache control header shouldn't have been tampered with
         assert!(apq_response.response.headers().get(CACHE_CONTROL).is_none());
@@ -398,6 +455,9 @@ mod apq_tests {
 
         // This apq call will miss the APQ cache
         let apq_error = router_service
+            .ready()
+            .await
+            .expect("readied")
             .call(hash_only)
             .await
             .unwrap()
@@ -411,7 +471,13 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
-        let insert_failed_response = router_service.call(with_query).await.unwrap();
+        let insert_failed_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCode::BAD_REQUEST,
@@ -438,6 +504,9 @@ mod apq_tests {
 
         // apq insert failed, this call will miss
         let second_apq_error = router_service
+            .ready()
+            .await
+            .expect("readied")
             .call(second_hash_only)
             .await
             .unwrap()
@@ -489,7 +558,13 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
-        let apq_response = router_service.call(hash_only).await.unwrap();
+        let apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(hash_only)
+            .await
+            .unwrap();
 
         let apq_error = apq_response
             .into_graphql_response_stream()
@@ -510,7 +585,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let with_query_response = router_service.call(with_query).await.unwrap();
+        let with_query_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(with_query)
+            .await
+            .unwrap();
 
         let apq_error = with_query_response
             .into_graphql_response_stream()
@@ -530,7 +611,13 @@ mod apq_tests {
             .try_into()
             .unwrap();
 
-        let without_apq_response = router_service.call(without_apq).await.unwrap();
+        let without_apq_response = router_service
+            .ready()
+            .await
+            .expect("readied")
+            .call(without_apq)
+            .await
+            .unwrap();
 
         let without_apq_graphql_response = without_apq_response
             .into_graphql_response_stream()
@@ -549,7 +636,7 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(ClientRequestAccepts {
                 json: true,
                 ..Default::default()

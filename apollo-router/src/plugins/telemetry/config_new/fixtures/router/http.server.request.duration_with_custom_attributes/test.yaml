@@ -7,7 +7,7 @@ events:
           hello
     - context:
         map:
-          operation_name: TestQuery
+          "apollo::supergraph::operation_name": TestQuery
     - router_response:
         body: |
           hello

@@ -15,13 +15,20 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: http
+      targetPort: {{ .Values.service.targetport }}
       protocol: TCP
       name: http
     - port: {{ (splitList ":" (index .Values.router.configuration "health_check").listen | last ) | default "8088" }}
       targetPort: health
       protocol: TCP
       name: health
+    {{- /* Should we expose an entity cache invalidation port? */}}
+    {{- if and (.Values.router.configuration.preview_entity_cache).enabled (.Values.router.configuration.preview_entity_cache).invalidation }}
+    - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.invalidation.listen | last) }}
+      targetPort: invalidation
+      protocol: TCP
+      name: invalidation
+    {{- end }}
     {{- if .Values.serviceMonitor.enabled }}
     {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
     {{- if .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen }}

@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: report
+snapshot_kind: text
 ---
 header:
   graph_ref: test
@@ -10,6 +11,7 @@ header:
   runtime_version: rust
   uname: "[uname]"
   executable_schema_id: "[executable_schema_id]"
+  agent_id: "[agent_id]"
 traces_per_query:
   "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
     trace: []
@@ -20,6 +22,8 @@ traces_per_query:
           operation_type: query
           operation_subtype: ""
           result: ""
+          client_library_name: ""
+          client_library_version: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
@@ -251,4 +255,5 @@ operation_count_by_type:
     subtype: ""
     operation_count: 1
 traces_pre_aggregated: true
-extended_references_enabled: false
+extended_references_enabled: true
+router_features_enabled: []

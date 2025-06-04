@@ -48,6 +48,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "router.serviceAccountName" . }}
+      {{- if .Values.restartPolicy }}
+      restartPolicy: {{.Values.restartPolicy}}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -69,14 +72,16 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
+            - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
+              value: "true"
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ template "router.managedFederation.apiSecretName" . }}
-                  key: managedFederationApiKey
+                  key: {{ (.Values.managedFederation.existingSecretKeyRefKey | default "managedFederationApiKey") }}
                   optional: true
             {{- end }}
             {{- if not (empty .Values.managedFederation.graphRef) }}
@@ -114,12 +119,12 @@ spec:
             {{- toYaml .Values.lifecycle | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: "/health?live"
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
-              path: "/health?ready"
+              path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
               port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:
@@ -172,3 +177,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.rollingUpdate }}
+  strategy:
+    rollingUpdate:
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      {{- end }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      {{- end }}
+  {{- end }}

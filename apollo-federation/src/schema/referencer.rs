@@ -1,9 +1,10 @@
-use apollo_compiler::schema::Name;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::Name;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -14,6 +15,7 @@ use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
@@ -42,30 +44,6 @@ impl Referencers {
             || self.input_object_types.contains_key(name)
     }
 
-    pub(crate) fn get_scalar_type(
-        &self,
-        name: &str,
-    ) -> Result<&ScalarTypeReferencers, FederationError> {
-        self.scalar_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Scalar type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_object_type(
-        &self,
-        name: &str,
-    ) -> Result<&ObjectTypeReferencers, FederationError> {
-        self.object_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Object type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
     pub(crate) fn get_interface_type(
         &self,
         name: &str,
@@ -78,51 +56,12 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_union_type(
-        &self,
-        name: &str,
-    ) -> Result<&UnionTypeReferencers, FederationError> {
-        self.union_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Union type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_enum_type(
-        &self,
-        name: &str,
-    ) -> Result<&EnumTypeReferencers, FederationError> {
-        self.enum_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Enum type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
-    pub(crate) fn get_input_object_type(
-        &self,
-        name: &str,
-    ) -> Result<&InputObjectTypeReferencers, FederationError> {
-        self.input_object_types.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Input object type referencers unexpectedly missing type".to_owned(),
-            }
-            .into()
-        })
-    }
-
     pub(crate) fn get_directive(
         &self,
         name: &str,
     ) -> Result<&DirectiveReferencers, FederationError> {
         self.directives.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Directive referencers unexpectedly missing directive".to_owned(),
-            }
-            .into()
+            internal_error!("Directive referencers unexpectedly missing directive `{name}`")
         })
     }
 }
@@ -138,6 +77,18 @@ pub(crate) struct ScalarTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl ScalarTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.union_fields.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ObjectTypeReferencers {
     pub(crate) schema_roots: IndexSet<SchemaRootDefinitionPosition>,
@@ -146,12 +97,30 @@ pub(crate) struct ObjectTypeReferencers {
     pub(crate) union_types: IndexSet<UnionTypeDefinitionPosition>,
 }
 
+impl ObjectTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.schema_roots.len()
+            + self.object_fields.len()
+            + self.interface_fields.len()
+            + self.union_types.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InterfaceTypeReferencers {
     pub(crate) object_types: IndexSet<ObjectTypeDefinitionPosition>,
     pub(crate) object_fields: IndexSet<ObjectFieldDefinitionPosition>,
     pub(crate) interface_types: IndexSet<InterfaceTypeDefinitionPosition>,
     pub(crate) interface_fields: IndexSet<InterfaceFieldDefinitionPosition>,
+}
+
+impl InterfaceTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_types.len()
+            + self.object_fields.len()
+            + self.interface_types.len()
+            + self.interface_fields.len()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -170,12 +139,32 @@ pub(crate) struct EnumTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl EnumTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InputObjectTypeReferencers {
     pub(crate) object_field_arguments: IndexSet<ObjectFieldArgumentDefinitionPosition>,
     pub(crate) interface_field_arguments: IndexSet<InterfaceFieldArgumentDefinitionPosition>,
     pub(crate) input_object_fields: IndexSet<InputObjectFieldDefinitionPosition>,
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
+}
+
+impl InputObjectTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_field_arguments.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -194,4 +183,19 @@ pub(crate) struct DirectiveReferencers {
     pub(crate) input_object_types: IndexSet<InputObjectTypeDefinitionPosition>,
     pub(crate) input_object_fields: IndexSet<InputObjectFieldDefinitionPosition>,
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
+}
+
+impl DirectiveReferencers {
+    pub(crate) fn object_or_interface_fields(
+        &self,
+    ) -> impl Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> {
+        self.object_fields
+            .iter()
+            .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()))
+            .chain(
+                self.interface_fields
+                    .iter()
+                    .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
+            )
+    }
 }

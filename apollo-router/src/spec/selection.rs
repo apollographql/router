@@ -6,12 +6,11 @@ use serde_json_bytes::ByteString;
 use super::Fragments;
 use crate::json_ext::Object;
 use crate::json_ext::PathElement;
-use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
-use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::TYPENAME;
+use crate::spec::query::DeferStats;
+use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
@@ -190,24 +189,15 @@ impl Selection {
         })
     }
 
-    pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
-    }
-
-    pub(crate) fn output_key_if_typename_field(&self) -> Option<ByteString> {
-        match self {
-            Selection::Field { name, alias, .. } if name.as_str() == TYPENAME => {
-                alias.as_ref().or(Some(name)).cloned()
-            }
-            _ => None,
-        }
-    }
-
-    pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
-        match (path.first(), self) {
-            (None, _) => true,
+    pub(crate) fn matching_error_path_length(
+        &self,
+        path: &[PathElement],
+        fragments: &Fragments,
+    ) -> usize {
+        match (path.split_first(), self) {
+            (None, _) => 0,
             (
-                Some(PathElement::Key(key, _)),
+                Some((PathElement::Key(key, _), rest)),
                 Selection::Field {
                     name,
                     alias,
@@ -218,17 +208,23 @@ impl Selection {
                 if alias.as_ref().unwrap_or(name).as_str() == key.as_str() {
                     match selection_set {
                         // if we don't select after that field, the path should stop there
-                        None => path.len() == 1,
-                        Some(set) => set
-                            .iter()
-                            .any(|selection| selection.contains_error_path(&path[1..], fragments)),
+                        None => 1,
+                        Some(set) => {
+                            set.iter()
+                                .map(|selection| {
+                                    selection.matching_error_path_length(rest, fragments)
+                                })
+                                .max()
+                                .unwrap_or(0)
+                                + 1
+                        }
                     }
                 } else {
-                    false
+                    0
                 }
             }
             (
-                Some(PathElement::Fragment(fragment)),
+                Some((PathElement::Fragment(fragment), rest)),
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
@@ -238,42 +234,54 @@ impl Selection {
                 if fragment.as_str() == type_condition.as_str() {
                     selection_set
                         .iter()
-                        .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                        .map(|selection| selection.matching_error_path_length(rest, fragments))
+                        .max()
+                        .unwrap_or(0)
+                        + 1
                 } else {
-                    false
+                    0
                 }
             }
-            (Some(PathElement::Fragment(fragment)), Self::FragmentSpread { name, .. }) => {
+            (Some((PathElement::Fragment(fragment), rest)), Self::FragmentSpread { name, .. }) => {
                 if let Some(f) = fragments.get(name) {
                     if fragment.as_str() == f.type_condition.as_str() {
                         f.selection_set
                             .iter()
-                            .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                            .map(|selection| selection.matching_error_path_length(rest, fragments))
+                            .max()
+                            .unwrap_or(0)
+                            + 1
                     } else {
-                        false
+                        0
                     }
                 } else {
-                    false
+                    0
                 }
             }
             (_, Self::FragmentSpread { name, .. }) => {
                 if let Some(f) = fragments.get(name) {
                     f.selection_set
                         .iter()
-                        .any(|selection| selection.contains_error_path(path, fragments))
+                        .map(|selection| selection.matching_error_path_length(path, fragments))
+                        .max()
+                        .unwrap_or(0)
                 } else {
-                    false
+                    0
                 }
             }
-            (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten(_)), _) => {
-                self.contains_error_path(&path[1..], fragments)
+            (Some((PathElement::Index(_), rest)), _)
+            | (Some((PathElement::Flatten(_), rest)), _) => {
+                self.matching_error_path_length(rest, fragments) + 1
             }
-            (Some(PathElement::Key(_, _)), Selection::InlineFragment { selection_set, .. }) => {
-                selection_set
-                    .iter()
-                    .any(|selection| selection.contains_error_path(path, fragments))
-            }
-            (Some(PathElement::Fragment(_)), Selection::Field { .. }) => false,
+            (
+                Some((PathElement::Key(_, _), _)),
+                Selection::InlineFragment { selection_set, .. },
+            ) => selection_set
+                .iter()
+                .map(|selection| selection.matching_error_path_length(path, fragments))
+                .max()
+                .unwrap_or(0),
+            (Some((PathElement::Fragment(_), _)), Selection::Field { .. }) => 0,
         }
     }
 }
@@ -313,7 +321,7 @@ fn parse_defer(
         }
         let label = if condition != Condition::No {
             directive
-                .argument_by_name("label")
+                .specified_argument_by_name("label")
                 .and_then(|value| value.as_str())
                 .map(|str| str.to_owned())
         } else {
@@ -364,7 +372,7 @@ impl IncludeSkip {
 
 impl Condition {
     pub(crate) fn parse(directive: &executable::Directive) -> Option<Self> {
-        match directive.argument_by_name("if")?.as_ref() {
+        match directive.specified_argument_by_name("if")?.as_ref() {
             executable::Value::Boolean(true) => Some(Condition::Yes),
             executable::Value::Boolean(false) => Some(Condition::No),
             executable::Value::Variable(variable) => {

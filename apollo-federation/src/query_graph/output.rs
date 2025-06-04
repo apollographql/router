@@ -2,11 +2,10 @@
 // - Corresponds to the `graphviz` and `mermaid` modules from the JS federation.
 
 use std::fmt::Write;
+use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
 use petgraph::dot::Config;
 use petgraph::dot::Dot;
-use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::stable_graph::StableGraph;
 
@@ -14,7 +13,6 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphNode;
 
-type InnerGraph = DiGraph<QueryGraphNode, QueryGraphEdge>;
 type StableInnerGraph = StableGraph<QueryGraphNode, QueryGraphEdge>;
 
 //////////////////////////////////////////////////////////////////////////////
@@ -53,7 +51,7 @@ pub fn to_dot(graph: &QueryGraph) -> String {
 fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
     fn edge_within_cluster(
         graph: &StableInnerGraph,
-        cluster_name: &NodeStr,
+        cluster_name: &Arc<str>,
         edge_index: EdgeIndex,
     ) -> bool {
         graph.edge_endpoints(edge_index).is_some_and(|(n1, n2)| {
@@ -127,7 +125,7 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
     // Supergraph nodes
     for i in stable_graph.node_indices() {
         let node = &stable_graph[i];
-        if node.source == graph.name() {
+        if node.source == *graph.name() {
             writeln!(dot_str, "  {} [{}]", i.index(), label_node(node))?;
         }
     }

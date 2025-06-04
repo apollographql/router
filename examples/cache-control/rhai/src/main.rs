@@ -22,14 +22,15 @@ mod tests {
         let mut mock_service1 = test::MockSubgraphService::new();
         let mut mock_service2 = test::MockSubgraphService::new();
 
-        mock_service1.expect_clone().return_once(|| {
+        mock_service1.expect_clone().returning(move || {
             let mut mock_service = test::MockSubgraphService::new();
+            let value = header_one.clone();
             mock_service
                 .expect_call()
                 .once()
                 .returning(move |req: subgraph::Request| {
                     let mut headers = HeaderMap::new();
-                    if let Some(value) = &header_one {
+                    if let Some(value) = &value {
                         headers.insert("cache-control", value.parse().unwrap());
                     }
 
@@ -41,14 +42,15 @@ mod tests {
             mock_service
         });
 
-        mock_service2.expect_clone().return_once(move || {
+        mock_service2.expect_clone().returning(move || {
             let mut mock_service = test::MockSubgraphService::new();
+            let value = header_two.clone();
             mock_service
                 .expect_call()
                 .once()
                 .returning(move |req: subgraph::Request| {
                     let mut headers = HeaderMap::new();
-                    if let Some(value) = &header_two {
+                    if let Some(value) = &value {
                         headers.insert("cache-control", value.parse().unwrap());
                     }
 

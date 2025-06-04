@@ -15,7 +15,7 @@ const SUBGRAPH: &str = r#"
       type Query {
         t: T @shareable
       }
-  
+
       type T @key(fields: "id") @shareable {
         id: ID!
         v1: Int
@@ -200,7 +200,7 @@ fn correctly_generate_plan_built_from_some_non_individually_optimal_branch_optio
         type Query {
           t: T @shareable
         }
-  
+
         type T {
           x: Int @shareable
         }
@@ -209,7 +209,7 @@ fn correctly_generate_plan_built_from_some_non_individually_optimal_branch_optio
         type Query {
           t: T @shareable
         }
-  
+
         type T @key(fields: "id") {
           id: ID!
         }
@@ -276,7 +276,7 @@ fn does_not_error_on_some_complex_fetch_group_dependencies() {
         type Query {
           me: User @shareable
         }
-  
+
         type User {
           id: ID! @shareable
         }
@@ -285,12 +285,12 @@ fn does_not_error_on_some_complex_fetch_group_dependencies() {
         type Query {
           me: User @shareable
         }
-  
+
         type User @key(fields: "id") {
           id: ID!
           p: Props
         }
-  
+
         type Props {
           id: ID! @shareable
         }
@@ -299,29 +299,29 @@ fn does_not_error_on_some_complex_fetch_group_dependencies() {
         type Query {
           me: User @shareable
         }
-  
+
         type User {
           id: ID! @shareable
         }
-  
+
         type Props @key(fields: "id") {
           id: ID!
           v0: Int
           t: T
         }
-  
+
         type T {
           id: ID!
           v1: V
           v2: V
-  
+
           # Note: this field is not queried, but matters to the reproduction this test exists
           # for because it prevents some optimizations that would happen without it (namely,
           # without it, the planner would notice that everything after type T is guaranteed
           # to be local to the subgraph).
           user: User
         }
-  
+
         type V {
           x: Int
         }
@@ -396,7 +396,7 @@ fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
         type Query {
           t: T
         }
-  
+
         type T @key(fields: "otherId") {
           otherId: ID!
         }
@@ -468,8 +468,6 @@ fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists() {
     // Each of id/v0 can have 2 options each, so that's 4 combinations. If we were to consider 2 options for each
     // v1 value however, that would multiple it by 2 each times, so it would 32 possibilities. We limit the number of
@@ -487,7 +485,7 @@ fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists(
         type Query {
           t: T @shareable
         }
-  
+
         type T @key(fields: "id") {
           id: ID!
           v0: Int @shareable
@@ -497,7 +495,7 @@ fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists(
         type Query {
           t: T @shareable
         }
-  
+
         type T @key(fields: "id") {
           id: ID!
           v0: Int @shareable

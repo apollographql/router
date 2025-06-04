@@ -846,3 +846,73 @@ fn it_works_with_type_condition_even_for_types_only_reachable_by_the_at_provides
       "###
     );
 }
+
+#[test]
+fn test_provides_edge_ordering() {
+    let planner = planner!(
+        SubgraphQ: r#"
+type A {
+    id: ID! @external
+}
+
+type Query {
+    test: A @provides(fields: "id")
+}
+        "#,
+        SubgraphX: r#"
+type A @key(fields: "id") {
+    id: ID!
+    data: String! @shareable
+}
+        "#,
+        SubgraphY: r#"
+type A @key(fields: "id") {
+    id: ID!
+    data: String! @shareable
+}
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+{
+    test { # provides id
+        data
+    }
+}
+        "#,
+
+        // Make sure @provides edges are ordered as expected.
+        // `data` is expected to be fetched from SubgraphX, not SubgraphY.
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphQ") {
+          {
+            test {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "SubgraphX") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

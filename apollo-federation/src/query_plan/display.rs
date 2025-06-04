@@ -3,8 +3,8 @@ use std::fmt;
 use apollo_compiler::executable;
 
 use super::*;
-use crate::indented_display::write_indented_lines;
-use crate::indented_display::State;
+use crate::display_helpers::State;
+use crate::display_helpers::write_indented_lines;
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
@@ -96,14 +96,15 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if let Some(v) = requires.as_ref() {
-            if !v.is_empty() {
-                write_selections(state, v)?;
-                state.write(" =>")?;
-                state.new_line()?;
-            }
+        if !requires.is_empty() {
+            write_requires_selections(state, requires)?;
+            state.write(" =>")?;
+            state.new_line()?;
         }
-        write_operation(state, operation_document)?;
+        write_operation(
+            state,
+            operation_document.as_parsed().map_err(|_| fmt::Error)?,
+        )?;
 
         state.dedent()?;
         state.write("},")
@@ -169,9 +170,9 @@ impl ConditionNode {
                 state.indent()?;
                 if_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("},")?;
+                state.write("}")?;
 
-                state.write("Else {")?;
+                state.write(" Else {")?;
                 state.indent()?;
                 else_clause.write_indented(state)?;
                 state.dedent()?;
@@ -215,7 +216,7 @@ impl DeferNode {
 
         primary.write_indented(state)?;
         if !deferred.is_empty() {
-            state.write(", [")?;
+            state.write(" [")?;
             write_indented_lines(state, deferred, |state, deferred| {
                 deferred.write_indented(state)
             })?;
@@ -235,19 +236,18 @@ impl PrimaryDeferBlock {
         } = self;
         state.write("Primary {")?;
         if sub_selection.is_some() || node.is_some() {
-            state.indent()?;
-
             if let Some(sub_selection) = sub_selection {
-                state.write(
-                    sub_selection
-                        .serialize()
-                        .initial_indent_level(state.indent_level()),
-                )?;
+                state.indent()?;
+                state.write(sub_selection)?;
                 if node.is_some() {
                     state.write(":")?;
                     state.new_line()?;
                 }
+            } else {
+                // Indent to match the Some() case
+                state.indent()?;
             }
+
             if let Some(node) = node {
                 node.write_indented(state)?;
             }
@@ -267,6 +267,7 @@ impl DeferredDeferBlock {
             sub_selection,
             node,
         } = self;
+
         state.write("Deferred(depends: [")?;
         if let Some((DeferredDependency { id }, rest)) = depends.split_first() {
             state.write(id)?;
@@ -285,16 +286,19 @@ impl DeferredDeferBlock {
         }
         state.write("\"")?;
         if let Some(label) = label {
-            state.write(", label: \"")?;
-            state.write(label)?;
-            state.write("\"")?;
+            state.write_fmt(format_args!(r#", label: "{label}""#))?;
         }
         state.write(") {")?;
+
         if sub_selection.is_some() || node.is_some() {
             state.indent()?;
 
             if let Some(sub_selection) = sub_selection {
-                write_selections(state, &sub_selection.selections)?;
+                state.write(sub_selection)?;
+                state.write(":")?;
+            }
+            if sub_selection.is_some() && node.is_some() {
+                state.new_line()?;
             }
             if let Some(node) = node {
                 node.write_indented(state)?;
@@ -302,6 +306,7 @@ impl DeferredDeferBlock {
 
             state.dedent()?;
         }
+
         state.write("},")
     }
 }
@@ -314,7 +319,8 @@ fn write_operation(
     operation_document: &ExecutableDocument,
 ) -> fmt::Result {
     let operation = operation_document
-        .get_operation(None)
+        .operations
+        .get(None)
         .expect("expected a single-operation document");
     write_selections(state, &operation.selection_set.selections)?;
     for fragment in operation_document.fragments.values() {
@@ -351,28 +357,101 @@ fn write_selections(
     state.write("}")
 }
 
+fn write_requires_selections(
+    state: &mut State<'_, '_>,
+    selections: &[requires_selection::Selection],
+) -> fmt::Result {
+    state.write("{")?;
+
+    // Manually indent and write the newline
+    // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
+    state.indent()?;
+    if let Some((first, rest)) = selections.split_first() {
+        write_requires_selection(state, first)?;
+        for sel in rest {
+            state.new_line()?;
+            write_requires_selection(state, sel)?;
+        }
+    }
+    state.dedent()?;
+
+    state.write("}")
+}
+
+fn write_requires_selection(
+    state: &mut State<'_, '_>,
+    selection: &requires_selection::Selection,
+) -> fmt::Result {
+    match selection {
+        requires_selection::Selection::Field(requires_selection::Field {
+            alias,
+            name,
+            selections,
+        }) => {
+            if let Some(alias) = alias {
+                state.write(alias)?;
+                state.write(": ")?;
+            }
+            state.write(name)?;
+            if !selections.is_empty() {
+                state.write(" ")?;
+                write_requires_selections(state, selections)?;
+            }
+        }
+        requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
+            type_condition,
+            selections,
+        }) => {
+            if let Some(type_name) = type_condition {
+                state.write("... on ")?;
+                state.write(type_name)?;
+                state.write(" ")?;
+            } else {
+                state.write("... ")?;
+            }
+            write_requires_selections(state, selections)?;
+        }
+    }
+    Ok(())
+}
+
+impl fmt::Display for requires_selection::Selection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_requires_selection(&mut State::new(f), self)
+    }
+}
+
 /// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("@"),
+            Self::Key(name, conditions) => {
+                f.write_str(name)?;
+                write_conditions(conditions, f)
+            }
+            Self::AnyIndex(conditions) => {
+                f.write_str("@")?;
+                write_conditions(conditions, f)
+            }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
+            Self::Parent => write!(f, ".."),
         }
+    }
+}
+
+fn write_conditions(conditions: &Option<Vec<Name>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if let Some(conditions) = conditions {
+        write!(f, "|[{}]", conditions.join(","))
+    } else {
+        Ok(())
     }
 }
 
 impl fmt::Display for QueryPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Field(field) => f.write_str(field.response_key()),
-            Self::InlineFragment(inline) => {
-                if let Some(cond) = &inline.type_condition {
-                    write!(f, "... on {cond}")
-                } else {
-                    Ok(())
-                }
-            }
+            Self::Field { response_key } => f.write_str(response_key),
+            Self::InlineFragment { type_condition } => write!(f, "... on {type_condition}"),
         }
     }
 }

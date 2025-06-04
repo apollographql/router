@@ -7,12 +7,11 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
+use http::HeaderValue;
 use http::header;
 use http::header::HeaderName;
-use http::HeaderValue;
 use multimap::MultiMap;
 
 use crate::graphql;
@@ -20,7 +19,7 @@ use crate::services::APPLICATION_JSON_HEADER_VALUE;
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderName` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.
@@ -47,7 +46,7 @@ pub struct TryIntoHeaderName {
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderValue`].
 ///
-/// `buildstructor` builders allow doing implict conversions for convenience,
+/// `buildstructor` builders allow doing implicit conversions for convenience,
 /// but only infallible ones.
 /// `HeaderValue` can be converted from various types but the conversions is often fallible,
 /// with `TryFrom` or `TryInto` instead of `From` or `Into`.
@@ -194,9 +193,8 @@ impl PartialEq for TryIntoHeaderName {
 
 impl Hash for TryIntoHeaderName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match &self.result {
-            Ok(value) => value.hash(state),
-            Err(_) => {}
+        if let Ok(value) = &self.result {
+            value.hash(state)
         }
     }
 }
@@ -218,27 +216,22 @@ pub(crate) fn header_map(
     Ok(http)
 }
 
-/// Ignores `http::Extensions`
+// In an earlier version of the http crate, `Request` didn't implement `Clone`, so we
+// implemented partial support (excluding Extensions) for `Clone`. `Request` does now implement
+// `Clone`, so this function does now clone Requests fully.
+//  - https://github.com/hyperium/http/pull/634
+//  - https://github.com/hyperium/http/releases/tag/v1.0.0
 pub(crate) fn clone_http_request<B: Clone>(request: &http::Request<B>) -> http::Request<B> {
-    let mut new = http::Request::builder()
-        .method(request.method().clone())
-        .uri(request.uri().clone())
-        .version(request.version())
-        .body(request.body().clone())
-        .unwrap();
-    *new.headers_mut() = request.headers().clone();
-    new
+    request.clone()
 }
 
-/// Ignores `http::Extensions`
+// In an earlier version of the http crate, `Response` didn't implement `Clone`, so we
+// implemented partial support (excluding Extensions) for `Clone`. `Response` does now implement
+// `Clone`, so this function does now clone Responses fully.
+//  - https://github.com/hyperium/http/pull/634
+//  - https://github.com/hyperium/http/releases/tag/v1.0.0
 pub(crate) fn clone_http_response<B: Clone>(response: &http::Response<B>) -> http::Response<B> {
-    let mut new = http::Response::builder()
-        .status(response.status())
-        .version(response.version())
-        .body(response.body().clone())
-        .unwrap();
-    *new.headers_mut() = response.headers().clone();
-    new
+    response.clone()
 }
 
 /// Wrap an http Request.
@@ -445,7 +438,7 @@ impl IntoResponse for Response<graphql::Response> {
             .headers
             .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(json_body_bytes))
     }
 }
 
@@ -454,7 +447,7 @@ impl IntoResponse for Response<Bytes> {
         // todo: chunks?
         let (parts, body) = http::Response::from(self).into_parts();
 
-        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
+        axum::response::Response::from_parts(parts, axum::body::Body::from(body))
     }
 }
 
@@ -464,6 +457,8 @@ mod test {
     use http::Method;
     use http::Uri;
 
+    use super::clone_http_request;
+    use super::clone_http_response;
     use crate::http_ext::Request;
 
     #[test]
@@ -487,5 +482,35 @@ mod test {
         assert_eq!(request.uri(), &Uri::from_static("http://example.com"));
         assert_eq!(request.method(), Method::POST);
         assert_eq!(request.body(), &"test");
+    }
+
+    #[test]
+    fn cloning_an_http_request_includes_extensions() {
+        let mut request = http::Request::new("body".to_string());
+        request.extensions_mut().insert::<usize>(6);
+        let cloned_request = clone_http_request(&request);
+
+        assert_eq!(
+            *cloned_request
+                .extensions()
+                .get::<usize>()
+                .expect("it has the usize extension"),
+            6
+        );
+    }
+
+    #[test]
+    fn cloning_an_http_response_includes_extensions() {
+        let mut response = http::Response::new("body".to_string());
+        response.extensions_mut().insert::<usize>(6);
+        let cloned_response = clone_http_response(&response);
+
+        assert_eq!(
+            *cloned_response
+                .extensions()
+                .get::<usize>()
+                .expect("it has the usize extension"),
+            6
+        );
     }
 }

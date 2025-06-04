@@ -1,32 +1,29 @@
 //! Configuration for apollo telemetry exporter.
-use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use bytes::BytesMut;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
+use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
-use http::StatusCode;
 use opentelemetry::ExportError;
+use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
 use serde_json::Value;
 use sys_info::hostname;
 use tokio::sync::mpsc;
-use tokio::task::JoinError;
-use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
 
@@ -106,6 +103,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        agent_id: String,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
@@ -119,6 +117,7 @@ impl ApolloExporter {
             runtime_version: "rust".to_string(),
             uname: get_uname()?,
             executable_schema_id: schema_id.to_string(),
+            agent_id,
             ..Default::default()
         };
 
@@ -196,7 +195,7 @@ impl ApolloExporter {
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *self.studio_backoff.lock().unwrap();
+        let expires_at = *self.studio_backoff.lock();
         let now = Instant::now();
         if expires_at > now {
             let remaining = expires_at - now;
@@ -264,8 +263,11 @@ impl ApolloExporter {
         let retries = if has_traces { 5 } else { 1 };
 
         for i in 0..retries {
-            // We know these requests can be cloned
-            let task_req = req.try_clone().expect("requests must be clone-able");
+            let task_req = req.try_clone().ok_or_else(|| {
+                ApolloExportError::ServerError(
+                    "Tried to clone a request that cannot be cloned".to_string(),
+                )
+            })?;
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
@@ -295,7 +297,7 @@ impl ApolloExporter {
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
                                 retry_after = returned_retry_after;
-                                *self.studio_backoff.lock().unwrap() =
+                                *self.studio_backoff.lock() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
                             // Even if we can't update the studio_backoff, we should not continue to
@@ -321,7 +323,9 @@ impl ApolloExporter {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
                             if let Ok(response) = serde_json::Value::from_str(&data) {
                                 if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
-                                    tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
+                                    tracing::warn!(
+                                        "traces will not be sent to Apollo as this account is on a free plan"
+                                    );
                                     self.strip_traces.store(true, Ordering::SeqCst);
                                 }
                             }
@@ -372,70 +376,6 @@ pub(crate) mod proto {
     pub(crate) mod reports {
         #![allow(clippy::derive_partial_eq_without_eq)]
         tonic::include_proto!("reports");
-    }
-}
-
-/// Reporting Error type
-#[derive(Debug)]
-pub(crate) struct ReporterError {
-    source: Box<dyn Error + Send + Sync + 'static>,
-    msg: String,
-}
-
-impl std::error::Error for ReporterError {}
-
-impl From<InvalidUri> for ReporterError {
-    fn from(error: InvalidUri) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<tonic::transport::Error> for ReporterError {
-    fn from(error: tonic::transport::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<std::io::Error> for ReporterError {
-    fn from(error: std::io::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<sys_info::Error> for ReporterError {
-    fn from(error: sys_info::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<JoinError> for ReporterError {
-    fn from(error: JoinError) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl std::fmt::Display for ReporterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "ReporterError: source: {}, message: {}",
-            self.source, self.msg
-        )
     }
 }
 

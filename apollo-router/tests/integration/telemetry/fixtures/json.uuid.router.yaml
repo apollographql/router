@@ -1,0 +1,25 @@
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+        jaeger: true
+      otlp:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        endpoint: default
+    logging:
+      stdout:
+        format:
+          json:
+            display_trace_id: uuid

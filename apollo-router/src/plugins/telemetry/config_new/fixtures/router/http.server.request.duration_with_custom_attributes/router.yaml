@@ -5,6 +5,8 @@ telemetry:
         http.server.active_requests: false
         http.server.request.duration:
           attributes:
+            http.request.method:
+              alias: http_method
             my_attribute:
               request_method: true
             graphql.operation.name:

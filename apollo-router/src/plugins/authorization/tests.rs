@@ -4,65 +4,27 @@ use http::header::CONTENT_TYPE;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
-use crate::graphql;
-use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
-use crate::plugins::authorization::CacheKeyMetadata;
-use crate::services::router;
-use crate::services::subgraph;
-use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::graphql;
+use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
+use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::CacheKeyMetadata;
+use crate::services::router;
+use crate::services::router::body;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
-const SCHEMA: &str = r#"schema
-    @core(feature: "https://specs.apollo.dev/core/v0.1")
-    @core(feature: "https://specs.apollo.dev/join/v0.1")
-    @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-     {
-    query: Query
-}
-directive @core(feature: String!) repeatable on SCHEMA
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-scalar join__FieldSet
-enum join__Graph {
-   USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-   ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-}
-type Query {
-   currentUser: User @join__field(graph: USER)
-   orga(id: ID): Organization @join__field(graph: ORGA)
-}
-type User
-@join__owner(graph: USER)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id"){
-   id: ID!
-   name: String
-   phone: String
-   activeOrganization: Organization
-}
-type Organization
-@join__owner(graph: ORGA)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id") {
-   id: ID
-   creatorUser: User
-   name: String
-   nonNullId: ID!
-   suborga: [Organization]
-}"#;
+const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
 #[tokio::test]
 async fn authenticated_request() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on User{name phone}}}",
                 "variables": {
                     "representations": [
                         { "__typename": "User", "id":0 }
@@ -103,10 +65,7 @@ async fn authenticated_request() {
 
     let context = Context::new();
     context
-        .insert(
-            "apollo_authentication::JWT::claims",
-            "placeholder".to_string(),
-        )
+        .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
         .unwrap();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
@@ -322,7 +281,7 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -343,7 +302,7 @@ async fn authenticated_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read" }},
         )
         .unwrap();
@@ -353,7 +312,7 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -440,7 +399,7 @@ async fn authenticated_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -525,7 +484,7 @@ async fn authenticated_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -666,7 +625,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -687,7 +646,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read" }},
         )
         .unwrap();
@@ -697,7 +656,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -718,7 +677,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read pii" }},
         )
         .unwrap();
@@ -728,7 +687,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -749,7 +708,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "admin" }},
         )
         .unwrap();
@@ -759,7 +718,7 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -838,7 +797,7 @@ async fn scopes_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -918,7 +877,7 @@ async fn scopes_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -1000,7 +959,7 @@ async fn errors_in_extensions() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(serde_json::to_vec(&req).unwrap().into())
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
             .unwrap(),
     };
 
@@ -1138,7 +1097,7 @@ async fn cache_key_metadata() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "id test" }},
         )
         .unwrap();

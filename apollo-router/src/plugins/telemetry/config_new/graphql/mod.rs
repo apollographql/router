@@ -1,44 +1,33 @@
-use std::sync::Arc;
-
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
-use apollo_compiler::ExecutableDocument;
-use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
-use super::instruments::CustomCounterInner;
 use super::instruments::CustomInstruments;
-use super::instruments::Increment;
-use super::instruments::InstrumentsConfig;
-use super::instruments::METER_NAME;
+use crate::Context;
 use crate::graphql::ResponseVisitor;
-use crate::metrics;
+use crate::json_ext::Object;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
-use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
 
-static FIELD_LENGTH: &str = "graphql.field.list.length";
-static FIELD_EXECUTION: &str = "graphql.field.execution";
+pub(crate) const FIELD_LENGTH: &str = "graphql.field.list.length";
+pub(crate) const FIELD_EXECUTION: &str = "graphql.field.execution";
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -73,6 +62,7 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 pub(crate) type GraphQLCustomInstruments = CustomInstruments<
     supergraph::Request,
     supergraph::Response,
+    crate::graphql::Response,
     GraphQLAttributes,
     GraphQLSelector,
     GraphQLValue,
@@ -83,6 +73,7 @@ pub(crate) struct GraphQLInstruments {
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             GraphQLAttributes,
             GraphQLSelector,
         >,
@@ -91,72 +82,12 @@ pub(crate) struct GraphQLInstruments {
         CustomCounter<
             supergraph::Request,
             supergraph::Response,
+            crate::graphql::Response,
             GraphQLAttributes,
             GraphQLSelector,
         >,
     >,
     pub(crate) custom: GraphQLCustomInstruments,
-}
-
-impl From<&InstrumentsConfig> for GraphQLInstruments {
-    fn from(value: &InstrumentsConfig) -> Self {
-        let meter = metrics::meter_provider().meter(METER_NAME);
-        GraphQLInstruments {
-            list_length: value.graphql.attributes.list_length.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &value.graphql.attributes.list_length {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::FieldCustom(None),
-                        condition: Condition::True,
-                        histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(GraphQLSelector::ListLength {
-                            list_length: ListLength::Value,
-                        })),
-                        selectors,
-                        updated: false,
-                    }),
-                }
-            }),
-            field_execution: value
-                .graphql
-                .attributes
-                .field_execution
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &value.graphql.attributes.field_execution {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomCounter {
-                        inner: Mutex::new(CustomCounterInner {
-                            increment: Increment::FieldUnit,
-                            condition: Condition::True,
-                            counter: Some(meter.f64_counter(FIELD_EXECUTION).init()),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: None,
-                            selectors,
-                            incremented: false,
-                        }),
-                    }
-                }),
-            custom: CustomInstruments::new(&value.graphql.custom),
-        }
-    }
 }
 
 impl Instrumented for GraphQLInstruments {
@@ -204,12 +135,18 @@ impl Instrumented for GraphQLInstruments {
         self.custom.on_response_event(response, ctx);
 
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.unsupported_executable_document() {
+            if let Some(executable_document) = ctx.executable_document() {
                 GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
                 }
-                .visit(&executable_document, response);
+                .visit(
+                    &executable_document,
+                    response,
+                    &ctx.get_demand_control_context()
+                        .map(|c| c.variables)
+                        .unwrap_or_default(),
+                );
             }
         }
     }
@@ -230,10 +167,11 @@ struct GraphQLInstrumentsVisitor<'a> {
     instruments: &'a GraphQLInstruments,
 }
 
-impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
+        variables: &Object,
         ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -244,11 +182,17 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                    self.visit_list_item(
+                        request,
+                        variables,
+                        field.ty().inner_named_type(),
+                        field,
+                        item,
+                    );
                 }
             }
             Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}
         }
@@ -259,10 +203,10 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
 pub(crate) mod test {
 
     use super::*;
+    use crate::Configuration;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
-    use crate::Configuration;
 
     #[test_log::test(tokio::test)]
     async fn basic_metric_publishing() {
@@ -283,10 +227,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -295,8 +239,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -327,14 +271,13 @@ pub(crate) mod test {
                 .build()
                 .unwrap();
 
-            let harness = PluginTestHarness::<Telemetry>::builder()
+            let harness: PluginTestHarness<Telemetry> = PluginTestHarness::<Telemetry>::builder()
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
-
+                .await.expect("test harness");
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -343,8 +286,9 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
+
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -386,10 +330,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_disabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -398,8 +342,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -428,10 +372,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/filtered_field_length.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -440,8 +384,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -452,14 +396,12 @@ pub(crate) mod test {
     }
 
     fn context(schema_str: &str, query_str: &str) -> Context {
-        let schema = crate::spec::Schema::parse_test(schema_str, &Default::default()).unwrap();
+        let schema = crate::spec::Schema::parse(schema_str, &Default::default()).unwrap();
         let query =
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(query));
+        context.extensions().with_lock(|lock| lock.insert(query));
 
         context
     }

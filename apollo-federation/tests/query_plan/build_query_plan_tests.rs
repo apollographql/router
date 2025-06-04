@@ -31,7 +31,12 @@ fn some_name() {
 }
 */
 
+mod cancel;
+mod context;
 mod debug_max_evaluated_plans_configuration;
+mod defer;
+mod disable_subgraphs;
+mod entities;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
@@ -41,13 +46,13 @@ mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;
 mod merged_abstract_types_handling;
-mod named_fragments;
-mod named_fragments_preservation;
+mod mutations;
+mod named_fragments_expansion;
+mod overrides;
 mod provides;
 mod requires;
 mod shareable_root_fields;
 mod subscriptions;
-
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
 #[test]
@@ -473,10 +478,8 @@ fn it_executes_mutation_operations_in_sequence() {
     );
 }
 
-/// @requires references external field indirectly {
+/// @requires references external field indirectly
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (appears to be visiting wrong subgraph)
 fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
     // Field issue where we were seeing a FetchGroup created where the fields used by the key to jump subgraphs
     // were not properly fetched. In the below test, this test will ensure that 'k2' is properly collected
@@ -613,109 +616,694 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
     );
 }
 
-// TODO(@TylerBloom): As part of the private preview, we strip out all uses of the @defer
-// directive. Once handling that feature is implemented, this test will start failing and should be
-// updated to use a config for the planner to strip out the defer directive.
 #[test]
-fn defer_gets_stripped_out() {
+fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
+    // This is a test for ROUTER-546 (the second part).
     let planner = planner!(
-        Subgraph1: r#"
+        S: r#"
           type Query {
-            t: T
+            start: T!
           }
 
           type T @key(fields: "id") {
-            id: ID!
+            id: String!
           }
           "#,
-        Subgraph2: r#"
+        A: r#"
           type T @key(fields: "id") {
+            id: String! @shareable
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
             id: ID!
-            data: String
+            a: String! @shareable
+            b: String @shareable
+          }
+          "#,
+        B: r#"
+          type T @key(fields: "id") {
+            id: String! @external
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+            a: String! @shareable
+            # Note: b is not here.
+          }
+
+          # This definition is necessary.
+          extend type W @key(fields: "id") {
+            id: ID @external
+          }
+          "#,
+        C: r#"
+          extend type U @key(fields: "id") {
+            id: ID! @external
+            a: String! @external
+            b: String @external
+            w: W @requires(fields: "a b")
+          }
+
+          type W @key(fields: "id") {
+            id: ID
+            y: Y
+            w1: Int
+            w2: Int
+            w3: Int
+            w4: Int
+            w5: Int
+          }
+
+          type Y {
+            y1: Int
+            y2: Int
+            y3: Int
           }
           "#,
     );
-    let plan_one = assert_plan!(
+    assert_plan!(
         &planner,
         r#"
           {
-              t {
+            start {
+              u {
+                w {
                   id
-                  data
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                }
               }
+            }
           }
         "#,
         @r###"
-          QueryPlan {
-            Sequence {
-              Fetch(service: "Subgraph1") {
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S") {
+          {
+            start {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "start") {
+              Fetch(service: "B") {
                 {
-                  t {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "start.u") {
+              Fetch(service: "A") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    b
+                    a
+                  }
+                }
+              },
+            },
+          },
+          Flatten(path: "start") {
+            Fetch(service: "A") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  u {
+                    __typename
+                    id
+                    b
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "start.u") {
+          Fetch(service: "C") {
+            {
+              ... on U {
+                __typename
+                a
+                b
+                id
+              }
+            } =>
+            {
+              ... on U {
+                w {
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn redundant_typename_for_inline_fragments_without_type_condition() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            products: [Product]
+          }
+          interface Product {
+            name: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            products {
+              ... @skip(if: false) {
+                name
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              products {
+                __typename
+                ... @skip(if: false) {
+                  name
+                }
+              }
+            }
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn test_merging_fetches_reset_cached_costs() {
+    // This is a test for ROUTER-553.
+    let planner = planner!(
+      A: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      B: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      C: r#"
+            type S @key(fields: "id") {
+                id: ID!
+                x: X
+                a: String!
+            }
+
+            type X {
+                t: T
+            }
+
+            type T {
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+                b: String
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"{
+            start {
+                u {
+                    b
+                }
+                a
+                x {
+                    t {
+                        u {
+                        id
+                        }
+                    }
+                }
+            }
+        }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            start {
+              __typename
+              u {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "start") {
+            Fetch(service: "C") {
+              {
+                ... on S {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on S {
+                  a
+                  x {
+                    t {
+                      u {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "start.u") {
+            Fetch(service: "C") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  b
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn handles_multiple_conditions_on_abstract_types() {
+    let planner = planner!(
+        books: r#"
+        type Book @key(fields: "id") {
+          id: ID!
+          title: String
+        }
+        "#,
+        magazines: r#"
+        type Magazine @key(fields: "id") {
+          id: ID!
+          title: String
+        }
+        "#,
+        products: r#"
+        type Query {
+          products: [Product]
+        }
+
+        interface Product {
+          id: ID!
+          sku: String
+          dimensions: ProductDimension
+        }
+
+        type ProductDimension @shareable {
+          size: String
+          weight: Float
+        }
+
+        type Book implements Product @key(fields: "id") {
+          id: ID!
+          sku: String
+          dimensions: ProductDimension @shareable
+        }
+
+        type Magazine implements Product @key(fields: "id") {
+          id: ID!
+          sku: String
+          dimensions: ProductDimension @shareable
+        }
+        "#,
+        reviews: r#"
+        type Book implements Product @key(fields: "id") {
+          id: ID!
+          reviews: [Review!]!
+        }
+
+        type Magazine implements Product @key(fields: "id") {
+          id: ID!
+          reviews: [Review!]!
+        }
+
+        interface Product {
+          id: ID!
+          reviews: [Review!]!
+        }
+
+        type Review {
+          id: Int!
+          body: String!
+          product: Product
+        }
+        "#,
+    );
+
+    assert_plan!(
+      &planner,
+      r#"
+      query ($title: Boolean = true) {
+        products {
+          id
+          reviews {
+            product {
+              id
+              ... on Book @include(if: $title) {
+                title
+                ... on Book @skip(if: $title) {
+                  sku
+                }
+              }
+              ... on Magazine {
+                sku
+              }
+            }
+          }
+        }
+      }
+      "#,
+      @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "products") {
+              {
+                products {
+                  __typename
+                  id
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Magazine {
                     __typename
                     id
                   }
                 }
+              }
+            },
+            Flatten(path: "products.@") {
+              Fetch(service: "reviews") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Magazine {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    reviews {
+                      product {
+                        __typename
+                        id
+                        ... on Book @include(if: $title) {
+                          __typename
+                          id
+                          ... on Book @skip(if: $title) {
+                            __typename
+                            id
+                          }
+                        }
+                        ... on Magazine {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  }
+                  ... on Magazine {
+                    reviews {
+                      product {
+                        __typename
+                        id
+                        ... on Book @include(if: $title) {
+                          __typename
+                          id
+                          ... on Book @skip(if: $title) {
+                            __typename
+                            id
+                          }
+                        }
+                        ... on Magazine {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
               },
-              Flatten(path: "t") {
-                Fetch(service: "Subgraph2") {
+            },
+            Parallel {
+              Flatten(path: "products.@.reviews.@.product") {
+                Fetch(service: "products") {
                   {
-                    ... on T {
+                    ... on Book {
+                      ... on Book {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Magazine {
                       __typename
                       id
                     }
                   } =>
                   {
-                    ... on T {
-                      data
+                    ... on Book @include(if: $title) {
+                      ... on Book @skip(if: $title) {
+                        sku
+                      }
+                    }
+                    ... on Magazine {
+                      sku
                     }
                   }
                 },
               },
+              Include(if: $title) {
+                Flatten(path: "products.@.reviews.@.product") {
+                  Fetch(service: "books") {
+                    {
+                      ... on Book {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Book {
+                        title
+                      }
+                    }
+                  },
+                },
+              },
             },
-          }
-        "###
+          },
+        }
+      "###
     );
-    let plan_two = assert_plan!(
+}
+
+#[test]
+fn condition_order_router799() {
+    let planner = planner!(
+        books: r#"
+        type Query {
+            bookName: String!
+        }
+        type Mutation {
+            bookName(name: String!): Int!
+        }
+        "#,
+    );
+
+    assert_plan!(
         &planner,
         r#"
-          {
-              t {
-                  id
-                  ... @defer {
-                    data
-                  }
-              }
+          mutation($var0: Boolean! = true, $var1: Boolean!) {
+            ... on Mutation @skip(if: $var0) @include(if: $var1) {
+              field0: __typename
+            }
           }
         "#,
         @r###"
-          QueryPlan {
-            Sequence {
-              Fetch(service: "Subgraph1") {
-                {
-                  t {
-                    __typename
-                    id
+    QueryPlan {
+      Include(if: $var1) {
+        Skip(if: $var0) {
+          Fetch(service: "books") {
+            {
+              ... on Mutation {
+                field0: __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Reordering @skip/@include should produce the same plan.
+    assert_plan!(
+        &planner,
+        r#"
+          mutation($var0: Boolean! = true, $var1: Boolean!) {
+            ... on Mutation @include(if: $var1) @skip(if: $var0) {
+              field0: __typename
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Include(if: $var1) {
+        Skip(if: $var0) {
+          Fetch(service: "books") {
+            {
+              ... on Mutation {
+                field0: __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn rebase_non_intersecting_without_dropping_inline_fragment_due_to_directive() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            test: X
+          }
+
+          interface I {
+            i: Int
+          }
+
+          type X implements I {
+            i: Int
+          }
+
+          type Y implements I {
+            i: Int
+          }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            test { # type X
+              ... on I { # upcast to I
+                ... @skip(if: false) { # This fragment can't be dropped due to its directive.
+                  ... on Y { # downcast to Y (non-intersecting)
+                    i
                   }
                 }
-              },
-              Flatten(path: "t") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on T {
-                      __typename
-                      id
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      data
-                    }
-                  }
-                },
-              },
-            },
+              }
+            }
           }
-        "###
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          test {
+            __typename @include(if: false)
+          }
+        }
+      },
+    }
+    "###
     );
-    assert_eq!(plan_one, plan_two)
 }

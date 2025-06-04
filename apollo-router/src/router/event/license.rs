@@ -6,26 +6,19 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
-use thiserror::Error;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
+use crate::uplink::UplinkConfig;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
 use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::UplinkConfig;
 
 const APOLLO_ROUTER_LICENSE_INVALID: &str = "APOLLO_ROUTER_LICENSE_INVALID";
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
-
-#[derive(Debug, Display, From, Error)]
-enum Error {
-    /// The license is invalid.
-    InvalidLicense,
-}
 
 /// License controls availability of certain features of the Router.
 /// This API experimental and is subject to change outside of semver.
@@ -34,19 +27,19 @@ enum Error {
 #[non_exhaustive]
 pub enum LicenseSource {
     /// A static license. EXPERIMENTAL and not subject to semver.
-    #[display(fmt = "Static")]
+    #[display("Static")]
     Static { license: License },
 
     /// A license supplied via APOLLO_ROUTER_LICENSE. EXPERIMENTAL and not subject to semver.
-    #[display(fmt = "Env")]
+    #[display("Env")]
     Env,
 
     /// A stream of license. EXPERIMENTAL and not subject to semver.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] LicenseStream),
 
     /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the license file.
         path: PathBuf,
@@ -56,7 +49,7 @@ pub enum LicenseSource {
     },
 
     /// Apollo uplink.
-    #[display(fmt = "Registry")]
+    #[display("Registry")]
     Registry(UplinkConfig),
 }
 

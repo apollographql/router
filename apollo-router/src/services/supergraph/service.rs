@@ -1,19 +1,18 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
+use futures::FutureExt;
+use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use router_bridge::planner::Planner;
-use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -21,89 +20,113 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_service::Service;
-use tracing::field;
 use tracing::Span;
+use tracing::field;
 use tracing_futures::Instrument;
 
+use crate::Configuration;
+use crate::Context;
+use crate::Notify;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
+use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::connectors::query_plans::store_connectors;
+use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
+use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::traffic_shaping::TrafficShaping;
-use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::subscription::SubscriptionHandle;
-use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::QueryPlanResult;
+use crate::query_planner::QueryPlannerService;
+use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
+use crate::query_planner::subscription::SubscriptionHandle;
+use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
-use crate::services::execution::QueryPlan;
-use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use crate::services::layers::content_negotiation;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::new_service::ServiceFactory;
-use crate::services::query_planner;
-use crate::services::router::ClientRequestAccepts;
-use crate::services::subgraph::BoxGqlStream;
-use crate::services::subgraph_service::MakeSubgraphService;
-use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
+use crate::services::SubgraphServiceFactory;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::operation_limits::OperationLimits;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
+use crate::services::connector_service::ConnectorServiceFactory;
+use crate::services::execution;
+use crate::services::execution::QueryPlan;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::http::HttpClientServiceFactory;
+use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::query_planner;
+use crate::services::subgraph::BoxGqlStream;
+use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::Configuration;
-use crate::Context;
-use crate::Notify;
+use crate::spec::operation_limits::OperationLimits;
+use crate::uplink::license_enforcement::LicenseState;
 
-pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
+pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
+    "apollo_router::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
-/// Containing [`Service`] in the request lifecyle.
+/// Containing [`Service`] in the request lifecycle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
+    query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     execution_service_factory: ExecutionServiceFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
+    execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
+    license: LicenseState,
 }
 
 #[buildstructor::buildstructor]
 impl SupergraphService {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
+        query_planner_service: CachingQueryPlanner<QueryPlannerService>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Self {
+        let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .buffered()
+            .service(execution_service_factory.create())
+            .boxed_clone();
+
         SupergraphService {
             query_planner_service,
             execution_service_factory,
+            execution_service,
             schema,
             notify,
+            license,
         }
     }
 }
@@ -120,6 +143,11 @@ impl Service<SupergraphRequest> for SupergraphService {
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+        if let Some(connectors) = &self.schema.connectors {
+            store_connectors_labels(&req.context, connectors.labels_by_service_name.clone());
+            store_connectors(&req.context, connectors.by_service_name.clone());
+        }
+
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let clone = self.query_planner_service.clone();
 
@@ -131,9 +159,11 @@ impl Service<SupergraphRequest> for SupergraphService {
         let fut = service_call(
             planning,
             self.execution_service_factory.clone(),
+            self.execution_service.clone(),
             schema,
             req,
             self.notify.clone(),
+            self.license,
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
@@ -159,44 +189,54 @@ impl Service<SupergraphRequest> for SupergraphService {
 }
 
 async fn service_call(
-    planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
+    planning: CachingQueryPlanner<QueryPlannerService>,
     execution_service_factory: ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     notify: Notify<String, graphql::Response>,
+    license: LicenseState,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
 
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(
+    let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
+        // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
+        // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
+        // places the results in context. Therefore plugins that have modified the query won't actually take effect.
+        // However, this can't be resolved before looking at the pipeline again.
         req.supergraph_request
             .body()
             .query
             .clone()
-            .expect("query presence was checked before"),
+            .unwrap_or_default(),
     )
     .await
     {
         Ok(resp) => resp,
-        Err(err) => match err.into_graphql_errors() {
-            Ok(gql_errors) => {
-                return Ok(SupergraphResponse::infallible_builder()
-                    .context(context)
-                    .errors(gql_errors)
-                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build());
+        Err(err) => {
+            let status = match &err {
+                CacheResolverError::Backpressure(_) => StatusCode::SERVICE_UNAVAILABLE,
+                CacheResolverError::RetrievalError(_) | CacheResolverError::BatchingError(_) => {
+                    StatusCode::BAD_REQUEST
+                }
+            };
+            match err.into_graphql_errors() {
+                Ok(gql_errors) => {
+                    return Ok(SupergraphResponse::infallible_builder()
+                        .context(context)
+                        .errors(gql_errors)
+                        .status_code(status) // If it's a graphql error we return a status code 400
+                        .build());
+                }
+                Err(err) => return Err(err.into()),
             }
-            Err(err) => return Err(err.into()),
-        },
+        }
     };
 
     if !errors.is_empty() {
@@ -208,16 +248,19 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
+        Some(QueryPlannerContent::Response { response })
+        | Some(QueryPlannerContent::CachedIntrospectionResponse { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
             let mut response = SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("introspection has been disabled"))
-                        .extension_code("INTROSPECTION_DISABLED")
-                        .build()])
+                    .errors(vec![
+                        crate::error::Error::builder()
+                            .message(String::from("introspection has been disabled"))
+                            .extension_code("INTROSPECTION_DISABLED")
+                            .build(),
+                    ])
                     .build(),
                 context,
             );
@@ -227,13 +270,12 @@ async fn service_call(
 
         Some(QueryPlannerContent::Plan { plan }) => {
             let query_metrics = plan.query_metrics;
-            context.extensions().with_lock(|mut lock| {
+            context.extensions().with_lock(|lock| {
                 let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
             });
 
-            let operation_name = body.operation_name.clone();
-            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            let is_subscription = plan.is_subscription(operation_name.as_deref());
+            let is_deferred = plan.is_deferred(&variables);
+            let is_subscription = plan.is_subscription();
 
             if let Some(batching) = context
                 .extensions()
@@ -264,8 +306,7 @@ async fn service_call(
                     .extensions()
                     .with_lock(|lock| lock.get::<BatchQuery>().cloned());
                 if let Some(batch_query) = batch_query_opt {
-                    let query_hashes =
-                        plan.query_hashes(batching, operation_name.as_deref(), &variables)?;
+                    let query_hashes = plan.query_hashes(batching, &variables)?;
                     batch_query
                         .set_query_hashes(query_hashes)
                         .await
@@ -287,16 +328,28 @@ async fn service_call(
                 || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
-                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                    (
+                        String::from(
+                            "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'",
+                        ),
+                        "DEFER_BAD_HEADER",
+                    )
                 } else {
-                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                    (
+                        String::from(
+                            "the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'",
+                        ),
+                        "SUBSCRIPTION_BAD_HEADER",
+                    )
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()
-                        .errors(vec![crate::error::Error::builder()
-                            .message(error_message)
-                            .extension_code(error_code)
-                            .build()])
+                        .errors(vec![
+                            crate::error::Error::builder()
+                                .message(error_message)
+                                .extension_code(error_code)
+                                .build(),
+                        ])
                         .build(),
                     context,
                 );
@@ -312,25 +365,27 @@ async fn service_call(
                     let (subs_tx, subs_rx) = mpsc::channel(1);
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
+                    let execution_service_cloned = execution_service.clone();
                     let cloned_supergraph_req =
                         clone_supergraph_request(&req.supergraph_request, context.clone());
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
                             execution_service_factory_cloned,
+                            execution_service_cloned,
                             ctx,
                             query_plan,
                             subs_rx,
                             notify,
                             cloned_supergraph_req,
+                            license,
                         )
                         .await;
                     });
                     subscription_tx = subs_tx.into();
                 }
 
-                let execution_response = execution_service_factory
-                    .create()
+                let execution_response = execution_service
                     .oneshot(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
@@ -349,6 +404,20 @@ async fn service_call(
                 let supergraph_response_event = context
                     .extensions()
                     .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
+                let mut first_event = true;
+                let mut inserted = false;
+                let ctx = context.clone();
+                let response_stream = response_stream.inspect(move |_| {
+                    if first_event {
+                        first_event = false;
+                    } else if !inserted {
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(false),
+                        );
+                        inserted = true;
+                    }
+                });
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
@@ -366,10 +435,11 @@ async fn service_call(
                         ));
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            if let Some(condition) = supergraph_response_event.0.condition() {
-                                if !condition.lock().evaluate_event_response(resp, &ctx) {
-                                    return;
-                                }
+                            if !supergraph_response_event
+                                .condition
+                                .evaluate_event_response(resp, &ctx)
+                            {
+                                return;
                             }
                             attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
@@ -378,7 +448,7 @@ async fn service_call(
                                 ),
                             ));
                             log_event(
-                                supergraph_response_event.0.level(),
+                                supergraph_response_event.level,
                                 "supergraph.response",
                                 attrs.clone(),
                                 "",
@@ -407,16 +477,18 @@ pub struct SubscriptionTaskParams {
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
-    pub(crate) service_name: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn subscription_task(
     mut execution_service_factory: ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
+    license: LicenseState,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -426,7 +498,6 @@ async fn subscription_task(
     };
     let subscription_config = sub_params.subscription_config;
     let subscription_handle = sub_params.subscription_handle;
-    let service_name = sub_params.service_name;
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
@@ -439,6 +510,7 @@ async fn subscription_task(
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 query_metrics: query_plan.query_metrics,
+                estimated_size: Default::default(),
             })
         }),
         _ => {
@@ -464,7 +536,7 @@ async fn subscription_task(
         .extensions()
         .with_lock(|lock| {
             lock.get::<Arc<UsageReporting>>()
-                .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+                .map(|usage_reporting| usage_reporting.get_stats_report_key().clone())
         })
         .unwrap_or_default();
 
@@ -473,7 +545,6 @@ async fn subscription_task(
         .ok()
         .flatten()
         .unwrap_or_default();
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
     let mut receiver = match receiver.next().await {
         Some(receiver) => receiver,
@@ -490,9 +561,17 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
-    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
-
-    let mut timeout = Box::pin(tokio::time::sleep(expires_in));
+    let mut timeout = if supergraph_req
+        .context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .is_some()
+    {
+        let expires_in =
+            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        tokio::time::sleep(expires_in).boxed()
+    } else {
+        futures::future::pending().boxed()
+    };
 
     loop {
         tokio::select! {
@@ -517,11 +596,8 @@ async fn subscription_task(
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {
-                        if display_body {
-                            tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
-                        }
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
@@ -540,14 +616,28 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, execution_service_factory.subgraph_schemas.clone(), None, None).await {
+                    let subgraph_schemas = Arc::new(
+                        execution_service_factory
+                            .subgraph_schemas
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.schema.clone()))
+                            .collect(),
+                    );
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None, license).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
                             break;
                         },
                     };
-                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
+                    let http_service_factory = match create_http_services(&plugins, &execution_service_factory.schema, &conf).await {
+                        Ok(http_service_factory) => http_service_factory,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },                    };
+
+                    let subgraph_services = match create_subgraph_services(&http_service_factory, &plugins, &conf).await {
                         Ok(subgraph_services) => subgraph_services,
                         Err(err) => {
                             tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -555,12 +645,52 @@ async fn subscription_task(
                         },
                     };
 
+
+                    let subscription_plugin_conf = execution_service_factory
+                        .plugins
+                        .iter()
+                        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+                        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+                        .map(|p| p.config.clone());
+
+                    let connector_sources = execution_service_factory.schema
+                        .connectors
+                        .as_ref()
+                        .map(|c| c.source_config_keys.clone()
+                        )
+                        .unwrap_or_default();
+
+                    let fetch_service_factory = Arc::new(FetchServiceFactory::new(
+                        execution_service_factory.schema.clone(),
+                                    execution_service_factory.subgraph_schemas.clone(),
+                                    Arc::new(SubgraphServiceFactory::new(
+                                        subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),
+                                        execution_service_factory.plugins.clone(),
+                                    )),
+                                    subscription_plugin_conf.clone(),
+                                    Arc::new(ConnectorServiceFactory::new(
+                                        execution_service_factory.schema.clone(),
+                                        execution_service_factory.subgraph_schemas.clone(),
+                                        subscription_plugin_conf,
+                                        execution_service_factory.schema
+                                            .connectors.as_ref().map(|c| c.by_service_name.clone())
+                                            .unwrap_or_default(),
+                                        Arc::new(ConnectorRequestServiceFactory::new(
+                                            Arc::new(http_service_factory),
+                                            execution_service_factory.plugins.clone(),
+                                            connector_sources
+                                        )),
+                                    )),
+                                 ),
+
+                    );
+
+
                     execution_service_factory = ExecutionServiceFactory {
                         schema: execution_service_factory.schema.clone(),
                         subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
                         plugins: plugins.clone(),
-                        subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
-
+                        fetch_service_factory,
                     };
                 }
             }
@@ -589,7 +719,7 @@ async fn subscription_task(
 
 async fn dispatch_event(
     supergraph_req: &SupergraphRequest,
-    execution_service_factory: &ExecutionServiceFactory,
+    execution_service: execution::BoxCloneService,
     query_plan: Option<&Arc<QueryPlan>>,
     context: Context,
     mut val: graphql::Response,
@@ -611,7 +741,6 @@ async fn dispatch_event(
                 .build()
                 .await;
 
-            let execution_service = execution_service_factory.create();
             let execution_response = execution_service.oneshot(execution_request).await;
             let next_response = match execution_response {
                 Ok(mut execution_response) => execution_response.next_response().await,
@@ -655,7 +784,7 @@ async fn dispatch_event(
 }
 
 async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlannerPool>,
+    mut planning: CachingQueryPlanner<QueryPlannerService>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
@@ -678,7 +807,7 @@ async fn plan_query(
             &Configuration::default(),
         )
         .map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
         });
     }
@@ -733,17 +862,21 @@ fn clone_supergraph_request(
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
+    http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
-    planner: BridgeQueryPlannerPool,
+    planner: QueryPlannerService,
+    license: LicenseState,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(planner: BridgeQueryPlannerPool) -> Self {
+    pub(crate) fn new(planner: QueryPlannerService) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
+            http_service_factory: Default::default(),
             configuration: None,
             planner,
+            license: Default::default(),
         }
     }
 
@@ -768,6 +901,14 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
+    pub(crate) fn with_http_service_factory(
+        mut self,
+        http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.http_service_factory = http_service_factory;
+        self
+    }
+
     pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,
@@ -776,50 +917,116 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
+    pub(crate) fn with_license(
+        mut self,
+        license: LicenseState,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.license = license;
+        self
+    }
+
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.planner.schema();
         let subgraph_schemas = self.planner.subgraph_schemas();
+
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
             schema.clone(),
-            subgraph_schemas,
+            subgraph_schemas.clone(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await?;
 
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in self.plugins.iter() {
-            if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
-                telemetry.activate();
-            }
+            plugin.activate();
         }
 
-        /*for (_, service) in self.subgraph_services.iter_mut() {
-            if let Some(subgraph) =
-                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
-            {
-                subgraph.client_factory.plugins = plugins.clone();
-            }
-        }*/
+        // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
+        // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
+        query_planner_service.activate();
 
-        let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
-            self.subgraph_services
-                .into_iter()
-                .map(|(name, service)| (name, service.into()))
-                .collect(),
-            self.plugins.clone(),
+        let subscription_plugin_conf = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+            .map(|p| p.config.clone());
+
+        let connector_sources = schema
+            .connectors
+            .as_ref()
+            .map(|c| c.source_config_keys.clone())
+            .unwrap_or_default();
+
+        let fetch_service_factory = Arc::new(FetchServiceFactory::new(
+            schema.clone(),
+            subgraph_schemas.clone(),
+            Arc::new(SubgraphServiceFactory::new(
+                self.subgraph_services
+                    .into_iter()
+                    .map(|(name, service)| (name, service.into()))
+                    .collect(),
+                self.plugins.clone(),
+            )),
+            subscription_plugin_conf.clone(),
+            Arc::new(ConnectorServiceFactory::new(
+                schema.clone(),
+                subgraph_schemas,
+                subscription_plugin_conf,
+                schema
+                    .connectors
+                    .as_ref()
+                    .map(|c| c.by_service_name.clone())
+                    .unwrap_or_default(),
+                Arc::new(ConnectorRequestServiceFactory::new(
+                    Arc::new(self.http_service_factory),
+                    self.plugins.clone(),
+                    connector_sources,
+                )),
+            )),
         ));
+
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(query_planner_service.clone())
+            .execution_service_factory(ExecutionServiceFactory {
+                schema: schema.clone(),
+                subgraph_schemas: query_planner_service.subgraph_schemas(),
+                plugins: self.plugins.clone(),
+                fetch_service_factory,
+            })
+            .schema(schema.clone())
+            .notify(configuration.notify.clone())
+            .license(self.license)
+            .build();
+
+        let supergraph_service =
+            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
+
+        let sb = Buffer::new(
+            ServiceBuilder::new()
+                .service(
+                    self.plugins
+                        .iter()
+                        .rev()
+                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                            e.supergraph_service(acc)
+                        }),
+                )
+                .boxed(),
+            DEFAULT_BUFFER_SIZE,
+        );
 
         Ok(SupergraphCreator {
             query_planner_service,
-            subgraph_service_factory,
             schema,
             plugins: self.plugins,
             config: configuration,
+            sb,
         })
     }
 }
@@ -827,11 +1034,11 @@ impl PluggableSupergraphServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
-    subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     config: Arc<Configuration>,
     plugins: Arc<Plugins>,
+    sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
 
 pub(crate) trait HasPlugins {
@@ -879,47 +1086,14 @@ impl SupergraphCreator {
         Response = supergraph::Response,
         Error = BoxError,
         Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send {
-        let supergraph_service = SupergraphService::builder()
-            .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionServiceFactory {
-                schema: self.schema.clone(),
-                subgraph_schemas: self.query_planner_service.subgraph_schemas(),
-                plugins: self.plugins.clone(),
-                subgraph_service_factory: self.subgraph_service_factory.clone(),
-            })
-            .schema(self.schema.clone())
-            .notify(self.config.notify.clone())
-            .build();
-
-        let shaping = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
-            .expect("traffic shaping should always be part of the plugin list");
-
-        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
-            .layer(shaping.supergraph_service_internal(supergraph_service));
-
-        ServiceBuilder::new()
-            .layer(content_negotiation::SupergraphLayer::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            )
+    > + Send
+    + use<> {
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.sb.clone().boxed()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.query_planner_service.previous_cache()
-    }
-
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.planners()
     }
 
     pub(crate) async fn warm_up_query_planner(
@@ -929,7 +1103,7 @@ impl SupergraphCreator {
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
-        experimental_pql_prewarm: bool,
+        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         self.query_planner_service
             .warm_up(

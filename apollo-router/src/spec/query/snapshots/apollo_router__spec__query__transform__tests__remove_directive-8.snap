@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/spec/query/transform.rs
+expression: "TestResult { query, result }"
+---
+query:
+
+            query($a: String, $b: String) {
+                c
+                e(arg:  {a: $a, b: "b"}) @remove
+                aliased:  e(arg:  {a: "a", b: $b})
+            }
+            
+filtered:
+query($b: String) {
+  c
+  aliased: e(arg: {a: "a", b: $b})
+}

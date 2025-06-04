@@ -1,0 +1,4 @@
+description: experimental_query_planner_mode config is no longer supported as the legacy query planner was removed
+actions:
+  - type: delete
+    path: experimental_query_planner_mode

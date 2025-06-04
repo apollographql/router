@@ -1,0 +1,20 @@
+fragment Items on SizedField {
+  items {
+    id
+  }
+}
+
+{
+  fieldWithCost
+  argWithCost(arg: 3)
+  enumWithCost
+  inputWithCost(someInput: { somethingWithCost: 10 })
+  scalarWithCost
+  objectWithCost {
+    id
+  }
+  fieldWithListSize
+  fieldWithDynamicListSize(first: 5) {
+    ...Items
+  }
+}

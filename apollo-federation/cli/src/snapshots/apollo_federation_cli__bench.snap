@@ -1,0 +1,20 @@
+---
+source: apollo-federation/cli/src/main.rs
+expression: "_cmd_bench(&Path::new(\"./test/starstuff.graphql\"),\n        &PathBuf::from(\"./test/queries\")).unwrap()"
+---
+[
+  {
+    "file_name": "topproducts.graphql",
+    "query_name": "topproducts.graphql",
+    "timing": 1.234,
+    "eval_plans": "1",
+    "error": null
+  },
+  {
+    "file_name": "topproducts2.graphql",
+    "query_name": "topproducts2.graphql",
+    "timing": 1.234,
+    "eval_plans": "1",
+    "error": null
+  }
+]

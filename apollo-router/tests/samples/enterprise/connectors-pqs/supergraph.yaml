@@ -1,0 +1,63 @@
+federation_version: =2.10.0-preview.6
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(name: "one", http: { baseURL: "http://localhost:4001" })
+
+        type Geo {
+          lat: String!
+          long: String!
+          weather: Weather
+        }
+
+        type Weather @key(fields: "lat long", resolvable: false) {
+          lat: String!
+          long: String!
+          temperature: Float
+          windSpeed: Float
+          conditions: String
+          forecastSnowFall: Float
+          currentSnowDepth: Float
+        }
+
+        type Query {
+          geoByAddress(search: String!): Geo
+            @connect(
+              source: "one"
+              http: { GET: "/api/search?query={$args.search}" }
+              selection: """
+              lat: Locations->first.Coords.Lat
+              long: Locations->first.Coords.Lon
+              weather: {
+                lat: Locations->first.Coords.Lat
+                long: Locations->first.Coords.Lon
+              }
+              """
+            )
+
+          getWeatherData (lat: String!, long: String!) : Weather
+            @connect(
+              source: "one"
+              http: { GET: "/weather/{$args.lat},{$args.long}" }
+              selection: """
+              lat: $args.lat
+              long: $args.long
+              $.currentConditions {
+                forecastSnowFall: snow
+                temperature: temp
+                windSpeed: windspeed
+                conditions
+                currentSnowDepth: snowdepth
+              }
+              """
+              entity: true
+            )
+        }

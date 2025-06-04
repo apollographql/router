@@ -6,18 +6,18 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::trace::SpanId;
-use opentelemetry_api::trace::TraceContextExt;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceId;
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
 use tracing_core::callsite::Identifier;
-use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
@@ -25,13 +25,12 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use super::reload::SampledSpan;
-use crate::metrics::layer::METRIC_PREFIX_COUNTER;
-use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
-use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
-use crate::metrics::layer::METRIC_PREFIX_VALUE;
 use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
+// The reason this is introduced right now is to directly avoid people relying on these attributes and then creating a breaking change in the future.
+pub(crate) const APOLLO_CONNECTOR_PREFIX: &str = "apollo.connector.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
 pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "code.filepath",
@@ -41,43 +40,39 @@ pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "thread.name",
 ];
 
-/// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
+/// Wrap a [tracing] event formatter with rate limiting.
+///
 /// ```ignore
 /// use tracing_core::Event;
-/// use tracing_subscriber::fmt::format::{Format};
+/// use tracing_subscriber::fmt::format::Format;
+/// use crate::plugins::telemetry::config_new::logging::RateLimit;
+///
 /// tracing_subscriber::fmt::fmt()
-/// .event_format(FilteringFormatter::new(
-///     Format::default().pretty(),
-///     // Do not display the event if an attribute name starts with "counter"
-///     |event: &Event| !event.metadata().fields().iter().any(|f| f.name().starts_with("counter")),
-/// ))
-/// .finish();
+///     .event_format(RateLimitFormatter::new(
+///         Format::default().pretty(),
+///         &RateLimit::default(),
+///     ))
+///     .finish();
 /// ```
-pub(crate) struct FilteringFormatter<T, F> {
+pub(crate) struct RateLimitFormatter<T> {
     inner: T,
-    filter_fn: F,
     rate_limiter: Mutex<HashMap<Identifier, RateCounter>>,
     config: RateLimit,
 }
 
-impl<T, F> FilteringFormatter<T, F>
-where
-    F: Fn(&tracing::Event<'_>) -> bool,
-{
-    pub(crate) fn new(inner: T, filter_fn: F, rate_limit: &RateLimit) -> Self {
+impl<T> RateLimitFormatter<T> {
+    pub(crate) fn new(inner: T, rate_limit: &RateLimit) -> Self {
         Self {
             inner,
-            filter_fn,
             rate_limiter: Mutex::new(HashMap::new()),
             config: rate_limit.clone(),
         }
     }
 }
 
-impl<T, F, S, N> FormatEvent<S, N> for FilteringFormatter<T, F>
+impl<T, S, N> FormatEvent<S, N> for RateLimitFormatter<T>
 where
     T: FormatEvent<S, N>,
-    F: Fn(&tracing::Event<'_>) -> bool,
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
 {
@@ -87,44 +82,37 @@ where
         writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
-        if (self.filter_fn)(event) {
-            match self.rate_limit(event) {
-                RateResult::Deny => return Ok(()),
+        match self.rate_limit(event) {
+            RateResult::Deny => return Ok(()),
 
-                RateResult::Allow => {}
-                RateResult::AllowSkipped(skipped) => {
-                    if let Some(span) = event
-                        .parent()
-                        .and_then(|id| ctx.span(id))
-                        .or_else(|| ctx.lookup_current())
-                    {
-                        let mut extensions = span.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            None => {
-                                let mut attributes = LogAttributes::default();
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                                extensions.insert(attributes);
-                            }
-                            Some(attributes) => {
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                            }
+            RateResult::Allow => {}
+            RateResult::AllowSkipped(skipped) => {
+                if let Some(span) = event
+                    .parent()
+                    .and_then(|id| ctx.span(id))
+                    .or_else(|| ctx.lookup_current())
+                {
+                    let mut extensions = span.extensions_mut();
+                    match extensions.get_mut::<LogAttributes>() {
+                        None => {
+                            let mut attributes = LogAttributes::default();
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
+                            extensions.insert(attributes);
+                        }
+                        Some(attributes) => {
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
                         }
                     }
                 }
             }
-            self.inner.format_event(ctx, writer, event)
-        } else {
-            Ok(())
         }
+        self.inner.format_event(ctx, writer, event)
     }
 }
 
-impl<T, F, S> EventFormatter<S> for FilteringFormatter<T, F>
+impl<T, S> EventFormatter<S> for RateLimitFormatter<T>
 where
     T: EventFormatter<S>,
-    F: Fn(&tracing::Event<'_>) -> bool,
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn format_event<W>(
@@ -136,37 +124,31 @@ where
     where
         W: std::fmt::Write,
     {
-        if (self.filter_fn)(event) {
-            match self.rate_limit(event) {
-                RateResult::Deny => return Ok(()),
+        match self.rate_limit(event) {
+            RateResult::Deny => return Ok(()),
 
-                RateResult::Allow => {}
-                RateResult::AllowSkipped(skipped) => {
-                    if let Some(span) = event
-                        .parent()
-                        .and_then(|id| ctx.span(id))
-                        .or_else(|| ctx.lookup_current())
-                    {
-                        let mut extensions = span.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            None => {
-                                let mut attributes = LogAttributes::default();
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                                extensions.insert(attributes);
-                            }
-                            Some(attributes) => {
-                                attributes
-                                    .insert(KeyValue::new("skipped_messages", skipped as i64));
-                            }
+            RateResult::Allow => {}
+            RateResult::AllowSkipped(skipped) => {
+                if let Some(span) = event
+                    .parent()
+                    .and_then(|id| ctx.span(id))
+                    .or_else(|| ctx.lookup_current())
+                {
+                    let mut extensions = span.extensions_mut();
+                    match extensions.get_mut::<LogAttributes>() {
+                        None => {
+                            let mut attributes = LogAttributes::default();
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
+                            extensions.insert(attributes);
+                        }
+                        Some(attributes) => {
+                            attributes.insert(KeyValue::new("skipped_messages", skipped as i64));
                         }
                     }
                 }
             }
-            self.inner.format_event(ctx, writer, event)
-        } else {
-            Ok(())
         }
+        self.inner.format_event(ctx, writer, event)
     }
 }
 
@@ -175,7 +157,7 @@ enum RateResult {
     AllowSkipped(u32),
     Deny,
 }
-impl<T, F> FilteringFormatter<T, F> {
+impl<T> RateLimitFormatter<T> {
     fn rate_limit(&self, event: &tracing::Event<'_>) -> RateResult {
         if self.config.enabled {
             let now = Instant::now();
@@ -225,54 +207,46 @@ struct RateCounter {
     count: u32,
 }
 
-// Function to filter metric event for the filter formatter
-pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
-    !event.metadata().fields().iter().any(|f| {
-        f.name().starts_with(METRIC_PREFIX_COUNTER)
-            || f.name().starts_with(METRIC_PREFIX_HISTOGRAM)
-            || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
-            || f.name().starts_with(METRIC_PREFIX_VALUE)
-    })
-}
-
 pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
     resource
         .into_iter()
         .map(|(k, v)| {
             (
-                k.into(),
+                k.to_string(),
                 match v {
-                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(value),
+                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(*value),
                     opentelemetry::Value::I64(value) => {
-                        serde_json::Value::Number(Number::from(value))
+                        serde_json::Value::Number(Number::from(*value))
                     }
                     opentelemetry::Value::F64(value) => serde_json::Value::Number(
-                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                        Number::from_f64(*value).unwrap_or(Number::from(0)),
                     ),
-                    opentelemetry::Value::String(value) => serde_json::Value::String(value.into()),
+                    opentelemetry::Value::String(value) => {
+                        serde_json::Value::String(value.to_string())
+                    }
                     opentelemetry::Value::Array(value) => match value {
                         opentelemetry::Array::Bool(array) => serde_json::Value::Array(
-                            array.into_iter().map(serde_json::Value::Bool).collect(),
+                            array.iter().copied().map(serde_json::Value::Bool).collect(),
                         ),
                         opentelemetry::Array::I64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
-                                .map(|value| serde_json::Value::Number(Number::from(value)))
+                                .iter()
+                                .map(|value| serde_json::Value::Number(Number::from(*value)))
                                 .collect(),
                         ),
                         opentelemetry::Array::F64(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|value| {
                                     serde_json::Value::Number(
-                                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                                        Number::from_f64(*value).unwrap_or(Number::from(0)),
                                     )
                                 })
                                 .collect(),
                         ),
                         opentelemetry::Array::String(array) => serde_json::Value::Array(
                             array
-                                .into_iter()
+                                .iter()
                                 .map(|s| serde_json::Value::String(s.to_string()))
                                 .collect(),
                         ),
@@ -318,7 +292,7 @@ where
     if let Some(sampled_span) = ext.get::<SampledSpan>() {
         let (trace_id, span_id) = sampled_span.trace_and_span_id();
         return Some((
-            opentelemetry_api::trace::TraceId::from(trace_id.to_u128()),
+            opentelemetry::trace::TraceId::from(trace_id.to_u128()),
             span_id,
         ));
     }

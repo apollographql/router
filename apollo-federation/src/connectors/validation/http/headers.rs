@@ -1,0 +1,162 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
+use http::HeaderName;
+use indexmap::IndexMap;
+
+use crate::connectors::HeaderSource;
+use crate::connectors::models::Header;
+use crate::connectors::models::HeaderParseError;
+use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
+use crate::connectors::string_template;
+use crate::connectors::validation::Code;
+use crate::connectors::validation::Message;
+use crate::connectors::validation::coordinates::HttpHeadersCoordinate;
+use crate::connectors::validation::expression;
+use crate::connectors::validation::expression::scalars;
+use crate::connectors::validation::graphql::GraphQLString;
+use crate::connectors::validation::graphql::SchemaInfo;
+
+pub(crate) struct Headers<'schema> {
+    headers: Vec<Header<'schema>>,
+    coordinate: HttpHeadersCoordinate<'schema>,
+}
+
+impl<'schema> Headers<'schema> {
+    pub(crate) fn parse(
+        http_arg: &'schema [(Name, Node<Value>)],
+        coordinate: HttpHeadersCoordinate<'schema>,
+        schema: &SchemaInfo,
+    ) -> Result<Self, Vec<Message>> {
+        let sources = &schema.sources;
+        let mut messages = Vec::new();
+        let Some(headers_arg) = get_arg(http_arg) else {
+            return Ok(Self {
+                headers: Vec::new(),
+                coordinate,
+            });
+        };
+
+        #[allow(clippy::mutable_key_type)]
+        let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
+        for header in Header::from_headers_arg(headers_arg) {
+            let header = match header {
+                Ok(header) => header,
+                Err(err) => {
+                    let (message, locations) = match err {
+                        HeaderParseError::Other { message, node } => (
+                            message,
+                            node.line_column_range(sources).into_iter().collect(),
+                        ),
+                        HeaderParseError::ConflictingArguments {
+                            message,
+                            from_location,
+                            value_location,
+                        } => (
+                            message,
+                            from_location
+                                .iter()
+                                .chain(value_location.iter())
+                                .flat_map(|span| span.line_column_range(sources))
+                                .collect(),
+                        ),
+                        HeaderParseError::ValueError {
+                            err: string_template::Error { message, location },
+                            node,
+                        } => (
+                            message,
+                            GraphQLString::new(node, sources)
+                                .ok()
+                                .and_then(|expression| {
+                                    expression.line_col_for_subslice(location, schema)
+                                })
+                                .into_iter()
+                                .collect(),
+                        ),
+                    };
+                    messages.push(Message {
+                        code: Code::InvalidHeader,
+                        message: format!("In {coordinate} {message}"),
+                        locations,
+                    });
+                    continue;
+                }
+            };
+            if let Some(duplicate) = headers.get(&header.name) {
+                messages.push(Message {
+                    code: Code::HttpHeaderNameCollision,
+                    message: format!(
+                        "Duplicate header names are not allowed. The header name '{name}' at {coordinate} is already defined.",
+                        name = header.name
+                    ),
+                    locations: header.name_node.line_column_range(sources)
+                        .into_iter()
+                        .chain(
+                            duplicate.name_node.line_column_range(sources)
+                        )
+                        .collect(),
+                });
+                continue;
+            }
+            headers.insert(header.name.clone(), header);
+        }
+        if messages.is_empty() {
+            Ok(Self {
+                headers: headers.into_values().collect(),
+                coordinate,
+            })
+        } else {
+            Err(messages)
+        }
+    }
+
+    // TODO: return extracted keys here?
+    pub(crate) fn type_check(self, schema: &SchemaInfo) -> Result<(), Vec<Message>> {
+        let coordinate = self.coordinate;
+        let mut messages = Vec::new();
+        for header in self.headers {
+            let HeaderSource::Value(header_value) = &header.source else {
+                continue;
+            };
+            let Ok(expression) = GraphQLString::new(header.source_node, &schema.sources) else {
+                // This should never fail in practice, we convert to GraphQLString only to hack in location data
+                continue;
+            };
+            let expression_context = match coordinate {
+                HttpHeadersCoordinate::Source { .. } => {
+                    expression::Context::for_source(schema, &expression, Code::InvalidHeader)
+                }
+                HttpHeadersCoordinate::Connect { connect, .. } => {
+                    expression::Context::for_connect_request(
+                        schema,
+                        connect,
+                        &expression,
+                        Code::InvalidHeader,
+                    )
+                }
+            };
+            messages.extend(
+                header_value
+                    .expressions()
+                    .filter_map(|expression| {
+                        expression::validate(expression, &expression_context, &scalars()).err()
+                    })
+                    .map(|mut err| {
+                        err.message = format!("In {coordinate}: {}", err.message);
+                        err
+                    }),
+            )
+        }
+        if messages.is_empty() {
+            Ok(())
+        } else {
+            Err(messages)
+        }
+    }
+}
+
+fn get_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
+    http_arg
+        .iter()
+        .find_map(|(key, value)| (*key == HEADERS_ARGUMENT_NAME).then_some(value))
+}

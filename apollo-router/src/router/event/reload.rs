@@ -1,9 +1,9 @@
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Poll;
 use std::time::Duration;
 
 use futures::prelude::*;
+use parking_lot::Mutex;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
@@ -22,7 +22,7 @@ pub(crate) struct ReloadSource {
 
 impl ReloadSource {
     pub(crate) fn set_period(&self, period: &Option<Duration>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         // Clear the queue before setting the period
         inner.queue.clear();
         inner.period = *period;
@@ -48,7 +48,7 @@ impl ReloadSource {
         let signal_stream = futures::stream::empty().boxed();
 
         let periodic_reload = futures::stream::poll_fn(move |cx| {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock();
             match inner.queue.poll_expired(cx) {
                 Poll::Ready(Some(_expired)) => {
                     if let Some(period) = inner.period {

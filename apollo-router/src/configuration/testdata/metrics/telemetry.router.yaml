@@ -16,20 +16,6 @@ telemetry:
       datadog:
         enabled: true
         endpoint: default
-      jaeger:
-        enabled: true
-        agent:
-          endpoint: default
-    logging:
-      experimental_when_header:
-        - name: apollo-router-log-request
-          value: test
-          headers: true # default: false
-          body: true # default: false
-        # log request for all requests coming from Iphones
-        - name: custom-header
-          match: ^foo.*
-          headers: true
   instrumentation:
     spans:
       mode: spec_compliant
@@ -99,6 +85,20 @@ telemetry:
               subgraph_response_data: "$.products[*].price1"
           attributes:
             subgraph.name: true
+      connector:
+        acme.user.not.found:
+          value: unit
+          type: counter
+          unit: count
+          description: "Count of 404 responses from the user API"
+          condition:
+            all:
+              - eq:
+                - 404
+                - connector_http_response_status: code
+              - eq:
+                - "user_api"
+                - connector_source: name
       graphql:
         list.length: true
         field.execution: true
@@ -175,3 +175,19 @@ telemetry:
             subgraph.name: true
             response_status:
               subgraph_response_status: code
+      connector:
+        # Standard events
+        request: off
+        response: info
+        error: error
+
+        # Custom events
+        connector.response:
+          message: "Connector response"
+          level: info
+          on: response
+          attributes:
+            connector.http.method: true
+            connector.url.template: true
+            response_status:
+              connector_http_response_status: code

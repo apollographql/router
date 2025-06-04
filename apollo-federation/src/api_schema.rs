@@ -1,16 +1,16 @@
 //! Implements API schema generation.
+use apollo_compiler::Node;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::ty;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
-use crate::schema::position;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position;
 
 /// Remove types and directives imported by `@link`.
 fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -39,48 +39,36 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
     for position in &types_for_removal {
         match position {
             position::TypeDefinitionPosition::Object(position) => {
-                let object = position.get(schema.schema())?;
-                let remove_children = object
+                let object = position.get(schema.schema())?.clone();
+                object
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::Interface(position) => {
-                let interface = position.get(schema.schema())?;
-                let remove_children = interface
+                let interface = position.get(schema.schema())?.clone();
+                interface
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::InputObject(position) => {
-                let input_object = position.get(schema.schema())?;
-                let remove_children = input_object
+                let input_object = position.get(schema.schema())?.clone();
+                input_object
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::Enum(position) => {
-                let enum_ = position.get(schema.schema())?;
-                let remove_children = enum_
+                let enum_ = position.get(schema.schema())?.clone();
+                enum_
                     .values
                     .keys()
                     .map(|field_name| position.value(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             _ => {}
         }
@@ -122,7 +110,7 @@ pub struct ApiSchemaOptions {
     pub include_stream: bool,
 }
 
-pub fn to_api_schema(
+pub(crate) fn to_api_schema(
     schema: ValidFederationSchema,
     options: ApiSchemaOptions,
 ) -> Result<ValidFederationSchema, FederationError> {

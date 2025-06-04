@@ -1,0 +1,107 @@
+# Composed from subgraphs with hash: 7c59bdaefc39d7e88a603f0560376a398e5b7e93
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type A implements I
+  @join__implements(graph: Y1, interface: "I")
+  @join__implements(graph: Y2, interface: "I")
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S3, key: "id")
+  @join__type(graph: S4, key: "id")
+  @join__type(graph: Y1, key: "id")
+  @join__type(graph: Y1, key: "alt_id { id }")
+  @join__type(graph: Y2, key: "id")
+  @join__type(graph: Y2, key: "alt_id { id }")
+{
+  id: ID!
+  alt_id: AltID! @join__field(graph: Y1) @join__field(graph: Y2)
+  data: String! @join__field
+}
+
+type AltID
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z)
+{
+  id: ID!
+}
+
+interface I
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z, key: "alt_id { id }", isInterfaceObject: true)
+{
+  id: ID! @join__field(graph: Y1) @join__field(graph: Y2)
+  alt_id: AltID! @join__field(graph: Z)
+  data: String! @join__field(graph: Z)
+}
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  S1 @join__graph(name: "S1", url: "none")
+  S2 @join__graph(name: "S2", url: "none")
+  S3 @join__graph(name: "S3", url: "none")
+  S4 @join__graph(name: "S4", url: "none")
+  Y1 @join__graph(name: "Y1", url: "none")
+  Y2 @join__graph(name: "Y2", url: "none")
+  Z @join__graph(name: "Z", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S3)
+  @join__type(graph: S4)
+  @join__type(graph: Y1)
+  @join__type(graph: Y2)
+  @join__type(graph: Z)
+{
+  test: A @join__field(graph: S1)
+}

@@ -8,7 +8,10 @@ events:
     - supergraph_request:
         uri: "/hello"
         method: GET
-        query: "query { hello }"
+        query: "query Test { hello }"
+    - context:
+        map:
+          "operation_name": "Test"
     - context:
         map:
           "apollo::telemetry::contains_graphql_error": true

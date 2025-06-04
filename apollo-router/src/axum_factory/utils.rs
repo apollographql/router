@@ -9,12 +9,10 @@ use tower_service::Service;
 use tracing::Span;
 
 use crate::plugins::telemetry::SpanMode;
-use crate::plugins::telemetry::OTEL_STATUS_CODE;
-use crate::plugins::telemetry::OTEL_STATUS_CODE_ERROR;
-use crate::uplink::license_enforcement::LicenseState;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
-
-pub(crate) const REQUEST_SPAN_NAME: &str = "request";
+use crate::uplink::license_enforcement::LicenseState;
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
@@ -28,7 +26,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
-            propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
+            propagator.extract(&crate::otel_compat::HeaderExtractor(request.headers()))
         });
         let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 
@@ -54,7 +52,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         };
         if matches!(
             self.license,
-            LicenseState::LicensedWarn | LicenseState::LicensedHalt
+            LicenseState::LicensedWarn { limits: _ } | LicenseState::LicensedHalt { limits: _ }
         ) {
             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
@@ -64,6 +62,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct InjectConnectionInfo<S> {
     inner: S,
     connection_info: ConnectionInfo,

@@ -4,26 +4,26 @@ use std::mem;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SubschemaValidation;
-use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Deserializer;
 use serde::de::Error;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::Context;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]
@@ -78,10 +78,10 @@ where
         format!("conditional_attribute_{}", type_name::<T>())
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Add condition to each variant in the schema.
         //Maybe we can rearrange this for a smaller schema
-        let selector = gen.subschema_for::<T>();
+        let selector = generator.subschema_for::<T>();
 
         Schema::Object(SchemaObject {
             metadata: None,
@@ -108,7 +108,7 @@ where
                             required: Default::default(),
                             properties: [(
                                 "condition".to_string(),
-                                gen.subschema_for::<Condition<T>>(),
+                                generator.subschema_for::<Condition<T>>(),
                             )]
                             .into(),
                             pattern_properties: Default::default(),
@@ -146,6 +146,18 @@ where
         kind: TelemetryDataKind,
     ) {
         self.selector.defaults_for_level(requirement_level, kind);
+    }
+}
+
+impl<Att, Request, Response, EventResponse> Conditional<Att>
+where
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        match &self.condition {
+            Some(cond) => cond.lock().validate(None),
+            None => Ok(()),
+        }
     }
 }
 
@@ -297,7 +309,7 @@ where
         field: &apollo_compiler::executable::Field,
         response_value: &serde_json_bytes::Value,
         ctx: &Context,
-    ) -> Option<opentelemetry_api::Value> {
+    ) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
         let value = mem::take(&mut *self.value.lock());
 
@@ -333,6 +345,10 @@ where
             }
             _ => None,
         }
+    }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        self.selector.is_active(stage)
     }
 }
 
@@ -408,11 +424,11 @@ where
 #[cfg(test)]
 mod test {
     use http::StatusCode;
-    use opentelemetry_api::Value;
+    use opentelemetry::Value;
 
-    use crate::plugins::telemetry::config_new::conditional::Conditional;
-    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::conditional::Conditional;
+    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 
     fn on_response(conditional: Conditional<RouterSelector>) -> Option<Value> {
         conditional.on_response(
@@ -629,10 +645,12 @@ mod test {
         "#;
 
         let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
-        assert!(result
-            .expect_err("should have got error")
-            .to_string()
-            .contains("data did not match any variant of untagged enum RouterSelector"),)
+        assert!(
+            result
+                .expect_err("should have got error")
+                .to_string()
+                .contains("data did not match any variant of untagged enum RouterSelector"),
+        )
     }
 
     #[test]
@@ -644,10 +662,12 @@ mod test {
         "#;
 
         let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
-        assert!(result
-            .expect_err("should have got error")
-            .to_string()
-            .contains("unknown variant `aaargh`"),)
+        assert!(
+            result
+                .expect_err("should have got error")
+                .to_string()
+                .contains("unknown variant `aaargh`"),
+        )
     }
 
     #[test]

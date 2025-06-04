@@ -1,27 +1,25 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
+use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::prelude::BASE64_URL_SAFE;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use base64::Engine as _;
 use bytes::Bytes;
-use http::header::InvalidHeaderName;
-use http::uri::Authority;
-use http::uri::Parts;
-use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
-use rhai::module_resolvers::FileModuleResolver;
-use rhai::plugin::*;
-use rhai::serde::from_dynamic;
-use rhai::serde::to_dynamic;
+use http::header::InvalidHeaderName;
+use http::uri::Authority;
+use http::uri::Parts;
+use http::uri::PathAndQuery;
+use http::uri::Scheme;
+use parking_lot::Mutex;
+use rhai::AST;
 use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -30,25 +28,32 @@ use rhai::FnPtr;
 use rhai::Instant;
 use rhai::Map;
 use rhai::Scope;
-use rhai::AST;
+use rhai::module_resolvers::FileModuleResolver;
+use rhai::plugin::*;
+use rhai::serde::from_dynamic;
+use rhai::serde::to_dynamic;
 use tower::BoxError;
 use uuid::Uuid;
 
+use super::Rhai;
+use super::ServiceStep;
 use super::execution;
 use super::router;
 use super::subgraph;
 use super::supergraph;
-use super::Rhai;
-use super::ServiceStep;
+use crate::Context;
 use crate::configuration::expansion;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
+use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_RESULT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
@@ -70,22 +75,22 @@ pub(super) type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         f(guard.as_mut().expect("re-entrant option dance"))
     }
 
     fn replace(&self, f: impl FnOnce(T) -> T) {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         *guard = Some(f(guard.take().expect("re-entrant option dance")))
     }
 
     fn take_unwrap(self) -> T {
         match Arc::try_unwrap(self) {
-            Ok(mutex) => mutex.into_inner().expect("poisoned mutex"),
+            Ok(mutex) => mutex.into_inner(),
 
             // TODO: Should we assume the Arc refcount is 1
             // and use `try_unwrap().expect("shared ownership")` instead of this fallback ?
-            Err(arc) => arc.lock().expect("poisoned mutex").take(),
+            Err(arc) => arc.lock().take(),
         }
         .expect("re-entrant option dance")
     }
@@ -422,7 +427,7 @@ mod router_context {
     // Register a contains function for Context so that "in" works
     #[rhai_fn(name = "contains", pure)]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
-        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+        x.get(key).is_ok_and(|v: Option<Dynamic>| v.is_some())
     }
 
     // Register a Context indexer so we can get/set context
@@ -688,6 +693,13 @@ mod router_plugin {
         *obj.uri_mut() = uri;
         Ok(())
     }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id(
+        obj: &mut SharedMut<subgraph::Request>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|request| request.id.to_string()))
+    }
     // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -784,6 +796,13 @@ mod router_plugin {
         obj: &mut SharedMut<subgraph::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(get = "subgraph_request_id", pure, return_raw)]
+    pub(crate) fn get_subgraph_id_response(
+        obj: &mut SharedMut<subgraph::Response>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.id.to_string()))
     }
 
     /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
@@ -1143,6 +1162,47 @@ mod router_plugin {
         Ok(())
     }
 
+    // Uri.port
+    #[rhai_fn(get = "port", pure, return_raw)]
+    pub(crate) fn uri_port_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.port().map(|p| p.as_u16()))
+    }
+
+    #[rhai_fn(set = "port", return_raw)]
+    pub(crate) fn uri_port_set(x: &mut Uri, value: i64) -> Result<(), Box<EvalAltResult>> {
+        // Because there is no simple way to update parts on an existing
+        // Uri (no parts_mut()), then we need to create a new Uri from our
+        // existing parts, preserving any port, and update our existing
+        // Uri.
+        let mut parts: Parts = x.clone().into_parts();
+        match parts.authority {
+            Some(old_authority) => {
+                let host = old_authority.host();
+                let new_authority = Authority::from_maybe_shared(format!("{host}:{value}"))
+                    .map_err(|e| e.to_string())?;
+                parts.authority = Some(new_authority);
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+                Ok(())
+            }
+            None => Err("invalid URI; unable to set port".into()),
+        }
+    }
+
+    // Uri.scheme
+    #[rhai_fn(get = "scheme", pure, return_raw)]
+    pub(crate) fn uri_scheme_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.scheme_str())
+    }
+
+    #[rhai_fn(set = "scheme", return_raw)]
+    pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        parts.scheme = Some(new_scheme);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
@@ -1200,7 +1260,9 @@ mod router_plugin {
     // TraceId support
     #[rhai_fn(return_raw)]
     pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
-        TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+        TraceId::maybe_new()
+            .or_else(TraceId::current)
+            .ok_or_else(|| "trace unavailable".into())
     }
 
     #[rhai_fn(name = "to_string")]
@@ -1481,11 +1543,30 @@ macro_rules! register_rhai_router_interface {
 
             $engine.register_get(
                 "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.uri().clone()))
+                }
+            ).register_get(
+                "uri",
                 |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
+
             $engine.register_set(
+                "uri",
+                |obj: &mut SharedMut<$base::FirstRequest>, uri: Uri| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|request| *request.request.uri_mut() = uri);
+                            Ok(())
+                        }
+                    }
+                }
+            ).register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
                     if_subgraph! {
@@ -1497,6 +1578,13 @@ macro_rules! register_rhai_router_interface {
                             Ok(())
                         }
                     }
+                }
+            );
+
+            $engine.register_get(
+                "method",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.method().clone()))
                 }
             );
         )*
@@ -1649,14 +1737,13 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: block.engine.clone(),
-            ast: block.ast.clone(),
+            engine: self.engine.clone(),
+            ast: self.ast.clone(),
         };
-        let mut guard = scope.lock().unwrap();
+        let mut guard = scope.lock();
         // Note: We don't use `process_error()` here, because this code executes in the context of
         // the pipeline processing. We can't return an HTTP error, we can only return a boxed
         // service which represents the next stage of the pipeline.
@@ -1664,20 +1751,20 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(
+                    .call_fn::<Dynamic>(
                         &mut guard,
-                        &block.ast,
+                        &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
+                    .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1775,6 +1862,14 @@ impl Rhai {
         );
         global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
+        // Demand Control Context Keys
+        global_variables.insert(
+            "APOLLO_COST_ESTIMATED_KEY".into(),
+            COST_ESTIMATED_KEY.into(),
+        );
+        global_variables.insert("APOLLO_COST_ACTUAL_KEY".into(), COST_ACTUAL_KEY.into());
+        global_variables.insert("APOLLO_COST_STRATEGY_KEY".into(), COST_STRATEGY_KEY.into());
+        global_variables.insert("APOLLO_COST_RESULT_KEY".into(), COST_RESULT_KEY.into());
 
         let shared_globals = Arc::new(global_variables);
 
@@ -1794,10 +1889,6 @@ impl Rhai {
     }
 
     pub(super) fn ast_has_function(&self, name: &str) -> bool {
-        self.block
-            .load()
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == name)
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }

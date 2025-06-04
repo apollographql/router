@@ -21,55 +21,32 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
+use crate::Configuration;
 use crate::graphql;
 use crate::spec::Schema;
-use crate::Configuration;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
-pub(crate) enum NotifyError<V> {
+pub(crate) enum NotifyError<K, V> {
+    #[error("cannot receive data from pubsub")]
+    RecvError(#[from] RecvError),
     #[error("cannot send data to pubsub")]
     SendError(#[from] SendError<V>),
+    #[error("cannot send data to pubsub")]
+    NotificationSendError(#[from] SendError<Notification<K, V>>),
+    #[error("cannot send data to pubsub")]
+    NotificationTrySendError(#[from] TrySendError<Notification<K, V>>),
     #[error("cannot send data to response stream")]
     BroadcastSendError(#[from] broadcast::error::SendError<V>),
     #[error("this topic doesn't exist")]
     UnknownTopic,
-}
-
-impl<K, V> From<SendError<Notification<K, V>>> for NotifyError<V>
-where
-    K: Send + Hash + Eq + Clone + 'static,
-    V: Send + Clone + 'static,
-{
-    fn from(error: SendError<Notification<K, V>>) -> Self {
-        error.into()
-    }
-}
-
-impl<V> From<RecvError> for NotifyError<V>
-where
-    V: Send + Clone + 'static,
-{
-    fn from(error: RecvError) -> Self {
-        error.into()
-    }
-}
-
-impl<K, V> From<TrySendError<Notification<K, V>>> for NotifyError<V>
-where
-    K: Send + Hash + Eq + Clone + 'static,
-    V: Send + Clone + 'static,
-{
-    fn from(error: TrySendError<Notification<K, V>>) -> Self {
-        error.into()
-    }
 }
 
 type ResponseSender<V> =
@@ -81,7 +58,7 @@ type ResponseSenderWithCreated<V> = oneshot::Sender<(
     bool,
 )>;
 
-enum Notification<K, V> {
+pub(crate) enum Notification<K, V> {
     CreateOrSubscribe {
         topic: K,
         // Sender connected to the original source stream
@@ -202,7 +179,9 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<K, V> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -210,7 +189,7 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.schema.0.send(schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new schema everytime we have a new schema
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<K, V> {
         self.router_broadcasts.subscribe_schema()
     }
 }
@@ -220,7 +199,7 @@ where
     K: Send + Hash + Eq + Clone + 'static,
     V: Send + Clone + 'static,
 {
-    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<K, V>> {
         self.sender
             .send(Notification::UpdateHeartbeat { new_ttl })
             .await?;
@@ -233,7 +212,7 @@ where
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
-    ) -> Result<(Handle<K, V>, bool), NotifyError<V>> {
+    ) -> Result<(Handle<K, V>, bool), NotifyError<K, V>> {
         let (sender, _receiver) =
             broadcast::channel(self.queue_size.unwrap_or(DEFAULT_MSG_CHANNEL_SIZE));
 
@@ -258,7 +237,7 @@ where
         Ok((handle, created))
     }
 
-    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<V>> {
+    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -284,7 +263,7 @@ where
     pub(crate) async fn subscribe_if_exist(
         &mut self,
         topic: K,
-    ) -> Result<Option<Handle<K, V>>, NotifyError<V>> {
+    ) -> Result<Option<Handle<K, V>>, NotifyError<K, V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -307,7 +286,7 @@ where
         Ok(handle.into())
     }
 
-    pub(crate) async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<V>> {
+    pub(crate) async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<K, V>> {
         // Channel to check if the topic still exists or not
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -326,7 +305,7 @@ where
     pub(crate) async fn invalid_ids(
         &mut self,
         topics: Vec<K>,
-    ) -> Result<(Vec<K>, Vec<K>), NotifyError<V>> {
+    ) -> Result<(Vec<K>, Vec<K>), NotifyError<K, V>> {
         // Channel to check if the topic still exists or not
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -343,7 +322,7 @@ where
     }
 
     /// Delete the topic even if several subscribers are still listening
-    pub(crate) async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<K, V>> {
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .send(Notification::ForceDelete { topic })
@@ -354,7 +333,7 @@ where
     /// Delete the topic if and only if one or zero subscriber is still listening
     /// This function is not async to allow it to be used in a Drop impl
     #[cfg(test)]
-    pub(crate) fn try_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
+    pub(crate) fn try_delete(&mut self, topic: K) -> Result<(), NotifyError<K, V>> {
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .try_send(Notification::TryDelete { topic })
@@ -362,7 +341,7 @@ where
     }
 
     #[cfg(test)]
-    pub(crate) async fn broadcast(&mut self, data: V) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn broadcast(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
         self.sender
             .send(Notification::Broadcast { data })
             .await
@@ -370,7 +349,7 @@ where
     }
 
     #[cfg(test)]
-    pub(crate) async fn debug(&mut self) -> Result<usize, NotifyError<V>> {
+    pub(crate) async fn debug(&mut self) -> Result<usize, NotifyError<K, V>> {
         let (response_tx, response_rx) = oneshot::channel();
         self.sender
             .send(Notification::Debug {
@@ -533,7 +512,11 @@ where
 
         match Pin::new(&mut this.msg_receiver).poll_next(cx) {
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
-                tracing::info!(monotonic_counter.apollo_router_skipped_event_count = 1u64,);
+                u64_counter!(
+                    "apollo.router.skipped.event.count",
+                    "Amount of events dropped from the internal message queue",
+                    1u64
+                );
                 self.poll_next(cx)
             }
             Poll::Ready(None) => Poll::Ready(None),
@@ -561,7 +544,7 @@ where
     V: Clone + 'static + Send,
 {
     /// Send data to the subscribed topic
-    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<V>> {
+    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
         self.msg_sender.send(data.into()).map_err(|err| {
             NotifyError::BroadcastSendError(broadcast::error::SendError(err.0.unwrap()))
         })?;
@@ -774,9 +757,8 @@ where
             .insert(topic, Subscription::new(sender, heartbeat_enabled))
             .is_some();
         if !existed {
-            // TODO: deprecated name, should use our new convention apollo.router. for router next
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 1
             );
@@ -830,9 +812,10 @@ where
         }
         #[allow(clippy::collapsible_if)]
         if topic_to_delete {
+            tracing::trace!("deleting subscription from unsubscribe");
             if self.subscriptions.remove(&topic).is_some() {
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -903,8 +886,9 @@ where
 
             // Send error message to all killed connections
             for (_subscriber_id, subscription) in closed_subs {
+                tracing::trace!("deleting subscription from kill_dead_topics");
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -930,11 +914,11 @@ where
     }
 
     fn force_delete(&mut self, topic: K) {
-        tracing::trace!("deleting subscription");
+        tracing::trace!("deleting subscription from force_delete");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 -1
             );
@@ -986,12 +970,14 @@ impl RouterBroadcasts {
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
 
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<> {
         BroadcastStream::new(self.schema.0.subscribe())
             .filter_map(|schema| futures::future::ready(schema.ok()))
     }

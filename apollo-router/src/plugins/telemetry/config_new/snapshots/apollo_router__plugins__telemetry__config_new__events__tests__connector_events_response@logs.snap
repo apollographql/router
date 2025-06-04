@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/events.rs
+expression: yaml
+---
+- fields:
+    kind: my.response.event
+  level: ERROR
+  message: my response event message
+  span:
+    name: connect_request
+    otel.kind: INTERNAL
+  spans:
+    - name: connect_request
+      otel.kind: INTERNAL

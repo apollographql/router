@@ -1,0 +1,6 @@
+description: Apollo Connectors GA has replaced `subgraphs` configuration with `sources`
+actions:
+  - type: log
+    level: warn
+    path: connectors.subgraphs
+    log: "In the General Availability (GA) release of Apollo Connectors, `subgraphs` has been replaced by `sources`. Please update your configuration."

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ast::Definition;
+use apollo_compiler::ast::Document;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -38,7 +40,15 @@ pub struct MockSubgraph {
 impl MockSubgraph {
     pub fn new(mocks: MockResponses) -> Self {
         Self {
-            mocks: Arc::new(mocks),
+            mocks: Arc::new(
+                mocks
+                    .into_iter()
+                    .map(|(mut req, res)| {
+                        normalize(&mut req);
+                        (req, res)
+                    })
+                    .collect(),
+            ),
             extensions: None,
             subscription_stream: None,
             map_request_fn: None,
@@ -91,11 +101,10 @@ impl MockSubgraphBuilder {
     ///
     /// the arguments must deserialize to `crate::graphql::Request` and `crate::graphql::Response`
     pub fn with_json(mut self, request: serde_json::Value, response: serde_json::Value) -> Self {
-        self.mocks.insert(
-            serde_json::from_value(request).unwrap(),
-            serde_json::from_value(response).unwrap(),
-        );
-
+        let mut request = serde_json::from_value(request).unwrap();
+        normalize(&mut request);
+        self.mocks
+            .insert(request, serde_json::from_value(response).unwrap());
         self
     }
 
@@ -123,6 +132,22 @@ impl MockSubgraphBuilder {
     }
 }
 
+// Normalize queries so that spaces and operation names
+// don't have an impact on the cache
+fn normalize(request: &mut Request) {
+    if let Some(q) = &request.query {
+        let mut doc = Document::parse(q.clone(), "request").unwrap();
+
+        if let Some(Definition::OperationDefinition(op)) = doc.definitions.first_mut() {
+            let o = op.make_mut();
+            o.name.take();
+        };
+
+        request.query = Some(doc.serialize().no_indent().to_string());
+        request.operation_name = None;
+    }
+}
+
 impl Service<SubgraphRequest> for MockSubgraph {
     type Response = SubgraphResponse;
 
@@ -140,11 +165,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
         let body = req.subgraph_request.body_mut();
 
+        let subscription_stream = self.subscription_stream.clone();
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
                 .try_send(Box::pin(
-                    self.subscription_stream
-                        .take()
+                    subscription_stream
                         .expect("must have a subscription stream set")
                         .into_stream(),
                 ))
@@ -173,6 +198,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
         }
 
+        normalize(body);
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response
             let mut http_response_builder = http::Response::builder().status(StatusCode::OK);
@@ -182,7 +208,12 @@ impl Service<SubgraphRequest> for MockSubgraph {
             let http_response = http_response_builder
                 .body(response.clone())
                 .expect("Response is serializable; qed");
-            SubgraphResponse::new_from_response(http_response, req.context)
+            SubgraphResponse::new_from_response(
+                http_response,
+                req.context,
+                "test".to_string(),
+                req.id,
+            )
         } else {
             let error = crate::error::Error::builder()
                 .message(format!(
@@ -195,6 +226,8 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::fake_builder()
                 .error(error)
                 .context(req.context)
+                .subgraph_name(req.subgraph_name.clone())
+                .id(req.id)
                 .build()
         };
         future::ok(response)

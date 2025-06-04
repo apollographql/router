@@ -9,12 +9,13 @@ use std::time::SystemTime;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
-use serde::ser::SerializeMap;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::SerializeMap;
 use url::Url;
 use uuid::Uuid;
 
+use super::apollo_exporter::proto::reports::QueryMetadata;
 use super::config::ApolloMetricsReferenceMode;
 use super::config::ApolloSignatureNormalizationAlgorithm;
 use super::config::Sampler;
@@ -67,7 +68,7 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
-    /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
+    /// The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
@@ -84,7 +85,7 @@ pub(crate) struct Config {
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
-    pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
+    pub(crate) otlp_tracing_sampler: SamplerOption,
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
@@ -107,11 +108,10 @@ pub(crate) struct Config {
     pub(crate) errors: ErrorsConfiguration,
 
     /// Set the signature normalization algorithm to use when sending Apollo usage reports.
-    pub(crate) experimental_apollo_signature_normalization_algorithm:
-        ApolloSignatureNormalizationAlgorithm,
+    pub(crate) signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
 
     /// Set the Apollo usage report reference reporting mode to use.
-    pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
+    pub(crate) metrics_reference_mode: ApolloMetricsReferenceMode,
 
     /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
     pub(crate) experimental_local_field_metrics: bool,
@@ -122,6 +122,9 @@ pub(crate) struct Config {
 pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
     pub(crate) subgraph: SubgraphErrorConfig,
+
+    /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
+    pub(crate) preview_extended_error_metrics: ExtendedErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -140,6 +143,9 @@ pub(crate) struct ErrorConfiguration {
     pub(crate) send: bool,
     /// Redact subgraph errors to Apollo Studio
     pub(crate) redact: bool,
+    /// Allows additional dimension `extensions.code` to be sent with errors
+    /// even when `redact` is set to `true`.  Has no effect when `redact` is false.
+    pub(crate) redaction_policy: ErrorRedactionPolicy,
 }
 
 impl Default for ErrorConfiguration {
@@ -147,6 +153,7 @@ impl Default for ErrorConfiguration {
         Self {
             send: true,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::default(),
         }
     }
 }
@@ -161,12 +168,35 @@ impl SubgraphErrorConfig {
     }
 }
 
+/// Extended Open Telemetry error metrics mode
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ExtendedErrorMetricsMode {
+    /// Do not send extended OTLP error metrics
+    #[default]
+    Disabled,
+    /// Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`].
+    /// If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.
+    Enabled,
+}
+
+/// Allow some error fields to be send to Apollo Studio even when `redact` is true.
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ErrorRedactionPolicy {
+    /// Applies redaction to all error details.
+    #[default]
+    Strict,
+    /// Modifies the `redact` setting by excluding the `extensions.code` field in errors from redaction.
+    Extended,
+}
+
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
-const fn default_experimental_otlp_tracing_sampler() -> SamplerOption {
-    SamplerOption::Always(Sampler::AlwaysOff)
+const fn default_otlp_tracing_sampler() -> SamplerOption {
+    SamplerOption::Always(Sampler::AlwaysOn)
 }
 
 fn endpoint_default() -> Url {
@@ -210,15 +240,14 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            experimental_otlp_tracing_sampler: default_experimental_otlp_tracing_sampler(),
+            otlp_tracing_sampler: default_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
             errors: ErrorsConfiguration::default(),
-            experimental_apollo_signature_normalization_algorithm:
-                ApolloSignatureNormalizationAlgorithm::default(),
+            signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
-            experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
+            metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
 }
@@ -307,6 +336,7 @@ pub(crate) struct Report {
     #[serde(serialize_with = "serialize_licensed_operation_count_by_type")]
     pub(crate) licensed_operation_count_by_type:
         HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
+    pub(crate) router_features_enabled: Vec<String>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
@@ -402,6 +432,7 @@ impl Report {
                 .collect(),
             traces_pre_aggregated: true,
             extended_references_enabled,
+            router_features_enabled: self.router_features_enabled.clone(),
             ..Default::default()
         };
 
@@ -455,6 +486,13 @@ impl AddAssign<SingleStatsReport> for Report {
                 })
                 .or_insert(licensed_operation_count_by_type);
         }
+        self.router_features_enabled = self
+            .router_features_enabled
+            .clone()
+            .into_iter()
+            .chain(report.router_features_enabled)
+            .unique()
+            .collect();
     }
 }
 
@@ -464,6 +502,7 @@ pub(crate) struct TracesAndStats {
     #[serde(with = "vectorize")]
     pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub(crate) query_metadata: Option<QueryMetadata>,
 }
 
 impl From<TracesAndStats>
@@ -474,7 +513,7 @@ impl From<TracesAndStats>
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
             referenced_fields_by_type: stats.referenced_fields_by_type,
             trace: stats.traces,
-            ..Default::default()
+            query_metadata: stats.query_metadata,
         }
     }
 }
@@ -486,8 +525,10 @@ impl AddAssign<SingleStats> for TracesAndStats {
             .entry(stats.stats_with_context.context.clone())
             .or_default() += stats.stats_with_context;
 
-        // No merging required here because references fields by type will always be the same for each stats report key.
+        // No merging required here because references fields by type and metadata will always be the same for
+        // each stats report key.
         self.referenced_fields_by_type = stats.referenced_fields_by_type;
+        self.query_metadata = stats.query_metadata;
     }
 }
 

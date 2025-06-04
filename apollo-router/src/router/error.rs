@@ -40,4 +40,7 @@ pub enum ApolloRouterError {
 
     /// TLS configuration error: {0}
     Rustls(rustls::Error),
+
+    /// Preview feature in supergraph schema not enabled via configuration
+    FeatureGateViolation,
 }

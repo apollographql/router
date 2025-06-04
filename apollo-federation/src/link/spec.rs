@@ -2,7 +2,7 @@
 use std::fmt;
 use std::str;
 
-use apollo_compiler::ast::Name;
+use apollo_compiler::Name;
 use apollo_compiler::name;
 use thiserror::Error;
 
@@ -88,10 +88,52 @@ impl Identity {
             name: name!("inaccessible"),
         }
     }
+
+    pub fn cost_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("cost"),
+        }
+    }
+
+    pub fn context_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("context"),
+        }
+    }
+
+    pub fn tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("tag"),
+        }
+    }
+
+    pub fn requires_scopes_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("requiresScopes"),
+        }
+    }
+
+    pub fn authenticated_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("authenticated"),
+        }
+    }
+
+    pub fn policy_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("policy"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Version {
     /// The major number part of the version.
     pub major: u32,
@@ -167,7 +209,7 @@ impl Version {
 }
 
 /// A `@link` specification url, which identifies a specific version of a specification.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Url {
     /// The identity of the `@link` specification pointed by this url.
     pub identity: Identity,
@@ -219,7 +261,7 @@ impl str::FromStr for Url {
                     // So we pretend that it's fine. You can't reference an imported element by the
                     // namespaced name because it's not valid GraphQL to do so--but you can
                     // explicitly import elements from a spec with an invalid name.
-                    .map(|segment| Name::new_unchecked(segment.into()))?;
+                    .map(Name::new_unchecked)?;
                 let scheme = url.scheme();
                 if !scheme.starts_with("http") {
                     return Err(SpecError::ParseError("invalid `@link` specification url: only http(s) urls are supported currently".to_string()));

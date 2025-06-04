@@ -5,16 +5,16 @@ fn handles_non_matching_value_types_under_interface_field() {
           type Query {
             i: I
           }
-  
+
           interface I {
             s: S
           }
-  
+
           type T implements I @key(fields: "id") {
             id: ID!
             s: S @shareable
           }
-  
+
           type S @shareable {
             x: Int
           }
@@ -24,7 +24,7 @@ fn handles_non_matching_value_types_under_interface_field() {
             id: ID!
             s: S @shareable
           }
-  
+
           type S @shareable {
             x: Int
             y: Int
@@ -90,16 +90,16 @@ fn skip_type_explosion_early_if_unnecessary() {
           type Query {
             i: I
           }
-  
+
           interface I {
             s: S
           }
-  
+
           type T implements I @key(fields: "id") {
             id: ID!
             s: S @shareable
           }
-  
+
           type S @shareable {
             x: Int
             y: Int
@@ -110,7 +110,7 @@ fn skip_type_explosion_early_if_unnecessary() {
             id: ID!
             s: S @shareable
           }
-  
+
           type S @shareable {
             x: Int
             y: Int

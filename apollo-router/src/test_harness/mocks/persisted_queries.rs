@@ -1,38 +1,45 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipEncoder;
-use maplit::hashmap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use url::Url;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 
+pub use crate::services::layers::persisted_queries::FullPersistedQueryOperationId;
+pub use crate::services::layers::persisted_queries::ManifestOperation;
+pub use crate::services::layers::persisted_queries::PersistedQueryManifest;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 
 /// Get a query ID, body, and a PQ manifest with that ID and body.
-pub fn fake_manifest() -> (String, String, HashMap<String, String>) {
+pub fn fake_manifest() -> (String, String, PersistedQueryManifest) {
     let id = "1234".to_string();
     let body = r#"query { typename }"#.to_string();
-    let manifest = hashmap! { id.to_string() => body.to_string() };
+
+    let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+        id: id.clone(),
+        body: body.clone(),
+        client_name: None,
+    }]);
+
     (id, body, manifest)
 }
 
 /// Mocks an uplink server with a persisted query list containing no operations.
 pub async fn mock_empty_pq_uplink() -> (UplinkMockGuard, UplinkConfig) {
-    mock_pq_uplink(&HashMap::new()).await
+    mock_pq_uplink(&PersistedQueryManifest::default()).await
 }
 
 /// Mocks an uplink server with a persisted query list with a delay.
 pub async fn mock_pq_uplink_with_delay(
-    manifest: &HashMap<String, String>,
+    manifest: &PersistedQueryManifest,
     delay: Duration,
 ) -> (UplinkMockGuard, UplinkConfig) {
     let (guard, url) = mock_pq_uplink_one_endpoint(manifest, Some(delay)).await;
@@ -43,7 +50,7 @@ pub async fn mock_pq_uplink_with_delay(
 }
 
 /// Mocks an uplink server with a persisted query list containing operations passed to this function.
-pub async fn mock_pq_uplink(manifest: &HashMap<String, String>) -> (UplinkMockGuard, UplinkConfig) {
+pub async fn mock_pq_uplink(manifest: &PersistedQueryManifest) -> (UplinkMockGuard, UplinkConfig) {
     let (guard, url) = mock_pq_uplink_one_endpoint(manifest, None).await;
     (
         guard,
@@ -58,22 +65,29 @@ pub struct UplinkMockGuard {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Operation {
     id: String,
     body: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    client_name: Option<String>,
 }
 
 /// Mocks an uplink server; returns a single Url rather than a full UplinkConfig, so you
 /// can combine it with another one to test failover.
 pub async fn mock_pq_uplink_one_endpoint(
-    manifest: &HashMap<String, String>,
+    manifest: &PersistedQueryManifest,
     delay: Option<Duration>,
 ) -> (UplinkMockGuard, Url) {
     let operations: Vec<Operation> = manifest
         // clone the manifest so the caller can still make assertions about it
         .clone()
         .drain()
-        .map(|(id, body)| Operation { id, body })
+        .map(|(full_id, body)| Operation {
+            id: full_id.operation_id,
+            body,
+            client_name: full_id.client_name,
+        })
         .collect();
 
     let mock_gcs_server = MockServer::start().await;

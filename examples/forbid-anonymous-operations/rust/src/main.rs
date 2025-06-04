@@ -1,3 +1,4 @@
+//! ```text
 //! curl -v \
 //!     --header 'content-type: application/json' \
 //!     --url 'http://127.0.0.1:4000' \
@@ -9,6 +10,7 @@
 //! <
 //! * Connection #0 to host 127.0.0.1 left intact
 //! {"errors":[{"message":"Anonymous operations are not allowed","locations":[],"path":null}]}
+//! ```
 
 use anyhow::Result;
 

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 use tower::BoxError;
 
 use self::storage::CacheStorage;
@@ -14,9 +14,14 @@ use self::storage::ValueType;
 use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
+mod size_estimation;
 pub(crate) mod storage;
+use std::convert::Infallible;
 
-type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
+pub(crate) use size_estimation::estimate_size;
+
+type WaitMap<K, V, UncachedError> =
+    Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, UncachedError>>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
     Some(v) => v,
     None => unreachable!(),
@@ -24,20 +29,25 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
-pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
-    wait_map: WaitMap<K, V>,
+pub(crate) struct DeduplicatingCache<K, V, UncachedError = Infallible>
+where
+    K: KeyType,
+    V: ValueType,
+{
+    wait_map: WaitMap<K, V, UncachedError>,
     storage: CacheStorage<K, V>,
 }
 
-impl<K, V> DeduplicatingCache<K, V>
+impl<K, V, UncachedError> DeduplicatingCache<K, V, UncachedError>
 where
     K: KeyType + 'static,
     V: ValueType + 'static,
+    UncachedError: Clone + Send + 'static,
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCache>,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
@@ -47,7 +57,7 @@ where
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
@@ -58,7 +68,7 @@ where
         &self,
         key: &K,
         init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
-    ) -> Entry<K, V> {
+    ) -> Entry<K, V, UncachedError> {
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
         // go through a wait map to register interest in data associated with a key.
@@ -97,7 +107,7 @@ where
                 drop(locked_wait_map);
 
                 if let Some(value) = self.storage.get(key, init_from_redis).await {
-                    self.send(sender, key, value.clone()).await;
+                    self.send(sender, key, Ok(value.clone())).await;
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -124,7 +134,12 @@ where
         self.storage.insert_in_memory(key, value).await;
     }
 
-    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
+    async fn send(
+        &self,
+        sender: broadcast::Sender<Result<V, UncachedError>>,
+        key: &K,
+        value: Result<V, UncachedError>,
+    ) {
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
         let mut locked_wait_map = self.wait_map.lock().await;
@@ -135,46 +150,60 @@ where
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
         self.storage.in_memory_cache()
     }
+
+    pub(crate) fn activate(&self) {
+        self.storage.activate()
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn len(&self) -> usize {
+        self.storage.len().await
+    }
 }
 
-pub(crate) struct Entry<K: KeyType, V: ValueType> {
-    inner: EntryInner<K, V>,
+pub(crate) struct Entry<K: KeyType, V: ValueType, UncachedError> {
+    inner: EntryInner<K, V, UncachedError>,
 }
-enum EntryInner<K: KeyType, V: ValueType> {
+enum EntryInner<K: KeyType, V: ValueType, UncachedError> {
     First {
         key: K,
-        sender: broadcast::Sender<V>,
-        cache: DeduplicatingCache<K, V>,
+        sender: broadcast::Sender<Result<V, UncachedError>>,
+        cache: DeduplicatingCache<K, V, UncachedError>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
-        receiver: broadcast::Receiver<V>,
+        receiver: broadcast::Receiver<Result<V, UncachedError>>,
     },
     Value(V),
 }
 
 #[derive(Debug)]
-pub(crate) enum EntryError {
-    Closed,
+pub(crate) enum EntryError<UncachedError> {
     IsFirst,
+    RecvError,
+    UncachedError(UncachedError),
 }
 
-impl<K, V> Entry<K, V>
+impl<K, V, UncachedError> Entry<K, V, UncachedError>
 where
     K: KeyType + 'static,
     V: ValueType + 'static,
+    UncachedError: Clone + Send + 'static,
 {
     pub(crate) fn is_first(&self) -> bool {
         matches!(self.inner, EntryInner::First { .. })
     }
 
-    pub(crate) async fn get(self) -> Result<V, EntryError> {
+    pub(crate) async fn get(self) -> Result<V, EntryError<UncachedError>> {
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => {
-                receiver.recv().await.map_err(|_| EntryError::Closed)
-            }
+            EntryInner::Receiver { mut receiver } => match receiver.recv().await {
+                Ok(Ok(value)) => Ok(value),
+                Ok(Err(e)) => Err(EntryError::UncachedError(e)),
+                Err(broadcast::error::RecvError::Closed)
+                | Err(broadcast::error::RecvError::Lagged(_)) => Err(EntryError::RecvError),
+            },
             _ => Err(EntryError::IsFirst),
         }
     }
@@ -188,13 +217,13 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.send(sender, &key, value).await;
+            cache.send(sender, &key, Ok(value)).await;
         }
     }
 
     /// sends the value without storing it into the cache
     #[allow(unused)]
-    pub(crate) async fn send(self, value: V) {
+    pub(crate) async fn send(self, value: Result<V, UncachedError>) {
         if let EntryInner::First {
             sender, cache, key, ..
         } = self.inner
@@ -218,9 +247,10 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test")
-            .await
-            .unwrap();
+        let cache: DeduplicatingCache<String, String> =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test")
+                .await
+                .unwrap();
 
         let entry = cache.get(&k, |_| Ok(())).await;
 

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use dashmap::DashMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,12 +24,14 @@ use crate::spec;
 use crate::spec::query::traverse;
 
 pub(crate) mod visitor;
-pub(crate) const UNRESOLVED_LABELS_KEY: &str = "apollo_override::unresolved_labels";
-pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_override";
+pub(crate) const DEPRECATED_UNRESOLVED_LABELS_KEY: &str = "apollo_override::unresolved_labels";
+pub(crate) const UNRESOLVED_LABELS_KEY: &str = "apollo::progressive_override::unresolved_labels";
+pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo::progressive_override::labels_to_override";
+pub(crate) const DEPRECATED_LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_override";
 
 pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
 pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";
-pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4.0, <=0.4.0";
+pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
@@ -91,7 +93,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
         .flatten()
         .filter_map(|join_directive| {
             if let Some(override_label_arg) =
-                join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
+                join_directive.specified_argument_by_name(OVERRIDE_LABEL_ARG_NAME)
             {
                 override_label_arg
                     .as_str()

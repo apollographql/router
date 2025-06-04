@@ -5,9 +5,9 @@ use std::ops::ControlFlow;
 use tower::BoxError;
 
 use super::ErrorDetails;
+use crate::Context;
 use crate::graphql::Error;
 pub(crate) use crate::services::execution::*;
-use crate::Context;
 
 pub(crate) type FirstResponse = super::engine::RhaiExecutionResponse;
 pub(crate) type DeferredResponse = super::engine::RhaiExecutionDeferredResponse;

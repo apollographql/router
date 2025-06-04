@@ -1,37 +1,44 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
-use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::service_fn;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::ListenAddr;
+use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
-use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::query_planner::BridgeQueryPlannerPool;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::query_planner::QueryPlannerService;
+use crate::services::HasConfig;
+use crate::services::HasSchema;
+use crate::services::PluggableSupergraphServiceBuilder;
+use crate::services::Plugins;
+use crate::services::SubgraphService;
+use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -39,22 +46,12 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
-use crate::services::subgraph;
-use crate::services::transport;
-use crate::services::HasConfig;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
-use crate::services::Plugins;
-use crate::services::SubgraphService;
-use crate::services::SupergraphCreator;
 use crate::spec::Schema;
-use crate::ListenAddr;
+use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
-pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -75,29 +72,15 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    #[deprecated = "use `from_router_service` instead"]
-    #[allow(deprecated)]
-    pub fn new(path: String, handler: transport::BoxService) -> Self {
-        let router_service = ServiceBuilder::new()
-            .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: transport::Response| response.into())
-            .service(handler)
-            .boxed();
-        Self {
-            path,
-            handler: Handler::new(router_service),
-        }
-    }
-
-    /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
         }
     }
+
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<crate::services::router::Body>| {
+        let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
@@ -127,6 +110,8 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory
@@ -141,9 +126,10 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError>;
 }
 
@@ -159,9 +145,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError> {
         // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
@@ -179,18 +166,17 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
+                    inject_schema_id(schema.schema_id.as_str(), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()
                                 .config(plugin_config.clone())
-                                .supergraph_sdl(Arc::new(schema.clone()))
-                                .supergraph_schema(Arc::new(
-                                    apollo_compiler::validation::Valid::assume_valid(
-                                        apollo_compiler::Schema::new(),
-                                    ),
-                                ))
+                                .supergraph_sdl(schema.raw_sdl.clone())
+                                .supergraph_schema_id(schema.schema_id.clone().into_inner())
+                                .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
+                                .license(license)
+                                .full_config(configuration.validated_yaml.clone())
                                 .build(),
                         )
                         .await
@@ -217,6 +203,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             previous_router,
             initial_telemetry_plugin,
             extra_plugins,
+            license,
         )
         .instrument(router_span)
         .await
@@ -227,10 +214,11 @@ impl YamlRouterFactory {
     async fn inner_create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a RouterCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<RouterCreator, BoxError> {
         let mut supergraph_creator = self
             .inner_create_supergraph(
@@ -239,15 +227,9 @@ impl YamlRouterFactory {
                 previous_router.map(|router| &*router.supergraph_creator),
                 initial_telemetry_plugin,
                 extra_plugins,
+                license,
             )
             .await?;
-
-        // Don't let the router start in experimental_query_planner_mode and
-        // unimplemented Rust QP features.
-        can_use_with_experimental_query_planner(
-            configuration.clone(),
-            supergraph_creator.schema(),
-        )?;
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis_layer =
@@ -268,7 +250,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -284,7 +266,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -302,44 +284,20 @@ impl YamlRouterFactory {
     pub(crate) async fn inner_create_supergraph<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            match previous_supergraph.as_ref().map(|router| router.planners()) {
-                None => {
-                    BridgeQueryPlannerPool::new(
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-                Some(planners) => {
-                    BridgeQueryPlannerPool::new_from_planners(
-                        planners,
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-            };
+        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
+            .instrument(query_planner_span)
+            .await?;
 
         let schema_changed = previous_supergraph
-            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
             .unwrap_or_default();
 
         let config_changed = previous_supergraph
@@ -355,7 +313,7 @@ impl YamlRouterFactory {
         let schema_span = tracing::info_span!("schema");
         let _guard = schema_span.enter();
 
-        let schema = bridge_query_planner.schema();
+        let schema = planner.schema();
         if schema_changed {
             configuration.notify.broadcast_schema(schema.clone());
         }
@@ -365,13 +323,22 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
+
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                bridge_query_planner.subgraph_schemas(),
+                subgraph_schemas,
                 initial_telemetry_plugin,
                 extra_plugins,
+                license,
             )
             .instrument(span)
             .await?
@@ -380,16 +347,23 @@ impl YamlRouterFactory {
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+            let mut builder = PluggableSupergraphServiceBuilder::new(planner);
             builder = builder.with_configuration(configuration.clone());
+            let http_service_factory =
+                create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+            builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder.with_plugins(plugins).build().await?;
+            let supergraph_creator = builder
+                .with_plugins(plugins)
+                .with_license(license)
+                .build()
+                .await?;
 
             Ok(supergraph_creator)
         }
@@ -399,39 +373,52 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
+    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> Result<IndexMap<String, SubgraphService>, BoxError> {
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let mut subgraph_services = IndexMap::default();
+    for (name, http_service_factory) in http_service_factory.iter() {
+        let subgraph_service = SubgraphService::from_config(
+            name.clone(),
+            configuration,
+            subscription_plugin_conf.clone(),
+            http_service_factory.clone(),
+        )?;
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+pub(crate) async fn create_http_services(
     plugins: &Arc<Plugins>,
     schema: &Schema,
     configuration: &Configuration,
-) -> Result<
-    IndexMap<
-        String,
-        impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
-                    SubgraphService,
-                >,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-    >,
-    BoxError,
-> {
-    let tls_root_store: RootCertStore = configuration
+) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
+    // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
+    // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
+    // This generates the native root store once, and reuses it across subgraphs
+    let subgraph_tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
         .all
         .create_certificate_store()
         .transpose()?
         .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
-
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
+    let connector_tls_root_store: RootCertStore = configuration
+        .tls
+        .connector
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
 
     let shaping = plugins
         .iter()
@@ -439,31 +426,53 @@ pub(crate) async fn create_subgraph_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let connector_subgraphs: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .iter()
+                .map(|(_, connector)| connector.id.subgraph_name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let http_service = crate::services::http::HttpClientService::from_config(
+        if connector_subgraphs.contains(name) {
+            continue; // Avoid adding services for subgraphs that are actually connectors since we'll separately add them below per source
+        }
+        let http_service = crate::services::http::HttpClientService::from_config_for_subgraph(
             name,
             configuration,
-            &tls_root_store,
-            shaping.enable_subgraph_http2(name),
+            &subgraph_tls_root_store,
+            shaping.subgraph_client_config(name),
         )?;
 
-        let http_service_factory =
-            HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
-
-        let subgraph_service = shaping.subgraph_service_internal(
-            name,
-            SubgraphService::from_config(
-                name,
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory,
-            )?,
-        );
-        subgraph_services.insert(name.clone(), subgraph_service);
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
+        http_services.insert(name.clone(), http_service_factory);
     }
 
-    Ok(subgraph_services)
+    // Also create client service factories for connector sources
+    let connector_sources = schema
+        .connectors
+        .as_ref()
+        .map(|c| c.source_config_keys.clone())
+        .unwrap_or_default();
+
+    for name in connector_sources.iter() {
+        let http_service = crate::services::http::HttpClientService::from_config_for_connector(
+            name,
+            configuration,
+            &connector_tls_root_store,
+            shaping.connector_client_config(name),
+        )?;
+
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
+        http_services.insert(name.clone(), http_service_factory);
+    }
+
+    Ok(http_services)
 }
 
 impl TlsClient {
@@ -487,7 +496,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -501,17 +510,15 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| io::Error::other("failed to load certificate"))
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -519,27 +526,67 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 /// not meant to be used directly
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;
     let service = YamlRouterFactory
         .create(
             is_telemetry_disabled,
             Arc::new(config),
-            schema.to_string(),
+            schema,
             None,
             None,
+            Default::default(),
         )
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
-Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn add_plugin(
+    name: String,
+    factory: &PluginFactory,
+    plugin_config: &Value,
+    schema: Arc<String>,
+    schema_id: Arc<String>,
+    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    launch_id: Option<Arc<String>>,
+    notify: &crate::notification::Notify<String, crate::graphql::Response>,
+    plugin_instances: &mut Plugins,
+    errors: &mut Vec<ConfigurationError>,
+    license: LicenseState,
+    full_config: Option<Value>,
+) {
+    match factory
+        .create_instance(
+            PluginInit::builder()
+                .config(plugin_config.clone())
+                .supergraph_sdl(schema)
+                .supergraph_schema_id(schema_id)
+                .supergraph_schema(supergraph_schema)
+                .subgraph_schemas(subgraph_schemas)
+                .launch_id(launch_id)
+                .notify(notify.clone())
+                .license(license)
+                .and_full_config(full_config)
+                .build(),
+        )
+        .await
+    {
+        Ok(plugin) => {
+            let _ = plugin_instances.insert(name, plugin);
+        }
+        Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+            plugin: name,
+            error: err.to_string(),
+        }),
+    }
 }
 
 pub(crate) async fn create_plugins(
@@ -548,8 +595,10 @@ pub(crate) async fn create_plugins(
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    license: LicenseState,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
+    let supergraph_schema_id = schema.schema_id.clone().into_inner();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -570,31 +619,27 @@ pub(crate) async fn create_plugins(
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
-    let mut plugin_instances = Plugins::new();
+    let mut plugin_instances = Plugins::default();
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
-        ($name: expr, $factory: expr, $plugin_config: expr) => {{
-            match $factory
-                .create_instance(
-                    PluginInit::builder()
-                        .config($plugin_config)
-                        .supergraph_sdl(schema.as_string().clone())
-                        .supergraph_schema(supergraph_schema.clone())
-                        .subgraph_schemas(subgraph_schemas.clone())
-                        .notify(configuration.notify.clone())
-                        .build(),
-                )
-                .await
-            {
-                Ok(plugin) => {
-                    let _ = plugin_instances.insert($name, plugin);
-                }
-                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                    plugin: $name,
-                    error: err.to_string(),
-                }),
-            }
+        ($name: expr, $factory: expr, $plugin_config: expr, $maybe_full_config: expr) => {{
+            add_plugin(
+                $name,
+                $factory,
+                &$plugin_config,
+                schema.as_string().clone(),
+                supergraph_schema_id.clone(),
+                supergraph_schema.clone(),
+                subgraph_schemas.clone(),
+                schema.launch_id.clone(),
+                &configuration.notify.clone(),
+                &mut plugin_instances,
+                &mut errors,
+                license.clone(),
+                $maybe_full_config,
+            )
+            .await;
         }};
     }
 
@@ -602,23 +647,22 @@ pub(crate) async fn create_plugins(
         ($name: literal, $opt_plugin_config: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
-
             async {
                 let factory = apollo_plugin_factories
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
+                    let mut full_config = None;
                     if name == "apollo.telemetry" {
                         // The apollo.telemetry" plugin isn't happy with empty config, so we
                         // give it some. If any of the other mandatory plugins need special
-                        // treatment, then we'll have to perform it here.
-                        // This is *required* by the telemetry module or it will fail...
-                        inject_schema_id(
-                            Some(&Schema::schema_id(&schema.raw_sdl)),
-                            &mut plugin_config,
-                        );
+                        // treatment, then we'll have to perform it here
+                        inject_schema_id(&supergraph_schema_id, &mut plugin_config);
+
+                        // Only the telemetry plugin should have access to the full configuration
+                        full_config = configuration.validated_yaml.clone();
                     }
-                    add_plugin!(name.to_string(), factory, plugin_config);
+                    add_plugin!(name.to_string(), factory, plugin_config, full_config);
                 }
             }
             .instrument(span)
@@ -654,7 +698,7 @@ pub(crate) async fn create_plugins(
                     if let Some(factory) =
                         plugin_registry.iter().find(|factory| factory.name == name)
                     {
-                        add_plugin!(name, factory, plugin_config);
+                        add_plugin!(name, factory, plugin_config, None);
                     } else {
                         errors.push(ConfigurationError::PluginUnknown(name))
                     }
@@ -667,8 +711,29 @@ pub(crate) async fn create_plugins(
         };
     }
 
+    // Be careful with this list! Moving things around can have subtle consequences.
+    // Requests flow through this list multiple times in two directions. First, they go "down"
+    // through the list several times as requests at the different services. Then, they go
+    // "up" through the list as a response several times, once for each service.
+    //
+    // The order of this list determines the relative order of plugin hooks executing at each
+    // service. This is *not* the same as the order a request flows through the router.
+    // For example, assume these three plugins:
+    // 1. header propagation (has a hook at the subgraph service)
+    // 2. telemetry (has hooks at router, supergraph, and subgraph services)
+    // 3. rate limiting (has a hook at the router service)
+    // The order here means that header propagation happens before telemetry *at the subgraph
+    // service*. Depending on the requirements of plugins, it may have to be in this order. The
+    // *router service* hook for telemetry still happens well before header propagation. Similarly,
+    // header propagation being first does not mean that it's exempt from rate limiting, for the
+    // same reason. Rate limiting must be after telemetry, though, because telemetry and rate
+    // limiting both work at the router service, and requests rejected from the router service must
+    // flow through telemetry so we can record errors.
+    //
+    // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
+    // plugin in this list *that adds a router service hook*. Other plugins can be before the
+    // telemetry plugin if they must do work *before* telemetry at specific services.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
-    add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
@@ -682,7 +747,15 @@ pub(crate) async fn create_plugins(
             }
         }
     }
+    add_mandatory_apollo_plugin!("license_enforcement");
+    add_mandatory_apollo_plugin!("health_check");
+    // TODO: Introduce a CORS plugin here
     add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("limits");
+    add_mandatory_apollo_plugin!("csrf");
+    add_mandatory_apollo_plugin!("fleet_detector");
+    add_mandatory_apollo_plugin!("enhanced_client_awareness");
+
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
     add_optional_apollo_plugin!("override_subgraph_url");
@@ -691,12 +764,19 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
+    add_optional_apollo_plugin!("demand_control");
+    add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("preview_demand_control");
     add_user_plugins!();
+
+    // Because this plugin intercepts subgraph requests
+    // and does not forward them to the next service in the chain,
+    // it needs to intervene after user plugins for users plugins to run at all.
+    add_optional_apollo_plugin!("experimental_mock_subgraphs");
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.
@@ -725,16 +805,27 @@ pub(crate) async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
+        let errors_list = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+            .join("\n");
+
         Err(BoxError::from(format!(
-            "there were {} configuration errors",
-            errors.len()
+            "there were {} configuration errors\n{}",
+            errors.len(),
+            errors_list
         )))
     } else {
         Ok(plugin_instances)
     }
 }
 
-fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
+fn inject_schema_id(
+    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
+    schema_id: &str,
+    configuration: &mut Value,
+) {
     if configuration.get("apollo").is_none() {
         // Warning: this must be done here, otherwise studio reporting will not work
         if apollo_key().is_some() && apollo_graph_reference().is_some() {
@@ -745,7 +836,7 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
             return;
         }
     }
-    if let (Some(schema_id), Some(apollo)) = (schema_id, configuration.get_mut("apollo")) {
+    if let Some(apollo) = configuration.get_mut("apollo") {
         if let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
@@ -755,111 +846,8 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
     }
 }
 
-// The Rust QP has not yet implemented setContext
-// (`@context` directives), progressive overrides, and it
-// doesn't support fed v1 *supergraphs*.
-//
-// If users are using the Rust QP as standalone (`new`) or in comparison mode (`both`),
-// fail to start up the router emitting an error.
-fn can_use_with_experimental_query_planner(
-    configuration: Arc<Configuration>,
-    schema: Arc<Schema>,
-) -> Result<(), ConfigurationError> {
-    match configuration.experimental_query_planner_mode {
-        crate::configuration::QueryPlannerMode::New
-        | crate::configuration::QueryPlannerMode::Both => {
-            // We have a *progressive* override when `join__directive` has a
-            // non-null value for `overrideLabel` field.
-            //
-            // This looks at object types' fields and their directive
-            // applications, looking specifically for `@join__direcitve`
-            // arguments list.
-            let has_progressive_overrides = schema
-                .supergraph_schema()
-                .types
-                .values()
-                .filter_map(|extended_type| {
-                    // The override label args can be only on ObjectTypes
-                    if let ExtendedType::Object(object_type) = extended_type {
-                        Some(object_type)
-                    } else {
-                        None
-                    }
-                })
-                .flat_map(|object_type| &object_type.fields)
-                .filter_map(|(_, field)| {
-                    let join_field_directives = field
-                        .directives
-                        .iter()
-                        .filter(|d| d.name.as_str() == JOIN_FIELD)
-                        .collect::<Vec<_>>();
-                    if !join_field_directives.is_empty() {
-                        Some(join_field_directives)
-                    } else {
-                        None
-                    }
-                })
-                .flatten()
-                .any(|join_directive| {
-                    if let Some(override_label_arg) =
-                        join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
-                    {
-                        // Any argument value for `overrideLabel` that's not
-                        // null can be considered as progressive override usage
-                        if !override_label_arg.is_null() {
-                            return true;
-                        }
-                        return false;
-                    }
-                    false
-                });
-            if has_progressive_overrides {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with progressive overrides",
-                    error: "remove uses of progressive overrides to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
-                });
-            }
-
-            // We will only check for `@context` direcive, since
-            // `@fromContext` can only be used if `@context` is already
-            // applied, and we assume a correctly composed supergraph.
-            //
-            // `@context` can only be applied on Object Types, Interface
-            // Types and Unions. For simplicity of this function, we just
-            // check all 'extended_type` directives.
-            let has_set_context = schema
-                .supergraph_schema()
-                .types
-                .values()
-                .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
-            if has_set_context {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with `@context`",
-                    error: "remove uses of `@context` to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
-                });
-            }
-
-            // Fed1 supergraphs will not work with the rust query planner.
-            let is_fed1_supergraph = match schema.federation_version() {
-                Some(v) => v == 1,
-                None => false,
-            };
-            if is_fed1_supergraph {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_query_planner_mode` cannot be used with fed1 supergraph",
-                    error: "switch back to `experimental_query_planner_mode: legacy` to use the router with fed1 supergraph".to_string(),
-                });
-            }
-
-            Ok(())
-        }
-        crate::configuration::QueryPlannerMode::Legacy => Ok(()),
-    }
-}
 #[cfg(test)]
 mod test {
-    use std::error::Error;
-    use std::fmt;
     use std::sync::Arc;
 
     use schemars::JsonSchema;
@@ -868,26 +856,14 @@ mod test {
     use tower_http::BoxError;
 
     use crate::configuration::Configuration;
-    use crate::configuration::QueryPlannerMode;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
-    use crate::router_factory::can_use_with_experimental_query_planner;
-    use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::router_factory::inject_schema_id;
     use crate::spec::Schema;
-
-    #[derive(Debug)]
-    struct PluginError;
-
-    impl fmt::Display for PluginError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "PluginError")
-        }
-    }
-
-    impl Error for PluginError {}
+    use crate::uplink::license_enforcement::LicenseState;
 
     // Always starts and stops plugin
 
@@ -933,6 +909,24 @@ mod test {
     }
 
     register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
+
+    async fn create_service(config: Configuration) -> Result<(), BoxError> {
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config)?;
+
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(config),
+                Arc::new(schema),
+                None,
+                None,
+                LicenseState::default(),
+            )
+            .await;
+        service.map(|_| ())
+    }
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
@@ -985,27 +979,11 @@ mod test {
         assert!(service.is_err())
     }
 
-    async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema = include_str!("testdata/supergraph.graphql");
-
-        let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
-            .create(
-                is_telemetry_disabled,
-                Arc::new(config),
-                schema.to_string(),
-                None,
-                None,
-            )
-            .await;
-        service.map(|_| ())
-    }
-
     #[test]
     fn test_inject_schema_id() {
         let mut config = json!({ "apollo": {} });
         inject_schema_id(
-            Some("8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"),
+            "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8",
             &mut config,
         );
         let config =
@@ -1013,127 +991,6 @@ mod test {
         assert_eq!(
             &config.apollo.schema_id,
             "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_context_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph_with_context.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with @context"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with @context"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with @context"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_progressive_overrides_with_experimental_query_planner() {
-        // PROGRESSIVE OVERRIDES
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph_with_override_label.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with progressive overrides"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with progressive overrides"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with progressive overrides"
-        );
-    }
-
-    #[test]
-    fn test_cannot_use_fed1_supergraphs_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
-            "experimental_query_planner_mode: new cannot be used with fed1 supergraph"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy should be able to be used with fed1 supergraph"
-        );
-    }
-
-    #[test]
-    fn test_can_use_fed2_supergraphs_with_experimental_query_planner() {
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        };
-        let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: both can be used"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: new can be used"
-        );
-        let config = Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Legacy,
-            ..Default::default()
-        };
-        assert!(
-            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
-            "experimental_query_planner_mode: legacy can be used"
         );
     }
 }

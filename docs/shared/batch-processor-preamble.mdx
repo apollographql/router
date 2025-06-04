@@ -2,8 +2,16 @@ All exporters support configuration of a batch span processor with `batch_proces
 
 You must tune your `batch_processor` configuration if you see any of the following messages in your logs:
 
-* `OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
+* `OpenTelemetry trace error occurred: cannot send message to batch processor '<provider>-tracing' as the channel is full`
 
 * `OpenTelemetry metrics error occurred: cannot send span to the batch span processor because the channel is full`
 
-The exact settings depend on the bandwidth available for you to send data to your application peformance monitor (APM) and the bandwidth configuration of your APM. Expect to tune these settings over time as your application changes.
+The exact settings depend on the bandwidth available for you to send data to your application performance monitor (APM) and the bandwidth configuration of your APM. Expect to tune these settings over time as your application changes.
+
+You can see how many spans are being dropped by enabling metrics export and looking at the:
+
+- `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
+    - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`, `zipkin-tracing`.
+    - `error` = One of `channel closed`, `channel full`.
+
+By looking at the rate of batch processor errors you can decide how to tune your batch processor settings.

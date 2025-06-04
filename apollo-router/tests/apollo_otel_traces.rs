@@ -16,15 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
+use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::routing::post;
 use bytes::Bytes;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -46,10 +48,10 @@ async fn config(
     batch: bool,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(traces_handler))
@@ -57,18 +59,18 @@ async fn config(
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
-        axum::Server::from_tcp(listener)
-            .expect("must be able to create otlp receiver")
-            .serve(app.into_make_service())
+        axum::serve(listener, app)
             .await
             .expect("could not start axum server")
     });
 
     let mut config: serde_json::Value = if batch {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports_batch.router.yaml"))
-            .expect("apollo_reports.router.yaml was invalid")
+        serde_yaml::from_str(include_str!(
+            "fixtures/reports/apollo_reports_batch.router.yaml"
+        ))
+        .expect("apollo_reports.router.yaml was invalid")
     } else {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
+        serde_yaml::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
             .expect("apollo_reports.router.yaml was invalid")
     };
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
@@ -83,7 +85,7 @@ async fn config(
     .expect("Could not sub in endpoint");
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.experimental_otlp_tracing_sampler",
+        "$.telemetry.apollo.otlp_tracing_sampler",
         &mut |_| Some(serde_json::Value::String("always_on".to_string())),
     )
     .expect("Could not sub in otlp sampler");
@@ -107,11 +109,38 @@ async fn get_router_service(
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(use_legacy_request_span, false, reports).await;
+
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
         .schema(include_str!("fixtures/supergraph.graphql"));
+    let builder = if mocked {
+        builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
+    } else {
+        builder.with_subgraph_network_requests()
+    };
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
+async fn get_connector_router_service(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    use_legacy_request_span: bool,
+    mocked: bool,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config(use_legacy_request_span, false, reports).await;
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph_connect.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
     } else {
@@ -153,11 +182,14 @@ async fn get_batch_router_service(
 
 macro_rules! assert_report {
         ($report: expr)=> {
+            assert_report!($report, false)
+        };
+        ($report: expr, $batch: literal)=> {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.attributes" => insta::sorted_redaction(),
                         ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
-                            const REDACTED_ATTRIBUTES: [&'static str; 11] = [
+                            let mut redacted_attributes = vec![
                                 "apollo.client.host",
                                 "apollo.client.uname",
                                 "apollo.router.id",
@@ -169,10 +201,17 @@ macro_rules! assert_report {
                                 "apollo_private.http.response_headers",
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
+                                "graphql.error.path",
                             ];
+                            if $batch {
+                                redacted_attributes.append(&mut vec![
+                                "apollo_private.operation_signature",
+                                "graphql.operation.name"
+                            ]);
+                            }
                             if let insta::internals::Content::Struct(name, key_value)  = &mut value{
                                 if name == &"KeyValue" {
-                                    if REDACTED_ATTRIBUTES.contains(&key_value[0].1.as_str().unwrap()) {
+                                    if redacted_attributes.contains(&key_value[0].1.as_str().unwrap()) {
                                         key_value[1].1 = insta::internals::Content::NewtypeVariant(
                                             "Value", 0, "stringValue", Box::new(insta::internals::Content::from("[redacted]"))
                                         );
@@ -187,6 +226,7 @@ macro_rules! assert_report {
                         ".**.parentSpanId" => "[span_id]",
                         ".**.startTimeUnixNano" => "[start_time]",
                         ".**.endTimeUnixNano" => "[end_time]",
+                        ".**.timeUnixNano" => "[time]",
                     });
                 });
         }
@@ -257,6 +297,31 @@ async fn get_trace_report(
     .await
 }
 
+async fn get_connector_trace_report(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        get_connector_router_service,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
 async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
@@ -308,9 +373,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {
@@ -338,6 +406,34 @@ where
     found_report
         .expect("failed to get report")
         .expect("failed to find report")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector_error() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{posts{id body title forceError}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_report!(report);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -403,24 +499,18 @@ async fn test_trace_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
     for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let request = make_fake_batch(
+            supergraph::Request::fake_builder()
+                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+                .operation_name("one")
+                .build()
+                .unwrap()
+                .supergraph_request,
+            Some(("one", "two")),
+        );
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report);
+        assert_report!(report, true);
     }
 }
 
@@ -473,26 +563,20 @@ async fn test_send_header() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
     for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("send-header", "Header value")
-            .header("dont-send-header", "Header value")
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let request = make_fake_batch(
+            supergraph::Request::fake_builder()
+                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+                .operation_name("one")
+                .header("send-header", "Header value")
+                .header("dont-send-header", "Header value")
+                .build()
+                .unwrap()
+                .supergraph_request,
+            Some(("one", "two")),
+        );
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report);
+        assert_report!(report, true);
     }
 }
 

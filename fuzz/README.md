@@ -25,12 +25,11 @@ Run the fuzzer with this command:
 cargo +nightly fuzz run router
 ```
 
-### Federation
+### Connectors
 
-This target is useful to spot differences between `gateway@1.x` and `gateway@2.x`. Before launching it you have to spawn the docker-compose located in the `fuzz` directory: `docker-compose -f fuzz/docker-compose.yml up`.
-And then run it with:
+This target fuzzes the Connector's Mapping Language and ensures that it continues to compose and that it
+successfully handles requests to a running router instance with the fuzzed schema.
 
 ```
-# Only works on Linux
-cargo +nightly fuzz run federation
+cargo +nightly fuzz run connectors
 ```

@@ -1,0 +1,15 @@
+{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "GetMyNameID",
+      "body": "query GetMyName { me { name } }"
+    },
+    {
+      "id": "GetMyNameID",
+      "clientName": "mobile",
+      "body": "query GetMyName { me { mobileAlias: name } }"
+    }
+  ]
+}

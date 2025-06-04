@@ -8,7 +8,7 @@
 //! every appear on the input side, while other will only appear on outputs, but it does not hurt
 //! to be future-proof by supporting all types of rewrites on both "sides".
 
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -21,7 +21,7 @@ use crate::spec::Schema;
 /// Given a path, separates the last element of path and the rest of it and return them as a pair.
 /// This will return `None` if the path is empty.
 fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
-    // If we have a `last()`, then we have a `parent()` too, so unwrapping shoud be safe.
+    // If we have a `last()`, then we have a `parent()` too, so unwrapping should be safe.
     path.last().map(|last| (path.parent().unwrap(), last))
 }
 
@@ -43,7 +43,7 @@ pub(crate) struct DataValueSetter {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataKeyRenamer {
     pub(crate) path: Path,
-    pub(crate) rename_key_to: NodeStr,
+    pub(crate) rename_key_to: Name,
 }
 
 impl DataRewrite {
@@ -109,42 +109,14 @@ pub(crate) fn apply_rewrites(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
     use serde_json_bytes::json;
 
     use super::*;
 
     // The schema is not used for the tests
     // but we need a valid one
-    const SCHEMA: &str = r#"
-       schema
-         @core(feature: "https://specs.apollo.dev/core/v0.1"),
-         @core(feature: "https://specs.apollo.dev/join/v0.1")
-       {
-         query: Query
-       }
-       directive @core(feature: String!) repeatable on SCHEMA
-       directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-       enum join__Graph {
-           FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
-       }
-
-       type Query {
-         i: [I]
-       }
-
-       interface I {
-         x: Int
-       }
-
-       type A implements I {
-         x: Int
-       }
-
-       type B {
-         y: Int
-       }
-    "#;
+    const SCHEMA: &str = include_str!("../testdata/minimal_supergraph.graphql");
 
     #[test]
     fn test_key_renamer_object() {
@@ -160,11 +132,11 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".into(),
+            rename_key_to: name!("testField"),
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 
@@ -198,11 +170,11 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".into(),
+            rename_key_to: name!("testField"),
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 

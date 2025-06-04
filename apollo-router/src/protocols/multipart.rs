@@ -3,9 +3,9 @@ use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::stream::select;
-use futures::stream::StreamExt;
 use futures::Stream;
+use futures::stream::StreamExt;
+use futures::stream::select;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio_stream::once;
@@ -40,7 +40,7 @@ struct SubscriptionPayload {
 #[derive(Debug)]
 enum MessageKind {
     Heartbeat,
-    Message(graphql::Response),
+    Message(Box<graphql::Response>),
     Eof,
 }
 
@@ -56,16 +56,15 @@ impl Multipart {
     where
         S: Stream<Item = graphql::Response> + Send + 'static,
     {
+        let stream = stream.map(|message| MessageKind::Message(Box::new(message)));
         let stream = match mode {
             ProtocolMode::Subscription => select(
-                stream
-                    .map(MessageKind::Message)
-                    .chain(once(MessageKind::Eof)),
+                stream.chain(once(MessageKind::Eof)),
                 IntervalStream::new(tokio::time::interval(HEARTBEAT_INTERVAL))
                     .map(|_| MessageKind::Heartbeat),
             )
             .boxed(),
-            ProtocolMode::Defer => stream.map(MessageKind::Message).boxed(),
+            ProtocolMode::Defer => stream.boxed(),
         };
 
         Self {
@@ -126,7 +125,7 @@ impl Stream for Multipart {
                                     None | Some(Value::Null) if response.extensions.is_empty() => {
                                         None
                                     }
-                                    _ => response.into(),
+                                    _ => (*response).into(),
                                 },
                             };
 
@@ -229,7 +228,10 @@ mod tests {
             } else {
                 match curr_index {
                     0 => {
-                        assert_eq!(res, "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql");
+                        assert_eq!(
+                            res,
+                            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql"
+                        );
                     }
                     1 => {
                         assert_eq!(

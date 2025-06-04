@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/string_template.rs
+expression: template
+---
+StringTemplate {
+    parts: [
+        Constant(
+            Constant {
+                value: "text",
+                location: 0..4,
+            },
+        ),
+    ],
+}

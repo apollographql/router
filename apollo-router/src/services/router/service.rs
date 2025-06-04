@@ -1,119 +1,124 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body::StreamBody;
 use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::TryFutureExt;
+use futures::future::BoxFuture;
 use futures::future::join_all;
 use futures::future::ready;
-use futures::future::BoxFuture;
-use futures::stream;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
-use http::request::Parts;
-use http::HeaderMap;
+use futures::stream::once;
 use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use http_body::Body as _;
+use http::header::CONTENT_TYPE;
+use http::request::Parts;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::ClientRequestAccepts;
+use super::Body;
+use crate::Configuration;
+use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
+use crate::json_ext::Value;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::ServiceBuilderExt;
+use crate::metrics::count_operation_error_codes;
+use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
+use crate::plugins::content_negotiation::invalid_accept_header_response;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
+use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
+use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::content_negotiation;
-use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::layers::static_page::StaticPageLayer;
-use crate::services::new_service::ServiceFactory;
-use crate::services::router;
-use crate::services::router::body::get_body_bytes;
-use crate::services::router::body::RouterBody;
-#[cfg(test)]
-use crate::services::supergraph;
 use crate::services::HasPlugins;
-#[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
-use crate::Configuration;
-use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::static_page::StaticPageLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::supergraph;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
-pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
-pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
 static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
-static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService {
-    supergraph_creator: Arc<SupergraphCreator>,
-    apq_layer: APQLayer,
+    apq_layer: Arc<APQLayer>,
     persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
+    query_analysis_layer: Arc<QueryAnalysisLayer>,
+    // Cannot be under Arc. Batching state must be preserved for each RouterService
+    // instance
     batching: Batching,
+    supergraph_service: supergraph::BoxCloneService,
+    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
-    pub(crate) fn new(
-        supergraph_creator: Arc<SupergraphCreator>,
+    fn new(
+        sgb: supergraph::BoxService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
-        http_max_request_bytes: usize,
         batching: Batching,
+        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
+        let supergraph_service: supergraph::BoxCloneService =
+            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+
         RouterService {
-            supergraph_creator,
-            apq_layer,
+            apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
-            query_analysis_layer,
-            http_max_request_bytes,
+            query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
+            supergraph_service,
+            apollo_telemetry_config,
         }
     }
 }
@@ -121,10 +126,10 @@ impl RouterService {
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -162,10 +167,10 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -214,25 +219,29 @@ impl Service<RouterRequest> for RouterService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.supergraph_service.poll_ready(cx)
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        let clone = self.clone();
+        let self_clone = self.clone();
 
-        let this = std::mem::replace(self, clone);
+        let this = std::mem::replace(self, self_clone);
 
         let fut = async move { this.call_inner(req).await };
+
         Box::pin(fut)
     }
 }
 
 impl RouterService {
     async fn process_supergraph_request(
-        &self,
+        self,
         supergraph_request: SupergraphRequest,
     ) -> Result<router::Response, BoxError> {
+        // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
+        // layers with various ifs and matches, but *really*, we are calling each layer in order
+        // and handling short-circuiting.
         let mut request_res = self
             .persisted_query_layer
             .supergraph_request(supergraph_request);
@@ -251,7 +260,19 @@ impl RouterService {
                     .await
                 {
                     Err(response) => response,
-                    Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                    Ok(request) => {
+                        // self.supergraph_service here is a clone of the service that was readied
+                        // in RouterService::poll_ready. Clones are unready by default, so this
+                        // self.supergraph_service is actually not ready, which is why we need to
+                        // oneshot it here. That technically breaks backpressure, but because we are
+                        // still readying the supergraph service before calling into the router
+                        // service, backpressure is actually still exerted at that point--there's
+                        // just potential for some requests to slip through the cracks and end up
+                        // queueing up at this .oneshot() call.
+                        //
+                        // Not ideal, but an improvement on the situation in Router 1.x.
+                        self.supergraph_service.oneshot(request).await?
+                    }
                 },
             },
         };
@@ -267,7 +288,6 @@ impl RouterService {
             .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
-        process_vary_header(&mut parts.headers);
 
         if context
             .extensions()
@@ -283,10 +303,9 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(
-                            RouterBody::from("router service is not available to process request")
-                                .into_inner(),
-                        )
+                        .body(router::body::from_bytes(
+                            "router service is not available to process request",
+                        ))
                         .expect("cannot fail"),
                     context,
                 })
@@ -297,37 +316,53 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors);
+                        count_operation_errors(
+                            &response.errors,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
+                    }
+                    if let Some(value_completion) =
+                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
+                    {
+                        Self::count_value_completion_errors(
+                            value_completion,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
                     }
 
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-                    tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json::to_string(&response)?;
-                        Ok(router::Response {
-                            response: http::Response::from_parts(
-                                parts,
-                                RouterBody::from(body).into_inner(),
-                            ),
-                            context,
-                        })
-                    })
+                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
+                        .in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            Ok(body)
+                        });
+                    let body = body?;
+                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                    let display_router_response = context
+                        .extensions()
+                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
+
+                    let mut res = router::Response {
+                        response: Response::from_parts(
+                            parts,
+                            router::body::from_bytes(body.clone()),
+                        ),
+                        context,
+                    };
+
+                    if display_router_response {
+                        res.stash_the_body_in_extensions(body);
+                    }
+
+                    Ok(res)
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    }
-
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors);
+                        count_operation_errors(
+                            &response.errors,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
                     }
 
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
@@ -335,95 +370,61 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let multipart_stream = match response.subscribed {
-                        Some(true) => StreamBody::new(Multipart::new(
-                            body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            }),
-                            ProtocolMode::Subscription,
-                        )),
-                        _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body.inspect(|response| {
-                                if !response.errors.is_empty() {
-                                    Self::count_errors(&response.errors);
-                                }
-                            })),
-                            ProtocolMode::Defer,
-                        )),
+
+                    // NB: here is where we decide what kind of streaming response we're going to
+                    //  send. insert it into the extensions so that the content negotiation plugin
+                    //  can read it.
+                    let protocol_mode = if matches!(response.subscribed, Some(true)) {
+                        ProtocolMode::Subscription
+                    } else {
+                        ProtocolMode::Defer
                     };
-                    let response = (parts, multipart_stream).into_response().map(|body| {
-                        // Axum makes this `body` have type:
-                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                        let mut body = Box::pin(body);
-                        // We make a stream based on its `poll_data` method
-                        // in order to create a `hyper::Body`.
-                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
-                            body.as_mut().poll_data(ctx)
-                        }))
-                        .into_inner()
-                        // … but we ignore the `poll_trailers` method:
-                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                        // so ignoring `poll_trailers` is fine.
-                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                    });
+                    context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(protocol_mode));
+
+                    let response_multipart = match protocol_mode {
+                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
+                        ProtocolMode::Defer => {
+                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
+                        }
+                    };
+
+                    let response = http::Response::from_parts(
+                        parts,
+                        router::body::from_result_stream(response_multipart),
+                    );
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = 1u64,
-                        code = "INVALID_ACCEPT_HEADER"
-                    );
-                    // Useful for selector in spans/instruments/events
-                    context.insert_json_value(
-                        CONTAINS_GRAPHQL_ERROR,
-                        serde_json_bytes::Value::Bool(true),
+                    count_operation_error_codes(
+                        &["INVALID_ACCEPT_HEADER"],
+                        &context,
+                        &self.apollo_telemetry_config.errors,
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
-                    Ok(router::Response::error_builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-                                        APPLICATION_JSON.essence_str(),
-                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_ACCEPT,
-                                        MULTIPART_SUBSCRIPTION_ACCEPT,
-                                    ))
-                                    .extension_code("INVALID_ACCEPT_HEADER")
-                                    .build(),
-                            )
-                            .status_code(StatusCode::NOT_ACCEPTABLE)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .context(context)
-                            .build()?)
+                    Ok(invalid_accept_header_response().into())
                 }
             }
         }
     }
 
-    async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
-        let context = req.context.clone();
+    async fn call_inner(self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
+        let context = req.context;
+        let (parts, body) = req.router_request.into_parts();
+        let requests = self
+            .clone()
+            .get_graphql_requests(&context, &parts, body)
+            .await?;
 
-        let (supergraph_requests, is_batch) = match self.translate_request(req).await {
+        let my_self = self.clone();
+        let (supergraph_requests, is_batch) = match futures::future::ready(requests)
+            .and_then(|r| my_self.translate_request(&context, parts, r))
+            .await
+        {
             Ok(requests) => requests,
             Err(err) => {
-                u64_counter!(
-                    "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
-                    1,
-                    status = err.status.as_u16() as i64,
-                    error = err.error.to_string()
-                );
-                // Useful for selector in spans/instruments/events
-                context
-                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-
                 return router::Response::error_builder()
                     .error(
                         graphql::Error::builder()
@@ -443,20 +444,20 @@ impl RouterService {
         // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
         // up through here, so we can catch them without having to specially handle batch queries in
         // other portions of the codebase.
-        let futures = supergraph_requests
-            .into_iter()
-            .map(|supergraph_request| async {
+        let futures = supergraph_requests.into_iter().map(|supergraph_request| {
+            let my_self = self.clone();
+            async move {
                 // We clone the context here, because if the request results in an Err, the
                 // response context will no longer exist.
                 let context = supergraph_request.context.clone();
-                let result = self.process_supergraph_request(supergraph_request).await;
+                let result = my_self.process_supergraph_request(supergraph_request).await;
 
                 // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
                 // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
                 let batch_query_opt = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<BatchQuery>());
+                    .with_lock(|lock| lock.remove::<BatchQuery>());
                 if let Some(batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
@@ -468,7 +469,8 @@ impl RouterService {
                 }
 
                 result
-            });
+            }
+        });
 
         // Use join_all to preserve ordering of concurrent operations
         // (Short circuit processing and propagate any errors in the batch)
@@ -490,17 +492,19 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&get_body_bytes(body).await?);
+            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(
+                    &router::body::into_bytes(result.response.into_body()).await?,
+                );
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
                 response: http::Response::from_parts(
                     parts,
-                    RouterBody::from(bytes.freeze()).into_inner(),
+                    router::body::from_bytes(bytes.freeze()),
                 ),
                 context,
             })
@@ -510,7 +514,7 @@ impl RouterService {
     }
 
     async fn translate_query_request(
-        &self,
+        self,
         parts: &Parts,
     ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
         let mut is_batch = false;
@@ -530,8 +534,7 @@ impl RouterService {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
+                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                                 extension_details: format!(
                                     "failed to decode a valid GraphQL request from path {e}"
                                 ),
@@ -539,8 +542,7 @@ impl RouterService {
                         if result.is_empty() {
                             return Err(TranslateError {
                                 status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
+                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                                 extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
                             });
                         }
@@ -554,15 +556,13 @@ impl RouterService {
                         };
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "batching not enabled",
-                            extension_code: "BATCHING_NOT_ENABLED",
+                            extension_code: "BATCHING_NOT_ENABLED".to_string(),
                             extension_details,
                         });
                     } else {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details: format!(
                                 "failed to decode a valid GraphQL request from path {err}"
                             ),
@@ -574,8 +574,7 @@ impl RouterService {
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
-                error: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
-                extension_code: "INVALID_GRAPHQL_REQUEST",
+                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                 extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
             })
         })
@@ -599,8 +598,7 @@ impl RouterService {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to deserialize the request body into JSON",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details: format!(
                                 "failed to deserialize the request body into JSON: {e}"
                             ),
@@ -608,8 +606,7 @@ impl RouterService {
                     if result.is_empty() {
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                             extension_details:
                                 "failed to decode a valid GraphQL request from path: empty array "
                                     .to_string(),
@@ -626,15 +623,13 @@ impl RouterService {
                     };
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        error: "batching not enabled",
-                        extension_code: "BATCHING_NOT_ENABLED",
+                        extension_code: "BATCHING_NOT_ENABLED".to_string(),
                         extension_details,
                     });
                 } else {
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
-                        error: "failed to deserialize the request body into JSON",
-                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
                         extension_details: format!(
                             "failed to deserialize the request body into JSON: {err}"
                         ),
@@ -642,72 +637,29 @@ impl RouterService {
                 }
             }
         };
+
+        if is_batch && self.batching.exceeds_batch_size(&result) {
+            return Err(TranslateError {
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                extension_details: format!(
+                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                    result.len(),
+                    self.batching.maximum_size.unwrap_or_default()
+                ),
+            });
+        }
+
         Ok((result, is_batch))
     }
 
     async fn translate_request(
-        &self,
-        req: RouterRequest,
+        self,
+        context: &Context,
+        parts: Parts,
+        graphql_requests: (Vec<graphql::Request>, bool),
     ) -> Result<(Vec<SupergraphRequest>, bool), TranslateError> {
-        let RouterRequest {
-            router_request,
-            context,
-        } = req;
-
-        let (parts, body) = router_request.into_parts();
-
-        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
-            .method
-            == Method::GET
-        {
-            self.translate_query_request(&parts).await
-        } else {
-            // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
-            let content_length = (|| {
-                parts
-                    .headers
-                    .get(http::header::CONTENT_LENGTH)?
-                    .to_str()
-                    .ok()?
-                    .parse()
-                    .ok()
-            })();
-            if content_length.unwrap_or(0) > self.http_max_request_bytes {
-                Err(TranslateError {
-                    status: StatusCode::PAYLOAD_TOO_LARGE,
-                    error: "payload too large for the `http_max_request_bytes` configuration",
-                    extension_code: "INVALID_GRAPHQL_REQUEST",
-                    extension_details: "payload too large".to_string(),
-                })
-            } else {
-                let body = http_body::Limited::new(body, self.http_max_request_bytes);
-                get_body_bytes(body)
-                    .instrument(tracing::debug_span!("receive_body"))
-                    .await
-                    .map_err(|e| {
-                        if e.is::<http_body::LengthLimitError>() {
-                            TranslateError {
-                                status: StatusCode::PAYLOAD_TOO_LARGE,
-                                error: "payload too large for the `http_max_request_bytes` configuration",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: "payload too large".to_string(),
-                            }
-                        } else {
-                            TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                error: "failed to get the request body",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: format!("failed to get the request body: {e}"),
-                            }
-                        }
-                    })
-                    .and_then(|bytes| {
-                        self.translate_bytes_request(&bytes)
-                    })
-            }
-        };
-
-        let (ok_results, is_batch) = graphql_requests?;
+        let (ok_results, is_batch) = graphql_requests;
         let mut results = Vec::with_capacity(ok_results.len());
         let batch_size = ok_results.len();
 
@@ -718,7 +670,7 @@ impl RouterService {
             .then(|| {
                 context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(self.batching.clone()));
+                    .with_lock(|lock| lock.insert(self.batching.clone()));
 
                 self.batching.subgraph.as_ref()
             })
@@ -754,12 +706,11 @@ impl RouterService {
         //
         // Note: If we enter this loop, then we must be processing a batch.
         for (index, graphql_request) in ok_results_it.enumerate() {
-            // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
             // XXX Lose some private entries, is that ok?
             let new_context = Context::new();
-            new_context.extend(&context);
+            new_context.extend(context);
             let client_request_accepts_opt = context
                 .extensions()
                 .with_lock(|lock| lock.get::<ClientRequestAccepts>().cloned());
@@ -769,8 +720,7 @@ impl RouterService {
                     Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
                         |err| TranslateError {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            error: "failed to create batch",
-                            extension_code: "BATCHING_ERROR",
+                            extension_code: "BATCHING_ERROR".to_string(),
                             extension_details: format!("failed to create batch entry: {err}"),
                         },
                     )?,
@@ -778,7 +728,7 @@ impl RouterService {
             } else {
                 None
             };
-            new_context.extensions().with_lock(|mut lock| {
+            new_context.extensions().with_lock(|lock| {
                 if let Some(client_request_accepts) = client_request_accepts_opt {
                     lock.insert(client_request_accepts);
                 }
@@ -798,75 +748,115 @@ impl RouterService {
             let b_for_index =
                 Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
                     status: StatusCode::INTERNAL_SERVER_ERROR,
-                    error: "failed to create batch",
-                    extension_code: "BATCHING_ERROR",
+                    extension_code: "BATCHING_ERROR".to_string(),
                     extension_details: format!("failed to create batch entry: {err}"),
                 })?;
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(b_for_index));
+                .with_lock(|lock| lock.insert(b_for_index));
         }
 
         results.insert(
             0,
             SupergraphRequest {
                 supergraph_request: sg,
-                context,
+                context: context.clone(),
             },
         );
 
         Ok((results, is_batch))
     }
 
-    fn count_errors(errors: &[graphql::Error]) {
-        let mut map = HashMap::new();
-        for error in errors {
-            let code = error.extensions.get("code").and_then(|c| c.as_str());
-            let entry = map.entry(code).or_insert(0u64);
-            *entry += 1;
-        }
+    async fn get_graphql_requests(
+        self,
+        context: &Context,
+        parts: &Parts,
+        body: Body,
+    ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
+        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
+            .method
+            == Method::GET
+        {
+            self.translate_query_request(parts).await
+        } else {
+            let bytes = router::body::into_bytes(body)
+                .instrument(tracing::debug_span!("receive_body"))
+                .await?;
+            if let Some(level) = context
+                .extensions()
+                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                .map(|d| d.0)
+            {
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                    .headers
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = &parts.headers;
 
-        for (code, count) in map {
-            match code {
-                None => {
-                    tracing::info!(monotonic_counter.apollo.router.graphql_error = count,);
-                }
-                Some(code) => {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.graphql_error = count,
-                        code = code
-                    );
-                }
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(format!("{}", parts.method).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                    ),
+                ));
+                log_event(level, "router.request", attrs, "");
             }
+            self.translate_bytes_request(&bytes)
+        };
+        Ok(graphql_requests)
+    }
+
+    fn count_value_completion_errors(
+        value_completion: &Value,
+        context: &Context,
+        errors_config: &ErrorsConfiguration,
+    ) {
+        if let Some(vc_array) = value_completion.as_array() {
+            let errors: Vec<graphql::Error> = vc_array
+                .iter()
+                .filter_map(graphql::Error::from_value_completion_value)
+                .collect();
+            count_operation_errors(&errors, context, errors_config);
         }
     }
 }
 
-struct TranslateError<'a> {
+#[derive(Clone)]
+struct TranslateError {
     status: StatusCode,
-    error: &'a str,
-    extension_code: &'a str,
+    extension_code: String,
     extension_details: String,
-}
-
-// Process the headers to make sure that `VARY` is set correctly
-pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).is_none() {
-        // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, ORIGIN_HEADER_VALUE.clone());
-    }
 }
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    static_page: StaticPageLayer,
-    apq_layer: APQLayer,
-    pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
-    batching: Batching,
+    sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -891,6 +881,10 @@ impl RouterFactory for RouterCreator {
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
     }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
+    }
 }
 
 impl RouterCreator {
@@ -909,15 +903,54 @@ impl RouterCreator {
         } else {
             APQLayer::disabled()
         };
+        // There is a problem here.
+        // APQ isn't a plugin and so cannot participate in plugin lifecycle events.
+        // After telemetry `activate` NO part of the pipeline can fail as globals have been interacted with.
+        // However, the APQLayer uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
+        // left in an inconsistent state and all metrics will likely stop working.
+        // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
+        // For now just call activate to make the gauges work on the happy path.
+        apq_layer.activate();
+
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the use to see if pipelines are being hung onto.
+        let schema_id = supergraph_creator.schema().schema_id.to_string();
+        let launch_id = supergraph_creator
+            .schema()
+            .launch_id
+            .as_ref()
+            .map(|launch_id| launch_id.to_string());
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
+
+        let router_service = RouterService::new(
+            supergraph_creator.create(),
+            apq_layer,
+            persisted_query_layer,
+            query_analysis_layer,
+            configuration.batching.clone(),
+            TelemetryConfig::apollo(&configuration),
+        );
+
+        // NOTE: This is the start of the router pipeline (router_service)
+        let sb = Buffer::new(
+            ServiceBuilder::new()
+                .layer(static_page.clone())
+                .service(
+                    supergraph_creator
+                        .plugins()
+                        .iter()
+                        .rev()
+                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+                )
+                .boxed(),
+            DEFAULT_BUFFER_SIZE,
+        );
 
         Ok(Self {
             supergraph_creator,
-            static_page,
-            apq_layer,
-            query_analysis_layer,
-            http_max_request_bytes: configuration.limits.http_max_request_bytes,
-            persisted_query_layer,
-            batching: configuration.batching.clone(),
+            sb,
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 
@@ -928,25 +961,10 @@ impl RouterCreator {
         Response = router::Response,
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
-    > + Send {
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            self.supergraph_creator.clone(),
-            self.apq_layer.clone(),
-            self.persisted_query_layer.clone(),
-            self.query_analysis_layer.clone(),
-            self.http_max_request_bytes,
-            self.batching.clone(),
-        ));
-
-        ServiceBuilder::new()
-            .layer(self.static_page.clone())
-            .service(
-                self.supergraph_creator
-                    .plugins()
-                    .iter()
-                    .rev()
-                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-            )
+    > + Send
+    + use<> {
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.sb.clone().boxed()
     }
 }
 

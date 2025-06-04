@@ -7,30 +7,26 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 
+use apollo_compiler::response::GraphQLError as CompilerExecutionError;
+use apollo_compiler::response::ResponseDataPathSegment;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
 pub use response::IncrementalResponse;
+use response::MalformedResponseError;
 pub use response::Response;
-pub use router_bridge::planner::Location;
-use router_bridge::planner::PlanError;
-use router_bridge::planner::PlanErrorExtensions;
-use router_bridge::planner::PlannerError;
-use router_bridge::planner::WorkerError;
-use router_bridge::planner::WorkerGraphQLError;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 pub(crate) use visitor::ResponseVisitor;
 
-use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
+use crate::spec::query::ERROR_CODE_RESPONSE_VALIDATION;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
 ///
@@ -41,6 +37,16 @@ pub use crate::json_ext::PathElement as JsonPathElement;
 /// We represent this in Rust as a stream,
 /// even if that stream happens to only contain one item.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+/// The error location
+pub struct Location {
+    /// The line number
+    pub line: u32,
+    /// The column number
+    pub column: u32,
+}
 
 /// A [GraphQL error](https://spec.graphql.org/October2021/#sec-Errors)
 /// as may be found in the `errors` field of a GraphQL [`Response`].
@@ -119,41 +125,40 @@ impl Error {
         }
     }
 
-    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
-        let mut object =
-            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            })?;
+    pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
+        let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
+            reason: format!("invalid error within `errors`: {}", error),
+        })?;
 
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(|err| FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
+                .map_err(|err| MalformedResponseError {
+                    reason: format!("invalid `extensions` within error: {}", err),
                 })?
                 .unwrap_or_default();
-        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            })?
-            .map(|s| s.as_str().to_string())
-            .unwrap_or_default();
+        let message = match extract_key_value_from_object!(object, "message", Value::String(s) => s)
+        {
+            Ok(Some(s)) => Ok(s.as_str().to_string()),
+            Ok(None) => Err(MalformedResponseError {
+                reason: "missing required `message` property within error".to_owned(),
+            }),
+            Err(err) => Err(MalformedResponseError {
+                reason: format!("invalid `message` within error: {}", err),
+            }),
+        }?;
         let locations = extract_key_value_from_object!(object, "locations")
+            .map(skip_invalid_locations)
             .map(serde_json_bytes::from_value)
             .transpose()
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
+            .map_err(|err| MalformedResponseError {
+                reason: format!("invalid `locations` within error: {}", err),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
+            .map_err(|err| MalformedResponseError {
+                reason: format!("invalid `path` within error: {}", err),
             })?;
 
         Ok(Error {
@@ -163,6 +168,55 @@ impl Error {
             extensions,
         })
     }
+
+    pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
+        let value_completion = ensure_object!(value).ok()?;
+        let mut extensions = value_completion
+            .get("extensions")
+            .and_then(|e: &Value| -> Option<Object> {
+                serde_json_bytes::from_value(e.clone()).ok()
+            })
+            .unwrap_or_default();
+        extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION.into());
+        extensions.insert("severity", tracing::Level::WARN.as_str().into());
+
+        let message = value_completion
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| m.to_string())
+            .unwrap_or_default();
+        let locations = value_completion
+            .get("locations")
+            .map(|l: &Value| skip_invalid_locations(l.clone()))
+            .map(|l: Value| serde_json_bytes::from_value(l).unwrap_or_default())
+            .unwrap_or_default();
+        let path =
+            value_completion
+                .get("path")
+                .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
+                    serde_json_bytes::from_value(p.clone()).ok()
+                });
+        Some(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
+}
+
+/// GraphQL spec require that both "line" and "column" are positive numbers.
+/// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
+/// if they can't determine error location inside query.
+/// This function removes such locations from supplied value.
+fn skip_invalid_locations(mut value: Value) -> Value {
+    if let Some(array) = value.as_array_mut() {
+        array.retain(|location| {
+            location.get("line") != Some(&Value::from(-1))
+                || location.get("column") != Some(&Value::from(-1))
+        })
+    }
+    value
 }
 
 /// Displays (only) the error message.
@@ -194,103 +248,40 @@ where
     }
 }
 
-impl ErrorExtension for PlanError {}
-
-impl From<PlanError> for Error {
-    fn from(err: PlanError) -> Self {
-        let extension_code = err.extension_code();
-        let extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_else(move || {
-                let mut object = Object::new();
-                object.insert("code", extension_code.into());
-                object
-            });
-        Self {
-            message: err.message.unwrap_or_else(|| String::from("plan error")),
+impl From<CompilerExecutionError> for Error {
+    fn from(error: CompilerExecutionError) -> Self {
+        let CompilerExecutionError {
+            message,
+            locations,
+            path,
             extensions,
-            ..Default::default()
-        }
-    }
-}
-
-impl ErrorExtension for PlannerError {
-    fn extension_code(&self) -> String {
-        match self {
-            PlannerError::WorkerGraphQLError(worker_graphql_error) => worker_graphql_error
-                .extensions
-                .as_ref()
-                .map(|ext| ext.code.clone())
-                .unwrap_or_else(|| worker_graphql_error.extension_code()),
-            PlannerError::WorkerError(worker_error) => worker_error
-                .extensions
-                .as_ref()
-                .map(|ext| ext.code.clone())
-                .unwrap_or_else(|| worker_error.extension_code()),
-        }
-    }
-}
-
-impl From<PlannerError> for Error {
-    fn from(err: PlannerError) -> Self {
-        match err {
-            PlannerError::WorkerGraphQLError(err) => err.into(),
-            PlannerError::WorkerError(err) => err.into(),
-        }
-    }
-}
-
-impl ErrorExtension for WorkerError {}
-
-impl From<WorkerError> for Error {
-    fn from(err: WorkerError) -> Self {
-        let extension_code = err.extension_code();
-        let mut extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_default();
-        extensions.insert("code", extension_code.into());
-
+        } = error;
+        let locations = locations
+            .into_iter()
+            .map(|location| Location {
+                line: location.line as u32,
+                column: location.column as u32,
+            })
+            .collect::<Vec<_>>();
+        let path = if !path.is_empty() {
+            let elements = path
+                .into_iter()
+                .map(|element| match element {
+                    ResponseDataPathSegment::Field(name) => {
+                        JsonPathElement::Key(name.as_str().to_owned(), None)
+                    }
+                    ResponseDataPathSegment::ListIndex(i) => JsonPathElement::Index(i),
+                })
+                .collect();
+            Some(Path(elements))
+        } else {
+            None
+        };
         Self {
-            message: err.message.unwrap_or_else(|| String::from("worker error")),
-            locations: err.locations.into_iter().map(Location::from).collect(),
+            message,
+            locations,
+            path,
             extensions,
-            ..Default::default()
         }
     }
-}
-
-impl ErrorExtension for WorkerGraphQLError {}
-
-impl From<WorkerGraphQLError> for Error {
-    fn from(err: WorkerGraphQLError) -> Self {
-        let extension_code = err.extension_code();
-        let mut extensions = err
-            .extensions
-            .map(convert_extensions_to_map)
-            .unwrap_or_default();
-        extensions.insert("code", extension_code.into());
-        Self {
-            message: err.message,
-            locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions,
-            ..Default::default()
-        }
-    }
-}
-
-fn convert_extensions_to_map(ext: PlanErrorExtensions) -> Object {
-    let mut extensions = Object::new();
-    extensions.insert("code", ext.code.into());
-    if let Some(exception) = ext.exception {
-        extensions.insert(
-            "exception",
-            json!({
-                "stacktrace": serde_json_bytes::Value::from(exception.stacktrace)
-            }),
-        );
-    }
-
-    extensions
 }

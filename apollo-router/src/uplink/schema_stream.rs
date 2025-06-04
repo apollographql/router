@@ -5,10 +5,11 @@
 
 use graphql_client::GraphQLQuery;
 
-use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
-use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
+use super::schema::SchemaState;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
+use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
+use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -18,7 +19,6 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-
 pub(crate) struct SupergraphSdlQuery;
 
 impl From<UplinkRequest> for supergraph_sdl_query::Variables {
@@ -63,6 +63,41 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     }
 }
 
+impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<SchemaState> {
+    fn from(response: supergraph_sdl_query::ResponseData) -> Self {
+        match response.router_config {
+            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
+                response: SchemaState {
+                    sdl: result.supergraph_sdl,
+                    launch_id: Some(result.id.clone()),
+                },
+                id: result.id,
+                // this will truncate the number of seconds to under u64::MAX, which should be
+                // a large enough delay anyway
+                delay: result.min_delay_seconds as u64,
+            },
+            SupergraphSdlQueryRouterConfig::Unchanged(response) => UplinkResponse::Unchanged {
+                id: Some(response.id),
+                delay: Some(response.min_delay_seconds as u64),
+            },
+            SupergraphSdlQueryRouterConfig::FetchError(err) => UplinkResponse::Error {
+                retry_later: err.code == FetchErrorCode::RETRY_LATER,
+                code: match err.code {
+                    FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
+                    FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
+                    FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
+                    FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
+                    FetchErrorCode::Other(other) => other,
+                },
+                message: err.message,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -71,12 +106,12 @@ mod test {
     use futures::stream::StreamExt;
     use url::Url;
 
+    use crate::uplink::AWS_URL;
+    use crate::uplink::Endpoints;
+    use crate::uplink::GCP_URL;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::Endpoints;
-    use crate::uplink::UplinkConfig;
-    use crate::uplink::AWS_URL;
-    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
@@ -89,7 +124,7 @@ mod test {
                     apollo_key,
                     apollo_graph_ref,
                     endpoints: Some(Endpoints::fallback(vec![
-                        Url::from_str(url).expect("url must be valid")
+                        Url::from_str(url).expect("url must be valid"),
                     ])),
                     poll_interval: Duration::from_secs(1),
                     timeout: Duration::from_secs(5),

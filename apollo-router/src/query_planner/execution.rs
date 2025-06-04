@@ -1,20 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
+use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
+use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::log;
-use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use super::log;
+use super::subscription::SubscriptionHandle;
+use crate::Context;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
@@ -24,23 +25,28 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::query_planner::FlattenNode;
-use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
 use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
-use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::SubgraphServiceFactory;
+use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::fetch::Variables;
+use crate::services::FetchRequest;
+use crate::services::fetch;
+use crate::services::fetch::ErrorMapping;
+use crate::services::fetch::SubscriptionRequest;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Context;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -48,10 +54,10 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SubgraphServiceFactory>,
+        service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
-        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: &'a Arc<SubgraphSchemas>,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -83,7 +89,11 @@ impl QueryPlan {
             )
             .await;
         if !deferred_fetches.is_empty() {
-            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1u64);
+            u64_counter!(
+                "apollo.router.operations.defer",
+                "Number of requests that request deferred data",
+                1
+            );
         }
 
         Response::builder().data(value).errors(errors).build()
@@ -101,11 +111,11 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
-    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -119,7 +129,7 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<'a, (Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
@@ -140,7 +150,7 @@ impl PlanNode {
                                 )
                                 .in_current_span()
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -168,7 +178,7 @@ impl PlanNode {
                             .collect();
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         }
                     }
@@ -198,33 +208,65 @@ impl PlanNode {
                     value = v;
                     errors = err;
                 }
-                PlanNode::Subscription { primary, .. } => {
-                    if parameters.subscription_handle.is_some() {
-                        let fetch_time_offset =
-                            parameters.context.created_at.elapsed().as_nanos() as i64;
-                        errors = primary
-                            .execute_recursively(parameters, current_dir, parent_value, sender)
-                            .instrument(tracing::info_span!(
-                                SUBSCRIBE_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_str(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                    } else {
+                PlanNode::Subscription {
+                    primary: subscription_node,
+                    ..
+                } => {
+                    if parameters.subscription_handle.is_none() {
                         tracing::error!("No subscription handle provided for a subscription");
-                        errors = vec![Error::builder()
-                            .message("no subscription handle provided for a subscription")
-                            .extension_code("NO_SUBSCRIPTION_HANDLE")
-                            .build()];
-                    };
-
-                    value = Value::default();
+                        value = Value::default();
+                        errors = vec![
+                            Error::builder()
+                                .message("no subscription handle provided for a subscription")
+                                .extension_code("NO_SUBSCRIPTION_HANDLE")
+                                .build(),
+                        ];
+                    } else {
+                        match Variables::new(
+                            &[],
+                            &subscription_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request,
+                            parameters.schema,
+                            &subscription_node.input_rewrites,
+                            &None,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = fetch::Request::Subscription(
+                                    SubscriptionRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .subscription_node(subscription_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .sender(sender)
+                                        .and_subscription_handle(
+                                            parameters.subscription_handle.clone(),
+                                        )
+                                        .and_subscription_config(
+                                            parameters.subscription_config.clone(),
+                                        )
+                                        .build(),
+                                );
+                                (value, errors) =
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        subscription_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
+                                        Ok(r) => r,
+                                        Err(e) => (Value::default(), vec![e]),
+                                    };
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
+                    }
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    let fetch_time_offset =
-                        parameters.context.created_at.elapsed().as_nanos() as i64;
-
                     // The client closed the connection, we are still executing the request pipeline,
                     // but we won't send unused trafic to subgraph
                     if parameters
@@ -235,17 +277,48 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let (v, e) = fetch_node
-                            .fetch_node(parameters, parent_value, current_dir)
-                            .instrument(tracing::info_span!(
-                                FETCH_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                        value = v;
-                        errors = e;
+                        match Variables::new(
+                            &fetch_node.requires,
+                            &fetch_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request,
+                            parameters.schema.as_ref(),
+                            &fetch_node.input_rewrites,
+                            &fetch_node.context_rewrites,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = fetch::Request::Fetch(
+                                    FetchRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .fetch_node(fetch_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .build(),
+                                );
+                                (value, errors) =
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        fetch_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
+                                        Ok(r) => r,
+                                        Err(e) => (Value::default(), vec![e]),
+                                    };
+                                FetchNode::deferred_fetches(
+                                    current_dir,
+                                    &fetch_node.id,
+                                    parameters.deferred_fetches,
+                                    &value,
+                                    &errors,
+                                );
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
                     }
                 }
                 PlanNode::Defer {
@@ -256,7 +329,7 @@ impl PlanNode {
                     errors = Vec::new();
                     async {
                         let mut deferred_fetches: HashMap<
-                            NodeStr,
+                            String,
                             broadcast::Sender<(Value, Vec<Error>)>,
                         > = HashMap::new();
                         let mut futures = Vec::new();
@@ -306,12 +379,14 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
+                            // primary response should be an empty object
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -332,11 +407,6 @@ impl PlanNode {
                         let v = parameters
                             .query
                             .variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
                                 condition.as_str(),
                                 &parameters.supergraph_request.body().variables,
                             )
@@ -357,7 +427,7 @@ impl PlanNode {
                                         "otel.kind" = "INTERNAL"
                                     ))
                                     .await;
-                                value.deep_merge(v);
+                                value.type_aware_deep_merge(v, parameters.schema);
                                 errors.extend(err.into_iter());
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
@@ -377,7 +447,7 @@ impl PlanNode {
                                     "otel.kind" = "INTERNAL"
                                 ))
                                 .await;
-                            value.deep_merge(v);
+                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err.into_iter());
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
@@ -406,8 +476,8 @@ impl DeferredNode {
         parent_value: &Value,
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
-    ) -> impl Future<Output = ()> {
+        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
+    ) -> impl Future<Output = ()> + use<> {
         let mut deferred_receivers = Vec::new();
 
         for d in self.depends.iter() {
@@ -415,11 +485,11 @@ impl DeferredNode {
                 None => {
                     let (sender, receiver) = tokio::sync::broadcast::channel(1);
                     deferred_fetches.insert(d.id.clone(), sender.clone());
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
                 Some(sender) => {
                     let receiver = sender.subscribe();
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
             }
         }
@@ -455,7 +525,7 @@ impl DeferredNode {
             if is_depends_empty {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                value.type_aware_deep_merge(primary_value, &sc);
                 errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
@@ -464,7 +534,7 @@ impl DeferredNode {
                     // or because it is lagging, but here we only send one message so it
                     // will not happen
                     if let Some(Ok((deferred_value, err))) = v {
-                        value.deep_merge(deferred_value);
+                        value.type_aware_deep_merge(deferred_value, &sc);
                         errors.extend(err.into_iter())
                     }
                 }
@@ -503,7 +573,7 @@ impl DeferredNode {
                 if !is_depends_empty {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
-                    v.deep_merge(primary_value);
+                    v.type_aware_deep_merge(primary_value, &sc);
                     errors.extend(primary_errors)
                 }
 
@@ -528,7 +598,7 @@ impl DeferredNode {
             } else {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
-                value.deep_merge(primary_value);
+                value.type_aware_deep_merge(primary_value, &sc);
                 errors.extend(primary_errors);
 
                 if let Err(e) = tx

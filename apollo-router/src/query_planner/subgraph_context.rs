@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::VariableDefinition;
 use apollo_compiler::executable;
 use apollo_compiler::executable::Operation;
@@ -10,12 +12,10 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
-use super::fetch::SubgraphOperation;
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
 use crate::json_ext::Path;
@@ -202,9 +202,9 @@ impl<'a> SubgraphContext<'a> {
 }
 
 // Take the existing subgraph operation and rewrite it to use aliasing. This will occur in the case
-// where we are collecting entites and different entities may have different variables passed to the resolver.
+// where we are collecting entities and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
-    subgraph_operation: &SubgraphOperation,
+    subgraph_operation: &SerializableDocument,
     contextual_arguments: &ContextualArguments,
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
@@ -215,21 +215,21 @@ pub(crate) fn build_operation_with_aliasing(
 
     // for every operation in the document, go ahead and transform even though it's likely that only one exists
     if let Ok(document) = parsed_document {
-        if let Some(anonymous_op) = &document.anonymous_operation {
+        if let Some(anonymous_op) = &document.operations.anonymous {
             let mut cloned = anonymous_op.clone();
             transform_operation(&mut cloned, arguments, count)?;
-            ed.insert_operation(cloned);
+            ed.operations.insert(cloned);
         }
 
-        for (_, op) in &document.named_operations {
+        for (_, op) in &document.operations.named {
             let mut cloned = op.clone();
             transform_operation(&mut cloned, arguments, count)?;
-            ed.insert_operation(cloned);
+            ed.operations.insert(cloned);
         }
 
         return ed
             .validate(subgraph_schema)
-            .map_err(ContextBatchingError::InvalidDocumentGenerated);
+            .map_err(|e| ContextBatchingError::InvalidDocumentGenerated(Box::new(e)));
     }
     Err(ContextBatchingError::NoSelectionSet)
 }
@@ -245,7 +245,7 @@ fn transform_operation(
         if arguments.contains(v.name.as_str()) {
             for i in 0..*count {
                 new_variables.push(Node::new(VariableDefinition {
-                    name: Name::new_unchecked(format!("{}_{}", v.name.as_str(), i).into()),
+                    name: Name::new_unchecked(&format!("{}_{}", v.name.as_str(), i)),
                     ty: v.ty.clone(),
                     default_value: v.default_value.clone(),
                     directives: v.directives.clone(),
@@ -284,7 +284,7 @@ fn transform_operation(
         // it is a field selection for _entities, so it's ok to reach in and give it an alias
         let mut cloned = field_selection.clone();
         let cfs = cloned.make_mut();
-        cfs.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
+        cfs.alias = Some(Name::new_unchecked(&format!("_{}", i)));
 
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
@@ -324,7 +324,7 @@ fn transform_selection_set(
         });
 }
 
-// transforms the variable name on the field argment
+// transforms the variable name on the field argument
 fn transform_field_arguments(
     arguments_in_selection: &mut [Node<ast::Argument>],
     arguments: &HashSet<String>,
@@ -334,9 +334,11 @@ fn transform_field_arguments(
         let arg = arg.make_mut();
         if let Some(v) = arg.value.as_variable() {
             if arguments.contains(v.as_str()) {
-                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(
-                    format!("{}_{}", v.as_str(), index).into(),
-                )));
+                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
+                    "{}_{}",
+                    v.as_str(),
+                    index
+                ))));
             }
         }
     });
@@ -345,7 +347,8 @@ fn transform_field_arguments(
 #[derive(Debug)]
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
-    InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
+    // The only use of the field is in `Debug`, on purpose.
+    InvalidDocumentGenerated(#[allow(unused)] Box<WithErrors<ExecutableDocument>>),
     InvalidRelativePath,
     UnexpectedSelection,
 }
@@ -382,34 +385,27 @@ mod subgraph_context_unit_tests {
 
     #[test]
     fn test_transform_selection_set() {
-        let type_name = executable::Name::new("Hello").unwrap();
-        let field_name = executable::Name::new("f").unwrap();
+        let type_name = Name::new("Hello").unwrap();
+        let field_name = Name::new("f").unwrap();
         let field_definition = ast::FieldDefinition {
             description: None,
             name: field_name.clone(),
             arguments: vec![Node::new(ast::InputValueDefinition {
                 description: None,
-                name: executable::Name::new("param").unwrap(),
-                ty: Node::new(ast::Type::Named(
-                    executable::Name::new("ParamType").unwrap(),
-                )),
+                name: Name::new("param").unwrap(),
+                ty: Node::new(ast::Type::Named(Name::new("ParamType").unwrap())),
                 default_value: None,
                 directives: ast::DirectiveList(vec![]),
             })],
-            ty: ast::Type::Named(executable::Name::new("FieldType").unwrap()),
+            ty: ast::Type::Named(Name::new("FieldType").unwrap()),
             directives: ast::DirectiveList(vec![]),
         };
         let mut selection_set = SelectionSet::new(type_name);
-        let field = executable::Field::new(
-            executable::Name::new("f").unwrap(),
-            Node::new(field_definition),
-        )
-        .with_argument(
-            executable::Name::new("param").unwrap(),
-            Node::new(ast::Value::Variable(
-                executable::Name::new("variable").unwrap(),
-            )),
-        );
+        let field = executable::Field::new(Name::new("f").unwrap(), Node::new(field_definition))
+            .with_argument(
+                Name::new("param").unwrap(),
+                Node::new(ast::Value::Variable(Name::new("variable").unwrap())),
+            );
 
         selection_set.push(Selection::Field(Node::new(field)));
 

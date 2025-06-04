@@ -4,30 +4,74 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
+use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use dashmap::DashMap;
 use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication::DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
+use crate::plugins::authorization::DEPRECATED_AUTHENTICATION_REQUIRED_KEY;
+use crate::plugins::authorization::DEPRECATED_REQUIRED_POLICIES_KEY;
+use crate::plugins::authorization::DEPRECATED_REQUIRED_SCOPES_KEY;
+use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
+use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
+use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_RESULT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_KEY;
+use crate::plugins::demand_control::DEPRECATED_COST_ACTUAL_KEY;
+use crate::plugins::demand_control::DEPRECATED_COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::DEPRECATED_COST_RESULT_KEY;
+use crate::plugins::demand_control::DEPRECATED_COST_STRATEGY_KEY;
+use crate::plugins::expose_query_plan::DEPRECATED_ENABLED_CONTEXT_KEY;
+use crate::plugins::expose_query_plan::DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY;
+use crate::plugins::expose_query_plan::DEPRECATED_QUERY_PLAN_CONTEXT_KEY;
+use crate::plugins::expose_query_plan::ENABLED_CONTEXT_KEY;
+use crate::plugins::expose_query_plan::FORMATTED_QUERY_PLAN_CONTEXT_KEY;
+use crate::plugins::expose_query_plan::QUERY_PLAN_CONTEXT_KEY;
+use crate::plugins::progressive_override::DEPRECATED_LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::progressive_override::DEPRECATED_UNRESOLVED_LABELS_KEY;
+use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::plugins::telemetry::DEPRECATED_CLIENT_NAME;
+use crate::plugins::telemetry::DEPRECATED_CLIENT_VERSION;
+use crate::plugins::telemetry::DEPRECATED_STUDIO_EXCLUDE;
+use crate::plugins::telemetry::DEPRECATED_SUBGRAPH_FTV1;
+use crate::plugins::telemetry::STUDIO_EXCLUDE;
+use crate::plugins::telemetry::SUBGRAPH_FTV1;
+use crate::query_planner::APOLLO_OPERATION_ID;
+use crate::query_planner::DEPRECATED_APOLLO_OPERATION_ID;
+use crate::services::DEPRECATED_FIRST_EVENT_CONTEXT_KEY;
+use crate::services::FIRST_EVENT_CONTEXT_KEY;
+use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_CACHE_HIT;
+use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_REGISTERED;
+use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
+use crate::services::layers::apq::PERSISTED_QUERY_REGISTERED;
 use crate::services::layers::query_analysis::ParsedDocument;
 
 pub(crate) mod extensions;
 
 /// The key of the resolved operation name. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_NAME: &str = "operation_name";
+pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
+/// The deprecated key (1.x) of the resolved operation name. This is subject to change and should not be relied on.
+pub(crate) const DEPRECATED_OPERATION_NAME: &str = "operation_name";
 /// The key of the resolved operation kind. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_KIND: &str = "operation_kind";
+pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
+/// The deprecated key (1.x) of the resolved operation kind. This is subject to change and should not be relied on.
+pub(crate) const DEPRECATED_OPERATION_KIND: &str = "operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
 
@@ -60,10 +104,6 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
-    #[derivative(Debug = "ignore")]
-    busy_timer: Arc<Mutex<BusyTimer>>,
-
-    #[serde(skip)]
     pub(crate) id: String,
 }
 
@@ -78,8 +118,18 @@ impl Context {
             entries: Default::default(),
             extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
-            busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
+        }
+    }
+}
+
+impl FromIterator<(String, Value)> for Context {
+    fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+        Self {
+            entries: Arc::new(DashMap::from_iter(iter)),
+            extensions: ExtensionsMutex::default(),
+            created_at: Instant::now(),
+            id: String::new(),
         }
     }
 }
@@ -234,54 +284,16 @@ impl Context {
         self.entries.iter_mut()
     }
 
-    /// Notify the busy timer that we're waiting on a network request
-    ///
-    /// When a plugin makes a network call that would block request handling, this
-    /// indicates to the processing time counter that it should stop measuring while
-    /// we wait for the call to finish. When the value returned by this method is
-    /// dropped, the router will start measuring again, unless we are still covered
-    /// by another active request (ex: parallel subgraph calls)
-    pub fn enter_active_request(&self) -> BusyTimerGuard {
-        self.busy_timer.lock().increment_active_requests();
-        BusyTimerGuard {
-            busy_timer: self.busy_timer.clone(),
-        }
-    }
-
-    /// Time actually spent working on this request
-    ///
-    /// This is the request duration without the time spent waiting for external calls
-    /// (coprocessor and subgraph requests). This metric is an approximation of
-    /// the time spent, because in the case of parallel subgraph calls, some
-    /// router processing time could happen during a network call (and so would
-    /// not be accounted for) and make another task late.
-    /// This is reported under the `apollo_router_processing_time` metric
-    pub fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().current()
-    }
-
     pub(crate) fn extend(&self, other: &Context) {
         for kv in other.entries.iter() {
             self.entries.insert(kv.key().clone(), kv.value().clone());
         }
     }
 
-    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
-    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
+    /// Read only access to the executable document for internal router plugins.
+    pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
-    }
-}
-
-pub struct BusyTimerGuard {
-    busy_timer: Arc<Mutex<BusyTimer>>,
-}
-
-impl Drop for BusyTimerGuard {
-    fn drop(&mut self) {
-        self.busy_timer.lock().decrement_active_requests()
     }
 }
 
@@ -291,67 +303,74 @@ impl Default for Context {
     }
 }
 
-/// Measures the total overhead of the router
-///
-/// This works by measuring the time spent executing when there is no active subgraph request.
-/// This is still not a perfect solution, there are cases where preprocessing a subgraph request
-/// happens while another one is running and still shifts the end of the span, but for now this
-/// should serve as a reasonable solution without complex post processing of spans
-pub(crate) struct BusyTimer {
-    active_requests: u32,
-    busy_ns: Duration,
-    start: Option<Instant>,
-}
-
-impl BusyTimer {
-    fn new() -> Self {
-        BusyTimer::default()
-    }
-
-    fn increment_active_requests(&mut self) {
-        if self.active_requests == 0 {
-            if let Some(start) = self.start.take() {
-                self.busy_ns += start.elapsed();
-            }
-            self.start = None;
-        }
-
-        self.active_requests += 1;
-    }
-
-    fn decrement_active_requests(&mut self) {
-        self.active_requests -= 1;
-
-        if self.active_requests == 0 {
-            self.start = Some(Instant::now());
-        }
-    }
-
-    fn current(&mut self) -> Duration {
-        if let Some(start) = self.start {
-            self.busy_ns + start.elapsed()
-        } else {
-            self.busy_ns
-        }
+/// Convert context key to the deprecated context key (mainly useful for coprocessor/rhai)
+/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
+pub(crate) fn context_key_to_deprecated(key: String) -> String {
+    match key.as_str() {
+        OPERATION_NAME => DEPRECATED_OPERATION_NAME.to_string(),
+        OPERATION_KIND => DEPRECATED_OPERATION_KIND.to_string(),
+        APOLLO_AUTHENTICATION_JWT_CLAIMS => DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string(),
+        AUTHENTICATION_REQUIRED_KEY => DEPRECATED_AUTHENTICATION_REQUIRED_KEY.to_string(),
+        REQUIRED_SCOPES_KEY => DEPRECATED_REQUIRED_SCOPES_KEY.to_string(),
+        REQUIRED_POLICIES_KEY => DEPRECATED_REQUIRED_POLICIES_KEY.to_string(),
+        APOLLO_OPERATION_ID => DEPRECATED_APOLLO_OPERATION_ID.to_string(),
+        UNRESOLVED_LABELS_KEY => DEPRECATED_UNRESOLVED_LABELS_KEY.to_string(),
+        LABELS_TO_OVERRIDE_KEY => DEPRECATED_LABELS_TO_OVERRIDE_KEY.to_string(),
+        FIRST_EVENT_CONTEXT_KEY => DEPRECATED_FIRST_EVENT_CONTEXT_KEY.to_string(),
+        CLIENT_NAME => DEPRECATED_CLIENT_NAME.to_string(),
+        CLIENT_VERSION => DEPRECATED_CLIENT_VERSION.to_string(),
+        STUDIO_EXCLUDE => DEPRECATED_STUDIO_EXCLUDE.to_string(),
+        SUBGRAPH_FTV1 => DEPRECATED_SUBGRAPH_FTV1.to_string(),
+        COST_ESTIMATED_KEY => DEPRECATED_COST_ESTIMATED_KEY.to_string(),
+        COST_ACTUAL_KEY => DEPRECATED_COST_ACTUAL_KEY.to_string(),
+        COST_RESULT_KEY => DEPRECATED_COST_RESULT_KEY.to_string(),
+        COST_STRATEGY_KEY => DEPRECATED_COST_STRATEGY_KEY.to_string(),
+        ENABLED_CONTEXT_KEY => DEPRECATED_ENABLED_CONTEXT_KEY.to_string(),
+        FORMATTED_QUERY_PLAN_CONTEXT_KEY => DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY.to_string(),
+        QUERY_PLAN_CONTEXT_KEY => DEPRECATED_QUERY_PLAN_CONTEXT_KEY.to_string(),
+        PERSISTED_QUERY_CACHE_HIT => DEPRECATED_PERSISTED_QUERY_CACHE_HIT.to_string(),
+        PERSISTED_QUERY_REGISTERED => DEPRECATED_PERSISTED_QUERY_REGISTERED.to_string(),
+        _ => key,
     }
 }
 
-impl Default for BusyTimer {
-    fn default() -> Self {
-        Self {
-            active_requests: 0,
-            busy_ns: Duration::new(0, 0),
-            start: Some(Instant::now()),
-        }
+/// Convert context key from deprecated to new one (mainly useful for coprocessor/rhai)
+/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
+pub(crate) fn context_key_from_deprecated(key: String) -> String {
+    match key.as_str() {
+        DEPRECATED_OPERATION_NAME => OPERATION_NAME.to_string(),
+        DEPRECATED_OPERATION_KIND => OPERATION_KIND.to_string(),
+        DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS => APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string(),
+        DEPRECATED_AUTHENTICATION_REQUIRED_KEY => AUTHENTICATION_REQUIRED_KEY.to_string(),
+        DEPRECATED_REQUIRED_SCOPES_KEY => REQUIRED_SCOPES_KEY.to_string(),
+        DEPRECATED_REQUIRED_POLICIES_KEY => REQUIRED_POLICIES_KEY.to_string(),
+        DEPRECATED_APOLLO_OPERATION_ID => APOLLO_OPERATION_ID.to_string(),
+        DEPRECATED_UNRESOLVED_LABELS_KEY => UNRESOLVED_LABELS_KEY.to_string(),
+        DEPRECATED_LABELS_TO_OVERRIDE_KEY => LABELS_TO_OVERRIDE_KEY.to_string(),
+        DEPRECATED_FIRST_EVENT_CONTEXT_KEY => FIRST_EVENT_CONTEXT_KEY.to_string(),
+        DEPRECATED_CLIENT_NAME => CLIENT_NAME.to_string(),
+        DEPRECATED_CLIENT_VERSION => CLIENT_VERSION.to_string(),
+        DEPRECATED_STUDIO_EXCLUDE => STUDIO_EXCLUDE.to_string(),
+        DEPRECATED_SUBGRAPH_FTV1 => SUBGRAPH_FTV1.to_string(),
+        DEPRECATED_COST_ESTIMATED_KEY => COST_ESTIMATED_KEY.to_string(),
+        DEPRECATED_COST_ACTUAL_KEY => COST_ACTUAL_KEY.to_string(),
+        DEPRECATED_COST_RESULT_KEY => COST_RESULT_KEY.to_string(),
+        DEPRECATED_COST_STRATEGY_KEY => COST_STRATEGY_KEY.to_string(),
+        DEPRECATED_ENABLED_CONTEXT_KEY => ENABLED_CONTEXT_KEY.to_string(),
+        DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY => FORMATTED_QUERY_PLAN_CONTEXT_KEY.to_string(),
+        DEPRECATED_QUERY_PLAN_CONTEXT_KEY => QUERY_PLAN_CONTEXT_KEY.to_string(),
+        DEPRECATED_PERSISTED_QUERY_CACHE_HIT => PERSISTED_QUERY_CACHE_HIT.to_string(),
+        DEPRECATED_PERSISTED_QUERY_REGISTERED => PERSISTED_QUERY_REGISTERED.to_string(),
+        _ => key,
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::spec::Query;
-    use crate::spec::Schema;
     use crate::Configuration;
     use crate::Context;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[test]
     fn test_context_insert() {
@@ -419,7 +438,7 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        c.extensions().with_lock(|lock| lock.insert(1usize));
         let v = c
             .extensions()
             .with_lock(|lock| lock.get::<usize>().cloned());
@@ -429,32 +448,12 @@ mod test {
     #[test]
     fn test_executable_document_access() {
         let c = Context::new();
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
-        assert!(c.unsupported_executable_document().is_none());
-        c.extensions().with_lock(|mut lock| lock.insert(document));
-        assert!(c.unsupported_executable_document().is_some());
+        assert!(c.executable_document().is_none());
+        c.extensions().with_lock(|lock| lock.insert(document));
+        assert!(c.executable_document().is_some());
     }
 }

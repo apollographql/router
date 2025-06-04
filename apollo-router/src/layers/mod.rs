@@ -3,24 +3,23 @@
 use std::future::Future;
 use std::ops::ControlFlow;
 
-use tower::buffer::BufferLayer;
-use tower::layer::util::Stack;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::buffer::BufferLayer;
+use tower::layer::util::Stack;
 use tower_service::Service;
 use tracing::Span;
 
 use self::map_first_graphql_response::MapFirstGraphqlResponseLayer;
 use self::map_first_graphql_response::MapFirstGraphqlResponseService;
+use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
 use crate::services::supergraph;
-use crate::Context;
 
 pub mod async_checkpoint;
 pub mod instrument;
@@ -28,7 +27,15 @@ pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
 
-pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
+// Note: We use Buffer in many places throughout the router. 50_000 represents
+// the "maximal number of requests that can be queued for the buffered
+// service before backpressure is applied to callers". We set this to be
+// so high, 50_000, because we anticipate that many users will want to
+//
+// Think of this as a backstop for when there are no other backpressure
+// enforcing limits configured in a router. In future we may tweak this
+// value higher or lower or expose it as a configurable.
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 
 /// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities
 /// (e.g.: checkpoints) to a [`Service`].
@@ -73,13 +80,13 @@ pub trait ServiceBuilderExt<L>: Sized {
     fn checkpoint<S, Request>(
         self,
         checkpoint_fn: impl Fn(
-                Request,
-            ) -> Result<
-                ControlFlow<<S as Service<Request>>::Response, Request>,
-                <S as Service<Request>>::Error,
-            > + Send
-            + Sync
-            + 'static,
+            Request,
+        ) -> Result<
+            ControlFlow<<S as Service<Request>>::Response, Request>,
+            <S as Service<Request>>::Error,
+        > + Send
+        + Sync
+        + 'static,
     ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
     where
         S: Service<Request> + Send + 'static,
@@ -146,63 +153,6 @@ pub trait ServiceBuilderExt<L>: Sized {
         F: Fn(Request) -> Fut + Send + Sync + 'static,
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
-    }
-
-    /// Decide if processing should continue or not, and if not allow returning of a response.
-    /// Unlike checkpoint it is possible to perform async operations in the callback. Unlike
-    /// checkpoint_async, this does not require that the service is `Clone` and avoids the
-    /// requiremnent to buffer services.
-    ///
-    /// This is useful for things like authentication where you need to make an external call to
-    /// check if a request should proceed or not.
-    ///
-    /// # Arguments
-    ///
-    /// * `async_checkpoint_fn`: The asynchronous callback to decide if processing should continue or not.
-    ///
-    /// returns: ServiceBuilder<Stack<OneShotAsyncCheckpointLayer<S, Request>, L>>
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use std::ops::ControlFlow;
-    /// use futures::FutureExt;
-    /// # use http::Method;
-    /// # use tower::ServiceBuilder;
-    /// # use tower_service::Service;
-    /// # use tracing::info_span;
-    /// # use apollo_router::services::supergraph;
-    /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
-    /// let _ = ServiceBuilder::new()
-    ///     .oneshot_checkpoint_async(|req: supergraph::Request|
-    ///         async {
-    ///             if req.supergraph_request.method() == Method::GET {
-    ///                 Ok(ControlFlow::Break(supergraph::Response::builder()
-    ///                     .data("Only get requests allowed")
-    ///                     .context(req.context)
-    ///                     .build()?))
-    ///             } else {
-    ///                 Ok(ControlFlow::Continue(req))
-    ///             }
-    ///         }
-    ///         .boxed()
-    ///     )
-    ///     .service(service);
-    /// # }
-    /// ```
-    fn oneshot_checkpoint_async<F, S, Fut, Request>(
-        self,
-        async_checkpoint_fn: F,
-    ) -> ServiceBuilder<Stack<OneShotAsyncCheckpointLayer<S, Fut, Request>, L>>
-    where
-        S: Service<Request, Error = BoxError> + Send + 'static,
-        Fut: Future<
-            Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
-        >,
-        F: Fn(Request) -> Fut + Send + Sync + 'static,
-    {
-        self.layer(OneShotAsyncCheckpointLayer::new(async_checkpoint_fn))
     }
 
     /// Adds a buffer to the service stack with a default size.
