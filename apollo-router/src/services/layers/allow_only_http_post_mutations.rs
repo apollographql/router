@@ -149,7 +149,7 @@ mod forbid_http_get_mutations_tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::Context;
+    use crate::{json_ext, Context};
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::plugin::test::MockSupergraphService;
@@ -239,17 +239,6 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_non_http_post_mutations_pass_through() {
-        let expected_error = Error {
-            message: "Mutations can only be sent over HTTP POST".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: serde_json_bytes::json!({
-                "code": "MUTATION_FORBIDDEN"
-            })
-            .as_object()
-            .unwrap()
-            .to_owned(),
-        };
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
@@ -276,19 +265,24 @@ mod forbid_http_get_mutations_tests {
             let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
             let services = service_stack.ready().await.unwrap();
 
-            let mut actual_error = services.call(request).await.unwrap();
+            let mut error_response = services.call(request).await.unwrap();
+            let response = error_response.next_response().await.unwrap();
+            let actual_error = response.errors[0].clone();
 
-            assert_eq!(expected_status, actual_error.response.status());
+            let expected_error = Error::builder()
+                .message( "Mutations can only be sent over HTTP POST".to_string())
+                .extension_code("MUTATION_FORBIDDEN")
+                // Take UUID from actual to ensure equality
+                .apollo_id(actual_error.apollo_id())
+                .build();
+
+            assert_eq!(expected_status, error_response.response.status());
             assert_eq!(
                 expected_allow_header,
-                actual_error.response.headers().get("Allow").unwrap()
+                error_response.response.headers().get("Allow").unwrap()
             );
-            assert_error_matches(&expected_error, actual_error.next_response().await.unwrap());
+            assert_eq!(actual_error, expected_error);
         }
-    }
-
-    fn assert_error_matches(expected_error: &Error, response: Response) {
-        assert_eq!(&response.errors[0], expected_error);
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> SupergraphRequest {

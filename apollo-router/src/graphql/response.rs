@@ -330,8 +330,16 @@ mod tests {
             .to_string()
             .as_str(),
         );
+        let response = result.unwrap();
+        let actual_error_apollo_id = response
+            .clone()
+            .errors
+            .get(0)
+            .unwrap()
+            .apollo_id
+            .clone();
         assert_eq!(
-            result.unwrap(),
+            response,
             Response::builder()
                 .data(json!({
                   "hero": {
@@ -352,18 +360,16 @@ mod tests {
                     ]
                   }
                 }))
-                .errors(vec![Error {
-                    message: "Name for character with ID 1002 could not be fetched.".into(),
-                    locations: vec!(Location { line: 6, column: 7 }),
-                    path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: bjson!({
-                        "error-extension": 5,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap(),
-                    // TODO need to ignore the apollo id for comparison
-                }])
+                .errors(vec![
+                    Error::builder()
+                        .message("Name for character with ID 1002 could not be fetched.")
+                        .locations(vec!(Location { line: 6, column: 7 }))
+                        .path(Path::from("hero/heroFriends/1/name"))
+                        .extensions(bjson!({ "error-extension": 5, }).as_object().cloned().unwrap())
+                        // Use actual's generated UUID for comparison
+                        .apollo_id(actual_error_apollo_id)
+                        .build()
+                ])
                 .extensions(
                     bjson!({
                         "response-extension": 3,
@@ -420,8 +426,16 @@ mod tests {
             .to_string()
             .as_str(),
         );
+        let response = result.unwrap();
+        let actual_error_apollo_id = response
+            .clone()
+            .errors
+            .get(0)
+            .unwrap()
+            .apollo_id
+            .clone();
         assert_eq!(
-            result.unwrap(),
+            response,
             Response::builder()
                 .label("part".to_owned())
                 .data(json!({
@@ -444,17 +458,16 @@ mod tests {
                   }
                 }))
                 .path(Path::from("hero/heroFriends/1/name"))
-                .errors(vec![Error {
-                    message: "Name for character with ID 1002 could not be fetched.".into(),
-                    locations: vec!(Location { line: 6, column: 7 }),
-                    path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: bjson!({
-                        "error-extension": 5,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap()
-                }])
+                .errors(vec![
+                    Error::builder()
+                        .message("Name for character with ID 1002 could not be fetched.")
+                        .locations(vec!(Location { line: 6, column: 7 }))
+                        .path(Path::from("hero/heroFriends/1/name"))
+                        .extensions(bjson!({ "error-extension": 5, }).as_object().cloned().unwrap())
+                        // Use actual's generated UUID for comparison
+                        .apollo_id(actual_error_apollo_id)
+                        .build()
+                ])
                 .extensions(
                     bjson!({
                         "response-extension": 3,
