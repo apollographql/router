@@ -28,6 +28,7 @@
 mod api_schema;
 mod compat;
 pub mod composition;
+pub mod connectors;
 #[cfg(feature = "correctness")]
 pub mod correctness;
 mod display_helpers;
@@ -39,7 +40,6 @@ pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
-pub mod sources;
 pub mod subgraph;
 pub(crate) mod supergraph;
 pub(crate) mod utils;
@@ -54,6 +54,7 @@ use schema::FederationSchema;
 use strum::IntoEnumIterator;
 
 pub use crate::api_schema::ApiSchemaOptions;
+use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::error::MultiTryAll;
 use crate::error::MultipleFederationErrors;
@@ -77,7 +78,6 @@ use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::merge::MergeFailure;
 use crate::merge::merge_subgraphs;
 use crate::schema::ValidFederationSchema;
-use crate::sources::connect::ConnectSpec;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;

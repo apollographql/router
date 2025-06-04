@@ -1,0 +1,15 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/circular_reference_2.graphql
+---
+[
+    Message {
+        code: CircularReference,
+        message: "Circular reference detected in `@connect(selection:)` on `Track.modules`: type `Track` appears more than once in `Track.modules.track`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+        locations: [
+            18:28..18:50,
+            25:3..25:15,
+        ],
+    },
+]

@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/multiple_errors.graphql
+---
+[
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"u$ers\")` can't contain `$`; only ASCII letters, numbers, underscores, or hyphens are allowed",
+        locations: [
+            6:17..6:24,
+        ],
+    },
+    Message {
+        code: InvalidUrlScheme,
+        message: "The value \"ftp://127.0.0.1\" for `@source(baseURL:)` must be http or https, got ftp.",
+        locations: [
+            6:44..6:47,
+        ],
+    },
+]

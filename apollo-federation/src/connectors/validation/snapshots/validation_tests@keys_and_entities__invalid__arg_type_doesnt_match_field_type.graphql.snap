@@ -1,0 +1,15 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/arg_type_doesnt_match_field_type.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`Query.product(id:)` is of type `String`, but must match `Product.id` of type `ID` because `entity` is `true`.",
+        locations: [
+            6:11..6:22,
+            10:7..10:19,
+        ],
+    },
+]

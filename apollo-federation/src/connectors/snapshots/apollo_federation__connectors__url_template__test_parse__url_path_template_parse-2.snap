@@ -1,0 +1,262 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"/users/{$this.user_id}?a={$args.b}&c={$args.d}&e={$args.f.g}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "users",
+                            location: 1..6,
+                        },
+                    ),
+                ],
+            },
+            StringTemplate {
+                parts: [
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "user_id",
+                                                        ),
+                                                        range: Some(
+                                                            6..13,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            13..13,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..13,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..13,
+                                        ),
+                                    },
+                                },
+                            ),
+                            location: 8..21,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: [
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "a",
+                                location: 23..24,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "b",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..7,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 26..33,
+                            },
+                        ),
+                    ],
+                },
+            ),
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "c",
+                                location: 35..36,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "d",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..7,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 38..45,
+                            },
+                        ),
+                    ],
+                },
+            ),
+            (
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "e",
+                                location: 47..48,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "f",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "g",
+                                                                    ),
+                                                                    range: Some(
+                                                                        8..9,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        9..9,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                7..9,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..9,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..9,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 50..59,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
+    },
+)
