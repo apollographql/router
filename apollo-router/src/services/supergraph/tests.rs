@@ -1276,7 +1276,7 @@ async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "{ ... on Query { currentUser { activeOrganization { __typename id } } } }",
+                "query": "{ ... { currentUser { activeOrganization { __typename id } } } }",
             }},
             serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
         ).build()),
