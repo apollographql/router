@@ -113,12 +113,13 @@ impl Merger {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{Name, ast::Value, schema::ObjectType};
+    use apollo_compiler::Name;
+    use apollo_compiler::ast::Value;
+    use apollo_compiler::schema::ObjectType;
 
     use super::*;
-    use crate::{
-        merger::merge::tests::create_test_merger, schema::position::ObjectTypeDefinitionPosition,
-    };
+    use crate::merger::merge::tests::create_test_merger;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
 
     // Helper function to create a union type for testing
     fn create_union_type(name: &str, member_names: &[&str]) -> Node<UnionType> {
