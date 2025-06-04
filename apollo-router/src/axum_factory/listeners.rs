@@ -522,7 +522,6 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
-    use crate::services::router::body;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -555,7 +554,7 @@ mod tests {
                     .data("this is a test")
                     .context(req.context)
                     .build()
-                    .unwrap()
+                    .unwrap(),
             )
         })
         .boxed();

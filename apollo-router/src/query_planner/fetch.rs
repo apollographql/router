@@ -362,23 +362,20 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(Error::builder()
-                                        .locations(error.locations.clone())
-                                        // append to the entitiy's path the error's path without
-                                        //`_entities` and the index
-                                        .path(
-                                            Path::from_iter(
-                                                values_path
-                                                    .0
-                                                    .iter()
-                                                    .chain(&path.0[2..])
-                                                    .cloned(),
+                                    errors.push(
+                                        Error::builder()
+                                            .locations(error.locations.clone())
+                                            // append to the entitiy's path the error's path without
+                                            //`_entities` and the index
+                                            .path(Path::from_iter(
+                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                            ))
+                                            .message(error.message.clone())
+                                            .extension_code(
+                                                error.extension_code().unwrap_or_default(),
                                             )
-                                        )
-                                        .message(error.message.clone())
-                                        .extension_code(error.extension_code().unwrap_or_default())
-                                        .extensions(error.extensions.clone())
-                                        .build()
+                                            .extensions(error.extensions.clone())
+                                            .build(),
                                     )
                                 }
                             }

@@ -7,6 +7,7 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 use std::str::FromStr;
+
 use apollo_compiler::response::GraphQLError as CompilerExecutionError;
 use apollo_compiler::response::ResponseDataPathSegment;
 use futures::Stream;
@@ -73,7 +74,7 @@ pub struct Error {
     pub extensions: Object,
 
     /// A unique identifier for this error
-    apollo_id: Uuid
+    apollo_id: Uuid,
 }
 // Implement getter and getter_mut to not use pub field directly
 
@@ -112,7 +113,7 @@ impl Error {
     ///   Sets the "code" in the extension map. Will be ignored if extension already has this key
     ///   set.
     ///
-    /// * `.apollo_id(impl Into<`[`UUID`]`>)`
+    /// * `.apollo_id(impl Into<`[`Uuid`]`>)`
     ///   Optional.
     ///   Sets the unique identifier for this Error. This should only be used in cases of
     ///   deserialization or testing. If not given, the ID will be auto-generated.
@@ -127,9 +128,9 @@ impl Error {
         extension_code: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         mut extensions: JsonMap<ByteString, Value>,
-        apollo_id: Option<Uuid>
+        apollo_id: Option<Uuid>,
     ) -> Self {
-        if let Some(code)  = extension_code  {
+        if let Some(code) = extension_code {
             extensions
                 .entry("code")
                 .or_insert(Value::String(ByteString::from(code)));
@@ -139,7 +140,7 @@ impl Error {
             locations,
             path,
             extensions,
-            apollo_id: apollo_id.unwrap_or_else(|| Uuid::new_v4())
+            apollo_id: apollo_id.unwrap_or_else(Uuid::new_v4),
         }
     }
 
@@ -187,20 +188,15 @@ impl Error {
         .map_err(|err| MalformedResponseError {
             reason: format!("invalid `apolloId` within error: {}", err),
         })?
-        .map(|s|
+        .map(|s| {
             Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
                 reason: format!("invalid `apolloId` within error: {}", err),
             })
-        )
+        })
         .transpose()?;
 
         Ok(Self::new(
-            message,
-            locations,
-            path,
-            None,
-            extensions,
-            apollo_id
+            message, locations, path, None, extensions, apollo_id,
         ))
     }
 
@@ -237,15 +233,12 @@ impl Error {
             .map(|id| Uuid::from_str(id).ok())?;
 
         Some(Self::new(
-            message,
-            locations,
-            path,
-            None,
-            extensions,
+            message, locations, path, None, extensions,
             apollo_id, // TODO confirm this exists from serialized error
         ))
     }
 
+    /// Extract the error code from [`Error::extensions`] as a String if it is set.
     pub fn extension_code(&self) -> Option<String> {
         self.extensions.get("code").and_then(|c| match c {
             Value::String(s) => Some(s.as_str().to_owned()),
@@ -255,6 +248,7 @@ impl Error {
         })
     }
 
+    /// Retrieve the internal Apollo unique ID for this error
     pub fn apollo_id(&self) -> Uuid {
         self.apollo_id
     }
@@ -337,7 +331,7 @@ impl From<CompilerExecutionError> for Error {
             locations,
             path,
             extensions,
-            apollo_id: Uuid::new_v4()
+            apollo_id: Uuid::new_v4(),
         }
     }
 }

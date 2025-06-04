@@ -269,9 +269,7 @@ mod tests {
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
                 .build(),
-           Error::builder()
-               .message("I mean for real")
-               .build(),
+            Error::builder().message("I mean for real").build(),
         ];
 
         let mut errors_to_append = vec![
@@ -279,9 +277,7 @@ mod tests {
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
                 .build(),
-            Error::builder()
-                .message("I mean for real")
-                .build(),
+            Error::builder().message("I mean for real").build(),
         ];
 
         let mut response = Response::builder().build();
@@ -331,13 +327,7 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        let actual_error_apollo_id = response
-            .clone()
-            .errors
-            .get(0)
-            .unwrap()
-            .apollo_id
-            .clone();
+        let actual_error_apollo_id = response.clone().errors.first().unwrap().apollo_id;
         assert_eq!(
             response,
             Response::builder()
@@ -365,7 +355,12 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(bjson!({ "error-extension": 5, }).as_object().cloned().unwrap())
+                        .extensions(
+                            bjson!({ "error-extension": 5, })
+                                .as_object()
+                                .cloned()
+                                .unwrap()
+                        )
                         // Use actual's generated UUID for comparison
                         .apollo_id(actual_error_apollo_id)
                         .build()
@@ -427,13 +422,7 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        let actual_error_apollo_id = response
-            .clone()
-            .errors
-            .get(0)
-            .unwrap()
-            .apollo_id
-            .clone();
+        let actual_error_apollo_id = response.clone().errors.first().unwrap().apollo_id;
         assert_eq!(
             response,
             Response::builder()
@@ -463,7 +452,12 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(bjson!({ "error-extension": 5, }).as_object().cloned().unwrap())
+                        .extensions(
+                            bjson!({ "error-extension": 5, })
+                                .as_object()
+                                .cloned()
+                                .unwrap()
+                        )
                         // Use actual's generated UUID for comparison
                         .apollo_id(actual_error_apollo_id)
                         .build()

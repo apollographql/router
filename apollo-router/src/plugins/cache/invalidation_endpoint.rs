@@ -18,8 +18,9 @@ use tracing_futures::Instrument;
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
-use crate::{graphql, ListenAddr};
+use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::graphql;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -91,7 +92,7 @@ impl InvalidationService {
     }
 }
 
-impl Service<router::Request> for InvalidationService { 
+impl Service<router::Request> for InvalidationService {
     type Response = router::Response;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -110,10 +111,11 @@ impl Service<router::Request> for InvalidationService {
                     Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                     return router::Response::error_builder()
                         .status_code(StatusCode::UNAUTHORIZED)
-                        .error(graphql::Error::builder()
-                                   .message(String::from("Missing authorization header"))
-                                   .extension_code(StatusCode::UNAUTHORIZED.to_string())
-                                   .build()
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Missing authorization header"))
+                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                .build(),
                         )
                         .context(req.context)
                         .build();
@@ -160,10 +162,13 @@ impl Service<router::Request> for InvalidationService {
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return router::Response::error_builder()
                                         .status_code(StatusCode::UNAUTHORIZED)
-                                        .error(graphql::Error::builder()
-                                            .message("Invalid authorization header")
-                                            .extension_code(StatusCode::UNAUTHORIZED.to_string())
-                                            .build()
+                                        .error(
+                                            graphql::Error::builder()
+                                                .message("Invalid authorization header")
+                                                .extension_code(
+                                                    StatusCode::UNAUTHORIZED.to_string(),
+                                                )
+                                                .build(),
                                         )
                                         .context(req.context)
                                         .build();
@@ -176,17 +181,20 @@ impl Service<router::Request> for InvalidationService {
                                     Ok(count) => router::Response::builder()
                                         .data(json!({ "count": count }))
                                         .status_code(StatusCode::ACCEPTED)
-                                        .context( req.context)
+                                        .context(req.context)
                                         .build(),
                                     Err(err) => {
                                         Span::current()
                                             .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                         router::Response::error_builder()
                                             .status_code(StatusCode::BAD_REQUEST)
-                                            .error(graphql::Error::builder()
-                                                .message(err.to_string())
-                                                .extension_code(StatusCode::BAD_REQUEST.to_string())
-                                                .build()
+                                            .error(
+                                                graphql::Error::builder()
+                                                    .message(err.to_string())
+                                                    .extension_code(
+                                                        StatusCode::BAD_REQUEST.to_string(),
+                                                    )
+                                                    .build(),
                                             )
                                             .context(req.context)
                                             .build()
@@ -197,10 +205,11 @@ impl Service<router::Request> for InvalidationService {
                                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                 router::Response::error_builder()
                                     .status_code(StatusCode::BAD_REQUEST)
-                                    .error(graphql::Error::builder()
-                                        .message(err)
-                                        .extension_code(StatusCode::BAD_REQUEST.to_string())
-                                        .build()
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(err)
+                                            .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                            .build(),
                                     )
                                     .context(req.context)
                                     .build()
@@ -211,10 +220,11 @@ impl Service<router::Request> for InvalidationService {
                         Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                         router::Response::error_builder()
                             .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                            .error(graphql::Error::builder()
-                                .message("".to_string())
-                                .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
-                                .build()
+                            .error(
+                                graphql::Error::builder()
+                                    .message("".to_string())
+                                    .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
+                                    .build(),
                             )
                             .context(req.context)
                             .build()

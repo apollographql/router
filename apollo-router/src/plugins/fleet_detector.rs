@@ -272,15 +272,16 @@ impl PluginPrivate for FleetDetector {
             // Count the number of response bytes from the router to clients
             .map_response(move |res: router::Response| {
                 let (parts, body) = res.response.into_parts();
-                let body = router::body::from_result_stream(body.into_data_stream().inspect(|res| {
-                    if let Ok(bytes) = res {
-                        u64_counter!(
-                            "apollo.router.operations.response_size",
-                            "Total number of response bytes to clients",
-                            bytes.len() as u64
-                        );
-                    }
-                }));
+                let body =
+                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
+                        if let Ok(bytes) = res {
+                            u64_counter!(
+                                "apollo.router.operations.response_size",
+                                "Total number of response bytes to clients",
+                                bytes.len() as u64
+                            );
+                        }
+                    }));
                 router::Response::parts_builder()
                     .parts(parts)
                     .body(body)
@@ -534,14 +535,14 @@ mod tests {
 
     use http::StatusCode;
     use tower::Service as _;
-    use crate::graphql;
+
     use super::*;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
     use crate::metrics::collect_metrics;
     use crate::metrics::test_utils::MetricType;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
-    use crate::query_planner::build_operation_with_aliasing;
     use crate::services::router::Body;
 
     #[tokio::test]
@@ -562,10 +563,11 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .header("content-type", "application/json")
-                        .error(graphql::Error::builder()
-                            .message("bad request")
-                            .extension_code(StatusCode::BAD_REQUEST.to_string())
-                            .build()
+                        .error(
+                            graphql::Error::builder()
+                                .message("bad request")
+                                .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                .build(),
                         )
                         .build()
                 });
@@ -623,10 +625,11 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .header("content-type", "application/json")
-                        .error(graphql::Error::builder()
-                            .message("bad request")
-                            .extension_code(StatusCode::BAD_REQUEST.to_string())
-                            .build()
+                        .error(
+                            graphql::Error::builder()
+                                .message("bad request")
+                                .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                .build(),
                         )
                         .build()
                 });

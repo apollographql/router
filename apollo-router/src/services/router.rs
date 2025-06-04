@@ -2,13 +2,12 @@
 
 use std::any::Any;
 use std::mem;
-use buildstructor::builder;
+
 use bytes::Bytes;
 use displaydoc::Display;
 use futures::Stream;
 use futures::StreamExt;
-use futures::future::{ready, Either};
-use futures::stream::once;
+use futures::future::Either;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -23,9 +22,9 @@ use serde_json_bytes::Map as JsonMap;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
-use wiremock::matchers::body_string;
+
 use self::body::RouterBody;
-use super::{router, supergraph};
+use super::supergraph;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
@@ -147,7 +146,6 @@ impl Request {
 }
 
 use crate::context::ROUTER_RESPONSE_ERRORS;
-use crate::protocols::multipart::ProtocolMode;
 
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
@@ -289,14 +287,11 @@ impl Response {
         body: Body,
         context: Context,
         body_to_stash: Option<String>,
-    ) -> Result<Self, BoxError>  {
-        let response =  http::Response::from_parts(parts, body);
-        let mut res = Self {
-            response,
-            context
-        };
-        if body_to_stash.is_some() {
-            res.stash_the_body_in_extensions(body_to_stash.unwrap())
+    ) -> Result<Self, BoxError> {
+        let response = http::Response::from_parts(parts, body);
+        let mut res = Self { response, context };
+        if let Some(body_to_stash) = body_to_stash {
+            res.stash_the_body_in_extensions(body_to_stash)
         }
         Ok(res)
     }

@@ -170,7 +170,7 @@ impl Service<SupergraphRequest> for SupergraphService {
                 crate::error::Error::builder()
                     .message(error.to_string())
                     .extension_code("INTERNAL_SERVER_ERROR")
-                    .build()
+                    .build(),
             ];
 
             Ok(SupergraphResponse::infallible_builder()

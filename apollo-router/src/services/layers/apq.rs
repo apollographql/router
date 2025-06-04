@@ -131,12 +131,13 @@ async fn apq_request(
                 Ok(request)
             } else {
                 tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
-                let errors = vec![crate::error::Error::builder()
-                    .message("provided sha does not match query".to_string())
-                    .locations(Default::default())
-                    .path(Path::default())
-                    .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
-                    .build(),
+                let errors = vec![
+                    crate::error::Error::builder()
+                        .message("provided sha does not match query".to_string())
+                        .locations(Default::default())
+                        .path(Path::default())
+                        .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
+                        .build(),
                 ];
                 let res = SupergraphResponse::builder()
                     .status_code(StatusCode::BAD_REQUEST)
@@ -162,12 +163,13 @@ async fn apq_request(
             } else {
                 let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);
                 tracing::trace!("apq: cache miss");
-                let errors = vec![crate::error::Error::builder()
-                    .message("PersistedQueryNotFound".to_string())
-                    .locations(Default::default())
-                    .path(Path::default())
-                    .extension_code("PERSISTED_QUERY_NOT_FOUND")
-                    .build(),
+                let errors = vec![
+                    crate::error::Error::builder()
+                        .message("PersistedQueryNotFound".to_string())
+                        .locations(Default::default())
+                        .path(Path::default())
+                        .extension_code("PERSISTED_QUERY_NOT_FOUND")
+                        .build(),
                 ];
                 let res = SupergraphResponse::builder()
                     .data(Value::default())
@@ -213,12 +215,13 @@ async fn disabled_apq_request(
         .extensions
         .contains_key("persistedQuery")
     {
-        let errors = vec![crate::error::Error::builder()
-            .message("PersistedQueryNotSupported".to_string())
-            .locations(Default::default())
-            .path(Path::default())
-            .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
-            .build(),
+        let errors = vec![
+            crate::error::Error::builder()
+                .message("PersistedQueryNotSupported".to_string())
+                .locations(Default::default())
+                .path(Path::default())
+                .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
+                .build(),
         ];
         let res = SupergraphResponse::builder()
             .data(Value::default())
@@ -507,7 +510,7 @@ mod apq_tests {
 
     #[tokio::test]
     async fn return_not_supported_when_disabled() {
-        let expected_apq_miss_error =Error::builder()
+        let expected_apq_miss_error = Error::builder()
             .message("PersistedQueryNotSupported".to_string())
             .locations(Default::default())
             .path(Path::default())

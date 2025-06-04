@@ -149,9 +149,8 @@ mod forbid_http_get_mutations_tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{json_ext, Context};
+    use crate::Context;
     use crate::error::Error;
-    use crate::graphql::Response;
     use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -270,7 +269,7 @@ mod forbid_http_get_mutations_tests {
             let actual_error = response.errors[0].clone();
 
             let expected_error = Error::builder()
-                .message( "Mutations can only be sent over HTTP POST".to_string())
+                .message("Mutations can only be sent over HTTP POST".to_string())
                 .extension_code("MUTATION_FORBIDDEN")
                 // Take UUID from actual to ensure equality
                 .apollo_id(actual_error.apollo_id())

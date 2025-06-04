@@ -742,18 +742,17 @@ fn ensure_id_consistency(
     id_from_body: &str,
 ) -> Result<(), router::Response> {
     if id_from_path != id_from_body {
-        Err(
-            router::Response::error_builder()
-                .status_code(StatusCode::BAD_REQUEST)
-                .error(graphql::Error::builder()
+        Err(router::Response::error_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .error(
+                graphql::Error::builder()
                     .message("id from url path and id from body are different")
                     .extension_code(StatusCode::BAD_REQUEST.to_string())
-                    .build()
-                )
-                .context(context.clone())
-                .build()
-                .expect("this response is valid")
-        )
+                    .build(),
+            )
+            .context(context.clone())
+            .build()
+            .expect("this response is valid"))
     } else {
         Ok(())
     }

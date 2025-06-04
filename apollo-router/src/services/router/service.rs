@@ -23,7 +23,6 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use serde_json::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -294,7 +293,9 @@ impl RouterService {
                 router::Response::error_builder()
                     .error(
                         graphql::Error::builder()
-                            .message(String::from("router service is not available to process request"))
+                            .message(String::from(
+                                "router service is not available to process request",
+                            ))
                             .extension_code(StatusCode::SERVICE_UNAVAILABLE.to_string())
                             .build(),
                     )
@@ -322,7 +323,11 @@ impl RouterService {
                     router::Response::parts_builder()
                         .parts(parts)
                         .body(router::body::from_bytes(body.clone()))
-                        .and_body_to_stash(if display_router_response { Some(body) } else { None })
+                        .and_body_to_stash(if display_router_response {
+                            Some(body)
+                        } else {
+                            None
+                        })
                         .context(context)
                         .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {

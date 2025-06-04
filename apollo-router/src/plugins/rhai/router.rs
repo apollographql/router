@@ -33,7 +33,7 @@ pub(super) fn request_failure(
             .errors(vec![
                 Error::builder()
                     .message(error_details.message.unwrap_or_default())
-                    .build()
+                    .build(),
             ])
             .context(context)
             .status_code(error_details.status)
@@ -62,7 +62,7 @@ pub(super) fn response_failure(
             .errors(vec![
                 Error::builder()
                     .message(error_details.message.unwrap_or_default())
-                    .build()
+                    .build(),
             ])
             .status_code(error_details.status)
             .context(context)

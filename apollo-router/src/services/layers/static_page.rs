@@ -61,12 +61,17 @@ where
                     {
                         ControlFlow::Break(
                             router::Response::builder()
-                                .header(CONTENT_TYPE,
-                                        HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()))
-                                .data(serde_json_bytes::Value::from_bytes(page.clone()).map_err(BoxError::from)?)
+                                .header(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
+                                )
+                                .data(
+                                    serde_json_bytes::Value::from_bytes(page.clone())
+                                        .map_err(BoxError::from)?,
+                                )
                                 .context(req.context)
                                 .build()
-                                .unwrap()
+                                .unwrap(),
                         )
                     } else {
                         ControlFlow::Continue(req)

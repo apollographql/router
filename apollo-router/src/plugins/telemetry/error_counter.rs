@@ -1,27 +1,30 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use ahash::{HashSet, HashSetExt};
+
+use ahash::HashSet;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
+
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
-use crate::context::{COUNTED_ERRORS, ROUTER_RESPONSE_ERRORS};
+use crate::context::COUNTED_ERRORS;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::graphql::Error;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::services::{router, ExecutionResponse, RouterResponse};
+use crate::services::ExecutionResponse;
+use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
-use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 pub(crate) async fn count_subgraph_errors(
@@ -173,10 +176,7 @@ pub(crate) async fn count_router_errors(
 }
 
 fn to_set(errors: &[Error]) -> HashSet<Uuid> {
-    errors
-        .iter()
-        .map(Error::apollo_id)
-        .collect()
+    errors.iter().map(Error::apollo_id).collect()
 }
 
 fn count_operation_errors(
@@ -187,8 +187,7 @@ fn count_operation_errors(
     let _id_str = errors[0].apollo_id().to_string(); // TODO DEBUG REMOVE
     let _msg_str = errors[0].message.clone(); // TODO DEBUG REMOVE
 
-    let previously_counted_errors_map: HashSet<Uuid> =
-        unwrap_from_context(context, COUNTED_ERRORS);
+    let previously_counted_errors_map: HashSet<Uuid> = unwrap_from_context(context, COUNTED_ERRORS);
 
     let mut operation_id: String = unwrap_from_context(context, APOLLO_OPERATION_ID);
     let mut operation_name: String = unwrap_from_context(context, OPERATION_NAME);
@@ -304,6 +303,7 @@ mod test {
     use crate::graphql;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::content_negotiation::ClientRequestAccepts;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -312,7 +312,6 @@ mod test {
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::SupergraphResponse;
-    use crate::plugins::content_negotiation::ClientRequestAccepts;
 
     #[tokio::test]
     async fn test_count_errors_with_no_previously_counted_errors() {

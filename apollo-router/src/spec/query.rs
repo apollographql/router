@@ -374,8 +374,8 @@ impl Query {
                                 Error::builder()
                                     .message(message)
                                     .path(Path::from_response_slice(path))
-                                    .build()
-                               );
+                                    .build(),
+                            );
 
                             Err(InvalidValue)
                         } else {
@@ -797,13 +797,14 @@ impl Query {
                         path.pop();
                         res?
                     } else if field_type.is_non_null() {
-                        parameters.errors.push(Error::builder()
-                            .message(format!(
-                                "Cannot return null for non-nullable field {}.{field_name_str}",
-                                root_type_name
-                            ))
-                            .path(Path::from_response_slice(path))
-                            .build()
+                        parameters.errors.push(
+                            Error::builder()
+                                .message(format!(
+                                    "Cannot return null for non-nullable field {}.{field_name_str}",
+                                    root_type_name
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .build(),
                         );
                         return Err(InvalidValue);
                     } else {

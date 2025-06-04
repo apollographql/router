@@ -113,7 +113,8 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-use crate::plugins::telemetry::error_counter::{count_execution_errors, count_router_errors};
+use crate::plugins::telemetry::error_counter::count_execution_errors;
+use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
@@ -613,7 +614,6 @@ impl PluginPrivate for Telemetry {
                         if let Ok(resp) = response {
                             response = Ok(count_router_errors(resp, &config.apollo.errors).await);
                         }
-
 
                         response
                     }
