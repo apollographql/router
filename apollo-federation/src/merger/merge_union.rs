@@ -4,7 +4,6 @@ use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::UnionType;
 
 use crate::error::FederationError;
-use crate::link::spec_definition::SpecDefinition;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
