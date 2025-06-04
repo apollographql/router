@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;

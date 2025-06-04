@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::sources::connect::HTTPMethod;
-use apollo_federation::sources::connect::HeaderSource;
-use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::MakeUriError;
+use apollo_federation::connectors::HTTPMethod;
+use apollo_federation::connectors::HeaderSource;
+use apollo_federation::connectors::HttpJsonTransport;
+use apollo_federation::connectors::MakeUriError;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -57,7 +57,7 @@ pub(crate) fn make_request(
                     let encoded = encode_json_as_form(json_body)
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
-                    let len = encoded.bytes().len();
+                    let len = encoded.len();
                     (encoded, len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
@@ -89,7 +89,7 @@ pub(crate) fn make_request(
 
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            serialize_request(
+            Box::new(serialize_request(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -101,9 +101,9 @@ pub(crate) fn make_request(
                     result: json_body,
                     errors: mapping_problems.clone(),
                 }),
-            )
+            ))
         } else {
-            serialize_request(
+            Box::new(serialize_request(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -113,7 +113,7 @@ pub(crate) fn make_request(
                     result: json_body.clone(),
                     errors: mapping_problems.clone(),
                 }),
-            )
+            ))
         }
     });
 
@@ -187,10 +187,10 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HeaderSource;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HeaderSource;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;

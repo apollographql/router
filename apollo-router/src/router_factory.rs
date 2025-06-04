@@ -518,12 +518,7 @@ fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
         .collect::<Result<Vec<_>, _>>()
         // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
         // instead of replacing it with this generic error message?
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "failed to load certificate".to_string(),
-            )
-        })
+        .map_err(|_| io::Error::other("failed to load certificate"))
 }
 
 /// test only helper method to create a router factory in integration tests

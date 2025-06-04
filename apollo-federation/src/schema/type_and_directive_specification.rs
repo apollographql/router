@@ -830,7 +830,7 @@ fn ensure_same_arguments(
             errors.push(generate_error(&format!(
                     r#"Invalid definition for {what}: argument "{arg_name}" should have type "{expected_type}" but found type "{actual_type}""#
                 )));
-        } else if !actual_type.is_non_null()
+        } else if !actual_arg.ty.is_non_null() // we mutate actual_type above, so we need to check against the original
             && expected_arg.default_value.as_ref() != actual_arg.default_value.as_deref()
         {
             let arg_name = &expected_arg.name;

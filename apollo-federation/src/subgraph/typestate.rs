@@ -250,6 +250,19 @@ impl Subgraph<Expanded> {
 }
 
 impl Subgraph<Upgraded> {
+    pub fn assume_validated(self) -> Result<Subgraph<Validated>, SubgraphError> {
+        let valid_federation_schema = ValidFederationSchema::new_assume_valid(self.state.schema)
+            .map_err(|(_schema, error)| SubgraphError::new(self.name.clone(), error))?;
+        Ok(Subgraph {
+            name: self.name,
+            url: self.url,
+            state: Validated {
+                schema: valid_federation_schema,
+                metadata: self.state.metadata,
+            },
+        })
+    }
+
     pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
         let schema = self
             .state
@@ -330,6 +343,10 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 }
 
 impl Subgraph<Validated> {
+    pub fn validated_schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
     pub fn invalidate(self) -> Subgraph<Upgraded> {
         // PORT_NOTE: In JS, the metadata gets invalidated by calling
         // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it

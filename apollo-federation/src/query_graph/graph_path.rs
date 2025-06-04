@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic;
 
 use apollo_compiler::Name;
@@ -34,7 +35,9 @@ use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::Field;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
@@ -43,6 +46,7 @@ use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_value_without_validation;
 use crate::schema::field_set::validate_field_value;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -350,17 +354,21 @@ where
     dead_ends: TDeadEnds,
 }
 
-#[allow(dead_code)]
 pub(crate) struct UnadvanceableClosures(Vec<UnadvanceableClosure>);
 
 impl From<UnadvanceableClosures> for () {
     fn from(_: UnadvanceableClosures) -> Self {}
 }
 
-pub(crate) type UnadvanceableClosure = Box<dyn FnOnce() -> Unadvanceables>;
+type UnadvanceableClosure = Arc<
+    LazyLock<
+        Result<Unadvanceables, FederationError>,
+        Box<dyn FnOnce() -> Result<Unadvanceables, FederationError> + Send + Sync>,
+    >,
+>;
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct Unadvanceables(Vec<Unadvanceable>);
+pub(crate) struct Unadvanceables(Vec<Arc<Unadvanceable>>);
 
 impl Display for Unadvanceables {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -374,6 +382,41 @@ impl Display for Unadvanceables {
             }
         }
         f.write_char(']')
+    }
+}
+
+impl Unadvanceables {
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Arc<Unadvanceable>> {
+        self.0.iter()
+    }
+}
+
+impl TryFrom<UnadvanceableClosure> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosure) -> Result<Self, Self::Error> {
+        (*value).clone()
+    }
+}
+
+impl TryFrom<UnadvanceableClosures> for Unadvanceables {
+    type Error = FederationError;
+
+    fn try_from(value: UnadvanceableClosures) -> Result<Self, Self::Error> {
+        Ok(Unadvanceables(
+            value
+                .0
+                .into_iter()
+                .map(|closure| (*closure).clone())
+                .process_results(|iter| {
+                    iter.flat_map(|unadvanceables| unadvanceables.0).collect()
+                })?,
+        ))
     }
 }
 
@@ -392,6 +435,30 @@ impl Display for Unadvanceable {
             "[{}]({}->{}) {}",
             self.reason, self.from_subgraph, self.to_subgraph, self.details
         )
+    }
+}
+
+impl Unadvanceable {
+    #[allow(dead_code)]
+    pub(crate) fn reason(&self) -> &UnadvanceableReason {
+        &self.reason
+    }
+
+    /// Returns `self.from_subgraph`. It's named `source_subgraph`, since `fn from_subgraph()` may
+    /// be ambiguous with the Rust `from_*` convention.
+    pub(crate) fn source_subgraph(&self) -> &str {
+        &self.from_subgraph
+    }
+
+    /// Returns `self.to_subgraph`. It's named `dest_subgraph`, since `fn to_subgraph()` may
+    /// be ambiguous with the Rust `to_*` convention.
+    #[allow(dead_code)]
+    pub(crate) fn dest_subgraph(&self) -> &str {
+        &self.to_subgraph
+    }
+
+    pub(crate) fn details(&self) -> &str {
+        &self.details
     }
 }
 
@@ -463,76 +530,18 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
     }
 }
 
-#[derive(derive_more::From)]
-pub(crate) enum GraphPathTriggerRef<'a> {
-    Op(&'a OpGraphPathTrigger),
-    Transition(&'a QueryGraphEdgeTransition),
-}
-
-#[derive(derive_more::From)]
-pub(crate) enum GraphPathTriggerRefMut<'a> {
-    Op(&'a mut OpGraphPathTrigger),
-    // Unused:
-    // Transition(&'a mut QueryGraphEdgeTransition),
-}
-
-impl<'a> From<&'a GraphPathTrigger> for GraphPathTriggerRef<'a> {
-    fn from(value: &'a GraphPathTrigger) -> Self {
-        match value {
-            GraphPathTrigger::Op(value) => value.as_ref().into(),
-            GraphPathTrigger::Transition(value) => value.as_ref().into(),
-        }
-    }
-}
-
 /// `GraphPath` is generic over two types, `TTrigger` and `TEdge`. This trait helps abstract over
 /// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
 /// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
 /// potentially raise errors), this trait provides ways to access the data needed within.
 pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
-    fn get_field_mut<'a>(&'a mut self) -> Option<&'a mut Field>
-    where
-        &'a mut Self: Into<GraphPathTriggerRefMut<'a>>,
-    {
-        match self.into() {
-            GraphPathTriggerRefMut::Op(OpGraphPathTrigger::OpPathElement(
-                OpPathElement::Field(field),
-            )) => Some(field),
-            _ => None,
-        }
-    }
-
-    fn get_field_parent_type<'a>(&'a self) -> Option<CompositeTypeDefinitionPosition>
-    where
-        &'a Self: Into<GraphPathTriggerRef<'a>>,
-    {
-        match self.into() {
-            GraphPathTriggerRef::Op(trigger) => match trigger {
-                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) => {
-                    Some(field.field_position.parent())
-                }
-                _ => None,
-            },
-            GraphPathTriggerRef::Transition(trigger) => match trigger {
-                QueryGraphEdgeTransition::FieldCollection {
-                    field_definition_position,
-                    ..
-                } => Some(field_definition_position.parent()),
-                _ => None,
-            },
-        }
-    }
+    fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition>;
+    fn get_field_mut(&mut self) -> Option<&mut Field>;
 }
-
-impl GraphPathTriggerVariant for OpGraphPathTrigger {}
-
-impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: GraphPathTriggerVariant + Display,
-    for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
-    for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
     Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
@@ -784,7 +793,7 @@ where
 
         if matches!(
             edge_weight.transition,
-            QueryGraphEdgeTransition::KeyResolution { .. }
+            QueryGraphEdgeTransition::KeyResolution
         ) {
             // We're adding a `@key` edge. If the last edge to that point is an `@interfaceObject`
             // fake downcast, and if our destination type is not an `@interfaceObject` itself, then
@@ -992,6 +1001,14 @@ where
                 arguments_to_context_usages,
             )
         }
+    }
+
+    pub(crate) fn head_node(&self) -> Result<&QueryGraphNode, FederationError> {
+        self.graph.node_weight(self.head)
+    }
+
+    pub(crate) fn tail_node(&self) -> Result<&QueryGraphNode, FederationError> {
+        self.graph.node_weight(self.tail)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = GraphPathItem<'_, TTrigger, TEdge>> {
@@ -1951,6 +1968,31 @@ where
         } else {
             None
         })
+    }
+}
+
+// Query graph accessors
+// - `self` is used to access the underlying query graph, not its path data.
+// - These methods will be useful in other modules of the crate.
+impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
+where
+    TTrigger: GraphPathTriggerVariant + Display,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    pub(crate) fn schema_by_source(
+        &self,
+        source: &str,
+    ) -> Result<&ValidFederationSchema, FederationError> {
+        self.graph.schema_by_source(source)
+    }
+
+    pub(crate) fn edge_weight(
+        &self,
+        edge_index: EdgeIndex,
+    ) -> Result<&QueryGraphEdge, FederationError> {
+        self.graph.edge_weight(edge_index)
     }
 }
 
