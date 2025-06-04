@@ -236,13 +236,15 @@ async fn test_coprocessor_supergraph_invalid_response_json() -> Result<(), BoxEr
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(format!(r#"
+        .config(format!(
+            r#"
             coprocessor:
               url: "{coprocessor_address}"
               supergraph:
                 request:
                   method: true
-        "#))
+        "#
+        ))
         .build()
         .await;
 
@@ -252,8 +254,18 @@ async fn test_coprocessor_supergraph_invalid_response_json() -> Result<(), BoxEr
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     let response: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(response["errors"][0]["extensions"]["code"].as_str().unwrap(), "INTERNAL_SERVER_ERROR");
-    assert!(response["errors"][0]["message"].as_str().unwrap().contains("coprocessor"));
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"]
+            .as_str()
+            .unwrap(),
+        "INTERNAL_SERVER_ERROR"
+    );
+    assert!(
+        response["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("coprocessor")
+    );
 
     router.graceful_shutdown().await;
 
@@ -287,13 +299,15 @@ async fn test_coprocessor_execution_invalid_response_json() -> Result<(), BoxErr
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(format!(r#"
+        .config(format!(
+            r#"
             coprocessor:
               url: "{coprocessor_address}"
               execution:
                 request:
                   method: true
-        "#))
+        "#
+        ))
         .build()
         .await;
 
@@ -303,8 +317,18 @@ async fn test_coprocessor_execution_invalid_response_json() -> Result<(), BoxErr
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     let response: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(response["errors"][0]["extensions"]["code"].as_str().unwrap(), "INTERNAL_SERVER_ERROR");
-    assert!(response["errors"][0]["message"].as_str().unwrap().contains("coprocessor"));
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"]
+            .as_str()
+            .unwrap(),
+        "EXTERNAL_DESERIALIZATION_ERROR"
+    );
+    assert!(
+        response["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("coprocessor")
+    );
 
     router.graceful_shutdown().await;
 
@@ -345,13 +369,15 @@ async fn test_coprocessor_execution_ignore_query_plan_in_response_json() -> Resu
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(format!(r#"
+        .config(format!(
+            r#"
             coprocessor:
               url: "{coprocessor_address}"
               execution:
                 request:
                   query_plan: true
-        "#))
+        "#
+        ))
         .build()
         .await;
 
