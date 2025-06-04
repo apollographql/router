@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-
+use ahash::{HashSet, HashSetExt};
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use serde::de::DeserializeOwned;
-
+use uuid::Uuid;
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::{COUNTED_ERRORS, ROUTER_RESPONSE_ERRORS};
@@ -35,7 +35,7 @@ pub(crate) async fn count_subgraph_errors(
     if !response_body.errors.is_empty() {
         count_operation_errors(&response_body.errors, &context, &errors_config);
         // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
+        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
     }
     SubgraphResponse {
         context: response.context,
@@ -94,7 +94,7 @@ pub(crate) async fn count_supergraph_errors(
             if !response_body.errors.is_empty() {
                 count_operation_errors(&response_body.errors, &context, &errors_config);
                 // Refresh context with the most up-to-date list of errors
-                let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
+                let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
             }
         }
     });
@@ -126,7 +126,7 @@ pub(crate) async fn count_execution_errors(
         if !response_body.errors.is_empty() {
             count_operation_errors(&response_body.errors, &context, &errors_config);
             // Refresh context with the most up-to-date list of errors
-            let _ = context.insert(COUNTED_ERRORS, to_map(&response_body.errors));
+            let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
         }
     });
 
@@ -151,14 +151,17 @@ pub(crate) async fn count_router_errors(
     let context = response.context.clone();
     let errors_config = errors_config.clone();
 
-    // We look at context for our current errors instead of the existing config so that we don't
-    // have to do a full deserialization of the response
+    // We look at context for our current errors instead of the existing response to avoid a full
+    // response deserialization.
     let errors: Vec<Error> = unwrap_from_context(&context, ROUTER_RESPONSE_ERRORS);
     if !errors.is_empty() {
         count_operation_errors(&errors, &context, &errors_config);
-        // Refresh context ONLY when we have errors. This
-        // TODO don't overwrite, append?
-        let _ = context.insert(COUNTED_ERRORS, to_map(&errors));
+        // Router layer handling is unique in that the list of new errors from context may not
+        // include errors we previously counted. Thus, we must combine the set of previously counted
+        // errors with the set of new errors here before adding to context.
+        let mut counted_errors: HashSet<Uuid> = unwrap_from_context(&context, COUNTED_ERRORS);
+        counted_errors.extend(errors.iter().map(Error::apollo_id));
+        let _ = context.insert(COUNTED_ERRORS, counted_errors);
     }
 
     // TODO confirm the count_operation_error_codes() INVALID_ACCEPT_HEADER case is handled here
@@ -169,16 +172,11 @@ pub(crate) async fn count_router_errors(
     }
 }
 
-fn to_map(errors: &[Error]) -> HashMap<String, u64> {
-    let mut map: HashMap<String, u64> = HashMap::new();
-    errors.iter().for_each(|error| {
-        // TODO hash the full error more uniquely
-        map.entry(error.extension_code().unwrap_or_default())
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
-    });
-
-    map
+fn to_set(errors: &[Error]) -> HashSet<Uuid> {
+    errors
+        .iter()
+        .map(Error::apollo_id)
+        .collect()
 }
 
 fn count_operation_errors(
@@ -189,7 +187,7 @@ fn count_operation_errors(
     let _id_str = errors[0].apollo_id().to_string(); // TODO DEBUG REMOVE
     let _msg_str = errors[0].message.clone(); // TODO DEBUG REMOVE
 
-    let previously_counted_errors_map: HashMap<String, u64> =
+    let previously_counted_errors_map: HashSet<Uuid> =
         unwrap_from_context(context, COUNTED_ERRORS);
 
     let mut operation_id: String = unwrap_from_context(context, APOLLO_OPERATION_ID);
@@ -215,21 +213,16 @@ fn count_operation_errors(
     }
 
     // TODO how do we account for redacted errors when comparing? Likely skip them completely (they will have been counted with correct codes in subgraph layer)
-    let mut diff_map = previously_counted_errors_map.clone();
+    // TODO ^This might not matter now that we're using apollo_id
     for error in errors {
-        let code = error.extension_code().unwrap_or_default();
+        let apollo_id = error.apollo_id();
 
         // If we already counted this error in a previous layer, then skip counting it again
-        if let Some(count) = diff_map.get_mut(&code) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                diff_map.remove(&code);
-            }
+        if previously_counted_errors_map.contains(&apollo_id) {
             continue;
         }
 
-        // If we haven't seen this error before, or we see more occurrences than we've counted
-        // before, then count the error
+        // If we haven't seen this error before, then count it
         let service = error
             .extensions
             .get("service")
@@ -255,6 +248,8 @@ fn count_operation_errors(
                     ExtendedErrorMetricsMode::Enabled
                 )
         };
+
+        let code = error.extension_code().unwrap_or_default();
 
         if send_otlp_errors {
             let severity_str = severity

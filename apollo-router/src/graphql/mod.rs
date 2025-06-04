@@ -72,17 +72,8 @@ pub struct Error {
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
 
-    // TODO do we need to implement a random one for default?
     /// A unique identifier for this error
     apollo_id: Uuid
-
-    // TODO add attr to mark as counted, skip serialize?
-    // TODO would include_subgraph_errors or a customer's plugin change this?
-    // TODO Does serialization happen btwn layers (which would break this also)?
-    // TODO if customer's are the only cause then maybe we can warn that this could double count.
-    // TODO OR make an "apollo error ID" that is serialized. Use this as hash key in context
-    // TODO make on init, public getter
-    // TODO OR can we store a list of errors in context. Assumes that Eq is actually strict equality
 }
 // Implement getter and getter_mut to not use pub field directly
 
@@ -203,13 +194,14 @@ impl Error {
         )
         .transpose()?;
 
-        Ok(Error {
+        Ok(Self::new(
             message,
             locations,
             path,
+            None,
             extensions,
-            apollo_id: apollo_id.unwrap_or_else(Uuid::new_v4)
-        })
+            apollo_id
+        ))
     }
 
     pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
@@ -239,13 +231,19 @@ impl Error {
                 .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
                     serde_json_bytes::from_value(p.clone()).ok()
                 });
-        Some(Error {
+        let apollo_id = value_completion
+            .get("apolloId")
+            .and_then(|id| id.as_str())
+            .map(|id| Uuid::from_str(id).ok())?;
+
+        Some(Self::new(
             message,
             locations,
             path,
+            None,
             extensions,
-            apollo_id: Uuid::new_v4()
-        })
+            apollo_id, // TODO confirm this exists from serialized error
+        ))
     }
 
     pub fn extension_code(&self) -> Option<String> {
