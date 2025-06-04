@@ -239,7 +239,26 @@ where
     record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(super::COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let http_response = http::Response::builder()
+                .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(stream::once(future::ready(graphql_response)).boxed())?;
+            return Ok(ControlFlow::Break(supergraph::Response {
+                response: http_response,
+                context: request.context,
+            }));
+        }
+    };
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -384,7 +403,26 @@ where
     record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(super::COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let http_response = http::Response::builder()
+                .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(stream::once(future::ready(graphql_response)).boxed())?;
+            return Ok(supergraph::Response {
+                response: http_response,
+                context: response.context,
+            });
+        }
+    };
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
 

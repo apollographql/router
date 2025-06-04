@@ -258,7 +258,7 @@ async fn test_coprocessor_supergraph_invalid_response_json() -> Result<(), BoxEr
         response["errors"][0]["extensions"]["code"]
             .as_str()
             .unwrap(),
-        "INTERNAL_SERVER_ERROR"
+        "EXTERNAL_CALL_ERROR"
     );
     assert!(
         response["errors"][0]["message"]
@@ -321,7 +321,7 @@ async fn test_coprocessor_execution_invalid_response_json() -> Result<(), BoxErr
         response["errors"][0]["extensions"]["code"]
             .as_str()
             .unwrap(),
-        "EXTERNAL_DESERIALIZATION_ERROR"
+        "EXTERNAL_CALL_ERROR"
     );
     assert!(
         response["errors"][0]["message"]
