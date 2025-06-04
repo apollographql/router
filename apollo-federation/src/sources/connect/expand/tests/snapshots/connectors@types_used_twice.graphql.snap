@@ -19,28 +19,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/",
-                            location: 0..1,
-                        },
-                    ),
-                ],
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://example/,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/",
+                                location: 0..1,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [

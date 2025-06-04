@@ -31,46 +31,48 @@ expression: "&connectors"
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/posts",
-                            location: 0..6,
-                        },
-                    ),
-                ],
-            },
-            method: Get,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    https://jsonplaceholder.typicode.com/,
                 ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/posts",
+                                location: 0..6,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {
+                    "authtoken": From(
+                        "x-auth-token",
                     ),
-                ),
+                    "user-agent": Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [
@@ -163,110 +165,112 @@ expression: "&connectors"
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/posts",
-                            location: 0..6,
-                        },
-                    ),
-                ],
-            },
-            method: Post,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    https://jsonplaceholder.typicode.com/,
                 ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/posts",
+                                location: 0..6,
+                            },
+                        ),
+                    ],
+                },
+                method: Post,
+                headers: {
+                    "authtoken": From(
+                        "x-auth-token",
                     ),
-                ),
-            },
-            body: Some(
-                Named(
-                    SubSelection {
-                        selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "ids",
-                                            ),
+                    "user-agent": Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+                body: Some(
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Path {
+                                    alias: Some(
+                                        Alias {
+                                            name: WithRange {
+                                                node: Field(
+                                                    "ids",
+                                                ),
+                                                range: Some(
+                                                    0..3,
+                                                ),
+                                            },
                                             range: Some(
-                                                0..3,
+                                                0..4,
                                             ),
                                         },
-                                        range: Some(
-                                            0..4,
-                                        ),
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $batch,
-                                                range: Some(
-                                                    5..11,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            12..14,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            14..14,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    11..14,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            5..14,
-                                        ),
+                                    ),
+                                    inline: false,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $batch,
+                                                    range: Some(
+                                                        5..11,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                12..14,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                14..14,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        11..14,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                5..14,
+                                            ),
+                                        },
                                     },
                                 },
-                            },
-                        ],
-                        range: Some(
-                            0..14,
-                        ),
-                    },
+                            ],
+                            range: Some(
+                                0..14,
+                            ),
+                        },
+                    ),
                 ),
-            ),
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
         selection: Named(
             SubSelection {
                 selections: [

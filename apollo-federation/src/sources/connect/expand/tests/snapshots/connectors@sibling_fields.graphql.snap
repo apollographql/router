@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
 {
     "connectors_Query_f_0": Connector {
         id: ConnectId {
-            label: "connectors. http: GET https://my.api/t",
+            label: "connectors http: GET https://my.api/t",
             subgraph_name: "connectors",
             source_name: None,
             directive: Field(
@@ -17,26 +17,28 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "https://my.api/t",
-                            location: 0..16,
-                        },
-                    ),
-                ],
+        transport: Some(
+            HttpJsonTransport {
+                source_url: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://my.api/t",
+                                location: 0..16,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [
@@ -99,7 +101,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
     },
     "connectors_T_b_0": Connector {
         id: ConnectId {
-            label: "connectors. http: GET https://my.api/t/{$this.k.id}",
+            label: "connectors http: GET https://my.api/t/{$this.k.id}",
             subgraph_name: "connectors",
             source_name: None,
             directive: Field(
@@ -110,84 +112,86 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "https://my.api/t/",
-                            location: 0..17,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $this,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "k",
-                                                        ),
-                                                        range: Some(
-                                                            6..7,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Key(
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "id",
-                                                                ),
-                                                                range: Some(
-                                                                    8..10,
-                                                                ),
-                                                            },
-                                                            WithRange {
-                                                                node: Empty,
-                                                                range: Some(
-                                                                    10..10,
-                                                                ),
-                                                            },
-                                                        ),
-                                                        range: Some(
-                                                            7..10,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..10,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..10,
-                                        ),
+        transport: Some(
+            HttpJsonTransport {
+                source_url: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://my.api/t/",
+                                location: 0..17,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $this,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "k",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "id",
+                                                                    ),
+                                                                    range: Some(
+                                                                        8..10,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        10..10,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                7..10,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..10,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..10,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
-                            location: 18..28,
-                        },
-                    ),
-                ],
+                                ),
+                                location: 18..28,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [

@@ -19,77 +19,79 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/itfs/",
-                            location: 0..6,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $this,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            6..8,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            8..8,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..8,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..8,
-                                        ),
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://localhost:4001/,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/itfs/",
+                                location: 0..6,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $this,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
-                            location: 7..15,
-                        },
-                    ),
-                    Constant(
-                        Constant {
-                            value: "/e",
-                            location: 16..18,
-                        },
-                    ),
-                ],
+                                ),
+                                location: 7..15,
+                            },
+                        ),
+                        Constant(
+                            Constant {
+                                value: "/e",
+                                location: 16..18,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Path(
             PathSelection {
                 path: WithRange {
@@ -151,28 +153,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/itfs",
-                            location: 0..5,
-                        },
-                    ),
-                ],
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://localhost:4001/,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/itfs",
+                                location: 0..5,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [
@@ -240,71 +244,73 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/itfs/",
-                            location: 0..6,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $args,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            6..8,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            8..8,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..8,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..8,
-                                        ),
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://localhost:4001/,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/itfs/",
+                                location: 0..6,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
-                            location: 7..15,
-                        },
-                    ),
-                ],
+                                ),
+                                location: 7..15,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [

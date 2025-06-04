@@ -19,28 +19,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/api,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users",
-                            location: 0..6,
-                        },
-                    ),
-                ],
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://localhost:4001/api,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/users",
+                                location: 0..6,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: {},
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: {},
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: Named(
             SubSelection {
                 selections: [
@@ -96,92 +98,94 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/api,
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users-batch",
-                            location: 0..12,
-                        },
-                    ),
-                ],
-            },
-            method: Post,
-            headers: {},
-            body: Some(
-                Named(
-                    SubSelection {
-                        selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "ids",
-                                            ),
+        transport: Some(
+            HttpJsonTransport {
+                source_url: Some(
+                    http://localhost:4001/api,
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/users-batch",
+                                location: 0..12,
+                            },
+                        ),
+                    ],
+                },
+                method: Post,
+                headers: {},
+                body: Some(
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Path {
+                                    alias: Some(
+                                        Alias {
+                                            name: WithRange {
+                                                node: Field(
+                                                    "ids",
+                                                ),
+                                                range: Some(
+                                                    0..3,
+                                                ),
+                                            },
                                             range: Some(
-                                                0..3,
+                                                0..4,
                                             ),
                                         },
-                                        range: Some(
-                                            0..4,
-                                        ),
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $batch,
-                                                range: Some(
-                                                    5..11,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            12..14,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            14..14,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    11..14,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            5..14,
-                                        ),
+                                    ),
+                                    inline: false,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $batch,
+                                                    range: Some(
+                                                        5..11,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                12..14,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                14..14,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        11..14,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                5..14,
+                                            ),
+                                        },
                                     },
                                 },
-                            },
-                        ],
-                        range: Some(
-                            0..14,
-                        ),
-                    },
+                            ],
+                            range: Some(
+                                0..14,
+                            ),
+                        },
+                    ),
                 ),
-            ),
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
         selection: Named(
             SubSelection {
                 selections: [

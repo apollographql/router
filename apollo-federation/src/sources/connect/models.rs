@@ -444,7 +444,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -474,46 +474,48 @@ mod tests {
                         },
                     ),
                 },
-                transport: Some(HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/users",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
+                transport: Some(
+                    HttpJsonTransport {
+                        source_url: Some(
+                            https://jsonplaceholder.typicode.com/,
                         ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                        connect_template: StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "/users",
+                                        location: 0..6,
+                                    },
+                                ),
+                            ],
+                        },
+                        method: Get,
+                        headers: {
+                            "authtoken": From(
+                                "x-auth-token",
                             ),
-                        ),
+                            "user-agent": Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
                     },
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                }),
+                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -594,46 +596,48 @@ mod tests {
                         },
                     ),
                 },
-                transport: Some(HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/posts",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
+                transport: Some(
+                    HttpJsonTransport {
+                        source_url: Some(
+                            https://jsonplaceholder.typicode.com/,
                         ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                        connect_template: StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "/posts",
+                                        location: 0..6,
+                                    },
+                                ),
+                            ],
+                        },
+                        method: Get,
+                        headers: {
+                            "authtoken": From(
+                                "x-auth-token",
                             ),
-                        ),
+                            "user-agent": Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
                     },
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                }),
+                ),
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -699,7 +703,7 @@ mod tests {
                 },
             },
         }
-        "#);
+        "###);
     }
 
     #[test]
