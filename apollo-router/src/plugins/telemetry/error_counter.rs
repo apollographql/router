@@ -96,10 +96,10 @@ pub(crate) async fn count_supergraph_errors(
             // TODO can we combine this with above?
             if !response_body.errors.is_empty() {
                 count_operation_errors(&response_body.errors, &context, &errors_config);
-                // Refresh context with the most up-to-date list of errors
-                let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
             }
         }
+        // Refresh context with the most up-to-date list of errors
+        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
     });
 
     let (first_response, rest) = StreamExt::into_future(stream).await;
@@ -292,10 +292,11 @@ fn count_graphql_error(count: u64, code: String) {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use http::StatusCode;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
-
+    use uuid::Uuid;
     use crate::Context;
     use crate::context::COUNTED_ERRORS;
     use crate::context::OPERATION_KIND;
@@ -308,7 +309,7 @@ mod test {
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-    use crate::plugins::telemetry::error_counter::count_operation_errors;
+    use crate::plugins::telemetry::error_counter::{count_operation_errors, unwrap_from_context};
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::SupergraphResponse;
@@ -338,6 +339,7 @@ mod test {
             let _ = context.insert(CLIENT_NAME, "client-1".to_string());
             let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
 
+            let error_id = Uuid::new_v4();
             let new_response = count_supergraph_errors(
                 SupergraphResponse::fake_builder()
                     .header("Accept", "application/json")
@@ -347,6 +349,7 @@ mod test {
                         graphql::Error::builder()
                             .message("You did a bad request.")
                             .extension_code("GRAPHQL_VALIDATION_FAILED")
+                            .apollo_id(error_id)
                             .build(),
                     ])
                     .build()
@@ -376,8 +379,8 @@ mod test {
             );
 
             assert_eq!(
-                new_response.context.get_json_value(COUNTED_ERRORS),
-                Some(json!({"GRAPHQL_VALIDATION_FAILED": 1}))
+                unwrap_from_context::<HashSet<Uuid>>(&new_response.context, COUNTED_ERRORS),
+                HashSet::from([error_id])
             )
         }
         .with_metrics()
@@ -403,13 +406,18 @@ mod test {
                 })
             });
 
-            let _ = context.insert(COUNTED_ERRORS, json!({"GRAPHQL_VALIDATION_FAILED": 1}));
+            let validation_error_id = Uuid::new_v4();
+            let custom_error_id = Uuid::new_v4();
+
+            let _ = context.insert(COUNTED_ERRORS, HashSet::from([validation_error_id]));
 
             let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
             let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
             let _ = context.insert(OPERATION_KIND, "query".to_string());
             let _ = context.insert(CLIENT_NAME, "client-1".to_string());
             let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+
 
             let new_response = count_supergraph_errors(
                 SupergraphResponse::fake_builder()
@@ -420,12 +428,14 @@ mod test {
                         graphql::Error::builder()
                             .message("You did a bad request.")
                             .extension_code("GRAPHQL_VALIDATION_FAILED")
+                            .apollo_id(validation_error_id)
                             .build(),
                     )
                     .error(
                         graphql::Error::builder()
                             .message("Custom error text")
                             .extension_code("CUSTOM_ERROR")
+                            .apollo_id(custom_error_id)
                             .build(),
                     )
                     .build()
@@ -471,8 +481,8 @@ mod test {
             );
 
             assert_eq!(
-                new_response.context.get_json_value(COUNTED_ERRORS),
-                Some(json!({"GRAPHQL_VALIDATION_FAILED": 1, "CUSTOM_ERROR": 1}))
+                unwrap_from_context::<HashSet<Uuid>>(&new_response.context, COUNTED_ERRORS),
+                HashSet::from([validation_error_id, custom_error_id])
             )
         }
         .with_metrics()
