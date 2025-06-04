@@ -350,23 +350,27 @@ fn make_label(
     transport: &Option<HttpJsonTransport>,
     entity_resolver: &Option<EntityResolver>,
 ) -> String {
-    let source = format!(".{}", source.as_deref().unwrap_or(""));
-    let batch = match entity_resolver {
-        Some(EntityResolver::TypeBatch) => "[BATCH] ",
-        _ => "",
-    };
-    let inline = transport
-        .is_none()
-        .then_some(" [INLINE]")
-        .unwrap_or_default();
-    let transport_label = transport
-        .as_ref()
-        .map(|t| format!(" {}", t.label()))
-        .unwrap_or_default();
-    format!(
-        "{}{}{}{} {}",
-        inline, batch, subgraph_name, source, transport_label
-    )
+    let mut label = String::new();
+
+    if transport.is_none() {
+        label.push_str("[INLINE] ");
+    }
+
+    if let Some(EntityResolver::TypeBatch) = entity_resolver {
+        label.push_str("[BATCH] ");
+    }
+
+    label.push_str(subgraph_name);
+
+    if let Some(source) = source {
+        label.push_str(&format!(".{}", source));
+    }
+
+    if let Some(transport) = transport {
+        label.push_str(&format!(" {}", transport.label()));
+    }
+
+    label
 }
 
 fn determine_entity_resolver(
