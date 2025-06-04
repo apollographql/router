@@ -66,6 +66,8 @@ pub(crate) enum Notification<K, V> {
         // To know if it has been created or re-used
         response_sender: ResponseSenderWithCreated<V>,
         heartbeat_enabled: bool,
+        // Useful for the metric we create
+        operation_name: Option<String>,
     },
     Subscribe {
         topic: K,
@@ -212,6 +214,7 @@ where
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
+        operation_name: Option<String>,
     ) -> Result<(Handle<K, V>, bool), NotifyError<K, V>> {
         let (sender, _receiver) =
             broadcast::channel(self.queue_size.unwrap_or(DEFAULT_MSG_CHANNEL_SIZE));
@@ -223,6 +226,7 @@ where
                 msg_sender: sender,
                 response_sender: tx,
                 heartbeat_enabled,
+                operation_name,
             })
             .await?;
 
@@ -617,8 +621,8 @@ async fn task<K, V>(
                         match message {
                             Notification::Unsubscribe { topic } => pubsub.unsubscribe(topic),
                             Notification::ForceDelete { topic } => pubsub.force_delete(topic),
-                            Notification::CreateOrSubscribe { topic,  msg_sender, response_sender, heartbeat_enabled } => {
-                                pubsub.subscribe_or_create(topic, msg_sender, response_sender, heartbeat_enabled);
+                            Notification::CreateOrSubscribe { topic,  msg_sender, response_sender, heartbeat_enabled, operation_name } => {
+                                pubsub.subscribe_or_create(topic, msg_sender, response_sender, heartbeat_enabled, operation_name);
                             }
                             Notification::Subscribe {
                                 topic,
@@ -697,14 +701,20 @@ struct Subscription<V> {
     msg_sender: broadcast::Sender<Option<V>>,
     heartbeat_enabled: bool,
     updated_at: Instant,
+    operation_name: Option<String>,
 }
 
 impl<V> Subscription<V> {
-    fn new(msg_sender: broadcast::Sender<Option<V>>, heartbeat_enabled: bool) -> Self {
+    fn new(
+        msg_sender: broadcast::Sender<Option<V>>,
+        heartbeat_enabled: bool,
+        operation_name: Option<String>,
+    ) -> Self {
         Self {
             msg_sender,
             heartbeat_enabled,
             updated_at: Instant::now(),
+            operation_name,
         }
     }
     // Update the updated_at value
@@ -751,16 +761,21 @@ where
         topic: K,
         sender: broadcast::Sender<Option<V>>,
         heartbeat_enabled: bool,
+        operation_name: Option<String>,
     ) {
         let existed = self
             .subscriptions
-            .insert(topic, Subscription::new(sender, heartbeat_enabled))
+            .insert(
+                topic,
+                Subscription::new(sender, heartbeat_enabled, operation_name.clone()),
+            )
             .is_some();
         if !existed {
             i64_up_down_counter!(
                 "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
-                1
+                1,
+                graphql.operation.name = operation_name.unwrap_or_default()
             );
         }
     }
@@ -785,6 +800,7 @@ where
         msg_sender: broadcast::Sender<Option<V>>,
         sender: ResponseSenderWithCreated<V>,
         heartbeat_enabled: bool,
+        operation_name: Option<String>,
     ) {
         match self.subscriptions.get(&topic) {
             Some(subscription) => {
@@ -795,7 +811,7 @@ where
                 ));
             }
             None => {
-                self.create_topic(topic, msg_sender.clone(), heartbeat_enabled);
+                self.create_topic(topic, msg_sender.clone(), heartbeat_enabled, operation_name);
 
                 let _ = sender.send((msg_sender.clone(), msg_sender.subscribe(), true));
             }
@@ -813,11 +829,12 @@ where
         #[allow(clippy::collapsible_if)]
         if topic_to_delete {
             tracing::trace!("deleting subscription from unsubscribe");
-            if self.subscriptions.remove(&topic).is_some() {
+            if let Some(sub) = self.subscriptions.remove(&topic) {
                 i64_up_down_counter!(
                     "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
-                    -1
+                    -1,
+                    graphql.operation.name = sub.operation_name.unwrap_or_default()
                 );
             }
         };
@@ -890,7 +907,8 @@ where
                 i64_up_down_counter!(
                     "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
-                    -1
+                    -1,
+                    graphql.operation.name = subscription.operation_name.unwrap_or_default()
                 );
                 if let Some(heartbeat_error_message) = &heartbeat_error_message {
                     let _ = subscription
@@ -920,7 +938,8 @@ where
             i64_up_down_counter!(
                 "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
-                -1
+                -1,
+                graphql.operation.name = sub.operation_name.unwrap_or_default()
             );
             let _ = sub.msg_sender.send(None);
         }
@@ -987,8 +1006,11 @@ impl RouterBroadcasts {
 mod tests {
 
     use futures::FutureExt;
+    use tokio::task;
     use tokio_stream::StreamExt;
     use uuid::Uuid;
+
+    use crate::metrics::FutureMetricsExt;
 
     use super::*;
 
@@ -998,9 +1020,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, false).await.unwrap();
+        let (handle1, created) = notify
+            .create_or_subscribe(topic_1, false, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, false).await.unwrap();
+        let (_handle2, created) = notify
+            .create_or_subscribe(topic_2, false, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let handle_1_bis = notify.subscribe(topic_1).await.unwrap();
@@ -1037,9 +1065,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, true).await.unwrap();
+        let (handle1, created) = notify
+            .create_or_subscribe(topic_1, true, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, true).await.unwrap();
+        let (_handle2, created) = notify
+            .create_or_subscribe(topic_2, true, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let mut _handle_1_bis = notify.subscribe(topic_1).await.unwrap();
@@ -1075,6 +1109,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_subscribe_and_delete_metrics() {
+        async {
+            let mut notify = Notify::builder().build();
+            let topic_1 = Uuid::new_v4();
+            let topic_2 = Uuid::new_v4();
+
+            let (handle1, created) = notify
+                .create_or_subscribe(topic_1, true, Some("TestSubscription".to_string()))
+                .await
+                .unwrap();
+            assert!(created);
+            let (_handle2, created) = notify
+                .create_or_subscribe(topic_2, true, Some("TestSubscriptionBis".to_string()))
+                .await
+                .unwrap();
+            assert!(created);
+
+            println!("assert");
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+
+            let mut _handle_1_bis = notify.subscribe(topic_1).await.unwrap();
+            let mut _handle_1_other = notify.subscribe(topic_1).await.unwrap();
+            let mut cloned_notify = notify.clone();
+            let mut handle = cloned_notify.subscribe(topic_1).await.unwrap().into_sink();
+            handle
+                .send_sync(serde_json_bytes::json!({"test": "ok"}))
+                .unwrap();
+            drop(handle);
+            assert!(notify.exist(topic_1).await.unwrap());
+            drop(_handle_1_bis);
+            drop(_handle_1_other);
+
+            notify.try_delete(topic_1).unwrap();
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+
+            let subscriptions_nb = notify.debug().await.unwrap();
+            assert_eq!(subscriptions_nb, 1);
+
+            assert!(!notify.exist(topic_1).await.unwrap());
+
+            notify.force_delete(topic_1).await.unwrap();
+
+            let mut handle1 = handle1.into_stream();
+            let new_msg = handle1.next().await.unwrap();
+            assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
+            assert!(handle1.next().await.is_none());
+            assert!(notify.exist(topic_2).await.unwrap());
+            notify.try_delete(topic_2).unwrap();
+
+            let subscriptions_nb = notify.debug().await.unwrap();
+            assert_eq!(subscriptions_nb, 0);
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn it_test_ttl() {
         let mut notify = Notify::builder()
             .ttl(Duration::from_millis(300))
@@ -1083,9 +1202,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, true).await.unwrap();
+        let (handle1, created) = notify
+            .create_or_subscribe(topic_1, true, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, true).await.unwrap();
+        let (_handle2, created) = notify
+            .create_or_subscribe(topic_2, true, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let handle_1_bis = notify.subscribe(topic_1).await.unwrap();
