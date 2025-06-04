@@ -931,11 +931,9 @@ impl QueryGraph {
                 field_definition_position,
                 ..
             } => {
-                let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
-                    tail_type_pos.clone().try_into()
-                else {
+                if CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone()).is_err() {
                     return Ok(IndexSet::default());
-                };
+                }
                 let schema = self.schema_by_source(source)?;
                 let mut new_possible_runtime_types = IndexSet::default();
                 for possible_runtime_type in possible_runtime_types {
