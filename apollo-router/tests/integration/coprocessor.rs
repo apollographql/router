@@ -210,6 +210,165 @@ async fn test_full_pipeline(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_supergraph_invalid_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "SupergraphRequest",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "SupergraphRequest",
+            "control": "continue",
+            "context": [
+                "not an object",
+            ],
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              supergraph:
+                request:
+                  method: true
+        "#))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 500);
+    let response: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(response["errors"][0]["extensions"]["code"].as_str().unwrap(), "INTERNAL_SERVER_ERROR");
+    assert!(response["errors"][0]["message"].as_str().unwrap().contains("coprocessor"));
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_execution_invalid_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "ExecutionRequest",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "ExecutionRequest",
+            "control": "continue",
+            "context": [
+                "not an object",
+            ],
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              execution:
+                request:
+                  method: true
+        "#))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 500);
+    let response: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(response["errors"][0]["extensions"]["code"].as_str().unwrap(), "INTERNAL_SERVER_ERROR");
+    assert!(response["errors"][0]["message"].as_str().unwrap().contains("coprocessor"));
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_execution_ignore_query_plan_in_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "ExecutionRequest",
+            "queryPlan": {
+                "root": {
+                    "kind": "Fetch",
+                },
+            },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "ExecutionRequest",
+            "control": "continue",
+            "queryPlan": {
+                "root": {
+                    "kind": "NotAPlanNodeType",
+                },
+            },
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              execution:
+                request:
+                  query_plan: true
+        "#))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This should succeed even though the "queryPlan" value can't be deserialized,
+    // because we don't attempt to deserialize it
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
