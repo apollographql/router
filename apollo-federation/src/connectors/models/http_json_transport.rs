@@ -149,8 +149,7 @@ impl HttpJsonTransport {
             self.connect_template.interpolate_uri(inputs)?;
         warnings.extend(
             connect_template_warnings
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(|warning| (ProblemLocation::ConnectUri, warning)),
         );
 
@@ -170,8 +169,7 @@ impl HttpJsonTransport {
         if let Some(source_path) = self.source_path.as_ref() {
             warnings.extend(
                 extend_path_from_expression(&mut path, source_path, inputs)?
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|error| (ProblemLocation::SourcePath, error)),
             );
         }
@@ -189,8 +187,7 @@ impl HttpJsonTransport {
         if let Some(connect_path) = self.connect_path.as_ref() {
             warnings.extend(
                 extend_path_from_expression(&mut path, connect_path, inputs)?
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|error| (ProblemLocation::ConnectPath, error)),
             );
         }
@@ -207,8 +204,7 @@ impl HttpJsonTransport {
         if let Some(source_query) = self.source_query_params.as_ref() {
             warnings.extend(
                 extend_query_from_expression(&mut query, source_query, inputs)?
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|error| (ProblemLocation::SourceQueryParams, error)),
             );
         }
@@ -222,8 +218,7 @@ impl HttpJsonTransport {
         if let Some(connect_query) = self.connect_query_params.as_ref() {
             warnings.extend(
                 extend_query_from_expression(&mut query, connect_query, inputs)?
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|error| (ProblemLocation::ConnectQueryParams, error)),
             );
         }
@@ -385,7 +380,7 @@ impl HeaderSource {
     }
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub enum OriginatingDirective {
     Source,
     Connect,

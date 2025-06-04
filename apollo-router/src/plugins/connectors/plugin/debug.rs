@@ -115,7 +115,7 @@ impl ConnectorContext {
                 .map(|item| {
                     // Items should be sorted so that they always come out in the same order
                     let mut problems = item.problems.clone();
-                    problems.sort_by_key(|(location, _)| location.clone());
+                    problems.sort_by_key(|(location, _)| *location);
 
                     json!({
                         "request": item.request,
@@ -214,7 +214,7 @@ impl
             |mut acc: HashMap<OriginatingDirective, Vec<(String, String)>>,
              (name, (source, directive))| {
                 if let HeaderSource::Value(value) = source {
-                    acc.entry(directive.clone())
+                    acc.entry(*directive)
                         .or_default()
                         .push((name.to_string(), value.to_string()));
                 }

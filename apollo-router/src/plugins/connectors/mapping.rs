@@ -66,7 +66,7 @@ pub(crate) fn aggregate_apply_to_errors_with_problem_locations(
         .flat_map(|(location, errors)| {
             aggregate_apply_to_errors(&errors)
                 .into_iter()
-                .map(move |problem| (location.clone(), problem))
+                .map(move |problem| (location, problem))
         })
         .collect()
 }
