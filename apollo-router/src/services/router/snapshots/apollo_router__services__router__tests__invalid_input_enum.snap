@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/services/router/tests.rs
+expression: response
+snapshot_kind: text
+---
+{
+  "errors": [
+    {
+      "message": "Value \"C\" does not exist in \"InputEnum\" enum.",
+      "locations": [
+        {
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
+    }
+  ]
+}

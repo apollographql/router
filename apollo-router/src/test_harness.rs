@@ -272,7 +272,7 @@ impl<'a> TestHarness<'a> {
 
     pub(crate) async fn build_common(
         self,
-    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
+    ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -297,7 +297,7 @@ impl<'a> TestHarness<'a> {
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
-                schema,
+                schema.clone(),
                 None,
                 None,
                 Some(builder.extra_plugins),
@@ -305,15 +305,42 @@ impl<'a> TestHarness<'a> {
             )
             .await?;
 
-        Ok((config, supergraph_creator))
+        Ok((config, schema, supergraph_creator))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
 
-        Ok(tower::service_fn(move |request| {
+        Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_creator.make();
+
+            // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
+            // none of those tests create an executable document to put it in the context, and the document cannot be created
+            // from inside the supergraph request fake builder, because it needs a schema matching the query.
+            // So while we are updating the tests to create a document manually, this here will make sure current
+            // tests will pass.
+            // During a regular request, `ParsedDocument` is already populated during query analysis.
+            // Some tests do populate the document, so we only do it if it's not already there.
+            let body = request.supergraph_request.body();
+            // If we don't have a query we definitely won't have a parsed document.
+            if let Some(query_str) = body.query.as_deref() {
+                let operation_name = body.operation_name.as_deref();
+                if !request.context.extensions().with_lock(|lock| {
+                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                }) {
+                    let doc = crate::spec::Query::parse_document(
+                        &query_str,
+                        operation_name,
+                        &schema,
+                        &config,
+                    )
+                    .expect("parse error in test");
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                    });
+                }
+            }
 
             async move { router.oneshot(request).await }
         })
@@ -322,7 +349,7 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
@@ -350,7 +377,7 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::router_factory::RouterFactory;
 
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
