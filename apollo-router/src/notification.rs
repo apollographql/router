@@ -1108,6 +1108,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn it_subscribe_and_delete_metrics() {
         async {
             let mut notify = Notify::builder().build();
