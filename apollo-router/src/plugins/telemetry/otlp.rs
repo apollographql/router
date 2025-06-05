@@ -72,11 +72,13 @@ pub(crate) enum TelemetryDataKind {
 // implementation unifies the processing of endpoints.
 //
 // The processing does the following:
-//  - If an endpoint is not specified, this results in `""`
+//  - If an endpoint is not specified, this results in `None`
 //  - If an endpoint is specified as "default", this results in `""`
-//  - If an endpoint has no scheme, we prepend "http://"
-//  - If an endpoint is not `""` and does not end in "/v1/<type>" or "/", then we append "/v1/<type>"
-//    (where type is either "metrics" or "traces")
+//  - If an endpoint is `""` or ends with a protocol appropriate suffix, we stop processing
+//  - If we continue processing:
+//      - If an endpoint has no scheme, we prepend "http://"
+//      - If our endpoint has no path, we append a protocol specific suffix
+//      - If it has a path, we return it unmodified
 //
 // Note: "" is the empty string and is thus interpreted by any opentelemetry sdk as indicating that
 // the default endpoint should be used.
@@ -87,36 +89,47 @@ pub(crate) enum TelemetryDataKind {
 fn process_endpoint(
     endpoint: &Option<String>,
     kind: &TelemetryDataKind,
-) -> Result<String, BoxError> {
-    let kind_s = match kind {
-        TelemetryDataKind::Metrics => "/v1/metrics",
-        TelemetryDataKind::Traces => "/v1/traces",
-    };
-
-    endpoint.as_ref().map_or(Ok("".to_string()), |v| {
-        let mut base = if v == "default" {
-            "".to_string()
-        } else {
-            v.to_string()
-        };
-        if base.is_empty() || base.ends_with(kind_s) || base.ends_with("/") {
-            Ok(base)
-        } else {
-            // We require a scheme on our endpoint or we can't parse it as a Uri.
-            // If we don't have one, prepend with "http://"
-            if !base.starts_with("http") {
-                base = format!("http://{base}");
-            }
-            let uri = http::Uri::try_from(&base)?;
-            // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
-            // We already checked that our base does not end with "/", so we must append `kind_s`
-            if uri.path() == "/" {
-                Ok(format!("{base}{kind_s}"))
+    protocol: &Protocol,
+) -> Result<Option<String>, BoxError> {
+    // If there is no endpoint, None, do no processing because the user must be relying on the
+    // router processing OTEL environment variables for endpoint.
+    // If there is an endpoint, Some(value), we must process that value.
+    endpoint
+        .as_ref()
+        .map(|v| {
+            let mut base = if v == "default" {
+                "".to_string()
             } else {
+                v.to_string()
+            };
+            // We only need to be concerned about paths for the HTTP protocol
+            let suffix = match protocol {
+                Protocol::Grpc => "/",
+                Protocol::Http => match kind {
+                    TelemetryDataKind::Metrics => "/v1/metrics",
+                    TelemetryDataKind::Traces => "/v1/traces",
+                },
+            };
+            if base.is_empty() || base.ends_with(suffix) || base.ends_with("/") {
                 Ok(base)
+            } else {
+                // We require a scheme on our endpoint or we can't parse it as a Uri.
+                // If we don't have one, prepend with "http://"
+                if !base.starts_with("http") {
+                    base = format!("http://{base}");
+                }
+                let uri = http::Uri::try_from(&base)?;
+                // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
+                // We already checked that our base does not end with "/", so we must append
+                // `suffix`
+                if uri.path() == "/" {
+                    Ok(format!("{base}{suffix}"))
+                } else {
+                    Ok(base)
+                }
             }
-        }
-    })
+        })
+        .transpose()
 }
 
 impl Config {
@@ -126,35 +139,44 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = process_endpoint(&self.endpoint, &kind)?;
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 // Figure out if we need to set tls config for our exporter
-                let tls_config_opt = if !endpoint.is_empty() {
-                    let tls_url = Uri::try_from(&endpoint)?;
-                    Some(self.grpc.clone().to_tls_config(&tls_url)?)
+                let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
+                    if !endpoint.is_empty() {
+                        let tls_url = Uri::try_from(endpoint)?;
+                        Some(self.grpc.clone().to_tls_config(&tls_url)?)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
 
                 let mut exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_endpoint(endpoint)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                if let Some(endpoint) = endpoint_opt {
+                    exporter = exporter.with_endpoint(endpoint);
+                }
                 if let Some(tls_config) = tls_config_opt {
                     exporter = exporter.with_tls_config(tls_config);
                 }
                 Ok(exporter.into())
             }
             Protocol::Http => {
-                let endpoint = process_endpoint(&self.endpoint, &kind)?;
-                let http = self.http.clone();
-                let exporter = opentelemetry_otlp::new_exporter()
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+                let headers = self.http.headers.clone();
+                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
                     .http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_endpoint(endpoint)
-                    .with_headers(http.headers)
-                    .into();
-                Ok(exporter)
+                    .with_headers(headers);
+                if let Some(endpoint) = endpoint_opt {
+                    exporter = exporter.with_endpoint(endpoint);
+                }
+                Ok(exporter.into())
             }
         }
     }
@@ -305,34 +327,57 @@ mod tests {
     fn test_process_endpoint() {
         // Traces
         let endpoint = None;
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
-        assert_eq!(Some("".to_string()), processed_endpoint);
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(None, processed_endpoint);
 
         let endpoint = Some("default".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(Some("".to_string()), processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/v1/traces".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("https://api.apm.com:433/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
         assert_eq!(
             Some("https://api.apm.com:433/v1/traces".to_string()),
             processed_endpoint
         );
 
         let endpoint = Some("https://api.apm.com:433/".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/traces".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("localhost:4317".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Traces).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("http://localhost:4317/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
         assert_eq!(
             Some("http://localhost:4317/v1/traces".to_string()),
             processed_endpoint
@@ -340,34 +385,57 @@ mod tests {
 
         // Metrics
         let endpoint = None;
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
-        assert_eq!(Some("".to_string()), processed_endpoint);
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(None, processed_endpoint);
 
         let endpoint = Some("default".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
         assert_eq!(Some("".to_string()), processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/v1/metrics".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("https://api.apm.com:433/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
         assert_eq!(
             Some("https://api.apm.com:433/v1/metrics".to_string()),
             processed_endpoint
         );
 
         let endpoint = Some("https://api.apm.com:433/".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/metrics".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("localhost:4317".to_string());
-        let processed_endpoint = process_endpoint(&endpoint, &TelemetryDataKind::Metrics).ok();
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("http://localhost:4317/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
         assert_eq!(
             Some("http://localhost:4317/v1/metrics".to_string()),
             processed_endpoint
