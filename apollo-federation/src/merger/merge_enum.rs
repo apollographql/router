@@ -1,6 +1,6 @@
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
@@ -172,8 +172,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(&value_pos.value_name)
                         })
                     },
                 );
@@ -192,7 +192,7 @@ impl Merger {
         }
         Ok(())
     }
-    
+
     fn add_join_enum_value(
         &mut self,
         sources: &Sources<&Component<EnumValueDefinition>>,
@@ -213,12 +213,12 @@ impl Merger {
                 let directive = self
                     .join_spec_definition
                     .enum_value_directive(&self.merged, join_spec_name)?;
-                let _ =value_pos.insert_directive(&mut self.merged, Node::new(directive));
+                let _ = value_pos.insert_directive(&mut self.merged, Node::new(directive));
             }
         }
         Ok(())
     }
-    
+
     // TODO: These error reporting functions are not yet fully implemented
     fn hint_on_inconsistent_output_enum_value(
         &mut self,
@@ -237,8 +237,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(value_name)
                         })
                     },
                 );
@@ -248,23 +248,23 @@ impl Merger {
     }
 }
 
-
 #[cfg(test)]
 pub(crate) mod tests {
     use apollo_compiler::Node;
+    use apollo_compiler::Schema;
     use apollo_compiler::name;
     use apollo_compiler::schema::ComponentOrigin;
-    use apollo_compiler::Schema;
 
     use super::*;
+    use crate::JOIN_VERSIONS;
     use crate::error::ErrorCode;
+    use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
     use crate::merger::merge::CompositionOptions;
+    use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-    use crate::schema::FederationSchema;
     use crate::subgraph::typestate::expand_schema;
-    use crate::JOIN_VERSIONS;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
@@ -310,6 +310,7 @@ pub(crate) mod tests {
             subgraphs: vec![],
             options: CompositionOptions::default(),
             names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
+            compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter: ErrorReporter::new(),
             merged: schema,
             subgraph_names_to_join_spec_name: [
@@ -324,12 +325,14 @@ pub(crate) mod tests {
             ]
             .into_iter()
             .collect(),
-            merged_federation_directive_names:Default::default(),
+            merged_federation_directive_names: Default::default(),
             enum_usages: Default::default(),
-            fields_with_from_context:Default::default(),
-            fields_with_override:Default::default(),
+            fields_with_from_context: Default::default(),
+            fields_with_override: Default::default(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition,
+            join_directive_identities: Default::default(),
+            schema_to_import_to_feature_url: Default::default(),
         })
     }
 

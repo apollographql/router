@@ -11,7 +11,6 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
-use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
@@ -24,13 +23,10 @@ use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
-use crate::schema::position::EnumTypeDefinitionPosition;
-use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
-use crate::JOIN_VERSIONS;
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
@@ -61,9 +57,11 @@ pub(crate) struct Merger {
     pub(crate) subgraph_names_to_join_spec_name: HashMap<String, Name>,
     pub(crate) merged_federation_directive_names: HashSet<String>,
     pub(crate) enum_usages: HashMap<String, EnumTypeUsage>,
-    pub(crate) fields_with_from_context: HashSet<String>,
-    pub(crate) fields_with_override: HashSet<String>,
+    pub(crate) fields_with_from_context: DirectiveReferencers,
+    pub(crate) fields_with_override: DirectiveReferencers,
     pub(crate) inaccessible_directive_name_in_supergraph: Option<Name>,
+    pub(crate) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(crate) join_directive_identities: HashSet<Identity>,
     pub(crate) join_spec_definition: &'static JoinSpecDefinition,
 }
 
@@ -122,13 +120,10 @@ impl Merger {
         self.subgraph_names_to_join_spec_name
             .get(subgraph_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Could not find join spec name for subgraph '{}'",
-                        subgraph_name
-                    ),
-                }
-                .into()
+                internal_error!(
+                    "Could not find join spec name for subgraph '{}'",
+                    subgraph_name
+                )
             })
     }
 
@@ -221,21 +216,6 @@ impl Merger {
 
     fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
         todo!("Prepare supergraph")
-    }
-
-    /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
-    pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
-        let subgraph_name = &self.names[subgraph_index];
-        let name = self
-            .subgraph_names_to_join_spec_name
-            .get(subgraph_name)
-            .ok_or_else(|| {
-                internal_error!(
-                    "Could not find join spec name for subgraph '{}'",
-                    subgraph_name
-                )
-            })?;
-        Ok(name)
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -392,7 +372,7 @@ impl Merger {
     ) {
         todo!("Implement record_applied_directives_to_merge")
     }
-    
+
     fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
         todo!("Implement is_inaccessible_directive_in_supergraph")
     }
@@ -484,34 +464,6 @@ impl Merger {
             message: detailed_message,
         };
         self.error_reporter.add_hint(hint);
-    }
-
-    // TODO: These error reporting functions are not yet fully implemented
-    fn hint_on_inconsistent_output_enum_value(
-        &mut self,
-        sources: &Sources<Node<EnumType>>,
-        dest_name: &Name,
-        value_name: &Name,
-    ) {
-        // As soon as we find a subgraph that has the type but not the member, we hint.
-        for enum_type in sources.values().flatten() {
-            if !enum_type.values.contains_key(value_name) {
-                self.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForOutputEnum,
-                    format!(
-                        "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
-                        value_name, dest_name, dest_name
-                    ),
-                    sources,
-                    |source| {
-                        source.as_ref().is_some_and(|enum_type| {
-                            enum_type.values.contains_key(value_name)
-                        })
-                    },
-                );
-                return;
-            }
-        }
     }
 }
 
