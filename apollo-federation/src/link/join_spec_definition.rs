@@ -396,6 +396,34 @@ impl JoinSpecDefinition {
         })
     }
 
+    pub(crate) fn union_member_directive(
+        &self,
+        schema: &FederationSchema,
+        subgraph_name: &Name,
+        member_name: &str,
+    ) -> Result<Directive, FederationError> {
+        let Ok(Some(name_in_schema)) =
+            self.directive_name_in_schema(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)
+        else {
+            bail!("Unexpectedly could not find unionMember directive in schema");
+        };
+        Ok(Directive {
+            name: name_in_schema,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
+                    value: Node::new(Value::Enum(subgraph_name.clone())),
+                }),
+                {
+                    Node::new(Argument {
+                        name: JOIN_MEMBER_ARGUMENT_NAME,
+                        value: Node::new(Value::String(member_name.to_owned())),
+                    })
+                },
+            ],
+        })
+    }
+
     pub(crate) fn enum_value_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,

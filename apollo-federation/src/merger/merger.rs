@@ -14,6 +14,7 @@ use apollo_compiler::validation::Valid;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -27,7 +28,7 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
-type Sources<T> = IndexMap<usize, Option<T>>;
+pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
 
 #[derive(Debug, Clone)]
 enum EnumTypeUsage {
@@ -66,16 +67,16 @@ pub(crate) struct CompositionOptions {
 pub(crate) struct Merger {
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
-    names: Vec<String>,
-    error_reporter: ErrorReporter,
-    merged: FederationSchema,
-    subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(crate) names: Vec<String>,
+    pub(crate) error_reporter: ErrorReporter,
+    pub(crate) merged: FederationSchema,
+    pub(crate) subgraph_names_to_join_spec_name: HashMap<String, Name>,
     merged_federation_directive_names: HashSet<String>,
     enum_usages: HashMap<String, EnumTypeUsage>,
     fields_with_from_context: HashSet<String>,
     fields_with_override: HashSet<String>,
     inaccessible_directive_name_in_supergraph: Option<Name>,
-    join_spec_definition: &'static JoinSpecDefinition,
+    pub(crate) join_spec_definition: &'static JoinSpecDefinition,
 }
 
 #[allow(unused)]
@@ -105,6 +106,21 @@ impl Merger {
             inaccessible_directive_name_in_supergraph: todo!(),
             join_spec_definition,
         })
+    }
+
+    /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
+    pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
+        let subgraph_name = &self.names[subgraph_index];
+        let name = self
+            .subgraph_names_to_join_spec_name
+            .get(subgraph_name)
+            .ok_or_else(|| {
+                internal_error!(
+                    "Could not find join spec name for subgraph '{}'",
+                    subgraph_name
+                )
+            })?;
+        Ok(name)
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -384,8 +400,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(&value_pos.value_name)
                         })
                     },
                 );
@@ -500,16 +516,44 @@ impl Merger {
         self.error_reporter.add_error(enhanced_error);
     }
 
-    // TODO: These error reporting functions are not yet fully implemented
-    fn report_mismatch_hint<T>(
+    pub(crate) fn report_mismatch_hint<T>(
         &mut self,
         code: HintCode,
         message: String,
-        _sources: &Sources<T>,
-        _accessor: impl Fn(&Option<T>) -> &str,
+        sources: &Sources<T>,
+        accessor: impl Fn(&Option<T>) -> bool,
     ) {
-        // Stub implementation - just print the hint for now
-        println!("HINT [{}]: {}", code.definition().code(), message);
+        // Build detailed hint message showing which subgraphs have/don't have the element
+        let mut has_subgraphs = Vec::new();
+        let mut missing_subgraphs = Vec::new();
+
+        for (&idx, source) in sources.iter() {
+            let subgraph_name = if idx < self.names.len() {
+                &self.names[idx]
+            } else {
+                "unknown"
+            };
+            let result = accessor(source);
+            if result {
+                has_subgraphs.push(subgraph_name);
+            } else {
+                missing_subgraphs.push(subgraph_name);
+            }
+        }
+
+        let detailed_message = format!(
+            "{}defined in {} but not in {}",
+            message,
+            has_subgraphs.join(", "),
+            missing_subgraphs.join(", ")
+        );
+
+        // Add the hint to the error reporter
+        let hint = CompositionHint {
+            code: code.definition().code().to_string(),
+            message: detailed_message,
+        };
+        self.error_reporter.add_hint(hint);
     }
 
     // TODO: These error reporting functions are not yet fully implemented
@@ -530,8 +574,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(value_name)
                         })
                     },
                 );
@@ -551,8 +595,7 @@ pub(crate) fn merge_subgraphs(
 }
 
 #[cfg(test)]
-mod tests {
-    use apollo_compiler::Name;
+pub(crate) mod tests {
     use apollo_compiler::Node;
     use apollo_compiler::name;
     use apollo_compiler::schema::ComponentOrigin;
@@ -580,7 +623,7 @@ mod tests {
 
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
-    fn create_test_merger() -> Result<Merger, FederationError> {
+    pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
         let join_spec_definition = JOIN_VERSIONS
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
@@ -594,6 +637,7 @@ mod tests {
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
             
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
             "#,
                 "",
             )
