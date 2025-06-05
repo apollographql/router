@@ -375,34 +375,25 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-8. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `main`**
+8. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI**
 
-9. After the PR has merged to `main`, pull `main` to your local terminal, and Git tag & push the release:
+9. After the PR has been approved, add the Git tag & push the release:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
     ```
-    git checkout main && \
+    git checkout "${APOLLO_ROUTER_RELEASE_VERSION}" && \
     git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" && \
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}" -m "${APOLLO_ROUTER_RELEASE_VERSION}" && \
     git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
+11. Resolve any merge conflicts 
 
-10. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, **do not squash or rebase**):
-
-    ```
-    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
-    ```
-
-11. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
+12. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
 
     ```
-    APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
-    test -n "${APOLLO_RECONCILE_PR_URL}" && \
-      gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --auto "${APOLLO_RECONCILE_PR_URL}"
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
-
-12. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `dev`**
 
 13. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.
 
