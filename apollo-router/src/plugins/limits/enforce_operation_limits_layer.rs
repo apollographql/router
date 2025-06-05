@@ -3,20 +3,20 @@ use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use tower::Service;
 
+use super::operation_limits::OperationLimits;
 use crate::graphql;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 /// Layer that enforces operation limits and rejects GraphQL requests that exceed the limits.
 ///
 /// `ParsedDocument` must be available in the context. Otherwise, no limits are enforced.
 pub(crate) struct EnforceOperationLimitsLayer {
-    config: crate::plugins::limits::Config,
+    config: super::Config,
 }
 
 impl EnforceOperationLimitsLayer {
-    pub(crate) fn new(config: &crate::plugins::limits::Config) -> Self {
+    pub(crate) fn new(config: &super::Config) -> Self {
         Self {
             config: config.clone(),
         }
@@ -40,7 +40,7 @@ impl<S> tower::Layer<S> for EnforceOperationLimitsLayer {
 #[derive(Clone)]
 pub(crate) struct EnforceOperationLimits<S> {
     inner: S,
-    config: crate::plugins::limits::Config,
+    config: super::Config,
 }
 
 impl<S> Service<supergraph::Request> for EnforceOperationLimits<S>
@@ -69,7 +69,7 @@ where
 
         if let Some(document) = document {
             let mut query_metrics = OperationLimits::default();
-            let result = crate::spec::operation_limits::check(
+            let result = super::operation_limits::check(
                 &mut query_metrics,
                 &self.config,
                 &document.executable,

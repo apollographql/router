@@ -54,7 +54,7 @@ impl OperationLimits<bool> {
 }
 
 /// Returns which limits are exceeded by the given query, if any
-pub(crate) fn check(
+pub(super) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
     config_limits: &crate::plugins::limits::Config,
     document: &ExecutableDocument,

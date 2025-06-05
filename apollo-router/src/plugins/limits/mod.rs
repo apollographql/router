@@ -1,5 +1,7 @@
+mod enforce_operation_limits_layer;
 mod layer;
 mod limited;
+mod operation_limits;
 
 use std::error::Error;
 
@@ -18,9 +20,9 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::limits::enforce_operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
-use crate::services::layers::enforce_operation_limits::EnforceOperationLimitsLayer;
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -148,6 +150,9 @@ impl Default for Config {
         }
     }
 }
+
+// Pub for use in telemetry.
+pub(crate) use operation_limits::OperationLimits;
 
 struct LimitsPlugin {
     config: Config,
