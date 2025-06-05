@@ -27,7 +27,7 @@ pub(crate) fn validate_from_context_directives(
     let from_context_rules: Vec<Box<dyn FromContextValidator>> = vec![
         Box::new(DenyOnAbstractType::new()),
         Box::new(DenyOnInterfaceImplementation::new()),
-        Box::new(RequireContextExists::new(context_map.clone())),
+        Box::new(RequireContextExists::new(context_map)),
         Box::new(RequireResolvableKey::new()),
         Box::new(DenyDefaultValues::new()),
         Box::new(DenyOnDirectiveDefinition::new()),
@@ -751,17 +751,17 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
 }
 
 /// Validator that checks if the referenced context exists
-struct RequireContextExists {
-    context_map: HashMap<String, Vec<Name>>,
+struct RequireContextExists<'a> {
+    context_map: &'a HashMap<String, Vec<Name>>,
 }
 
-impl RequireContextExists {
-    fn new(context_map: HashMap<String, Vec<Name>>) -> Self {
+impl<'a> RequireContextExists<'a> {
+    fn new(context_map: &'a HashMap<String, Vec<Name>>) -> Self {
         Self { context_map }
     }
 }
 
-impl FromContextValidator for RequireContextExists {
+impl<'a> FromContextValidator for RequireContextExists<'a> {
     fn validate(
         &self,
         target: &FieldArgumentDefinitionPosition,
