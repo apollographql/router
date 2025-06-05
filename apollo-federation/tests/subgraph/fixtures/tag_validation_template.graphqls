@@ -27,3 +27,11 @@ enum TestEnum @tag(name: "test{symbol}") {
   VALUE1 @tag(name: "test{symbol}")
   VALUE2
 }
+
+input TestInput @tag(name: "test{symbol}") {
+  inputField1: String @tag(name: "test{symbol}")
+  inputField2: Int
+  inputField3: Boolean @tag(name: "{symbol}test")
+}
+
+scalar CustomScalar @tag(name: "test{symbol}")
