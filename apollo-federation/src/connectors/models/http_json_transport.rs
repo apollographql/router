@@ -150,7 +150,7 @@ impl HttpJsonTransport {
         warnings.extend(
             connect_template_warnings
                 .into_iter()
-                .map(|warning| (ProblemLocation::ConnectUri, warning)),
+                .map(|warning| (ProblemLocation::ConnectUrl, warning)),
         );
 
         if let Some(source_uri) = &self.source_url {

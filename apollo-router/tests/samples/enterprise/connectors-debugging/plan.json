@@ -42,12 +42,12 @@
                     ["x-invalid-from-source", ""]
                   ],
                   "body": null,
-                  "sourceUri": {
+                  "sourceUrl": {
                     "base": "http://127.0.0.1:61000/",
                     "path": null,
                     "queryParams": "invalidFromSource: $config.abcd"
                   },
-                  "connectUri": {
+                  "connectUrl": {
                     "base": "/posts/{$args.id}?invalidInConnectUri={$config.aaa}",
                     "path": null,
                     "queryParams": "invalidFromConnect: $config.abcdef"
@@ -88,7 +88,7 @@
                     "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
                   },
                   {
-                    "location": "ConnectUri",
+                    "location": "ConnectUrl",
                     "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
                   },
                   {
@@ -122,12 +122,12 @@
                     ["x-invalid-from-source", ""]
                   ],
                   "body": null,
-                  "sourceUri": {
+                  "sourceUrl": {
                     "base": "http://127.0.0.1:61000/",
                     "path": null,
                     "queryParams": "invalidFromSource: $config.abcd"
                   },
-                  "connectUri": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
+                  "connectUrl": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
                   "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
                   "connectHeaders": null
                 },
@@ -224,12 +224,12 @@
                     ["x-invalid-from-source", ""]
                   ],
                   "body": null,
-                  "sourceUri": {
+                  "sourceUrl": {
                     "base": "http://127.0.0.1:61000/",
                     "path": null,
                     "queryParams": "invalidFromSource: $config.abcd"
                   },
-                  "connectUri": { "base": "/broken", "path": null, "queryParams": null },
+                  "connectUrl": { "base": "/broken", "path": null, "queryParams": null },
                   "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
                   "connectHeaders": null
                 },

@@ -185,8 +185,8 @@ pub(crate) struct ConnectorDebugHttpRequest {
     method: String,
     headers: Vec<(String, String)>,
     body: Option<ConnectorDebugBody>,
-    source_uri: Option<ConnectorDebugUri>,
-    connect_uri: ConnectorDebugUri,
+    source_url: Option<ConnectorDebugUri>,
+    connect_url: ConnectorDebugUri,
     source_headers: Option<Vec<(String, String)>>,
     connect_headers: Option<Vec<(String, String)>>,
 }
@@ -244,7 +244,7 @@ impl
                     result: selection.result,
                 }),
             }),
-            source_uri: if transport.source_url.is_some()
+            source_url: if transport.source_url.is_some()
                 || transport.source_path.is_some()
                 || transport.source_query_params.is_some()
             {
@@ -256,7 +256,7 @@ impl
             } else {
                 None
             },
-            connect_uri: ConnectorDebugUri {
+            connect_url: ConnectorDebugUri {
                 base: Some(transport.connect_template.clone().to_string()),
                 path: transport.connect_path.clone().map(|u| u.to_string()),
                 query_params: transport
