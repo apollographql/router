@@ -28,5 +28,3 @@ pub struct Response {
 
 #[derive(Debug, Error)]
 enum Error {}
-
-type FetchService = BoxCloneService<Request, Response, BoxError>;

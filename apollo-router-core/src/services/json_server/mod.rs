@@ -22,5 +22,3 @@ pub struct Response {
 
 #[derive(Debug, Error)]
 enum Error {}
-
-type JsonServerService = BoxCloneService<Request, Response, BoxError>;

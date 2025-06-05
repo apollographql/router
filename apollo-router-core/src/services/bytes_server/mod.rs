@@ -22,5 +22,3 @@ pub struct Response {
 
 #[derive(Debug, Error)]
 enum Error {}
-
-type BytesServerService = BoxCloneService<Request, Response, BoxError>;
