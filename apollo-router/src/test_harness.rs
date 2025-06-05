@@ -330,7 +330,7 @@ impl<'a> TestHarness<'a> {
                     lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
                 }) {
                     let doc = crate::spec::Query::parse_document(
-                        &query_str,
+                        query_str,
                         operation_name,
                         &schema,
                         &config,
