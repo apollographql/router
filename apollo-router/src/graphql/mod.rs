@@ -74,6 +74,7 @@ pub struct Error {
     pub extensions: Object,
 
     /// A unique identifier for this error
+    #[serde(default = "generate_uuid", skip_serializing)]
     apollo_id: Uuid,
 }
 // Implement getter and getter_mut to not use pub field directly
@@ -252,6 +253,12 @@ impl Error {
     pub fn apollo_id(&self) -> Uuid {
         self.apollo_id
     }
+}
+
+/// Generate a random Uuid. For use in generating a default [`Error:apollo_id`] when not supplied
+/// during deserialization.
+fn generate_uuid() -> Uuid {
+    Uuid::new_v4()
 }
 
 /// GraphQL spec require that both "line" and "column" are positive numbers.
