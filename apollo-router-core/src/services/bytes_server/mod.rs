@@ -4,8 +4,8 @@ use bytes::Bytes;
 use futures::Stream;
 use std::pin::Pin;
 use thiserror::Error;
-use tower::util::BoxCloneService;
 use tower::BoxError;
+use tower::util::BoxCloneService;
 
 #[derive(Clone)]
 pub struct Request {
@@ -23,4 +23,4 @@ pub struct Response {
 #[derive(Debug, Error)]
 enum Error {}
 
-type BytesServerService = BoxCloneService<Request, Result<Response, Error>, BoxError>;
+type BytesServerService = BoxCloneService<Request, Response, BoxError>;

@@ -1,10 +1,10 @@
+use crate::services::context::Context;
 use bytes::Bytes;
 use futures::Stream;
-use services::context::Context;
 use std::pin::Pin;
 use thiserror::Error;
-use tower::util::BoxCloneService;
 use tower::BoxError;
+use tower::util::BoxCloneService;
 
 #[derive(Clone)]
 pub struct Request {
@@ -22,4 +22,4 @@ pub struct Response {
 #[derive(Debug, Error)]
 enum Error {}
 
-type BytesClientService = BoxCloneService<Request, Result<Response, Error>, BoxError>;
+type BytesClientService = BoxCloneService<Request, Response, BoxError>;

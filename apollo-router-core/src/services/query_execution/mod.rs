@@ -6,8 +6,8 @@ use services::JsonValue;
 use std::collections::HashMap;
 use std::pin::Pin;
 use thiserror::Error;
-use tower::util::BoxCloneService;
 use tower::BoxError;
+use tower::util::BoxCloneService;
 
 pub struct Request {
     pub context: Context,
@@ -26,4 +26,4 @@ pub struct Response {
 #[derive(Debug, Error)]
 enum Error {}
 
-type QueryPlannerService = BoxCloneService<Request, Result<Response, Error>, BoxError>;
+type QueryExecutionService = BoxCloneService<Request, Response, BoxError>;

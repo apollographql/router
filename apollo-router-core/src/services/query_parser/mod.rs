@@ -1,15 +1,14 @@
+use crate::services::context::Context;
 use apollo_compiler::ExecutableDocument;
 use serde_json::Value;
-use services::context::Context;
-use std::collections::HashMap;
 use thiserror::Error;
-use tower::util::BoxCloneService;
 use tower::BoxError;
+use tower::util::BoxCloneService;
 
 pub struct Request {
     pub context: Context,
     pub operation_name: Option<String>,
-    pub query: String,
+    pub query: Value,
 }
 
 pub struct Response {
@@ -19,6 +18,9 @@ pub struct Response {
 }
 
 #[derive(Debug, Error)]
-enum Error {}
+enum Error {
+    BackPressure,
+    Wrapped(BoxError),
+}
 
-type QueryParserService = BoxCloneService<Request, Result<Response, Error>, BoxError>;
+type QueryParserService = BoxCloneService<Request, Response, BoxError>;
