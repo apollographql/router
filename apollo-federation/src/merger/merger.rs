@@ -48,21 +48,21 @@ pub(crate) struct CompositionOptions {
 
 #[allow(unused)]
 pub(crate) struct Merger {
-    pub(crate) subgraphs: Vec<Subgraph<Validated>>,
-    pub(crate) options: CompositionOptions,
-    pub(crate) compose_directive_manager: ComposeDirectiveManager,
-    pub(crate) names: Vec<String>,
-    pub(crate) error_reporter: ErrorReporter,
-    pub(crate) merged: FederationSchema,
-    pub(crate) subgraph_names_to_join_spec_name: HashMap<String, Name>,
-    pub(crate) merged_federation_directive_names: HashSet<String>,
-    pub(crate) enum_usages: HashMap<String, EnumTypeUsage>,
-    pub(crate) fields_with_from_context: DirectiveReferencers,
-    pub(crate) fields_with_override: DirectiveReferencers,
-    pub(crate) inaccessible_directive_name_in_supergraph: Option<Name>,
-    pub(crate) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
-    pub(crate) join_directive_identities: HashSet<Identity>,
-    pub(crate) join_spec_definition: &'static JoinSpecDefinition,
+    pub(in crate::merger) subgraphs: Vec<Subgraph<Validated>>,
+    pub(in crate::merger) options: CompositionOptions,
+    pub(in crate::merger) compose_directive_manager: ComposeDirectiveManager,
+    pub(in crate::merger) names: Vec<String>,
+    pub(in crate::merger) error_reporter: ErrorReporter,
+    pub(in crate::merger) merged: FederationSchema,
+    pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
+    pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
+    pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
+    pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
+    pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
 }
 
 #[allow(unused)]
