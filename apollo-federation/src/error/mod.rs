@@ -1987,7 +1987,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
         "INVALID_TAG_NAME".to_owned(),
         "Argument name application of @tag is invalid.".to_owned(),
         Some(ErrorCodeMetadata {
-            added_in: "2.8.0", // TODO: What should this be? 2.12?
+            added_in: "2.0.0",
             replaces: &[],
         }),
     )
