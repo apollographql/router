@@ -1,0 +1,28 @@
+We are working in the apollo-router-core directory only for now. Ignore all other directoreius
+Use hexagonal architecture to allow testing and to not expose client details to callers.
+Traits and interfaces should generally be in a mod.rs and then implementations should be in sub modules. Submodules should be in their own directories because they will require a test.rs.
+Always separate tests and test helpers out into a separate tests.rs file that are adjacent to a mod.rs
+Traits should not expose client types. Instead create a new type and implement From.
+Traits should avoid exposing nested traits in return types, the only exception is to return Self.
+Mocking should be avoided if possible but if it must be used to make code testable then mry should be used NOT mockall.
+Traits should be annotated with `#[cfg_attr(test, mry::mry)]`.
+When you need to write tests that are applicable to multiple implementations make sure to have a reference implementation and use build.rs to duplicate it for the other implementations. This way it's easy for the tests to be run in an IDE. Remember that tests will be generated to the target directory, so don't forget to examine generated sourcode when correcting errors.
+Make sure to use the bon library for builders
+When diagnosing test failures run them one at a time
+To create octocrab model types for fake requests/responses use serde to hydrate json
+Never declare top level lifetimes in a trait only on individual functions.
+Always externalize test fixtures, use include_str! to bring them in. Use yaml where possible.
+Each trait should have an Error enum in the same mod.rs.
+Never make errors Clone
+Don't make too many code changes without making the code compile, break up refactorings into small chunks.
+Check the crates directory to make sure you are not implementing a new crate that already exists
+When adding a crate make sure to use the latest version from the internet also check to see if the workspace dependency is already specified.
+Use rust edition = "2024"
+Do not create tests that only exercise mocks of traits. There is no benefit to this.
+Whenever you create a tests.rs file you must use
+```rust
+#[cfg(test)]
+mod test
+```
+in the related mod.rs file.
+Keep functions small, single purpose and testable.

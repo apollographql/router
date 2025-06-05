@@ -18,9 +18,6 @@ pub struct Response {
 }
 
 #[derive(Debug, Error)]
-enum Error {
-    BackPressure,
-    Wrapped(BoxError),
-}
+enum Error {}
 
 type QueryParserService = BoxCloneService<Request, Response, BoxError>;

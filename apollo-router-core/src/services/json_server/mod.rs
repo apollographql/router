@@ -8,7 +8,6 @@ use thiserror::Error;
 use tower::BoxError;
 use tower::util::BoxCloneService;
 
-#[derive(Clone)]
 pub struct Request {
     pub context: Context,
     pub body: JsonValue,

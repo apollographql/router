@@ -7,13 +7,13 @@ use tower::util::BoxCloneService;
 use tower::{BoxError, Service};
 
 pub struct Request {
-    pub context: HashableAnyMap,
+    pub context: Context,
     pub operation_name: Option<String>,
     pub query: ExecutableDocument,
 }
 
 pub struct Response {
-    pub context: HashableAnyMap,
+    pub context: Context,
     pub operation_name: Option<String>,
 
     // TODO maybe wrap to make immutable

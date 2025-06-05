@@ -1,8 +1,8 @@
+use crate::services::JsonValue;
 use crate::services::context::Context;
 use apollo_federation::query_plan::QueryPlan;
 use futures::Stream;
 use serde_json::Value;
-use services::JsonValue;
 use std::collections::HashMap;
 use std::pin::Pin;
 use thiserror::Error;
