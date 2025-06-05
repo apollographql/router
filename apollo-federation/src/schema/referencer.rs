@@ -200,8 +200,8 @@ impl DirectiveReferencers {
     }
 
     pub(crate) fn extend(&mut self, other: &Self) {
-        if let Some(schema) = other.schema.clone() {
-            self.schema = Some(schema);
+        if let Some(schema) = &other.schema {
+            self.schema = Some(schema.clone());
         }
         self.scalar_types.extend(other.scalar_types.iter().cloned());
         self.object_types.extend(other.object_types.iter().cloned());
