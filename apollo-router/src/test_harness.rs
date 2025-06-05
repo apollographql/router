@@ -315,13 +315,11 @@ impl<'a> TestHarness<'a> {
         Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_creator.make();
 
-            // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
-            // none of those tests create an executable document to put it in the context, and the document cannot be created
-            // from inside the supergraph request fake builder, because it needs a schema matching the query.
-            // So while we are updating the tests to create a document manually, this here will make sure current
-            // tests will pass.
-            // During a regular request, `ParsedDocument` is already populated during query analysis.
-            // Some tests do populate the document, so we only do it if it's not already there.
+            // The supergraph service expects a ParsedDocument in the context. In the real world,
+            // that is always populated by the router service. For the testing harness, however,
+            // tests normally craft a supergraph request manually, and it's inconvenient to
+            // manually populate the ParsedDocument. Instead of doing it many different ways
+            // over and over in different tests, we simulate that part of the router service here.
             let body = request.supergraph_request.body();
             // If we don't have a query we definitely won't have a parsed document.
             if let Some(query_str) = body.query.as_deref() {
