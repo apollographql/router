@@ -1945,7 +1945,7 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
 static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INVALID_TAG_NAME".to_owned(),
-        "Argument name application of @tag is invalid.".to_owned(),
+        "Invalid value for argument \"name\" in application of @tag.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.0.0",
             replaces: &[],
