@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::connectors::ConnectId;
 use parking_lot::Mutex;
 
 /// Key to access request limits for a connector

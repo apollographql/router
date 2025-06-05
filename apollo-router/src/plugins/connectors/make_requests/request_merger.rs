@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::sources::connect::Namespace;
+use apollo_federation::connectors::Namespace;
 use http::response::Parts;
 use serde_json::Value as JsonValue;
 use serde_json_bytes::ByteString;

@@ -706,7 +706,6 @@ impl RouterService {
         //
         // Note: If we enter this loop, then we must be processing a batch.
         for (index, graphql_request) in ok_results_it.enumerate() {
-            // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
             // XXX Lose some private entries, is that ok?
