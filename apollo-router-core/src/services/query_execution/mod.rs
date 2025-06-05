@@ -1,5 +1,5 @@
+use crate::Context;
 use crate::json::JsonValue;
-use crate::services::context::Context;
 use apollo_federation::query_plan::QueryPlan;
 use futures::Stream;
 use serde_json::Value;

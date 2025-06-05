@@ -1,4 +1,4 @@
-use crate::services::context::Context;
+use crate::Context;
 use apollo_compiler::ExecutableDocument;
 use serde_json::Value;
 use thiserror::Error;

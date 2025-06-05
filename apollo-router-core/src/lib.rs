@@ -3,6 +3,7 @@ use tower::{Service, ServiceBuilder};
 
 mod context;
 mod json;
+mod layers;
 mod services;
 
 pub use context::Context;

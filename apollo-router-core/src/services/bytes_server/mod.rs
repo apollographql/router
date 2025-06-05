@@ -1,4 +1,4 @@
-use crate::services::context::Context;
+use crate::Context;
 use apollo_federation::query_plan::QueryPlan;
 use bytes::Bytes;
 use futures::Stream;

@@ -1,6 +1,5 @@
 pub mod bytes_client;
 pub mod bytes_server;
-pub mod context;
 pub mod fetch;
 pub mod http_client;
 pub mod http_server;

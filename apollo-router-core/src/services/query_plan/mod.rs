@@ -1,4 +1,4 @@
-use crate::services::context::Context;
+use crate::Context;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::QueryPlan;
 use std::collections::{HashMap, HashSet};
