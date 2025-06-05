@@ -925,71 +925,9 @@ async fn cache_lookup_root(
     mut request: subgraph::Request,
     supergraph_schema: Arc<Valid<Schema>>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
+    let (invalidation_cache_keys_propagated, invalidation_cache_keys) =
+        get_invalidation_root_keys_from_schema(&request, supergraph_schema)?;
     let body = request.subgraph_request.body_mut();
-
-    // Get directives cacheKey for each root fields
-    let mut cache_keys = Vec::new();
-    if let Some(executable_document) = &request.executable_document {
-        let root_operation_fields = executable_document
-            .operations
-            .iter()
-            .next()
-            .unwrap()
-            .root_fields(executable_document); //FIXME: unwrap
-        let root_query_type = supergraph_schema
-            .root_operation(apollo_compiler::ast::OperationType::Query)
-            .unwrap(); // FIXME: get rid of unwrap
-        let root_object_type = supergraph_schema
-            .get_object(root_query_type.as_str())
-            .unwrap(); //FIXME
-
-        cache_keys = root_operation_fields
-            .map(|field| {
-                let field_def = root_object_type.fields.get(&field.name).unwrap(); //FIXME
-                let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
-                    let cascade = dir
-                        .argument_by_name("format", &supergraph_schema)
-                        .ok()
-                        .and_then(|arg| match &**arg {
-                            apollo_compiler::ast::Value::Boolean(cascade) => Some(*cascade),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-                    Some((
-                        cascade,
-                        dir.argument_by_name("format", &supergraph_schema)
-                            .ok()
-                            .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())?,
-                    ))
-                });
-                let args: serde_json_bytes::Map<ByteString, Value> = field
-                    .arguments
-                    .iter()
-                    .map(|arg| {
-                        let name = arg.name.clone();
-                        let value = get_arg_value(&arg.value, &body.variables);
-
-                        (name.to_string().into(), value)
-                    })
-                    .collect();
-                let mut vars = IndexMap::default();
-                vars.insert("$args".to_string(), Value::Object(args));
-                // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
-                cache_keys
-                    .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars)?)))
-                    .collect::<Result<Vec<(bool, String)>, apollo_federation::connectors::Error>>()
-            })
-            .collect::<Result<Vec<Vec<(bool, String)>>, apollo_federation::connectors::Error>>()?;
-    }
-    // I transform it to HashSet<String> because we don't support split root fields operations so far
-    let invalidation_cache_keys_propagated: HashSet<String> = cache_keys
-        .iter()
-        .flatten()
-        .filter_map(|(cascade, cache_key)| cascade.then_some(cache_key.clone()))
-        .collect();
-    let invalidation_cache_keys: HashSet<String> =
-        cache_keys.into_iter().flatten().map(|(_, k)| k).collect();
-
     println!(
         "Invalidation keys for root fields in subgraph {name:?}:\n{invalidation_cache_keys:#?}\n========"
     );
@@ -1073,6 +1011,87 @@ async fn cache_lookup_root(
         }
         Err(_) => Ok(ControlFlow::Continue((request, key, invalidation_keys))),
     }
+}
+
+fn get_invalidation_root_keys_from_schema(
+    request: &subgraph::Request,
+    supergraph_schema: Arc<Valid<Schema>>,
+) -> Result<(HashSet<String>, HashSet<String>), anyhow::Error> {
+    let mut cache_keys = Vec::new();
+    // TODO: should we throw an error ?
+    if let Some(executable_document) = &request.executable_document {
+        let root_operation_fields = executable_document
+            .operations
+            .iter()
+            .next()
+            .unwrap()
+            .root_fields(executable_document); //FIXME: unwrap
+        let root_query_type = supergraph_schema
+            .root_operation(apollo_compiler::ast::OperationType::Query)
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "cannot get the root operation from supergraph schema".to_string(),
+            })?;
+        let root_object_type = supergraph_schema
+            .get_object(root_query_type.as_str())
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "cannot get the root query type from supergraph schema".to_string(),
+            })?;
+
+        cache_keys = root_operation_fields
+            .map(|field| {
+                let field_def = root_object_type.fields.get(&field.name).ok_or_else(|| {
+                    FetchError::MalformedRequest {
+                        reason: format!(
+                            "cannot get field name {:?} from supergraph schema",
+                            field.name
+                        ),
+                    }
+                })?;
+                let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
+                    let cascade = dir
+                        .argument_by_name("format", &supergraph_schema)
+                        .ok()
+                        .and_then(|arg| match &**arg {
+                            apollo_compiler::ast::Value::Boolean(cascade) => Some(*cascade),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Some((
+                        cascade,
+                        dir.argument_by_name("format", &supergraph_schema)
+                            .ok()
+                            .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())?,
+                    ))
+                });
+                let args: serde_json_bytes::Map<ByteString, Value> = field
+                    .arguments
+                    .iter()
+                    .map(|arg| {
+                        let name = arg.name.clone();
+                        let value =
+                            get_arg_value(&arg.value, &request.subgraph_request.body().variables);
+
+                        (name.to_string().into(), value)
+                    })
+                    .collect();
+                let mut vars = IndexMap::default();
+                vars.insert("$args".to_string(), Value::Object(args));
+                // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
+                cache_keys
+                    .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars)?)))
+                    .collect::<Result<Vec<(bool, String)>, anyhow::Error>>()
+            })
+            .collect::<Result<Vec<Vec<(bool, String)>>, anyhow::Error>>()?;
+    }
+    let invalidation_cache_keys_propagated: HashSet<String> = cache_keys
+        .iter()
+        .flatten()
+        .filter_map(|(cascade, cache_key)| cascade.then_some(cache_key.clone()))
+        .collect();
+    let invalidation_cache_keys: HashSet<String> =
+        cache_keys.into_iter().flatten().map(|(_, k)| k).collect();
+
+    Ok((invalidation_cache_keys_propagated, invalidation_cache_keys))
 }
 
 struct SubgraphCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
@@ -1597,26 +1616,11 @@ fn extract_cache_keys(
         ];
 
         // get cache keys from directive
-        let field_def =
-            supergraph_schema
-                .get_object(typename)
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: "can't find corresponding type for __typename {typename:?}".to_string(),
-                })?;
-
-        let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
-            dir.argument_by_name("format", &supergraph_schema)
-                .ok()
-                .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())
-        });
-        let mut vars = IndexMap::default();
-        vars.insert(
-            "$key".to_string(),
-            Value::Object(representation_entity_key.clone()),
-        );
-        let invalidation_cache_keys = cache_keys
-            .map(|ck| ck.interpolate(&vars))
-            .collect::<Result<HashSet<String>, apollo_federation::connectors::Error>>()?;
+        let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
+            &supergraph_schema,
+            typename,
+            &representation_entity_key,
+        )?;
 
         if is_known_private {
             if let Some(id) = private_id {
@@ -1637,6 +1641,31 @@ fn extract_cache_keys(
         res.push((key, invalidation_keys));
     }
     Ok(res)
+}
+
+/// Get invalidation keys from @cacheKey directives in supergraph schema for entities
+fn get_invalidation_entity_keys_from_schema(
+    supergraph_schema: &Arc<Valid<Schema>>,
+    typename: &str,
+    entity_keys: &serde_json_bytes::Map<ByteString, Value>,
+) -> Result<HashSet<String>, anyhow::Error> {
+    let field_def =
+        supergraph_schema
+            .get_object(typename)
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+            })?;
+    let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
+        dir.argument_by_name("format", supergraph_schema)
+            .ok()
+            .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())
+    });
+    let mut vars = IndexMap::default();
+    vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
+    let invalidation_cache_keys = cache_keys
+        .map(|ck| ck.interpolate(&vars))
+        .collect::<Result<HashSet<String>, apollo_federation::connectors::Error>>()?;
+    Ok(invalidation_cache_keys)
 }
 
 fn take_matching_key_field_set(
