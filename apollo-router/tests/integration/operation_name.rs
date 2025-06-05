@@ -1,5 +1,5 @@
+use apollo_router::graphql::Request;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -7,8 +7,7 @@ use tower::ServiceExt;
 async fn empty_document() {
     let request = Request::fake_builder()
         .query("# intentionally left blank")
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -34,8 +33,7 @@ async fn empty_document() {
 async fn zero_operation() {
     let request = Request::fake_builder()
         .query("fragment F on Query { me { id }}")
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -59,10 +57,7 @@ async fn zero_operation() {
 
 #[tokio::test]
 async fn anonymous_operation() {
-    let request = Request::fake_builder()
-        .query("{ me { id } }")
-        .build()
-        .unwrap();
+    let request = Request::fake_builder().query("{ me { id } }").build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -80,8 +75,7 @@ async fn named_operation() {
     let request = Request::fake_builder()
         .query("query Op { me { id } }")
         .operation_name("Op")
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -104,8 +98,7 @@ async fn two_named_operations() {
             "#,
         )
         .operation_name("Op")
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -127,8 +120,7 @@ async fn missing_operation_name() {
                 query OtherOp { me { name } }
             "#,
         )
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -154,8 +146,7 @@ async fn incorrect_operation_name() {
             "#,
         )
         .operation_name("SecretThirdOp")
-        .build()
-        .unwrap();
+        .build();
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -172,7 +163,7 @@ async fn incorrect_operation_name() {
 }
 
 async fn make_request(request: Request) -> apollo_router::graphql::Response {
-    apollo_router::TestHarness::builder()
+    let router = apollo_router::TestHarness::builder()
         .configuration_json(json!({
             "include_subgraph_errors": {
                 "all": true,
@@ -196,13 +187,26 @@ async fn make_request(request: Request) -> apollo_router::graphql::Response {
                 .boxed(),
             _ => default,
         })
-        .build_supergraph()
+        .build_router()
         .await
-        .unwrap()
+        .unwrap();
+
+    let request = apollo_router::services::router::Request::fake_builder()
+        .body(serde_json::to_string(&request).unwrap().into_bytes())
+        .method(http::Method::POST)
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .build()
+        .unwrap();
+
+    let response = router
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
-        .unwrap()
+        .expect("should have one response")
+        .unwrap();
+
+    serde_json::from_slice(&response).unwrap()
 }
