@@ -350,6 +350,483 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn entity_cache_basic_with_directive() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    const SCHEMA: &str = include_str!("../fixtures/supergraph-auth_cache_key.graphql");
+
+    let mut conn = PgConnection::connect("postgres://127.0.0.1").await?;
+    sqlx::migrate!().run(&mut conn).await.unwrap();
+    let subgraphs = serde_json::json!({
+        "products": {
+            "query": {"topProducts": [{
+                "__typename": "Product",
+                "upc": "4",
+                "price": 5,
+                "name": "chair"
+            },
+            {
+                "__typename": "Product",
+                "upc": "5",
+                "price": 6,
+                "name": "table"
+            },
+            {
+                "__typename": "Product",
+                "upc": "6",
+                "price": 7,
+                "name": "plate"
+            }]},
+            "headers": {"cache-control": "public"},
+        },
+        "reviews": {
+            "entities": [{
+                "__typename": "Product",
+                "upc": "4",
+                "reviews": [{
+                    "__typename": "Review",
+                    "body": "I can sit on it",
+                }]
+            },
+            {
+                "__typename": "Product",
+                "upc": "5",
+                "reviews": [{
+                    "__typename": "Review",
+                    "body": "I can sit on it",
+                }, {
+                    "__typename": "Review",
+                    "body": "I can sit on it2",
+                }]
+            },
+            {
+                "__typename": "Product",
+                "upc": "6",
+                "reviews": [{
+                    "__typename": "Review",
+                    "body": "I can sit on it",
+                }, {
+                    "__typename": "Review",
+                    "body": "I can sit on it2",
+                }, {
+                    "__typename": "Review",
+                    "body": "I can sit on it3",
+                }]
+            }],
+            "headers": {"cache-control": "public"},
+        }
+    });
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_cache": {
+                "enabled": true,
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
+                        "postgres": {
+                            "url": "postgres://127.0.0.1",
+                            "pool_size": 3
+                        },
+                    },
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
+                    }
+                }
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "experimental_mock_subgraphs": subgraphs.clone()
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { upc name price reviews { body } } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
+
+    let response = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        serde_json::json!({
+          "data": {
+            "topProducts": [
+              {
+                "upc": "4",
+                "name": "chair",
+                "price": 5,
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  }
+                ]
+              },
+              {
+                "upc": "5",
+                "name": "table",
+                "price": 6,
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  },
+                  {
+                    "body": "I can sit on it2"
+                  }
+                ]
+              },
+              {
+                "upc": "6",
+                "name": "plate",
+                "price": 7,
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  },
+                  {
+                    "body": "I can sit on it2"
+                  },
+                  {
+                    "body": "I can sit on it3"
+                  }
+                ]
+              }
+            ]
+          }
+        })
+    );
+
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:5f7033dc6948d07556d0f6a22e4df8279eebeeb596ef75ad51c1c3a45d0b2567:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: Record = sqlx::query_as!(
+        Record,
+        "SELECT data FROM cache WHERE cache_key = $1",
+        cache_key
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    let v: Value = serde_json::from_str(&s.data).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({
+              "topProducts": [
+                {
+                  "__typename": "Product",
+                  "upc": "4",
+                  "price": 5,
+                  "name": "chair"
+                },
+                {
+                  "__typename": "Product",
+                  "upc": "5",
+                  "price": 6,
+                  "name": "table"
+                },
+                {
+                  "__typename": "Product",
+                  "upc": "6",
+                  "price": 7,
+                  "name": "plate"
+                }
+              ]
+            }
+        )
+    );
+
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:9a894d1be8b58b0269c0829ffa4f1d61bf9df2738437a5270731be6047bb7e58:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: Record = sqlx::query_as!(
+        Record,
+        "SELECT data FROM cache WHERE cache_key = $1",
+        cache_key
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    let v: Value = serde_json::from_str(&s.data).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({
+          "reviews": [
+            {
+              "body": "I can sit on it"
+            }
+          ]
+        })
+    );
+
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_cache": {
+                "enabled": true,
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
+                        "postgres": {
+                            "url": "postgres://127.0.0.1"
+                        },
+                    },
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
+                    }
+                }
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "experimental_mock_subgraphs": subgraphs.clone()
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts(first: 2) { upc name price reviews { body } } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
+
+    let response = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        serde_json::json!({
+          "data": {
+            "topProducts": [
+              {
+                "upc": "4",
+                "price": 5,
+                "name": "chair",
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  }
+                ]
+              },
+              {
+                "upc": "5",
+                "price": 6,
+                "name": "table",
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  },
+                  {
+                    "body": "I can sit on it2"
+                  }
+                ]
+              },
+              {
+                "upc": "6",
+                "price": 7,
+                "name": "plate",
+                "reviews": [
+                  {
+                    "body": "I can sit on it"
+                  },
+                  {
+                    "body": "I can sit on it2"
+                  },
+                  {
+                    "body": "I can sit on it3"
+                  }
+                ]
+              }
+            ]
+          }
+        })
+    );
+
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:20a3418db67808ee50198c3f1091742cd72f9391053f23299ecfca14c86007f2:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: Record = sqlx::query_as!(
+        Record,
+        "SELECT data FROM cache WHERE cache_key = $1",
+        cache_key
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    let v: Value = serde_json::from_str(&s.data).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({
+              "reviews": [
+                {
+                  "body": "I can sit on it"
+                },
+                {
+                  "body": "I can sit on it2"
+                },
+                {
+                  "body": "I can sit on it3"
+                }
+              ]
+            }
+        )
+    );
+
+    const SECRET_SHARED_KEY: &str = "supersecret";
+    let http_service = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_cache": {
+                "enabled": true,
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": true,
+                        "postgres": {
+                            "url": "postgres://127.0.0.1"
+                        },
+                        "invalidation": {
+                            "enabled": true,
+                            "shared_key": SECRET_SHARED_KEY
+                        }
+                    },
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s",
+                            "invalidation": {
+                                "enabled": true,
+                                "shared_key": SECRET_SHARED_KEY
+                            }
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s",
+                            "invalidation": {
+                                "enabled": true,
+                                "shared_key": SECRET_SHARED_KEY
+                            }
+                        }
+                    }
+                }
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "experimental_mock_subgraphs": subgraphs.clone()
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let request = http::Request::builder()
+        .uri("http://127.0.0.1:4000/invalidation")
+        .method(http::Method::POST)
+        .header(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )
+        .header(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_static(SECRET_SHARED_KEY),
+        )
+        .body(from_bytes(
+            serde_json::to_vec(&vec![json!({
+                "subgraphs": ["reviews"],
+                "kind": "cache_key",
+                "cache_key": "product-4"
+            })])
+            .unwrap(),
+        ))
+        .unwrap();
+    let response = http_service.oneshot(request).await.unwrap();
+    let response_status = response.status();
+    let mut resp: serde_json::Value = serde_json::from_str(
+        &apollo_router::services::router::body::into_string(response.into_body())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert!(response_status.is_success());
+    assert_eq!(
+        resp.as_object_mut()
+            .unwrap()
+            .get("count")
+            .unwrap()
+            .as_u64()
+            .unwrap(),
+        1u64
+    );
+
+    // This should be in error because we invalidated this entity
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:9a894d1be8b58b0269c0829ffa4f1d61bf9df2738437a5270731be6047bb7e58:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    assert!(
+        sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        .is_err()
+    );
+    // This entry should still be in redis because we didn't invalidate this entry
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:5f7033dc6948d07556d0f6a22e4df8279eebeeb596ef75ad51c1c3a45d0b2567:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    assert!(
+        sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        .is_ok()
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
