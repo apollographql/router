@@ -37,7 +37,7 @@ pub(crate) fn make_request(
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let (uri, uri_apply_to_errors) = transport.make_uri(&inputs)?;
     let uri_mapping_problems =
-        aggregate_apply_to_errors_with_problem_locations(&uri_apply_to_errors);
+        aggregate_apply_to_errors_with_problem_locations(uri_apply_to_errors);
 
     let method = transport.method;
     let request = http::Request::builder()
@@ -52,7 +52,7 @@ pub(crate) fn make_request(
         &inputs,
     );
     let header_mapping_problems =
-        aggregate_apply_to_errors_with_problem_locations(&header_apply_to_errors);
+        aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
@@ -93,20 +93,13 @@ pub(crate) fn make_request(
         .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    let body_mapping_problems: Vec<(ProblemLocation, Problem)> =
-        aggregate_apply_to_errors(&body_apply_to_errors)
-            .iter()
-            .map(|problem| (ProblemLocation::RequestBody, problem.clone()))
-            .collect();
+    let body_mapping_problems = aggregate_apply_to_errors(body_apply_to_errors)
+        .map(|problem| (ProblemLocation::RequestBody, problem));
 
-    let all_problems: Vec<(ProblemLocation, Problem)> = [
-        uri_mapping_problems,
-        body_mapping_problems,
-        header_mapping_problems,
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let all_problems: Vec<(ProblemLocation, Problem)> = uri_mapping_problems
+        .chain(body_mapping_problems)
+        .chain(header_mapping_problems)
+        .collect();
 
     let mapping_problems: Vec<Problem> = all_problems.clone().into_iter().map(|(_, p)| p).collect();
 

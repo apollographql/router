@@ -113,7 +113,8 @@ impl RawResponse {
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
-                let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+                let mapping_problems: Vec<Problem> =
+                    aggregate_apply_to_errors(apply_to_errors).collect();
 
                 if let Some(debug) = debug_context {
                     let mut debug_problems: Vec<(ProblemLocation, Problem)> = mapping_problems
@@ -191,9 +192,7 @@ impl RawResponse {
                 let message = if let Some(message_selection) = &connector.error_settings.message {
                     let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
                     warnings.extend(
-                        aggregate_apply_to_errors(&apply_to_errors)
-                            .iter()
-                            .cloned()
+                        aggregate_apply_to_errors(apply_to_errors)
                             .map(|problem| (ProblemLocation::ErrorsMessage, problem))
                             .collect::<Vec<_>>(),
                     );
@@ -237,9 +236,7 @@ impl RawResponse {
                     let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
                     warnings.extend(
-                        aggregate_apply_to_errors(&apply_to_errors)
-                            .iter()
-                            .cloned()
+                        aggregate_apply_to_errors(apply_to_errors)
                             .map(|problem| (ProblemLocation::SourceErrorsExtensions, problem))
                             .collect::<Vec<_>>(),
                     );
@@ -265,9 +262,7 @@ impl RawResponse {
                     let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
                     warnings.extend(
-                        aggregate_apply_to_errors(&apply_to_errors)
-                            .iter()
-                            .cloned()
+                        aggregate_apply_to_errors(apply_to_errors)
                             .map(|problem| (ProblemLocation::ConnectErrorsExtensions, problem))
                             .collect::<Vec<_>>(),
                     );
