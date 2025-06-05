@@ -3634,10 +3634,15 @@ const ENUM_SCHEMA: &str = r#"schema
     B
   }"#;
 
+// Companion test: services::router::tests::invalid_input_enum
 #[tokio::test]
 async fn invalid_input_enum() {
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
+        }))
         .unwrap()
         .schema(ENUM_SCHEMA)
         //.extra_plugin(subgraphs)
@@ -3646,29 +3651,13 @@ async fn invalid_input_enum() {
         .unwrap();
 
     let request = supergraph::Request::fake_builder()
-        .query("query { test(input: C) }")
-        .context(defer_context())
-        // Request building here
-        .build()
-        .unwrap();
-    let response = service
-        .clone()
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    insta::assert_json_snapshot!(response);
-
-    let request = supergraph::Request::fake_builder()
         .query("query($input: InputEnum) { test(input: $input) }")
         .variable("input", "INVALID")
         .context(defer_context())
         // Request building here
         .build()
         .unwrap();
+
     let response = service
         .oneshot(request)
         .await
