@@ -5,7 +5,7 @@ expression: stream.next_response().await.unwrap()
 {
   "errors": [
     {
-      "message": "invalid type for variable: 'userId'",
+      "message": "missing variable `$userId`: for required GraphQL type `ID!`",
       "extensions": {
         "name": "userId",
         "code": "VALIDATION_INVALID_TYPE_VARIABLE"

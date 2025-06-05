@@ -421,6 +421,13 @@ impl Debug for OutputTypeDefinitionPosition {
 impl OutputTypeDefinitionPosition {
     const EXPECTED: &'static str = "an output type";
 
+    pub(crate) fn is_leaf_type(&self) -> bool {
+        matches!(
+            self,
+            OutputTypeDefinitionPosition::Scalar(_) | OutputTypeDefinitionPosition::Enum(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,

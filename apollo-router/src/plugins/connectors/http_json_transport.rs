@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::sources::connect::HTTPMethod;
-use apollo_federation::sources::connect::HeaderSource;
-use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::MakeUriError;
+use apollo_federation::connectors::HTTPMethod;
+use apollo_federation::connectors::HeaderSource;
+use apollo_federation::connectors::HttpJsonTransport;
+use apollo_federation::connectors::MakeUriError;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -187,10 +187,10 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HeaderSource;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HeaderSource;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;

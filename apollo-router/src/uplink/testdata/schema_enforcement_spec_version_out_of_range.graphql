@@ -1,7 +1,9 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-  @link(url: "https://specs.apollo.dev/authenticated/v0.2", for: SECURITY) {
+  # Note: `for` argument is not used on the `authenticated` link. Otherwise, schema validation
+  #       would fail before license enforcement.
+  @link(url: "https://specs.apollo.dev/authenticated/v0.2") {
   query: Query
 }
 

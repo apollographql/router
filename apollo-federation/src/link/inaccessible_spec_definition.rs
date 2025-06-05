@@ -124,7 +124,7 @@ impl InaccessibleSpecDefinition {
             false, // not repeatable
             locations,
             true, // composes
-            Some(&|v| INACCESSIBLE_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -547,7 +547,7 @@ fn validate_inaccessible_in_fields(
 }
 
 /// Generic way to check for @inaccessible directives on a position or its parents.
-trait IsInaccessibleExt {
+pub(crate) trait IsInaccessibleExt {
     /// Does this element, or any of its parents, have an @inaccessible directive?
     ///
     /// May return Err if `self` is an element that does not exist in the schema.

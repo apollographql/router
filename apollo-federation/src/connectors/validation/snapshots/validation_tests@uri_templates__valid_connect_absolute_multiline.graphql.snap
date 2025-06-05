@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/valid_connect_absolute_multiline.graphql
+---
+[]
