@@ -1,12 +1,8 @@
 use bytes::Bytes;
-use http_body_util::combinators::BoxBody;
+use http_body_util::combinators::UnsyncBoxBody;
 use tower::BoxError;
-use tower::util::BoxCloneService;
 
-type HttpServerService = BoxCloneService<
-    http::Request<BoxBody<Bytes, BoxError>>,
-    http::Response<BoxBody<Bytes, BoxError>>,
-    BoxError,
->;
+type Request = http::Request<UnsyncBoxBody<Bytes, BoxError>>;
+type Response = http::Response<UnsyncBoxBody<Bytes, BoxError>>;
 
 // Context is stored in extensions
