@@ -35,6 +35,7 @@ pub use models::CustomConfiguration;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
+pub use string_template::Error;
 pub use string_template::StringTemplate;
 pub use variable::Namespace;
 

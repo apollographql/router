@@ -108,7 +108,7 @@ impl StringTemplate {
     /// Interpolate the expressions in the template into a basic string.
     ///
     /// For URIs, use [`Self::interpolate_uri`] instead.
-    pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
+    pub fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
         let mut result = String::new();
         for part in &self.parts {
             part.interpolate(vars, &mut result)?;

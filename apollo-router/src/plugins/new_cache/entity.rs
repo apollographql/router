@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
+use apollo_federation::connectors::StringTemplate;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -638,6 +640,7 @@ impl CacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
+                // TODO get cache keys for root fields
                 let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
                 match cache_lookup_root(
                     self.name.clone(),
@@ -647,6 +650,7 @@ impl CacheService {
                     private_id.as_deref(),
                     self.expose_keys_in_context,
                     request,
+                    self.supergraph_schema.clone(),
                 )
                 .instrument(tracing::info_span!("cache.entity.lookup"))
                 .await?
@@ -740,6 +744,7 @@ impl CacheService {
                 Ok(response)
             }
         } else {
+            // TODO get cache keys for entities
             let request_id = request.id.clone();
             match cache_lookup_entities(
                 self.name.clone(),
@@ -906,6 +911,10 @@ impl CacheService {
     }
 }
 
+#[derive(Default, Clone)]
+pub(crate) struct InvalidationKeysPropagation(HashMap<String, HashSet<String>>);
+
+#[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
@@ -914,10 +923,89 @@ async fn cache_lookup_root(
     private_id: Option<&str>,
     expose_keys_in_context: bool,
     mut request: subgraph::Request,
+    supergraph_schema: Arc<Valid<Schema>>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let (key, invalidation_keys) = extract_cache_key_root(
+    // Get directives cacheKey for each root fields
+    let mut cache_keys = Vec::new();
+    if let Some(executable_document) = &request.executable_document {
+        let root_operation_fields = executable_document
+            .operations
+            .iter()
+            .next()
+            .unwrap()
+            .root_fields(executable_document); //FIXME: unwrap
+        let root_query_type = supergraph_schema
+            .root_operation(apollo_compiler::ast::OperationType::Query)
+            .unwrap(); // FIXME: get rid of unwrap
+        let root_object_type = supergraph_schema
+            .get_object(root_query_type.as_str())
+            .unwrap(); //FIXME
+
+        cache_keys = root_operation_fields
+            .map(|field| {
+                let field_def = root_object_type.fields.get(&field.name).unwrap(); //FIXME
+                let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
+                    let cascade = dir
+                        .argument_by_name("format", &supergraph_schema)
+                        .ok()
+                        .and_then(|arg| match &**arg {
+                            apollo_compiler::ast::Value::Boolean(cascade) => Some(*cascade),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Some((
+                        cascade,
+                        dir.argument_by_name("format", &supergraph_schema)
+                            .ok()
+                            .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())?,
+                    ))
+                });
+                let args: serde_json_bytes::Map<ByteString, Value> = field
+                    .arguments
+                    .iter()
+                    .map(|arg| {
+                        let name = arg.name.clone();
+                        let value = get_arg_value(&arg.value, &body.variables);
+
+                        (name.to_string().into(), value)
+                    })
+                    .collect();
+                let mut vars = IndexMap::default();
+                vars.insert("$args".to_string(), Value::Object(args));
+                // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
+                cache_keys
+                    .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars)?)))
+                    .collect::<Result<Vec<(bool, String)>, apollo_federation::connectors::Error>>()
+            })
+            .collect::<Result<Vec<Vec<(bool, String)>>, apollo_federation::connectors::Error>>()?;
+    }
+    // I transform it to HashSet<String> because we don't support split root fields operations so far
+    let invalidation_cache_keys_propagated: HashSet<String> = cache_keys
+        .iter()
+        .flatten()
+        .filter_map(|(cascade, cache_key)| cascade.then_some(cache_key.clone()))
+        .collect();
+    let invalidation_cache_keys: HashSet<String> =
+        cache_keys.into_iter().flatten().map(|(_, k)| k).collect();
+
+    println!(
+        "Invalidation keys for root fields in subgraph {name:?}:\n{invalidation_cache_keys:#?}\n========"
+    );
+
+    let subgraph_name = name.clone();
+    if !invalidation_cache_keys_propagated.is_empty() {
+        request.context.extensions().with_lock(move |ext| {
+            let invalidation_cache_key_prop =
+                ext.get_or_default_mut::<InvalidationKeysPropagation>();
+            invalidation_cache_key_prop
+                .0
+                .insert(subgraph_name, invalidation_cache_keys_propagated);
+        });
+    }
+
+    let (key, mut invalidation_keys) = extract_cache_key_root(
         &name,
         entity_type_opt,
         &request.query_hash,
@@ -927,6 +1015,7 @@ async fn cache_lookup_root(
         is_known_private,
         private_id,
     );
+    invalidation_keys.extend(invalidation_cache_keys);
 
     let cache_result = cache.get(&key).await;
 
@@ -999,15 +1088,11 @@ async fn cache_lookup_entities(
     mut request: subgraph::Request,
     expose_keys_in_context: bool,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, SubgraphCacheResults)>, BoxError> {
-    let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
         &name,
         supergraph_schema,
         subgraph_enums,
-        &request.query_hash,
-        body,
-        &request.context,
-        &request.authorization,
+        &mut request,
         is_known_private,
         private_id,
     )?;
@@ -1029,7 +1114,8 @@ async fn cache_lookup_entities(
                 })
                 .collect()
         })
-        .unwrap_or_else(|_| std::iter::repeat(None).take(keys_len).collect());
+        .unwrap_or_else(|_| std::iter::repeat_n(None, keys_len).collect());
+    let body = request.subgraph_request.body_mut();
 
     let representations = body
         .variables
@@ -1388,32 +1474,73 @@ fn extract_cache_key_root(
     (key, invalidation_keys)
 }
 
+fn get_arg_value(arg_value: &apollo_compiler::ast::Value, variables: &Object) -> Value {
+    match arg_value {
+        apollo_compiler::ast::Value::Null => Value::Null,
+        apollo_compiler::ast::Value::Enum(name) => Value::String(name.to_string().into()),
+        apollo_compiler::ast::Value::Variable(name) => {
+            variables
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_else(|| Value::Null) // FIXME
+        }
+        apollo_compiler::ast::Value::String(val) => Value::String(val.clone().into()),
+        apollo_compiler::ast::Value::Float(float_value) => {
+            Value::Number(serde_json::Number::from_f64(float_value.try_to_f64().unwrap()).unwrap())
+        } // FIXME
+        apollo_compiler::ast::Value::Int(int_value) => {
+            Value::Number(int_value.try_to_i32().unwrap().into())
+        } //FIXME
+        apollo_compiler::ast::Value::Boolean(b) => Value::Bool(*b),
+        apollo_compiler::ast::Value::List(nodes) => {
+            Value::Array(nodes.iter().map(|n| get_arg_value(n, variables)).collect())
+        }
+        apollo_compiler::ast::Value::Object(items) => Value::Object(
+            items
+                .iter()
+                .map(|(key, val)| (key.to_string().into(), get_arg_value(val, variables)))
+                .collect(),
+        ),
+    }
+}
+
 // build a list of keys to get from the cache in one query
 #[allow(clippy::too_many_arguments)]
 fn extract_cache_keys(
     subgraph_name: &str,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    query_hash: &QueryHash,
-    body: &mut graphql::Request,
-    context: &Context,
-    cache_key: &CacheKeyMetadata,
+    request: &mut subgraph::Request,
     is_known_private: bool,
     private_id: Option<&str>,
 ) -> Result<Vec<(String, Vec<String>)>, BoxError> {
+    let context = &request.context;
+    let authorization = &request.authorization;
     // hash the query and operation name
-    let query_hash = hash_query(query_hash, body);
+    let query_hash = hash_query(&request.query_hash, request.subgraph_request.body());
     // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context, cache_key);
+    let additional_data_hash =
+        hash_additional_data(request.subgraph_request.body_mut(), context, authorization);
 
-    let representations = body
+    let representations = request
+        .subgraph_request
+        .body_mut()
         .variables
         .get_mut(REPRESENTATIONS)
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
-    // Get entity key to only get the right fields in representations
+    // Get parent cache keys set on root fields
+    let parent_invalidation_cache_keys = request
+        .context
+        .extensions()
+        .with_lock(move |ext| {
+            ext.get::<InvalidationKeysPropagation>()
+                .and_then(|invalidat_keys| invalidat_keys.0.get(subgraph_name).cloned())
+        })
+        .unwrap_or_default();
 
+    // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
     for representation in representations {
         let representation =
@@ -1462,22 +1589,51 @@ fn extract_cache_keys(
             "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         // Used as a surrogate cache key
-        let invalidation_keys = vec![
+        let mut invalidation_keys = vec![
             format!(
                 "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
             ),
             format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
         ];
+
+        // get cache keys from directive
+        let field_def =
+            supergraph_schema
+                .get_object(typename)
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+                })?;
+
+        let cache_keys = field_def.directives.get_all("cacheKey").filter_map(|dir| {
+            dir.argument_by_name("format", &supergraph_schema)
+                .ok()
+                .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())
+        });
+        let mut vars = IndexMap::default();
+        vars.insert(
+            "$key".to_string(),
+            Value::Object(representation_entity_key.clone()),
+        );
+        let invalidation_cache_keys = cache_keys
+            .map(|ck| ck.interpolate(&vars))
+            .collect::<Result<HashSet<String>, apollo_federation::connectors::Error>>()?;
+
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
             }
         }
 
+        // TO DELETE: only to debug
+        let typename = typename.to_string();
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key);
-
+        invalidation_keys.extend(parent_invalidation_cache_keys.clone());
+        invalidation_keys.extend(invalidation_cache_keys);
+        println!(
+            "Invalidation keys for entity type {typename:?} in subgraph {subgraph_name:?}:\n{invalidation_keys:#?}\n========"
+        );
         res.push((key, invalidation_keys));
     }
     Ok(res)
