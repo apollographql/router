@@ -19,3 +19,6 @@ http.workspace = true
 serde_json.workspace = true
 thiserror = "2.0"
 tower.workspace = true
+quick_cache = "0.6.14"
+[dev-dependencies]
+mry = "0.14.0"

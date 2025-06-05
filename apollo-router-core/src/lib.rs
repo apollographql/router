@@ -1,8 +1,11 @@
 use apollo_federation::sources::connect::validation::Code::HttpHeaderNameCollision;
 use tower::{Service, ServiceBuilder};
 
+mod context;
 mod json;
 mod services;
+
+pub use context::Context;
 
 #[test]
 fn test() {
