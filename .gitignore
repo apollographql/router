@@ -43,3 +43,4 @@ dhat-heap.json
 fuzz/crash-*
 fuzz/slow-unit-*
 fuzz/timeout-*
+.mise.toml
