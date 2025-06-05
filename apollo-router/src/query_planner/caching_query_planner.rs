@@ -176,9 +176,10 @@ where
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
-            f64_histogram!(
+            f64_histogram_with_unit!(
                 "apollo.router.query_planning.warmup.duration",
-                "Time spent warming up the query planner queries in seconds",
+                "Time spent warming up the query planner queries",
+                "s",
                 duration.as_secs_f64()
             );
         });
@@ -517,6 +518,7 @@ where
                 .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
+            let (query, operation_name) = (request.query.clone(), request.operation_name.clone());
             let planning_task = async move {
                 let service = match self.delegate.ready().await {
                     Ok(service) => service,
@@ -609,7 +611,7 @@ where
                         // Abort is a no-op if the task has already completed.
                         abort_handle.abort();
                     });
-                match self
+                let task = match self
                     .cooperative_cancellation
                     .timeout_in_seconds()
                     .map(Duration::from_secs_f64)
@@ -627,13 +629,30 @@ where
                             .map_err(convert_timeout_error)?
                     }
                     None => planning_task.await,
-                }
+                };
+
+                tracing::debug!(
+                    "Query planning task completed for query: {}, operation: {:?}",
+                    query, operation_name
+                );
+                
+                task
             } else {
                 // some clients might timeout and cancel the request before query planning is finished,
                 // so we execute it in a task that can continue even after the request was canceled and
                 // the join handle was dropped. That way, the next similar query will use the cache instead
                 // of restarting the query planner until another timeout
-                tokio::task::spawn(planning_task).await
+                tokio::task::spawn(async move {
+                    let res = planning_task.await;
+
+                    tracing::debug!(
+                        "Query planning task completed for query: {}, operation: {:?}",
+                        query, operation_name
+                    );
+
+                    res
+                }).await
+                    
             }
             .map_err(convert_join_error)?
         } else {
@@ -889,6 +908,76 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    #[tracing_test::traced_test]
+    async fn test_query_planning_can_be_cancelled() {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            planner
+                .expect_sync_call()
+                .returning(|_| panic!("This query planner should not be called, as it is expected to be cancelled"));
+            planner
+        });
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::Enabled,
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+            .await
+            .unwrap();
+
+        let configuration = Configuration::default();
+
+        let doc1 = Query::parse_document(
+            "query Me { me { username } }",
+            None,
+            &schema,
+            &configuration,
+        )
+            .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
+        
+        let planning_task = planner
+                .call(query_planner::CachingRequest::new(
+                    "query Me { me { username } }".to_string(),
+                    Some("".into()),
+                    context.clone()
+                ));
+        let planning_task = tokio::task::spawn(planning_task);
+        planning_task.abort();
+        match planning_task.await {
+            Ok(_) => panic!("Expected the task to be aborted, but it completed successfully"),
+            Err(e) => assert!(
+                e.is_cancelled(),
+            ),
+        }
+    }
+
+    #[test(tokio::test)]
     async fn test_cooperative_cancellation_timeout() {
         #[derive(Clone)]
         struct SlowQueryPlanner;
@@ -939,8 +1028,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        let configuration = Configuration::default();
 
         let doc = Query::parse_document(
             "query Me { me { name { first } } }",
