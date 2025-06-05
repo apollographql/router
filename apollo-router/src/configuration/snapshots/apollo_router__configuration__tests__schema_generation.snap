@@ -2272,6 +2272,39 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "CooperativeCancellation": {
+      "description": "Controls cooperative cancellation of query planning.\n\nWhen enabled, query planning will be cancelled if the client waiting on the query plan closes their connection. Additionally, when enabled with a timeout, the query planning will be cancelled if it takes longer than the specified timeout.",
+      "oneOf": [
+        {
+          "description": "Enables cooperative cancellation of query planning, but does not set a timeout.",
+          "enum": [
+            "Enabled"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Enables cooperative cancellation of query planning with a timeout.",
+          "properties": {
+            "EnabledWithTimeoutInSeconds": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "EnabledWithTimeoutInSeconds"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Disables cooperative cancellation of query planning.",
+          "enum": [
+            "Disabled"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -4983,10 +5016,9 @@ expression: "&schema"
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
         },
-        "experimental_enable_cooperative_cancellation": {
-          "default": false,
-          "description": "Enable cooperative cancellation of query planning\n\nWhen enabled, query planning will be cancelled if the client waiting on the QP closes their connection.",
-          "type": "boolean"
+        "experimental_cooperative_cancellation": {
+          "$ref": "#/definitions/CooperativeCancellation",
+          "description": "#/definitions/CooperativeCancellation"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -5008,13 +5040,6 @@ expression: "&schema"
           "default": false,
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
           "type": "boolean"
-        },
-        "experimental_timeout_in_seconds": {
-          "default": null,
-          "description": "A timeout for query planning. This option requires that `experimental_enable_cooperative_cancellation` is set to true. Otherwise, it will be ignored.",
-          "format": "double",
-          "nullable": true,
-          "type": "number"
         },
         "warmed_up_queries": {
           "default": null,

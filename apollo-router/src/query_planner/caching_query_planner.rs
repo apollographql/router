@@ -2,6 +2,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 use std::task;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -27,6 +28,7 @@ use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
+use crate::configuration::CooperativeCancellation;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -94,8 +96,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
-    enable_cooperative_cancellation: bool,
-    cooperative_cancellation_timeout: Option<core::time::Duration>,
+    cooperative_cancellation: CooperativeCancellation,
 }
 
 fn init_query_plan_from_redis(
@@ -143,15 +144,11 @@ where
         let mut hasher = StructHasher::new();
         configuration.rust_query_planner_config().hash(&mut hasher);
         let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
-        let enable_cooperative_cancellation = configuration
+        let cooperative_cancellation = configuration
             .supergraph
             .query_planning
-            .experimental_enable_cooperative_cancellation;
-        let cooperative_cancellation_timeout = configuration
-            .supergraph
-            .query_planning
-            .experimental_timeout_in_seconds
-            .map(|s| core::time::Duration::from_secs_f64(s));
+            .experimental_cooperative_cancellation
+            .clone();
 
         Ok(Self {
             cache,
@@ -160,8 +157,7 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
-            enable_cooperative_cancellation,
-            cooperative_cancellation_timeout,
+            cooperative_cancellation,
             config_mode_hash,
         })
     }
@@ -606,14 +602,18 @@ where
 
             // When cooperative cancellation is enabled, we want to cancel the query planner
             // task if the request is canceled.
-            if self.enable_cooperative_cancellation {
+            if self.cooperative_cancellation.is_enabled() {
                 let planning_task = tokio::task::spawn(planning_task);
                 let _abort_guard =
                     scopeguard::guard(planning_task.abort_handle(), |abort_handle| {
                         // Abort is a no-op if the task has already completed.
                         abort_handle.abort();
                     });
-                match self.cooperative_cancellation_timeout {
+                match self
+                    .cooperative_cancellation
+                    .timeout_in_seconds()
+                    .map(Duration::from_secs_f64)
+                {
                     Some(timeout) => {
                         fn convert_timeout_error(e: impl std::fmt::Display) -> CacheResolverError {
                             CacheResolverError::RetrievalError(Arc::new(
@@ -907,7 +907,7 @@ mod tests {
 
             fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
                 Box::pin(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     panic!("This query planner should not be called, as it is expected to timeout");
                 })
             }
@@ -918,8 +918,9 @@ mod tests {
                 Supergraph::builder()
                     .query_planning(
                         QueryPlanning::builder()
-                            .experimental_enable_cooperative_cancellation(true)
-                            .experimental_timeout_in_seconds(0.1)
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::EnabledWithTimeoutInSeconds(0.1),
+                            )
                             .build(),
                     )
                     .build(),

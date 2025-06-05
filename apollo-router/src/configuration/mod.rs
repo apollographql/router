@@ -901,14 +901,10 @@ pub(crate) struct QueryPlanning {
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
 
-    /// A timeout for query planning. This option requires that `experimental_enable_cooperative_cancellation` is set to true.
-    /// Otherwise, it will be ignored.
-    pub(crate) experimental_timeout_in_seconds: Option<f64>,
-
     /// Enable cooperative cancellation of query planning
     ///
-    /// When enabled, query planning will be cancelled if the client waiting on the QP closes their connection.
-    pub(crate) experimental_enable_cooperative_cancellation: bool,
+    /// See [`CooperativeCancellation`] for more details.
+    pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
 }
 
 #[buildstructor::buildstructor]
@@ -921,8 +917,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_reuse_query_plans: Option<bool>,
-        experimental_timeout_in_seconds: Option<f64>,
-        experimental_enable_cooperative_cancellation: Option<bool>,
+        experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -930,9 +925,43 @@ impl QueryPlanning {
             experimental_plans_limit,
             experimental_paths_limit,
             experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
-            experimental_timeout_in_seconds,
-            experimental_enable_cooperative_cancellation:
-                experimental_enable_cooperative_cancellation.unwrap_or_default(),
+            experimental_cooperative_cancellation: experimental_cooperative_cancellation
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// Controls cooperative cancellation of query planning.
+///
+/// When enabled, query planning will be cancelled if the client waiting on the query plan closes
+/// their connection. Additionally, when enabled with a timeout, the query planning will be
+/// cancelled if it takes longer than the specified timeout.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub(crate) enum CooperativeCancellation {
+    /// Enables cooperative cancellation of query planning, but does not set a timeout.
+    Enabled,
+    /// Enables cooperative cancellation of query planning with a timeout.
+    EnabledWithTimeoutInSeconds(f64),
+    /// Disables cooperative cancellation of query planning.
+    #[default]
+    Disabled,
+}
+
+impl CooperativeCancellation {
+    /// Returns true if cooperative cancellation is enabled.
+    pub(crate) fn is_enabled(&self) -> bool {
+        matches!(
+            self,
+            CooperativeCancellation::Enabled
+                | CooperativeCancellation::EnabledWithTimeoutInSeconds(_)
+        )
+    }
+
+    /// Returns the timeout in seconds if cooperative cancellation is enabled with a timeout.
+    pub(crate) fn timeout_in_seconds(&self) -> Option<f64> {
+        match self {
+            CooperativeCancellation::EnabledWithTimeoutInSeconds(timeout) => Some(*timeout),
+            _ => None,
         }
     }
 }
