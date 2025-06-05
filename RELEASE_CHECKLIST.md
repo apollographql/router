@@ -369,12 +369,6 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr ready "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-7. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
-
-    ```
-    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
-    ```
-
 8. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI**
 
 9. After the PR has been approved, add the Git tag & push the release:
@@ -392,7 +386,7 @@ Start following the steps below to start a release PR.  The process is **not ful
 12. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
 
     ```
-    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 13. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.
