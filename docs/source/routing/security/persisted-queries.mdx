@@ -74,13 +74,12 @@ persisted_queries:
 
 If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.require_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.require_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
-<MinVersion version="1.55.0">
-
 #### `experimental_prewarm_query_plan_cache`
 
-</MinVersion>
-
-<ExperimentalFeature />
+<div className="flex flex-row items-start gap-2 mt-2">
+  <MinVersionBadge version="Router v1.55.0" />
+  <ExperimentalFeatureBadge />
+</div>
 
 By default, the router [prewarms the query plan cache](/router/configuration/in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
 
