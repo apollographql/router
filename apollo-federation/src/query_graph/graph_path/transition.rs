@@ -1,11 +1,15 @@
 use std::borrow::Cow;
+use std::ops::Not;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use either::Either;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
+use tracing::debug;
+use tracing::debug_span;
 
 use crate::bail;
 use crate::ensure;
@@ -19,6 +23,7 @@ use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::graph_path::GraphPath;
 use crate::query_graph::graph_path::GraphPathTriggerVariant;
+use crate::query_graph::graph_path::IndirectPaths;
 use crate::query_graph::graph_path::Unadvanceable;
 use crate::query_graph::graph_path::UnadvanceableClosure;
 use crate::query_graph::graph_path::UnadvanceableClosures;
@@ -29,6 +34,7 @@ use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::human_readable::HumanReadableListOptions;
 use crate::utils::human_readable::HumanReadableListPrefix;
@@ -55,6 +61,15 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
         None
     }
 }
+
+pub(crate) struct TransitionPathWithLazyIndirectPaths {
+    pub(crate) path: TransitionGraphPath,
+    #[allow(dead_code)]
+    pub(crate) lazily_computed_indirect_paths: Option<TransitionIndirectPaths>,
+}
+
+pub(crate) type TransitionIndirectPaths =
+    IndirectPaths<QueryGraphEdgeTransition, EdgeIndex, UnadvanceableClosures>;
 
 impl TransitionGraphPath {
     /// Because Fed 1 used to (somewhat wrongly) require @external on key fields of type extensions
@@ -291,7 +306,7 @@ impl TransitionGraphPath {
             {
                 let graph = to_advance.graph.clone();
                 let override_conditions = override_conditions.clone();
-                dead_end_closures.push(Box::new(move || {
+                dead_end_closures.push(Arc::new(LazyLock::new(Box::new(move || {
                     let edge_weight = graph.edge_weight(edge)?;
                     let Some(override_condition) = &edge_weight.override_condition else {
                         bail!("Edge unexpectedly had no override condition");
@@ -299,7 +314,7 @@ impl TransitionGraphPath {
                     let (head, tail) = graph.edge_endpoints(edge)?;
                     let head_weight = graph.node_weight(head)?;
                     let tail_weight = graph.node_weight(tail)?;
-                    Ok(Unadvanceables(vec![Unadvanceable {
+                    Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
                         reason: UnadvanceableReason::UnsatisfiableOverrideCondition,
                         from_subgraph: head_weight.source.clone(),
                         to_subgraph: tail_weight.source.clone(),
@@ -309,8 +324,8 @@ impl TransitionGraphPath {
                             override_condition.label,
                             override_conditions.contains(&override_condition.label)
                         ),
-                    }]))
-                }));
+                    })]))
+                }))));
                 continue;
             }
 
@@ -334,7 +349,7 @@ impl TransitionGraphPath {
                 ConditionResolution::Unsatisfied { reason } => {
                     let transition = transition.clone();
                     let graph = to_advance.graph.clone();
-                    dead_end_closures.push(Box::new(move || {
+                    dead_end_closures.push(Arc::new(LazyLock::new(Box::new(move || {
                         let edge_weight = graph.edge_weight(edge)?;
                         let (head, _) = graph.edge_endpoints(edge)?;
                         let head_weight = graph.node_weight(head)?;
@@ -385,12 +400,12 @@ impl TransitionGraphPath {
                                         )
                                     }
                                 };
-                                Ok(Unadvanceables(vec![Unadvanceable {
+                                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
                                     reason: UnadvanceableReason::UnsatisfiableRequiresCondition,
                                     from_subgraph: head_weight.source.clone(),
                                     to_subgraph: head_weight.source.clone(),
                                     details,
-                                }]))
+                                })]))
                             }
                             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
                                 from_type_position,
@@ -414,12 +429,12 @@ impl TransitionGraphPath {
                                         )
                                     }
                                 };
-                                Ok(Unadvanceables(vec![Unadvanceable {
+                                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
                                     reason: UnadvanceableReason::UnresolvableInterfaceObject,
                                     from_subgraph: head_weight.source.clone(),
                                     to_subgraph: head_weight.source.clone(),
                                     details,
-                                }]))
+                                })]))
                             }
                             _ => {
                                 bail!(
@@ -428,7 +443,7 @@ impl TransitionGraphPath {
                             );
                             }
                         }
-                    }));
+                    }))));
                 }
             }
         }
@@ -440,11 +455,11 @@ impl TransitionGraphPath {
         let transition = transition.clone();
         let graph = self.graph.clone();
         let tail = self.tail;
-        Ok(Either::Right(UnadvanceableClosures(vec![Box::new(
-            move || {
+        Ok(Either::Right(UnadvanceableClosures(vec![Arc::new(
+            LazyLock::new(Box::new(move || {
                 let dead_ends: Unadvanceables =
                     UnadvanceableClosures(dead_end_closures).try_into()?;
-                if !dead_ends.0.is_empty() {
+                if !dead_ends.is_empty() {
                     return Ok(dead_ends);
                 }
                 let tail_weight = graph.node_weight(tail)?;
@@ -479,9 +494,8 @@ impl TransitionGraphPath {
                                 parent_type_pos, tail_type_pos, subgraph,
                             );
                         }
-                        let Some(Ok::<CompositeTypeDefinitionPosition, _>(
-                            parent_type_pos_in_subgraph,
-                        )) = parent_type_pos_in_subgraph.map(|pos| pos.try_into())
+                        let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
+                            .map(CompositeTypeDefinitionPosition::try_from)
                         else {
                             break 'details format!(
                                 "cannot find field \"{}\"",
@@ -556,13 +570,396 @@ impl TransitionGraphPath {
                         bail!("Unhandled direct transition {}", transition);
                     }
                 };
-                Ok(Unadvanceables(vec![Unadvanceable {
+                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
                     reason: UnadvanceableReason::NoMatchingTransition,
                     from_subgraph: subgraph.clone(),
                     to_subgraph: subgraph.clone(),
                     details,
-                }]))
-            },
+                })]))
+            })),
+        )])))
+    }
+}
+
+impl TransitionPathWithLazyIndirectPaths {
+    // PORT_NOTE: Named `initial()` in the JS codebase, but conventionally in Rust this kind of
+    // constructor is named `new()`.
+    fn new(path: TransitionGraphPath) -> Self {
+        Self {
+            path,
+            lazily_computed_indirect_paths: None,
+        }
+    }
+
+    fn indirect_options(
+        &mut self,
+        _condition_resolver: &mut impl ConditionResolver,
+        _override_conditions: &EnabledOverrideConditions,
+    ) -> Result<TransitionIndirectPaths, FederationError> {
+        // FED-573
+        todo!()
+    }
+
+    /// Returns an `UnadvanceableClosures` if there is no way to advance the path with this
+    /// transition. Otherwise, it returns a list of options (paths) we can be in after advancing the
+    /// transition. The lists of options can be empty, which has the special meaning that the
+    /// transition is guaranteed to have no results (due to unsatisfiable type conditions), meaning
+    /// that as far as composition validation goes, we can ignore that transition (and anything that
+    /// follows) and otherwise continue.
+    // PORT_NOTE: In the JS codebase, this was named `advancePathWithTransition`.
+    #[allow(dead_code)]
+    fn advance_with_transition(
+        &mut self,
+        transition: &QueryGraphEdgeTransition,
+        target_type: &OutputTypeDefinitionPosition,
+        api_schema: &ValidFederationSchema,
+        condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &Arc<EnabledOverrideConditions>,
+    ) -> Result<
+        Either<Vec<TransitionPathWithLazyIndirectPaths>, UnadvanceableClosures>,
+        FederationError,
+    > {
+        // The `transition` comes from the supergraph. Now, it is possible that a transition can be
+        // expressed on the supergraph, but corresponds to an "unsatisfiable" condition on the
+        // subgraph. Let's consider:
+        // - Subgraph A:
+        //    type Query {
+        //       get: [I]
+        //    }
+        //
+        //    interface I {
+        //      k: Int
+        //    }
+        //
+        //    type T1 implements I @key(fields: "k") {
+        //      k: Int
+        //      a: String
+        //    }
+        //
+        //    type T2 implements I @key(fields: "k") {
+        //      k: Int
+        //      b: String
+        //    }
+        //
+        // - Subgraph B:
+        //    interface I {
+        //      k: Int
+        //    }
+        //
+        //    type T1 implements I @key(fields: "k") {
+        //      k: Int
+        //      myself: I
+        //    }
+        //
+        // On the resulting supergraph, we will have a path for:
+        //   {
+        //     get {
+        //       ... on T1 {
+        //         myself {
+        //           ... on T2 {
+        //             b
+        //           }
+        //         }
+        //       }
+        //     }
+        //   }
+        //
+        // As we compute possible subgraph paths, the `myself` field will get us in subgraph `B`
+        // through `T1`'s key. However, as we look at transition `... on T2` from subgraph `B`, we
+        // have no such type/transition. But this does not mean that the subgraphs shouldn't
+        // compose. What it really means is that the corresponding query above can be done, but is
+        // guaranteed to never return anything (essentially, we can query subgraph `B` but will
+        // never get a `T2`, so the result of the query should be empty).
+        //
+        // So we need to handle this case, and we do this first. Note that the only kind of
+        // transition that can give use this is a 'DownCast' transition. Also note that if the
+        // subgraph type we're on is an @interfaceObject type, then we also can't be in this
+        // situation as an @interfaceObject type "stands in" for all the possible implementations of
+        // that interface. And one way to detect if the subgraph type an @interfaceObject is to
+        // check if the subgraph type is an object type while the supergraph type is an interface
+        // one.
+        if let QueryGraphEdgeTransition::Downcast {
+            from_type_position, ..
+        } = &transition
+        {
+            let tail_weight = self.path.graph.node_weight(self.path.tail)?;
+            let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
+                bail!("Subgraph path tail was unexpectedly a federation root node");
+            };
+            if !(matches!(
+                from_type_position,
+                CompositeTypeDefinitionPosition::Interface(_)
+            ) && matches!(tail_type_pos, OutputTypeDefinitionPosition::Object(_)))
+            {
+                // If we consider a "downcast" transition, it means that the target of that cast is
+                // composite, but also that the last type of the subgraph path is also composite
+                // (that type is essentially the "source" of the cast).
+                let target_type: CompositeTypeDefinitionPosition =
+                    target_type.clone().try_into()?;
+                let runtime_types_in_supergraph =
+                    api_schema.possible_runtime_types(target_type.clone())?;
+                let runtime_types_in_subgraph = &self.path.runtime_types_of_tail;
+                // If the intersection is empty, it means whatever field got us here can never
+                // resolve into an object of the type we're casting into. Essentially, we'll be fine
+                // building a plan for this transition and whatever comes next: it'll just return
+                // nothing.
+                if runtime_types_in_subgraph.is_disjoint(&runtime_types_in_supergraph) {
+                    debug!(
+                        "No intersection between casted type {} and the possible types in this subgraph",
+                        target_type,
+                    );
+                    return Ok(Either::Left(vec![]));
+                }
+            }
+        }
+
+        debug!("Trying to advance {} for {}", self.path, transition,);
+        let span = debug_span!(" |");
+        let options_guard = span.enter();
+        debug!("Direct options:");
+        let span = debug_span!(" |");
+        let direct_options_guard = span.enter();
+        let direct_options = self.path.advance_with_transition(
+            transition,
+            condition_resolver,
+            override_conditions,
+        )?;
+        let mut options: Vec<TransitionGraphPath> = vec![];
+        let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
+        match direct_options {
+            Either::Left(direct_options) => {
+                drop(direct_options_guard);
+                debug!("{:?}", direct_options);
+                // If we can fulfill the transition directly (without taking an edge) and the target
+                // type is "terminal", then there is no point in computing all the options.
+                if !direct_options.is_empty() && target_type.is_leaf_type() {
+                    drop(options_guard);
+                    debug!(
+                        "reached leaf type {} so not trying indirect paths",
+                        target_type,
+                    );
+                    return Ok(Either::Left(
+                        direct_options
+                            .into_iter()
+                            .map(TransitionPathWithLazyIndirectPaths::new)
+                            .collect(),
+                    ));
+                }
+                options = direct_options;
+            }
+            Either::Right(closures) => {
+                drop(direct_options_guard);
+                debug!("No direct options");
+                dead_end_closures = closures.0;
+            }
+        }
+        // Otherwise, let's try non-collecting edges and see if we can find some (more) options
+        // there.
+        debug!("Computing indirect paths:");
+        let span = debug_span!(" |");
+        let indirect_options_guard = span.enter();
+        let paths_with_non_collecting_edges =
+            self.indirect_options(condition_resolver, override_conditions)?;
+        if !paths_with_non_collecting_edges.paths.is_empty() {
+            drop(indirect_options_guard);
+            debug!(
+                "{} indirect paths: {:?}",
+                paths_with_non_collecting_edges.paths.len(),
+                paths_with_non_collecting_edges.paths,
+            );
+            debug!("Validating indirect options:");
+            let span = debug_span!(" |");
+            let _guard = span.enter();
+            for non_collecting_path in paths_with_non_collecting_edges.paths.iter() {
+                debug!("For indirect path {}:", non_collecting_path,);
+                let span = debug_span!(" |");
+                let indirect_option_guard = span.enter();
+                let paths_with_transition = non_collecting_path.advance_with_transition(
+                    transition,
+                    condition_resolver,
+                    override_conditions,
+                )?;
+                match paths_with_transition {
+                    Either::Left(mut paths_with_transition) => {
+                        drop(indirect_option_guard);
+                        debug!("Adding valid option: {:?}", paths_with_transition);
+                        options.append(&mut paths_with_transition);
+                    }
+                    Either::Right(mut closures) => {
+                        drop(indirect_option_guard);
+                        debug!("Cannot be advanced with {}", transition);
+                        dead_end_closures.append(&mut closures.0);
+                    }
+                }
+            }
+        } else {
+            drop(indirect_options_guard);
+            debug!("no indirect paths");
+        }
+        if !options.is_empty() {
+            drop(options_guard);
+            debug!("{:?}", options);
+            return Ok(Either::Left(
+                options
+                    .into_iter()
+                    .map(TransitionPathWithLazyIndirectPaths::new)
+                    .collect(),
+            ));
+        } else {
+            drop(options_guard);
+            debug!("Cannot advance {} for this path", transition);
+        }
+
+        let transition = transition.clone();
+        let graph = self.path.graph.clone();
+        let tail = self.path.tail;
+        let mut indirect_dead_end_closures = paths_with_non_collecting_edges.dead_ends.0;
+        Ok(Either::Right(UnadvanceableClosures(vec![Arc::new(
+            LazyLock::new(Box::new(move || {
+                dead_end_closures.append(&mut indirect_dead_end_closures);
+                let mut all_dead_ends: Unadvanceables =
+                    UnadvanceableClosures(dead_end_closures).try_into()?;
+                if let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &transition
+                {
+                    let parent_type_pos = field_definition_position.parent();
+                    let tail_weight = graph.node_weight(tail)?;
+                    let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
+                        bail!("Subgraph path tail was unexpectedly a federation root node");
+                    };
+                    let subgraphs_with_dead_ends = all_dead_ends
+                        .iter()
+                        .map(|unadvanceable| unadvanceable.to_subgraph.clone())
+                        .collect::<IndexSet<_>>();
+                    for (subgraph, subgraph_schema) in graph.subgraphs() {
+                        if subgraphs_with_dead_ends.contains(subgraph) {
+                            continue;
+                        }
+                        let parent_type_pos_in_subgraph =
+                            subgraph_schema.try_get_type(parent_type_pos.type_name().clone());
+                        let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
+                            .map(CompositeTypeDefinitionPosition::try_from)
+                        else {
+                            continue;
+                        };
+                        let Ok(field_pos_in_subgraph) = parent_type_pos_in_subgraph
+                            .field(field_definition_position.field_name().clone())
+                        else {
+                            continue;
+                        };
+                        let Ok(_field_in_subgraph) =
+                            field_pos_in_subgraph.get(subgraph_schema.schema())
+                        else {
+                            continue;
+                        };
+                        // The subgraph has the type we're looking for, but we have recorded no
+                        // dead-ends. This means there is no edge to that type, and thus either:
+                        // 1. it has no keys, or
+                        // 2. the path to advance it is an @interfaceObject type, the type we look
+                        //    for is an implementation of that interface, and there are no keys on
+                        //    the interface.
+                        let tail_type_pos_in_subgraph =
+                            subgraph_schema.try_get_type(tail_type_pos.type_name().clone());
+                        if let Some(tail_type_pos_in_subgraph) = tail_type_pos_in_subgraph {
+                            // `tail_type_pos_in_subgraph` exists, so it's either equal to
+                            // `parent_type_pos_in_subgraph`, or it's an interface of it. In any
+                            // case, it's composite.
+                            let Ok(tail_type_pos_in_subgraph) =
+                                CompositeTypeDefinitionPosition::try_from(
+                                    tail_type_pos_in_subgraph.clone(),
+                                )
+                            else {
+                                bail!(
+                                    "Type {} in {} should be composite",
+                                    tail_type_pos_in_subgraph,
+                                    subgraph,
+                                );
+                            };
+                            let Some(metadata) = subgraph_schema.subgraph_metadata() else {
+                                bail!("Type should originate from a federation subgraph schema");
+                            };
+                            let key_directive_definition_name = &metadata
+                                .federation_spec_definition()
+                                .key_directive_definition(subgraph_schema)?
+                                .name;
+                            let tail_type_def =
+                                tail_type_pos_in_subgraph.get(subgraph_schema.schema())?;
+                            let key_resolvables = tail_type_def
+                                .directives()
+                                .get_all(key_directive_definition_name)
+                                .map(|application| {
+                                    Ok::<_, FederationError>(
+                                        metadata
+                                            .federation_spec_definition()
+                                            .key_directive_arguments(application)?
+                                            .resolvable,
+                                    )
+                                })
+                                .process_results(|iter| iter.collect::<Vec<_>>())?;
+                            ensure!(
+                                key_resolvables.iter().all(Not::not),
+                                "After transition {}, expected type {} in {} to have no resolvable keys",
+                                transition,
+                                parent_type_pos_in_subgraph,
+                                subgraph,
+                            );
+                            let kind_of_type =
+                                if tail_type_pos_in_subgraph == parent_type_pos_in_subgraph {
+                                    "type"
+                                } else {
+                                    "interface"
+                                };
+                            let explanation = if key_resolvables.is_empty() {
+                                format!(
+                                    "{} \"{}\" has no @key defined in subgraph \"{}\"",
+                                    kind_of_type, tail_type_pos, subgraph,
+                                )
+                            } else {
+                                format!(
+                                    "none of the @key defined on {} \"{}\" in subgraph \"{}\" are resolvable (they are all declared with their \"resolvable\" argument set to false)",
+                                    kind_of_type, tail_type_pos, subgraph,
+                                )
+                            };
+                            all_dead_ends.0.push(Arc::new(Unadvanceable {
+                                reason: UnadvanceableReason::UnreachableType,
+                                from_subgraph: tail_weight.source.clone(),
+                                to_subgraph: subgraph.clone(),
+                                details: format!(
+                                    "cannot move to subgraph \"{}\", which has field \"{}\", because {}",
+                                    subgraph,
+                                    field_definition_position,
+                                    explanation,
+                                ),
+                            }))
+                        } else {
+                            // This means that:
+                            // 1. the type of the path we're trying to advance is different from the
+                            //    transition we're considering, and that should only happen if the
+                            //    path is on an @interfaceObject type, and
+                            // 2. the subgraph we're looking at actually doesn't have that interface
+                            //    (to be able to jump to that subgraph, we would need the interface
+                            //    and it would need to have a resolvable key, but it has neither).
+                            all_dead_ends.0.push(Arc::new(Unadvanceable {
+                                reason: UnadvanceableReason::UnreachableType,
+                                from_subgraph: tail_weight.source.clone(),
+                                to_subgraph: subgraph.clone(),
+                                details: format!(
+                                    "cannot move to subgraph \"{}\", which has field \"{}\", because interface \"{}\" is not defined in this subgraph (to jump to \"{}\", it would need to both define interface \"{}\" and have a @key on it)",
+                                    subgraph,
+                                    field_definition_position,
+                                    tail_type_pos,
+                                    subgraph,
+                                    tail_type_pos,
+                                ),
+                            }))
+                        }
+                    }
+                }
+
+                Ok(all_dead_ends)
+            })),
         )])))
     }
 }

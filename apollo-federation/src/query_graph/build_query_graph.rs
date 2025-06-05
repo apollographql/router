@@ -1153,8 +1153,8 @@ impl FederatedQueryGraphBuilder {
                 // allow a type to be an entity in some subgraphs but not others, this is not
                 // the place to impose that restriction, and this may be at least temporarily
                 // useful to allow convert a type to an entity).
-                let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> =
-                    type_pos.clone().try_into()
+                let Ok(type_pos) =
+                    ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos.clone())
                 else {
                     return Err(SingleFederationError::Internal {
                             message: format!(

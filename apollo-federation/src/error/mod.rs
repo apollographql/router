@@ -123,6 +123,10 @@ pub enum CompositionError {
         error: FederationError,
     },
     #[error("{message}")]
+    EmptyMergedEnumType { message: String },
+    #[error("{message}")]
+    EnumValueMismatch { message: String },
+    #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error(transparent)]
     InvalidGraphQLName(InvalidNameError),
@@ -138,6 +142,23 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+}
+
+impl CompositionError {
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::SubgraphError { .. } => todo!(),
+            Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
+            Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            Self::InvalidGraphQLName(..) => ErrorCode::InvalidGraphQL,
+            Self::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
+            Self::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
+            Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
+            Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+        }
+    }
 }
 
 impl From<SubgraphError> for CompositionError {
@@ -1918,7 +1939,7 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
-#[derive(Debug, strum_macros::EnumIter)]
+#[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
     InvalidGraphQL,
