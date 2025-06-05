@@ -1382,7 +1382,6 @@ mod tests {
                     usage_reporting: UsageReporting::Error("this is a test report key".to_string())
                         .into(),
                     query: Arc::new(Query::empty_for_tests()),
-                    query_metrics: Default::default(),
                     estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {

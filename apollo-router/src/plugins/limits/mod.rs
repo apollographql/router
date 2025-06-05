@@ -20,8 +20,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
+use crate::services::layers::enforce_operation_limits::EnforceOperationLimitsLayer;
 use crate::services::router;
-use crate::services::router::BoxService;
+use crate::services::supergraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -165,7 +166,7 @@ impl Plugin for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
@@ -179,6 +180,13 @@ impl Plugin for LimitsPlugin {
             ))
             .map_request(Into::into)
             .map_response(Into::into)
+            .service(service)
+            .boxed()
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&self.config))
             .service(service)
             .boxed()
     }

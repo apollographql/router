@@ -22,7 +22,6 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 /// Return up to this many GraphQL parsing or validation errors.
 ///
@@ -283,9 +282,6 @@ pub(crate) enum QueryPlannerError {
     /// spec error: {0}
     SpecError(SpecError),
 
-    /// complexity limit exceeded
-    LimitExceeded(OperationLimits<bool>),
-
     // Safe to cache because user scopes and policies are included in the cache key.
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
@@ -393,46 +389,6 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::OperationValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::OperationValidationErrors),
-
-            QueryPlannerError::LimitExceeded(OperationLimits {
-                depth,
-                height,
-                root_fields,
-                aliases,
-            }) => {
-                let mut errors = Vec::new();
-                let mut build = |exceeded, code, message| {
-                    if exceeded {
-                        errors.push(
-                            Error::builder()
-                                .message(message)
-                                .extension_code(code)
-                                .build(),
-                        )
-                    }
-                };
-                build(
-                    depth,
-                    "MAX_DEPTH_LIMIT",
-                    "Maximum depth limit exceeded in this operation",
-                );
-                build(
-                    height,
-                    "MAX_HEIGHT_LIMIT",
-                    "Maximum height (field count) limit exceeded in this operation",
-                );
-                build(
-                    root_fields,
-                    "MAX_ROOT_FIELDS_LIMIT",
-                    "Maximum root fields limit exceeded in this operation",
-                );
-                build(
-                    aliases,
-                    "MAX_ALIASES_LIMIT",
-                    "Maximum aliases limit exceeded in this operation",
-                );
-                Ok(errors)
-            }
             QueryPlannerError::FederationError(err) => err
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::FederationError),
@@ -472,11 +428,6 @@ impl From<SpecError> for QueryPlannerError {
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
         QueryPlannerError::OperationValidationErrors(ValidationErrors { errors: err.errors })
-    }
-}
-impl From<OperationLimits<bool>> for QueryPlannerError {
-    fn from(error: OperationLimits<bool>) -> Self {
-        QueryPlannerError::LimitExceeded(error)
     }
 }
 
