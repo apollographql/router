@@ -2,6 +2,166 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.3.0] - 2025-06-02
+
+## 🚀 Features
+
+**Connectors improvements**: Router 2.3.0 supports Connect spec v0.2, including batch requests, error customization, and direct access to HTTP headers. To use these features: upgrade your Router to 2.3, update your version of Federation to 2.11, and update the @link directives in your subgraphs to https://specs.apollo.dev/connect/v0.2.
+
+See the [Connectors changelog](https://www.apollographql.com/docs/graphos/connectors/reference/changelog) for more details.
+
+### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
+
+When logging unknown operations encountered during safe-listing, include information about whether enforcement was skipped. This will help distinguish between truly problematic external operations (where `enforcement_skipped` is false) and internal operations that are intentionally allowed to bypass safelisting (where `enforcement_skipped` is true).
+
+By [@DaleSeo](https://github.com/DaleSeo) in https://github.com/apollographql/router/pull/7509
+
+### Add response body telemetry selector ([PR #7363](https://github.com/apollographql/router/pull/7363))
+
+The Router now supports a `response_body` selector which provides access to the response body in telemetry configurations. This enables more detailed monitoring and logging of response data in the Router.
+
+Example configuration:
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          "my_attribute":
+            response_body: true
+```
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7363
+
+### Support non-JSON and JSON-like content types for connectors ([PR #7380](https://github.com/apollographql/router/pull/7380))
+
+Connectors now inspect the `content-type` header of responses to determine how they should treat the response. This allows more flexibility as prior to this change, all responses were treated as JSON which would lead to errors on non-json responses.
+
+The behavior is as follows:
+
+- If `content-type` ends with `/json` (like `application/json`) OR `+json` (like `application/vnd.foo+json`): content is parsed as JSON.
+- If `content-type` is `text/plain`: content will be treated as a UTF-8 `string`. Content can be accessed in `selection` mapping via `$` variable.
+- If `content-type` is any other value: content will be treated as a JSON `null`.
+- If no `content-type` header is provided: content is assumed to be JSON and therefore parsed as JSON.
+
+If deserialization fails, an error message of `Response deserialization failed` with a error code of `CONNECTOR_DESERIALIZE` will be returned:
+
+```json
+"errors": [
+    {
+        "message": "Response deserialization failed",
+        "extensions": {
+            "code": "CONNECTOR_DESERIALIZE"
+        }
+    }
+]
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7380
+
+### Include message and path for certain errors in Apollo telemetry ([PR #7378](https://github.com/apollographql/router/pull/7378))
+
+For errors pertaining to connectors and demand control features, Apollo telemetry will now include the original error message and path as part of the traces sent to GraphOS.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7378
+
+### Support ignoring specific headers during subscriptions deduplication ([PR #7070](https://github.com/apollographql/router/pull/7070))
+
+The Router now supports ignoring specific headers when deduplicating requests to subgraphs which provide subscription events. Previously, any differing headers which didn't actually affect the subscription response (e.g., `user-agent`) would prevent or limit the potential of deduplication.
+
+The introduction of the `ignored_headers` option allows you to specify headers to ignore during deduplication, enabling you to benefit from subscription deduplication even when requests include headers with unique or varying values that don't affect the subscription's event data.
+
+Configuration example:
+
+```yaml
+subscription:
+  enabled: true
+  deduplication:
+    enabled: true # optional, default: true
+    ignored_headers: # (optional) List of ignored headers when deduplicating subscriptions
+      - x-transaction-id
+      - custom-header-name
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7070
+
+## 🐛 Fixes
+
+### Support disabling the health check endpoint ([PR #7519](https://github.com/apollographql/router/pull/7519))
+
+During the development of Router 2.0, the health check endpoint support was converted to be a plugin. Unfortunately, the support for disabling the health check endpoint was lost during the conversion.
+
+This is now fixed and a new unit test ensures that disabling the health check does not result in the creation of a health check endpoint.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7519
+
+### Propagate client name and version modifications through telemetry ([PR #7369](https://github.com/apollographql/router/pull/7369))
+
+The Router accepts modifications to the client name and version (`apollo::telemetry::client_name` and `apollo::telemetry::client_version`), but those modifications were not propagated through the telemetry layers to update spans and traces.
+
+After this change, the modifications from plugins **on the `router` service** are propagated through the telemetry layers.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7369
+
+### Prevent connectors error when using a variable in a nested input argument ([PR #7472](https://github.com/apollographql/router/pull/7472))
+
+The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
+
+```graphql
+query Query (: String){
+    complexInputType(filters: { inSpace: true, search:  })
+}
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7472
+
+### Spans should only include path in `http.route` ([PR #7390](https://github.com/apollographql/router/pull/7390))
+
+Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
+
+Prior to this change, the Router sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). The Router will now only include the path (`/graphql`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7390
+
+### Decrease log level for JWT authentication failure ([PR #7396](https://github.com/apollographql/router/pull/7396))
+
+A recent change increased the log level of JWT authentication failures from `info` to `error`. This reverts that change.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7396
+
+### Prefer headers propagated with Router YAML config over headers from Connector directives ([PR #7499](https://github.com/apollographql/router/pull/7499))
+
+When configuring the same header name in both `@connect(http: { headers: })` (or `@source(http: { headers: })`) in SDL and `propagate` in Router YAML configuration, the request had both headers, even if the value is the same. After this change, Router YAML configuration always wins.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7499
+
+## 🛠 Maintenance
+
+### Add timeouts and connection health checks to Redis connections ([Issue #6855](https://github.com/apollographql/router/issues/6855))
+
+The Router's internal Redis configuration has been improved to increase client resiliency under various failure modes (TCP failures and timeouts, unresponsive sockets, Redis server failures, etc.). It also adds heartbeats (a PING every 10 seconds) to the Redis clients.
+
+By [@aembke](https://github.com/aembke), [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7526
+
+## 📚 Documentation
+
+### Fix discrepancies in coprocessor metrics documentation ([PR #7359](https://github.com/apollographql/router/pull/7359))
+
+The documentation for standard metric instruments for [coprocessors](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#coprocessor) has been updated:
+
+- Rename `apollo.router.operations.coprocessor.total` to `apollo.router.operations.coprocessor`
+- Clarify that `coprocessor.succeeded` attribute applies to `apollo.router.operations.coprocessor` only.
+
+By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/7359
+
+### Add example Rhai script for returning Demand Control metrics as response headers ([PR #7564](https://github.com/apollographql/router/pull/7564))
+
+A new section has been added to the [demand control documentation](https://www.apollographql.com/docs/graphos/routing/security/demand-control#accessing-programmatically) to demonstrate how to use Rhai scripts to expose cost estimation data in response headers. This allows clients to see the estimated cost, actual cost, and other demand control metrics directly in HTTP responses, which is useful for debugging and client-side optimization.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/7564
+
+
+
 # [2.2.1] - 2025-05-13
 
 ## 🐛 Fixes
