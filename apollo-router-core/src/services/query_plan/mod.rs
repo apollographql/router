@@ -23,4 +23,4 @@ pub struct Response {
 #[derive(Debug, Error)]
 enum Error {}
 
-type QueryPlannerService = BoxCloneService<Request, Response, BoxError>;
+type QueryPlanService = BoxCloneService<Request, Response, BoxError>;

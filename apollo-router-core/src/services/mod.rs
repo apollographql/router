@@ -7,7 +7,7 @@ pub mod http_server;
 pub mod json_client;
 pub mod json_server;
 pub mod query_execution;
-pub mod query_parser;
-pub mod query_planner;
+pub mod query_parse;
+pub mod query_plan;
 
 pub type JsonValue = serde_json::Value;
