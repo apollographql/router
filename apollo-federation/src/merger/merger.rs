@@ -218,7 +218,6 @@ impl Merger {
             })
     }
 
-
     pub(crate) fn merge(mut self) -> MergeResult {
         // Validate compose directive manager
         self.validate_compose_directive_manager();
