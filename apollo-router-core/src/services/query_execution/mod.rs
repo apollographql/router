@@ -1,4 +1,4 @@
-use crate::services::JsonValue;
+use crate::json::JsonValue;
 use crate::services::context::Context;
 use apollo_federation::query_plan::QueryPlan;
 use futures::Stream;
