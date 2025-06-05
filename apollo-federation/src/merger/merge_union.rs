@@ -94,13 +94,9 @@ impl Merger {
                     sources,
                     |source| {
                         if let Some(union_type) = source {
-                            if union_type.members.contains(member_name) {
-                                "yes"
-                            } else {
-                                "no"
-                            }
+                            union_type.members.contains(member_name)
                         } else {
-                            "no"
+                            false
                         }
                     },
                 );
@@ -124,7 +120,7 @@ mod tests {
     fn create_union_type(name: &str, member_names: &[&str]) -> Node<UnionType> {
         let mut union_type = UnionType {
             description: None,
-            name: Name::new(name).expect("Valid name"),
+            name: Name::new_unchecked(name),
             directives: Default::default(),
             members: Default::default(),
         };

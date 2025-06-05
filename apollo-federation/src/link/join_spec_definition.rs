@@ -402,11 +402,11 @@ impl JoinSpecDefinition {
         subgraph_name: &Name,
         member_name: &str,
     ) -> Result<Directive, FederationError> {
-        let name_in_schema = self
-            .directive_name_in_schema(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)?
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: "Unexpectedly could not find unionMember directive in schema".to_owned(),
-            })?;
+        let Ok(Some(name_in_schema)) =
+            self.directive_name_in_schema(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)
+        else {
+            bail!("Unexpectedly could not find unionMember directive in schema");
+        };
         Ok(Directive {
             name: name_in_schema,
             arguments: vec![

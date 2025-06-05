@@ -14,7 +14,7 @@ use apollo_compiler::validation::Valid;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -111,17 +111,16 @@ impl Merger {
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
     pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
         let subgraph_name = &self.names[subgraph_index];
-        self.subgraph_names_to_join_spec_name
+        let name = self
+            .subgraph_names_to_join_spec_name
             .get(subgraph_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Could not find join spec name for subgraph '{}'",
-                        subgraph_name
-                    ),
-                }
-                .into()
-            })
+                internal_error!(
+                    "Could not find join spec name for subgraph '{}'",
+                    subgraph_name
+                )
+            })?;
+        Ok(name)
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -401,8 +400,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(&value_pos.value_name)
                         })
                     },
                 );
@@ -522,7 +521,7 @@ impl Merger {
         code: HintCode,
         message: String,
         sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> &str,
+        accessor: impl Fn(&Option<T>) -> bool,
     ) {
         // Build detailed hint message showing which subgraphs have/don't have the element
         let mut has_subgraphs = Vec::new();
@@ -535,7 +534,7 @@ impl Merger {
                 "unknown"
             };
             let result = accessor(source);
-            if result == "yes" {
+            if result {
                 has_subgraphs.push(subgraph_name);
             } else {
                 missing_subgraphs.push(subgraph_name);
@@ -575,8 +574,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(value_name)
                         })
                     },
                 );
