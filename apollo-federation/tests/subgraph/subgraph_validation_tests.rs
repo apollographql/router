@@ -2271,7 +2271,6 @@ mod tag_tests {
             'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
         ];
         for symbol in allowed_symbols {
-            // TODO: Expand this test to use all available locations
             let doc = include_str!("fixtures/tag_validation_template.graphqls")
                 .replace("{symbol}", &symbol.to_string());
             // Build should succeed without errors

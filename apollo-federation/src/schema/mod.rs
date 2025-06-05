@@ -612,8 +612,6 @@ impl FederationSchema {
             .referencers()
             .get_directive(&tag_directive_definition.name)?;
 
-        // TODO: Can we macro these loops?
-        // TODO: Do we need to handle directive arguments?
         let mut applications = Vec::new();
         // Schema
         if let Some(schema_position) = &tag_directive_referencers.schema {
