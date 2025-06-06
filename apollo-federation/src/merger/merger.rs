@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
@@ -28,12 +29,25 @@ use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::FederationSchema;
+use crate::schema::directive_location::DirectiveLocationExt;
+use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+
+/// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
+/// the end user redefined these directives, we consider them built-in for merging.
+static BUILT_IN_DIRECTIVES: [&str; 6] = [
+    "skip",
+    "include",
+    "deprecated",
+    "specifiedBy",
+    "defer",
+    "stream",
+];
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
@@ -342,8 +356,41 @@ impl Merger {
         todo!("Implement shallow type addition - create empty type definitions")
     }
 
-    fn add_directives_shallow(&mut self) {
-        todo!("Implement shallow directive addition - create empty directive definitions")
+    fn add_directives_shallow(&mut self) -> Result<(), FederationError> {
+        for subgraph in self.subgraphs.iter() {
+            for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
+                if self.merged.get_directive_definition(name).is_none()
+                    && self.is_merged_directive(&subgraph.name, definition)
+                {
+                    let pos = DirectiveDefinitionPosition {
+                        directive_name: name.clone(),
+                    };
+                    pos.pre_insert(&mut self.merged)?;
+                    pos.insert(&mut self.merged, definition.clone())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_merged_directive(&self, subgraph_name: &str, definition: &DirectiveDefinition) -> bool {
+        if self
+            .compose_directive_manager
+            .should_compose_directive(subgraph_name, &definition.name)
+        {
+            return true;
+        }
+
+        // TODO: There's a block here for handling directive applications instead of just definitions
+
+        if BUILT_IN_DIRECTIVES.contains(&definition.name.as_str()) {
+            return false;
+        }
+
+        definition
+            .locations
+            .iter()
+            .any(|loc| loc.is_executable_location())
     }
 
     fn merge_implements(&mut self, _type_def: &Name) {
