@@ -2,13 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
@@ -17,7 +13,6 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
-use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
@@ -28,11 +23,10 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::EnumTypeDefinitionPosition;
-use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -52,24 +46,6 @@ static BUILT_IN_DIRECTIVES: [&str; 6] = [
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
 
-#[derive(Debug, Clone)]
-enum EnumTypeUsage {
-    #[allow(dead_code)]
-    Input {
-        input_example: String,
-    },
-    #[allow(dead_code)]
-    Output {
-        output_example: String,
-    },
-    #[allow(dead_code)]
-    Both {
-        input_example: String,
-        output_example: String,
-    },
-    Unused,
-}
-
 #[derive(Debug)]
 pub(crate) struct MergeResult {
     #[allow(dead_code)]
@@ -87,21 +63,21 @@ pub(crate) struct CompositionOptions {
 
 #[allow(unused)]
 pub(crate) struct Merger {
-    subgraphs: Vec<Subgraph<Validated>>,
-    options: CompositionOptions,
-    compose_directive_manager: ComposeDirectiveManager,
-    pub(crate) names: Vec<String>,
-    pub(crate) error_reporter: ErrorReporter,
-    pub(crate) merged: FederationSchema,
-    pub(crate) subgraph_names_to_join_spec_name: HashMap<String, Name>,
-    merged_federation_directive_names: HashSet<String>,
-    fields_with_from_context: DirectiveReferencers,
-    fields_with_override: DirectiveReferencers,
-    schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
-    join_directive_identities: HashSet<Identity>,
-    enum_usages: HashMap<String, EnumTypeUsage>,
-    inaccessible_directive_name_in_supergraph: Option<Name>,
-    pub(crate) join_spec_definition: &'static JoinSpecDefinition,
+    pub(in crate::merger) subgraphs: Vec<Subgraph<Validated>>,
+    pub(in crate::merger) options: CompositionOptions,
+    pub(in crate::merger) compose_directive_manager: ComposeDirectiveManager,
+    pub(in crate::merger) names: Vec<String>,
+    pub(in crate::merger) error_reporter: ErrorReporter,
+    pub(in crate::merger) merged: FederationSchema,
+    pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
+    pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
+    pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
+    pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
+    pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
 }
 
 #[allow(unused)]
@@ -113,7 +89,14 @@ impl Merger {
         let mut error_reporter = ErrorReporter::new();
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
-        let join_spec = JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let Some(join_spec) =
+            JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No join spec version found for federation version {}",
+                latest_federation_version_used
+            )
+        };
         let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
@@ -149,7 +132,7 @@ impl Merger {
             schema_to_import_to_feature_url,
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: todo!(),
-            join_spec_definition: join_spec.expect("exists"), // TODO: handle this and bail up top
+            join_spec_definition: join_spec,
         })
     }
 
@@ -247,16 +230,14 @@ impl Merger {
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
     pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
         let subgraph_name = &self.names[subgraph_index];
-        let name = self
-            .subgraph_names_to_join_spec_name
+        self.subgraph_names_to_join_spec_name
             .get(subgraph_name)
             .ok_or_else(|| {
                 internal_error!(
                     "Could not find join spec name for subgraph '{}'",
                     subgraph_name
                 )
-            })?;
-        Ok(name)
+            })
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -433,163 +414,6 @@ impl Merger {
         todo!("Implement post-merge validations")
     }
 
-    /// Merge enum type from multiple subgraphs
-    pub(crate) fn merge_enum(
-        &mut self,
-        sources: Sources<Node<EnumType>>,
-        dest: &EnumTypeDefinitionPosition,
-    ) -> Result<(), FederationError> {
-        let usage = self.enum_usages.get(dest.type_name.as_str()).cloned().unwrap_or_else(|| {
-            // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
-            // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
-            // an "input-only" or as a "input/output" type, but the hints/errors generated in both those cases would be confusing in that case, and while we could amend them
-            // for this case, it would complicate things and doesn't feel like it would feel very justified. So we merge it as an "output" type, which is the least contraining
-            // option. We do raise an hint though so users can notice this.
-            let usage = EnumTypeUsage::Unused;
-            self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
-                message: format!(
-                    "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
-                    dest.type_name
-                ),
-            });
-            usage
-        });
-
-        let mut enum_values: IndexSet<Name> = Default::default();
-
-        enum_values.extend(
-            sources
-                .iter()
-                .filter_map(|(_, source)| source.as_ref())
-                .flat_map(|source| source.values.values())
-                .map(|value| value.node.value.clone()),
-        );
-
-        // Merge each enum value
-        for value_name in enum_values {
-            let value_pos = dest.value(value_name);
-            self.merge_enum_value(&sources, &value_pos, &usage)?;
-        }
-
-        // We could be left with an enum type with no values, and that's invalid in graphQL
-        if dest.get(self.merged.schema())?.values.is_empty() {
-            self.error_reporter.add_error(CompositionError::EmptyMergedEnumType {
-                message: format!(
-                    "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
-                    dest.type_name
-                ),
-            });
-        }
-
-        Ok(())
-    }
-
-    /// Merge a specific enum value across subgraphs
-    /// Returns true if the value should be removed from the enum
-    fn merge_enum_value(
-        &mut self,
-        sources: &Sources<Node<EnumType>>,
-        value_pos: &EnumValueDefinitionPosition,
-        usage: &EnumTypeUsage,
-    ) -> Result<(), FederationError> {
-        // We merge directives (and description while at it) on the value even though we might remove it later in that function,
-        // but we do so because:
-        // 1. this will catch any problems merging the description/directives (which feels like a good thing).
-        // 2. it easier to see if the value is marked @inaccessible.
-
-        let value_sources: Sources<&Component<EnumValueDefinition>> = sources
-            .iter()
-            .map(|(&idx, source)| {
-                let source_value = source
-                    .as_ref()
-                    .and_then(|enum_type| enum_type.values.get(&value_pos.value_name));
-                (idx, source_value)
-            })
-            .collect();
-
-        // create new dest for the value
-        let dest = Component::new(EnumValueDefinition {
-            description: None,
-            value: value_pos.value_name.clone(),
-            directives: Default::default(),
-        });
-        value_pos.insert(&mut self.merged, dest)?;
-        // TODO: Implement these helper methods - for now skip the actual merging
-        // self.merge_description(&value_sources, &mut dest);
-        // self.record_applied_directives_to_merge(&value_sources, &mut dest);
-        self.add_join_enum_value(&value_sources, value_pos)?;
-
-        let is_inaccessible = match &self.inaccessible_directive_name_in_supergraph {
-            Some(name) => value_pos.is_inaccessible(&self.merged, name)?,
-            None => false,
-        };
-
-        // The merging strategy depends on the enum type usage:
-        //  - if it is _only_ used in position of Input type, we merge it with an "intersection" strategy (like other input types/things).
-        //  - if it is _only_ used in position of Output type, we merge it with an "union" strategy (like other output types/things).
-        //  - otherwise, it's used as both input and output and we can only merge it if it has the same values in all subgraphs.
-        // So in particular, the value will be in the supergraph only if it is either an "output only" enum, or if the value is in all subgraphs.
-        // Note that (like for input object fields), manually marking the value as @inaccessible let's use skips any check and add the value
-        // regardless of inconsistencies.
-        let violates_intersection_requirement = !is_inaccessible
-            && sources.values().any(|source| {
-                source
-                    .as_ref()
-                    .is_some_and(|enum_type| !enum_type.values.contains_key(&value_pos.value_name))
-            });
-        // We have a source (subgraph) that _has_ the enum type but not that particular enum value. If we're in the "both input and output usages",
-        // that's where we have to fail. But if we're in the "only input" case, we simply don't merge that particular value and hint about it.
-        match usage {
-            EnumTypeUsage::Both {
-                input_example,
-                output_example,
-            } if violates_intersection_requirement => {
-                self.report_mismatch_error_with_specifics(
-                    CompositionError::EnumValueMismatch {
-                        message: format!(
-                            "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                            &value_pos.type_name, input_example, output_example, &value_pos.value_name, &value_pos.type_name
-                        ),
-                    },
-                    sources,
-                    |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
-                        })
-                    },
-                );
-            }
-            EnumTypeUsage::Input { input_example } if violates_intersection_requirement => {
-                self.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForInputEnum,
-                    format!(
-                        "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
-                        &value_pos.value_name, &value_pos.type_name, &value_pos.type_name
-                    ),
-                    sources,
-                    |source| {
-                        source.as_ref().is_some_and(|enum_type| {
-                            enum_type.values.contains_key(&value_pos.value_name)
-                        })
-                    },
-                );
-                value_pos.remove(&mut self.merged)?;
-            }
-            EnumTypeUsage::Output { .. } | EnumTypeUsage::Unused => {
-                self.hint_on_inconsistent_output_enum_value(
-                    sources,
-                    &value_pos.type_name,
-                    &value_pos.value_name,
-                );
-            }
-            _ => {
-                // will get here if violates_intersection_requirement is false and usage is either Both or Input.
-            }
-        }
-        Ok(())
-    }
-
     // Helper functions that need to be implemented as stubs
 
     fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
@@ -604,40 +428,12 @@ impl Merger {
         todo!("Implement record_applied_directives_to_merge")
     }
 
-    fn add_join_enum_value(
-        &mut self,
-        sources: &Sources<&Component<EnumValueDefinition>>,
-        value_pos: &EnumValueDefinitionPosition,
-    ) -> Result<(), FederationError> {
-        let dest = value_pos.get(self.merged.schema())?;
-
-        for (&idx, source) in sources.iter() {
-            if source.is_some() {
-                // Get the join spec name for this subgraph
-                let subgraph_name = &self.names[idx];
-                let Some(join_spec_name) = self.subgraph_names_to_join_spec_name.get(subgraph_name)
-                else {
-                    bail!(
-                        "Could not find join spec name for subgraph '{}'",
-                        subgraph_name
-                    );
-                };
-
-                let directive = self
-                    .join_spec_definition
-                    .enum_value_directive(&self.merged, join_spec_name)?;
-                value_pos.insert_directive(&mut self.merged, Node::new(directive));
-            }
-        }
-        Ok(())
-    }
-
     fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
         todo!("Implement is_inaccessible_directive_in_supergraph")
     }
 
     // TODO: These error reporting functions are not yet fully implemented
-    fn report_mismatch_error_with_specifics<T>(
+    pub(crate) fn report_mismatch_error_with_specifics<T>(
         &mut self,
         error: CompositionError,
         sources: &Sources<T>,
@@ -724,34 +520,6 @@ impl Merger {
         };
         self.error_reporter.add_hint(hint);
     }
-
-    // TODO: These error reporting functions are not yet fully implemented
-    fn hint_on_inconsistent_output_enum_value(
-        &mut self,
-        sources: &Sources<Node<EnumType>>,
-        dest_name: &Name,
-        value_name: &Name,
-    ) {
-        // As soon as we find a subgraph that has the type but not the member, we hint.
-        for enum_type in sources.values().flatten() {
-            if !enum_type.values.contains_key(value_name) {
-                self.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForOutputEnum,
-                    format!(
-                        "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
-                        value_name, dest_name, dest_name
-                    ),
-                    sources,
-                    |source| {
-                        source.as_ref().is_some_and(|enum_type| {
-                            enum_type.values.contains_key(value_name)
-                        })
-                    },
-                );
-                return;
-            }
-        }
-    }
 }
 
 // Public function to start the merging process
@@ -761,336 +529,4 @@ pub(crate) fn merge_subgraphs(
     options: CompositionOptions,
 ) -> Result<MergeResult, FederationError> {
     Ok(Merger::new(subgraphs, options)?.merge())
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use apollo_compiler::Node;
-    use apollo_compiler::name;
-    use apollo_compiler::schema::ComponentOrigin;
-
-    use super::*;
-    use crate::error::ErrorCode;
-    use crate::schema::position::EnumTypeDefinitionPosition;
-    use crate::schema::position::PositionLookupError;
-    use crate::subgraph::typestate::expand_schema;
-
-    fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
-        let status_pos = EnumTypeDefinitionPosition {
-            type_name: name.clone(),
-        };
-        let dest = Node::new(EnumType {
-            name: name.clone(),
-            description: None,
-            directives: Default::default(),
-            values: Default::default(),
-        });
-        status_pos.pre_insert(schema)?;
-        status_pos.insert(schema, dest)?;
-        Ok(())
-    }
-
-    // Helper function to create a minimal merger instance for testing
-    // This only initializes what's needed for merge_enum() testing
-    pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
-        let join_spec_definition = JOIN_VERSIONS
-            .find(&Version { major: 0, minor: 5 })
-            .expect("JOIN_VERSIONS should have version 0.5");
-
-        let schema = Schema::builder()
-            .adopt_orphan_extensions()
-            .parse(
-                r#"
-            schema
-                @link(url: "https://specs.apollo.dev/link/v1.0")
-                @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-            
-            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-            "#,
-                "",
-            )
-            .build()?;
-        let mut schema = expand_schema(schema)?;
-        insert_enum_type(&mut schema, name!("Status"))?;
-        insert_enum_type(&mut schema, name!("UnusedStatus"))?;
-
-        Ok(Merger {
-            subgraphs: vec![],
-            options: CompositionOptions::default(),
-            names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
-            compose_directive_manager: ComposeDirectiveManager::new(),
-            error_reporter: ErrorReporter::new(),
-            merged: schema,
-            subgraph_names_to_join_spec_name: [
-                (
-                    "subgraph1".to_string(),
-                    Name::new("SUBGRAPH1").expect("Valid name"),
-                ),
-                (
-                    "subgraph2".to_string(),
-                    Name::new("SUBGRAPH2").expect("Valid name"),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-            merged_federation_directive_names: HashSet::new(),
-            enum_usages: HashMap::new(),
-            fields_with_from_context: Default::default(),
-            fields_with_override: Default::default(),
-            inaccessible_directive_name_in_supergraph: None,
-            join_spec_definition,
-            join_directive_identities: HashSet::from([Identity::connect_identity()]),
-            schema_to_import_to_feature_url: HashMap::new(),
-        })
-    }
-
-    // Helper function to create enum type with values
-    fn create_enum_type(name: &str, values: &[&str]) -> Node<EnumType> {
-        let mut enum_type = EnumType {
-            name: Name::new(name).expect("Valid enum type name"),
-            description: None,
-            directives: Default::default(),
-            values: Default::default(),
-        };
-
-        for value_name in values {
-            let value_name_obj = Name::new(value_name).expect("Valid enum value name");
-            let value_def = Component {
-                origin: ComponentOrigin::Definition,
-                node: Node::new(EnumValueDefinition {
-                    description: None,
-                    value: value_name_obj.clone(),
-                    directives: Default::default(),
-                }),
-            };
-            enum_type.values.insert(value_name_obj, value_def);
-        }
-
-        Node::new(enum_type)
-    }
-
-    fn get_enum_values(
-        merger: &Merger,
-        enum_name: &str,
-    ) -> Result<Vec<String>, PositionLookupError> {
-        let enum_pos = EnumTypeDefinitionPosition {
-            type_name: Name::new_unchecked(enum_name),
-        };
-        Ok(enum_pos
-            .get(merger.merged.schema())?
-            .values
-            .keys()
-            .map(|key| key.to_string())
-            .collect::<Vec<String>>())
-    }
-
-    #[test]
-    fn test_merge_enum_output_only_enum_includes_all_values() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create enum types from different subgraphs
-        let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
-        let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("Status").expect("Valid enum name"),
-        };
-
-        // Set up usage as output-only (union strategy)
-        merger.enum_usages.insert(
-            "Status".to_string(),
-            EnumTypeUsage::Output {
-                output_example: "field1".to_string(),
-            },
-        );
-
-        // Merge should include all values from all subgraphs for output-only enum
-        let result = merger.merge_enum(sources, &dest);
-
-        assert!(result.is_ok());
-        let enum_vals =
-            get_enum_values(&merger, "Status").expect("enum should exist in the supergraph");
-        assert_eq!(enum_vals.len(), 3); // ACTIVE, INACTIVE, PENDING
-        assert!(enum_vals.contains(&"ACTIVE".to_string()));
-        assert!(enum_vals.contains(&"INACTIVE".to_string()));
-        assert!(enum_vals.contains(&"PENDING".to_string()));
-    }
-
-    #[test]
-    fn test_merge_enum_input_only_enum_includes_intersection() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create enum types from different subgraphs
-        let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
-        let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("Status").expect("Valid enum name"),
-        };
-
-        // Set up usage as input-only (intersection strategy)
-        merger.enum_usages.insert(
-            "Status".to_string(),
-            EnumTypeUsage::Input {
-                input_example: "field1".to_string(),
-            },
-        );
-
-        // Merge should only include common values for input-only enum
-        let result = merger.merge_enum(sources, &dest);
-
-        assert!(result.is_ok());
-        // Only ACTIVE should remain (intersection)
-        // INACTIVE and PENDING should be removed with hints
-        let enum_vals =
-            get_enum_values(&merger, "Status").expect("enum should exist in the supergraph");
-        assert_eq!(enum_vals.len(), 1);
-        assert!(enum_vals.contains(&"ACTIVE".to_string()));
-    }
-
-    #[test]
-    fn test_merge_enum_both_input_output_requires_all_values_consistent() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create enum types from different subgraphs with inconsistent values
-        let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE"]);
-        let enum2 = create_enum_type("Status", &["ACTIVE", "PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("Status").expect("Valid enum name"),
-        };
-
-        // Set up usage as both input and output (requires consistency)
-        let usage = EnumTypeUsage::Both {
-            input_example: "field1".to_string(),
-            output_example: "field2".to_string(),
-        };
-
-        merger.enum_usages.insert("Status".to_string(), usage);
-
-        // This should generate an error for inconsistent values
-        let result = merger.merge_enum(sources, &dest);
-
-        // The function should complete but the error reporter should have errors
-        assert!(result.is_ok());
-        assert!(
-            merger.error_reporter.has_errors(),
-            "Expected errors to be reported for inconsistent enum values"
-        );
-    }
-
-    #[test]
-    fn test_merge_enum_empty_result_generates_error() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create enum types that will result in empty enum after merging
-        let enum1 = create_enum_type("Status", &["INACTIVE"]);
-        let enum2 = create_enum_type("Status", &["PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("Status").expect("Valid enum name"),
-        };
-
-        // Set up usage as input-only (intersection strategy)
-        merger.enum_usages.insert(
-            "Status".to_string(),
-            EnumTypeUsage::Input {
-                input_example: "field1".to_string(),
-            },
-        );
-
-        let result = merger.merge_enum(sources, &dest);
-
-        assert!(result.is_ok());
-        // Should be empty after merging
-        let enum_vals =
-            get_enum_values(&merger, "Status").expect("enum should exist in the supergraph");
-        assert_eq!(enum_vals.len(), 0);
-
-        // Error reporter should have an EmptyMergedEnumType error
-        let (errors, _hints) = merger.error_reporter.into_errors_and_hints();
-        assert!(errors.len() == 1);
-        assert!(errors[0].code() == ErrorCode::EmptyMergedEnumType);
-    }
-
-    #[test]
-    fn test_merge_enum_unused_enum_treated_as_output() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create enum types from different subgraphs
-        let enum1 = create_enum_type("UnusedStatus", &["ACTIVE", "INACTIVE"]);
-        let enum2 = create_enum_type("UnusedStatus", &["ACTIVE", "PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("UnusedStatus").expect("Valid enum name"),
-        };
-
-        // Don't set usage - this should trigger the unused enum path
-        // which treats it as output-only
-
-        let result = merger.merge_enum(sources, &dest);
-
-        assert!(result.is_ok());
-        // Should include all values (treated as output-only)
-        let enum_vals =
-            get_enum_values(&merger, "UnusedStatus").expect("enum should exist in the supergraph");
-        assert_eq!(enum_vals.len(), 3); // ACTIVE, INACTIVE, PENDING
-        assert!(enum_vals.contains(&"ACTIVE".to_string()));
-        assert!(enum_vals.contains(&"INACTIVE".to_string()));
-        assert!(enum_vals.contains(&"PENDING".to_string()));
-        // Should generate an UnusedEnumType hint
-    }
-
-    #[test]
-    fn test_merge_enum_identical_values_across_subgraphs() {
-        let mut merger = create_test_merger().expect("valid Merger object");
-
-        // Create identical enum types from different subgraphs
-        let enum1 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
-        let enum2 = create_enum_type("Status", &["ACTIVE", "INACTIVE", "PENDING"]);
-
-        let sources: Sources<Node<EnumType>> =
-            [(0, Some(enum1)), (1, Some(enum2))].into_iter().collect();
-
-        let dest = EnumTypeDefinitionPosition {
-            type_name: Name::new("Status").expect("Valid enum name"),
-        };
-
-        // Set up usage as both input and output
-        merger.enum_usages.insert(
-            "Status".to_string(),
-            EnumTypeUsage::Both {
-                input_example: "field1".to_string(),
-                output_example: "field2".to_string(),
-            },
-        );
-
-        let result = merger.merge_enum(sources, &dest);
-
-        assert!(result.is_ok());
-        // Should include all values since they're consistent
-        let enum_vals =
-            get_enum_values(&merger, "Status").expect("enum should exist in the supergraph");
-        assert_eq!(enum_vals.len(), 3); // ACTIVE, INACTIVE, PENDING
-        assert!(enum_vals.contains(&"ACTIVE".to_string()));
-        assert!(enum_vals.contains(&"INACTIVE".to_string()));
-        assert!(enum_vals.contains(&"PENDING".to_string()));
-        // Should not generate any errors or hints
-    }
 }

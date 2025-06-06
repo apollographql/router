@@ -1993,6 +1993,7 @@ pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Ve
 }
 
 struct EnableSubgraphFtv1;
+
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
 //
@@ -2056,6 +2057,21 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
+
+    macro_rules! assert_prometheus_metrics {
+        ($plugin:expr) => {{
+            let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let regexp = regex::Regex::new(
+                r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
+            )
+            .unwrap();
+            let prometheus_metrics = regexp.replace_all(&prometheus_metrics, "").to_owned();
+            assert_snapshot!(prometheus_metrics.replace(
+                &format!(r#"service_version="{}""#, std::env!("CARGO_PKG_VERSION")),
+                r#"service_version="X""#
+            ));
+        }};
+    }
 
     async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
         let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
@@ -3027,8 +3043,7 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3044,9 +3059,7 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3061,9 +3074,7 @@ mod tests {
             .await;
             make_supergraph_request(plugin.as_ref()).await;
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3077,9 +3088,7 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert!(prometheus_metrics.is_empty());
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3094,8 +3103,7 @@ mod tests {
             f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
