@@ -93,7 +93,10 @@ fn process_endpoint(
 ) -> Result<Option<String>, BoxError> {
     // If there is no endpoint, None, do no processing because the user must be relying on the
     // router processing OTEL environment variables for endpoint.
-    // If there is an endpoint, Some(value), we must process that value.
+    // If there is an endpoint, Some(value), we must process that value. Most of this processing is
+    // performed to try and remain backwards compatible with previous versions of the router which
+    // depended on "non-standard" behaviour of the opentelemetry_otlp crate. I've tried documenting
+    // each of the outcomes clearly for the benefit of future maintainers.
     endpoint
         .as_ref()
         .map(|v| {
@@ -102,15 +105,8 @@ fn process_endpoint(
             } else {
                 v.to_string()
             };
-            // We only need to be concerned about paths for the HTTP protocol
-            let suffix = match protocol {
-                Protocol::Grpc => "/",
-                Protocol::Http => match kind {
-                    TelemetryDataKind::Metrics => "/v1/metrics",
-                    TelemetryDataKind::Traces => "/v1/traces",
-                },
-            };
-            if base.is_empty() || base.ends_with(suffix) || base.ends_with("/") {
+            if base.is_empty() {
+                // We don't want to process empty strings
                 Ok(base)
             } else {
                 // We require a scheme on our endpoint or we can't parse it as a Uri.
@@ -118,14 +114,33 @@ fn process_endpoint(
                 if !base.starts_with("http") {
                     base = format!("http://{base}");
                 }
-                let uri = http::Uri::try_from(&base)?;
-                // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
-                // We already checked that our base does not end with "/", so we must append
-                // `suffix`
-                if uri.path() == "/" {
-                    Ok(format!("{base}{suffix}"))
-                } else {
+                // We expect different suffixes by protocol and signal type
+                let suffix = match protocol {
+                    Protocol::Grpc => "/",
+                    Protocol::Http => match kind {
+                        TelemetryDataKind::Metrics => "/v1/metrics",
+                        TelemetryDataKind::Traces => "/v1/traces",
+                    },
+                };
+                if base.ends_with(suffix) {
+                    // Our suffix is in place, all is good
                     Ok(base)
+                } else {
+                    let uri = http::Uri::try_from(&base)?;
+                    // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
+                    // We already ensured that our base does not end with "/", so we must append
+                    // `suffix`
+                    if uri.path() == "/" {
+                        // We don't have a path, we need to add one
+                        Ok(format!("{base}{suffix}"))
+                    } else {
+                        // We have a path, it doesn't end with suffix, let it pass...
+                        // We could try and enforce the standard here and only let through paths
+                        // which end with the expected suffix. However, I think that would reduce
+                        // backwards compatibility and we should just trust that the user knows
+                        // what they are doing.
+                        Ok(base)
+                    }
                 }
             }
         })
@@ -329,7 +344,7 @@ mod tests {
         let endpoint = None;
         let processed_endpoint =
             process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
-        assert_eq!(None, processed_endpoint);
+        assert_eq!(endpoint, processed_endpoint);
 
         let endpoint = Some("default".to_string());
         let processed_endpoint =
@@ -380,6 +395,14 @@ mod tests {
             process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
         assert_eq!(
             Some("http://localhost:4317/v1/traces".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://otlp.nr-data.net".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("https://otlp.nr-data.net/v1/traces".to_string()),
             processed_endpoint
         );
 
@@ -438,6 +461,14 @@ mod tests {
             process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
         assert_eq!(
             Some("http://localhost:4317/v1/metrics".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://otlp.nr-data.net".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("https://otlp.nr-data.net/v1/metrics".to_string()),
             processed_endpoint
         );
     }
