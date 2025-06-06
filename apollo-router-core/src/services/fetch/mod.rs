@@ -25,6 +25,3 @@ pub struct Response {
     pub extensions: Extensions,
     pub responses: ResponseStream,
 }
-
-#[derive(Debug, Error)]
-enum Error {}

@@ -1,13 +1,10 @@
 use crate::Extensions;
 use bytes::Bytes;
 use http_body::Body;
-use http_body_util::combinators::BoxBody;
+use http_body_util::combinators::{BoxBody, UnsyncBoxBody};
 use thiserror::Error;
 use tower::BoxError;
 use tower::util::BoxCloneService;
 
-type HttpClientService = BoxCloneService<
-    http::Request<BoxBody<Bytes, BoxError>>,
-    http::Response<BoxBody<Bytes, BoxError>>,
-    BoxError,
->;
+pub type Request = http::Request<UnsyncBoxBody<Bytes, BoxError>>;
+pub type Response = http::Response<UnsyncBoxBody<Bytes, BoxError>>;

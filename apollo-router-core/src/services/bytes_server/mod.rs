@@ -28,6 +28,3 @@ impl std::fmt::Debug for Response {
             .finish()
     }
 }
-
-#[derive(Debug, Error)]
-enum Error {}

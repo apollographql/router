@@ -19,6 +19,3 @@ pub struct Response {
     // TODO maybe wrap to make immutable
     pub query_plan: QueryPlan,
 }
-
-#[derive(Debug, Error)]
-enum Error {}

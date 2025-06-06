@@ -16,6 +16,3 @@ pub struct Response {
     pub operation_name: Option<String>,
     pub query: ExecutableDocument,
 }
-
-#[derive(Debug, Error)]
-enum Error {}
