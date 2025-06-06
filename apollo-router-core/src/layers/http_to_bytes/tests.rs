@@ -120,3 +120,56 @@ async fn test_extensions_passthrough() {
     let collected = http_response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(collected, "test response".as_bytes());
 }
+
+#[tokio::test]
+async fn test_downstream_service_error() {
+    let (mut mock_service, mut handle) = mock::pair::<BytesRequest, BytesResponse>();
+    
+    // Set up the mock to return an error
+    handle.allow(1);
+    let _ = tokio::task::spawn(async move {
+        let (_request, response) = handle.next_request().await.expect("service must not fail");
+        response.send_error(tower::BoxError::from("Downstream service failed"));
+    });
+
+    // Set up the service under test
+    let mut service = ServiceBuilder::new()
+        .layer(HttpToBytesLayer)
+        .service(mock_service);
+
+    // Create a test HTTP request
+    let http_req = http::Request::builder()
+        .uri("http://example.com")
+        .body(UnsyncBoxBody::new(
+            http_body_util::Full::from("test body").map_err(Into::into),
+        ))
+        .unwrap();
+
+    // Call the service and expect an error
+    let result = service.oneshot(http_req).await;
+    assert!(result.is_err(), "Should return error when downstream service fails");
+    
+    if let Err(error) = result {
+        let error_message = error.to_string();
+        assert!(error_message.contains("Downstream service error"));
+    }
+}
+
+#[tokio::test]
+async fn test_http_response_builder_error() {
+    // Note: HTTP response builder errors are difficult to trigger in practice
+    // since http::Response::builder() is quite forgiving. This test demonstrates
+    // the error handling path using direct error construction.
+    use crate::layers::http_to_bytes::Error;
+    
+    // Create an HTTP error by trying to build an invalid response
+    let http_error = http::Response::builder()
+        .header("invalid\0header", "value") // Invalid header name with null byte
+        .body(())
+        .unwrap_err();
+    let layer_error = Error::HttpResponseBuilder(http_error);
+    
+    // Verify the error message format
+    let error_message = layer_error.to_string();
+    assert!(error_message.contains("Failed to build HTTP response"));
+}

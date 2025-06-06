@@ -87,8 +87,10 @@ async fn test_invalid_json_bytes() {
     let result = service.oneshot(bytes_req).await;
     assert!(result.is_err(), "Should return error for invalid JSON");
     
+    // Verify it's specifically a JSON deserialization error
     if let Err(error) = result {
         let error_message = error.to_string();
+        // The error should be our wrapped JSON parsing error
         assert!(error_message.contains("Failed to parse JSON from bytes"));
     }
 }
@@ -228,4 +230,39 @@ async fn test_extensions_passthrough() {
     
     let expected_response = json!({"data": {"hello": "world"}});
     assert_eq!(response_json, expected_response);
+}
+
+#[tokio::test]
+async fn test_downstream_service_error() {
+    let (mut mock_service, mut handle) = mock::pair::<JsonRequest, JsonResponse>();
+    
+    // Set up the mock to return an error
+    handle.allow(1);
+    let _ = tokio::task::spawn(async move {
+        let (_request, response) = handle.next_request().await.expect("service must not fail");
+        response.send_error(tower::BoxError::from("Downstream JSON service failed"));
+    });
+
+    // Set up the service under test
+    let mut service = ServiceBuilder::new()
+        .layer(BytesToJsonLayer)
+        .service(mock_service);
+
+    // Create a test bytes request with valid JSON content
+    let json_bytes = serde_json::to_vec(&json!({"test": "data"}))
+        .expect("JSON serialization should succeed");
+    
+    let bytes_req = BytesRequest {
+        extensions: crate::Extensions::default(),
+        body: Bytes::from(json_bytes),
+    };
+
+    // Call the service and expect an error
+    let result = service.oneshot(bytes_req).await;
+    assert!(result.is_err(), "Should return error when downstream service fails");
+    
+    if let Err(error) = result {
+        let error_message = error.to_string();
+        assert!(error_message.contains("Downstream service error"));
+    }
 } 

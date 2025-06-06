@@ -4,8 +4,19 @@ use crate::json::JsonValue;
 use bytes::Bytes;
 use futures::StreamExt;
 use std::pin::Pin;
+use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
+
+#[derive(Debug, Error)]
+pub enum Error {
+    /// Failed to parse JSON from bytes: {0}
+    #[error("Failed to parse JSON from bytes: {0}")]
+    JsonDeserialization(#[from] serde_json::Error),
+    /// Downstream service error: {0}
+    #[error("Downstream service error: {0}")]
+    Downstream(#[from] BoxError),
+}
 
 #[derive(Clone, Debug)]
 pub struct BytesToJsonLayer;
@@ -30,7 +41,7 @@ where
     S::Error: Into<BoxError>,
 {
     type Response = BytesResponse;
-    type Error = BoxError;
+    type Error = Error;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -38,7 +49,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
+        self.inner.poll_ready(cx).map_err(|e| Error::Downstream(e.into()))
     }
 
     fn call(&mut self, req: BytesRequest) -> Self::Future {
@@ -53,10 +64,7 @@ where
 
         Box::pin(async move {
             // Convert bytes to JSON
-            let json_body: JsonValue = match serde_json::from_slice(&req.body) {
-                Ok(json) => json,
-                Err(e) => return Err(format!("Failed to parse JSON from bytes: {}", e).into()),
-            };
+            let json_body: JsonValue = serde_json::from_slice(&req.body)?;
 
             // Create an extended layer for the inner service
             let original_extensions = req.extensions;
@@ -68,7 +76,7 @@ where
             };
 
             // Call the inner service
-            let json_resp = inner.call(json_req).await.map_err(Into::into)?;
+            let json_resp = inner.call(json_req).await.map_err(|e| Error::Downstream(e.into()))?;
 
             // Convert JSON response to bytes response
             let bytes_stream = json_resp.responses.map(|json_value| {

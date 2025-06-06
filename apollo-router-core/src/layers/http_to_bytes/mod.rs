@@ -5,8 +5,22 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use std::pin::Pin;
+use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
+
+#[derive(Debug, Error)]
+pub enum Error {
+    /// Failed to collect HTTP body: {0}
+    #[error("Failed to collect HTTP body: {0}")]
+    HttpBodyCollection(tower::BoxError),
+    /// Failed to build HTTP response: {0}
+    #[error("Failed to build HTTP response: {0}")]
+    HttpResponseBuilder(#[from] http::Error),
+    /// Downstream service error: {0}
+    #[error("Downstream service error: {0}")]
+    Downstream(#[from] BoxError),
+}
 
 #[derive(Clone, Debug)]
 pub struct HttpToBytesLayer;
@@ -31,7 +45,7 @@ where
     S::Error: Into<BoxError>,
 {
     type Response = HttpResponse;
-    type Error = BoxError;
+    type Error = Error;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -39,7 +53,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
+        self.inner.poll_ready(cx).map_err(|e| Error::Downstream(e.into()))
     }
 
     fn call(&mut self, req: HttpRequest) -> Self::Future {
@@ -55,7 +69,7 @@ where
         Box::pin(async move {
             // Convert HTTP request to bytes request
             let (parts, body) = req.into_parts();
-            let body_bytes = body.collect().await?.to_bytes();
+            let body_bytes = body.collect().await.map_err(|e| Error::HttpBodyCollection(e.into()))?;
 
             // Extract our Extensions from the HTTP request extensions, or create default
             let original_extensions = parts
@@ -69,11 +83,11 @@ where
 
             let bytes_req = BytesRequest {
                 extensions: extended_extensions,
-                body: body_bytes,
+                body: body_bytes.to_bytes(),
             };
 
             // Call the inner service
-            let bytes_resp = inner.call(bytes_req).await.map_err(Into::into)?;
+            let bytes_resp = inner.call(bytes_req).await.map_err(|e| Error::Downstream(e.into()))?;
 
             // Convert bytes response to HTTP response
             let mut http_resp = http::Response::builder()

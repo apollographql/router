@@ -362,6 +362,84 @@ Common JSON utilities and type definitions used across services.
 - Use `thiserror::Error` for error definitions
 - Errors should be descriptive and actionable
 
+### BoxError for Service Error Types
+
+**Critical Principle**: All services and layers **must** use `tower::BoxError` for their error types to ensure downstream errors can be passed through unwrapped.
+
+#### Service Error Type Pattern
+
+Services should follow this error type pattern:
+
+```rust
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    /// Service-specific error variant
+    #[error("Specific error description: {0}")]
+    SpecificError(String),
+    
+    /// Another service-specific error variant  
+    #[error("Another error: {0}")]
+    AnotherError(#[from] SomeSpecificError),
+    
+    /// Downstream service error (always present)
+    #[error("Downstream service error: {0}")]
+    Downstream(#[from] tower::BoxError),
+}
+```
+
+#### Layer Error Type Pattern
+
+Layers should follow this error type pattern:
+
+```rust
+#[derive(Debug, Error)]
+pub enum LayerError {
+    /// Layer-specific error variants
+    #[error("Layer operation failed: {0}")]
+    LayerSpecificError(#[from] SomeLayerError),
+    
+    /// Downstream service error (always present)
+    #[error("Downstream service error: {0}")]
+    Downstream(#[from] tower::BoxError),
+}
+```
+
+#### Benefits of This Pattern
+
+1. **Error Transparency**: Downstream errors flow through the service stack without modification
+2. **Type Safety**: Each service can define specific error variants for its operations
+3. **Debugging**: Error chains preserve the original error context
+4. **Flexibility**: Services can handle specific error types while allowing others to pass through
+5. **Interoperability**: All services work together seamlessly in Tower service stacks
+
+#### Service Implementation Guidelines
+
+When implementing services:
+
+```rust
+impl<S> Service<Request> for MyService<S>
+where
+    S: Service<DownstreamRequest, Response = DownstreamResponse>,
+    S::Error: Into<tower::BoxError>, // Always require BoxError conversion
+{
+    type Response = MyResponse;
+    type Error = MyServiceError; // Your specific error enum
+    
+    fn call(&mut self, req: Request) -> Self::Future {
+        // ... service logic ...
+        
+        // Convert downstream errors using the Downstream variant
+        let result = self.inner.call(downstream_req)
+            .await
+            .map_err(|e| MyServiceError::Downstream(e.into()))?;
+            
+        // ... continue processing ...
+    }
+}
+```
+
+This pattern ensures that error information flows correctly through the service pipeline while maintaining type safety and clear error boundaries.
+
 ### Testing
 
 - Separate test files: `tests.rs` adjacent to `mod.rs`
