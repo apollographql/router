@@ -5,33 +5,60 @@ expression: "selection!(r#\"\n            id\n            created\n            c
 Named(
     SubSelection {
         selections: [
-            Field(
-                None,
-                WithRange {
-                    node: Field(
-                        "id",
-                    ),
-                    range: Some(
-                        13..15,
-                    ),
-                },
-                None,
-            ),
-            Field(
-                None,
-                WithRange {
-                    node: Field(
-                        "created",
-                    ),
-                    range: Some(
-                        28..35,
-                    ),
-                },
-                None,
-            ),
-            Path {
+            NamedSelection {
                 alias: None,
-                inline: true,
+                path: PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "id",
+                                ),
+                                range: Some(
+                                    13..15,
+                                ),
+                            },
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    15..15,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            13..15,
+                        ),
+                    },
+                },
+            },
+            NamedSelection {
+                alias: None,
+                path: PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "created",
+                                ),
+                                range: Some(
+                                    28..35,
+                                ),
+                            },
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    35..35,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            28..35,
+                        ),
+                    },
+                },
+            },
+            NamedSelection {
+                alias: None,
                 path: PathSelection {
                     path: WithRange {
                         node: Key(
@@ -66,30 +93,58 @@ Named(
                                                 node: Selection(
                                                     SubSelection {
                                                         selections: [
-                                                            Field(
-                                                                None,
-                                                                WithRange {
-                                                                    node: Field(
-                                                                        "content",
-                                                                    ),
-                                                                    range: Some(
-                                                                        73..80,
-                                                                    ),
+                                                            NamedSelection {
+                                                                alias: None,
+                                                                path: PathSelection {
+                                                                    path: WithRange {
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "content",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    73..80,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Empty,
+                                                                                range: Some(
+                                                                                    80..80,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            73..80,
+                                                                        ),
+                                                                    },
                                                                 },
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                WithRange {
-                                                                    node: Field(
-                                                                        "role",
-                                                                    ),
-                                                                    range: Some(
-                                                                        81..85,
-                                                                    ),
+                                                            },
+                                                            NamedSelection {
+                                                                alias: None,
+                                                                path: PathSelection {
+                                                                    path: WithRange {
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "role",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    81..85,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Empty,
+                                                                                range: Some(
+                                                                                    85..85,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            81..85,
+                                                                        ),
+                                                                    },
                                                                 },
-                                                                None,
-                                                            ),
+                                                            },
                                                         ],
                                                         range: Some(
                                                             71..87,
@@ -117,18 +172,32 @@ Named(
                     },
                 },
             },
-            Field(
-                None,
-                WithRange {
-                    node: Field(
-                        "model",
-                    ),
-                    range: Some(
-                        100..105,
-                    ),
+            NamedSelection {
+                alias: None,
+                path: PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "model",
+                                ),
+                                range: Some(
+                                    100..105,
+                                ),
+                            },
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    105..105,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            100..105,
+                        ),
+                    },
                 },
-                None,
-            ),
+            },
         ],
         range: Some(
             13..105,

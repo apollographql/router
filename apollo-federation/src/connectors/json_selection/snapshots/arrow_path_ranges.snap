@@ -5,7 +5,7 @@ expression: parsed
 Named(
     SubSelection {
         selections: [
-            Path {
+            NamedSelection {
                 alias: Some(
                     Alias {
                         name: WithRange {
@@ -21,7 +21,6 @@ Named(
                         ),
                     },
                 ),
-                inline: false,
                 path: PathSelection {
                     path: WithRange {
                         node: Var(

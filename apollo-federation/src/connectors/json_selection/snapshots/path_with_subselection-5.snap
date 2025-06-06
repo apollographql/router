@@ -6,7 +6,7 @@ Ok(
     Named(
         SubSelection {
             selections: [
-                Path {
+                NamedSelection {
                     alias: Some(
                         Alias {
                             name: WithRange {
@@ -22,7 +22,6 @@ Ok(
                             ),
                         },
                     ),
-                    inline: false,
                     path: PathSelection {
                         path: WithRange {
                             node: Var(
@@ -60,9 +59,8 @@ Ok(
                         },
                     },
                 },
-                Path {
+                NamedSelection {
                     alias: None,
-                    inline: true,
                     path: PathSelection {
                         path: WithRange {
                             node: Var(
@@ -86,30 +84,58 @@ Ok(
                                             node: Selection(
                                                 SubSelection {
                                                     selections: [
-                                                        Field(
-                                                            None,
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "title",
-                                                                ),
-                                                                range: Some(
-                                                                    68..73,
-                                                                ),
+                                                        NamedSelection {
+                                                            alias: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "title",
+                                                                            ),
+                                                                            range: Some(
+                                                                                68..73,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Empty,
+                                                                            range: Some(
+                                                                                73..73,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        68..73,
+                                                                    ),
+                                                                },
                                                             },
-                                                            None,
-                                                        ),
-                                                        Field(
-                                                            None,
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "body",
-                                                                ),
-                                                                range: Some(
-                                                                    90..94,
-                                                                ),
+                                                        },
+                                                        NamedSelection {
+                                                            alias: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "body",
+                                                                            ),
+                                                                            range: Some(
+                                                                                90..94,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Empty,
+                                                                            range: Some(
+                                                                                94..94,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        90..94,
+                                                                    ),
+                                                                },
                                                             },
-                                                            None,
-                                                        ),
+                                                        },
                                                     ],
                                                     range: Some(
                                                         50..108,

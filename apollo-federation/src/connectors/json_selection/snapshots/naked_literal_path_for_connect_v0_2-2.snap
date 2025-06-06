@@ -5,7 +5,7 @@ expression: selection_hello_slice_v0_2
 Named(
     SubSelection {
         selections: [
-            Path {
+            NamedSelection {
                 alias: Some(
                     Alias {
                         name: WithRange {
@@ -21,7 +21,6 @@ Named(
                         ),
                     },
                 ),
-                inline: false,
                 path: PathSelection {
                     path: WithRange {
                         node: Expr(
