@@ -39,17 +39,19 @@ fn match_if_method(
     if let Some(MethodArgs { args, .. }) = method_args {
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
-                if pair.len() == 2 {
-                    let (condition_opt, condition_errors) =
-                        pair[0].apply_to_path(data, vars, input_path);
-                    errors.extend(condition_errors);
+                let (pattern, value) = match pair.as_slice() {
+                    [pattern, value] => (pattern, value),
+                    _ => continue,
+                };
+                let (condition_opt, condition_errors) =
+                    pattern.apply_to_path(data, vars, input_path);
+                errors.extend(condition_errors);
 
-                    if condition_opt == Some(JSON::Bool(true)) {
-                        return pair[1]
-                            .apply_to_path(data, vars, input_path)
-                            .prepend_errors(errors);
-                    };
-                }
+                if condition_opt == Some(JSON::Bool(true)) {
+                    return value
+                        .apply_to_path(data, vars, input_path)
+                        .prepend_errors(errors);
+                };
             }
         }
     }

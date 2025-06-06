@@ -1,3 +1,17 @@
+// No panics allowed from connectors code.
+// Crashing the language server is a bad user experience, and panicking in the router is even worse.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::exit,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
 #![deny(nonstandard_style)]
 #![deny(clippy::redundant_clone)]
 #![deny(clippy::manual_while_let_some)]
