@@ -1,19 +1,5 @@
 //! Validation of the `@source` and `@connect` directives.
 
-// No panics allowed in this module
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::panic,
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unimplemented,
-        clippy::todo
-    )
-)]
-
 mod connect;
 mod coordinates;
 mod errors;
