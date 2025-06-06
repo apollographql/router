@@ -136,7 +136,6 @@ infix_math_op!(mul_op, *);
 infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
-#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn math_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
