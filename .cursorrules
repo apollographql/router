@@ -22,9 +22,9 @@ Do not create tests that only exercise mocks of traits. There is no benefit to t
 Whenever you create a tests.rs file you must use
 ```rust
 #[cfg(test)]
-mod test
+mod tests
 ```
 in the related mod.rs file.
 Keep functions small, single purpose and testable.
 Always use tower-test for testing tower layers and services.
-Remember to use the request and response types from the services mod when creating services that do something, e.g. request response transformation.
+Remember to use the request and response types from the services mod when creating services that do something, e.g. request response transformation. However for http request and response types remember to construct them you have to use http::Request::builder() or http::Response::builder(), you can't use the type aliases in our service.

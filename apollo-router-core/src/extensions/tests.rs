@@ -29,7 +29,7 @@ mod test {
 
     #[test]
     fn test_basic_operations() {
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Insert and get simple values
         extensions.insert(42);
@@ -46,7 +46,7 @@ mod test {
 
     #[test]
     fn test_expensive_type_with_arc() {
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Create an expensive type and wrap it in Arc
         let expensive = Arc::new(ExpensiveType::new(1000));
@@ -62,7 +62,7 @@ mod test {
 
     #[test]
     fn test_multiple_types() {
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Store different types
         extensions.insert(42);
@@ -78,7 +78,7 @@ mod test {
     #[test]
     fn test_concurrent_access() {
         use std::thread;
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Create a shared counter using Arc
         let counter = Arc::new(AtomicUsize::new(0));
@@ -109,7 +109,7 @@ mod test {
 
     #[test]
     fn test_overwrite_values() {
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Insert initial values
         extensions.insert(42);
@@ -126,7 +126,7 @@ mod test {
 
     #[test]
     fn test_remove_nonexistent() {
-        let extensions = Extensions::new();
+        let extensions = Extensions::default();
 
         // Removing non-existent values should not panic
         extensions.remove::<i32>();

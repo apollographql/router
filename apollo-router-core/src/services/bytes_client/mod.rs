@@ -5,7 +5,7 @@ use std::pin::Pin;
 use thiserror::Error;
 use tower::Service;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Request {
     pub extensions: Extensions,
     pub body: Bytes,

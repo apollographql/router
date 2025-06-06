@@ -3,6 +3,7 @@ mod tests;
 
 use quick_cache::sync::Cache;
 use std::any::{Any, TypeId};
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -60,11 +61,17 @@ pub struct Extensions {
     cache: Arc<Cache<TypeId, Arc<dyn Any + Send + Sync + 'static>>>,
 }
 
+impl Default for Extensions {
+    fn default() -> Self {
+        Self::new(1000)
+    }
+}
+
 impl Extensions {
     /// Creates a new empty context.
-    pub fn new() -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
-            cache: Arc::new(Cache::new(1000)),
+            cache: Arc::new(Cache::new(capacity)),
         }
     }
 
@@ -130,5 +137,22 @@ impl Extensions {
     pub fn remove<T: ExtensionValue>(&self) {
         let type_id = TypeId::of::<T>();
         self.cache.remove(&type_id);
+    }
+}
+
+impl Debug for Extensions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut type_names: Vec<_> = self.cache
+            .iter()
+            .map(|(_, value)| {
+                std::any::type_name_of_val(value.as_ref())
+            })
+            .collect();
+        
+        type_names.sort();
+        
+        f.debug_struct("Extensions")
+            .field("types", &type_names)
+            .finish()
     }
 }
