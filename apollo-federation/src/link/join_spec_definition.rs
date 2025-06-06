@@ -396,6 +396,34 @@ impl JoinSpecDefinition {
         })
     }
 
+    pub(crate) fn union_member_directive(
+        &self,
+        schema: &FederationSchema,
+        subgraph_name: &Name,
+        member_name: &str,
+    ) -> Result<Directive, FederationError> {
+        let Ok(Some(name_in_schema)) =
+            self.directive_name_in_schema(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)
+        else {
+            bail!("Unexpectedly could not find unionMember directive in schema");
+        };
+        Ok(Directive {
+            name: name_in_schema,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
+                    value: Node::new(Value::Enum(subgraph_name.clone())),
+                }),
+                {
+                    Node::new(Argument {
+                        name: JOIN_MEMBER_ARGUMENT_NAME,
+                        value: Node::new(Value::String(member_name.to_owned())),
+                    })
+                },
+            ],
+        })
+    }
+
     pub(crate) fn enum_value_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -466,7 +494,7 @@ impl JoinSpecDefinition {
             false,
             &[DirectiveLocation::EnumValue],
             false,
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -543,7 +571,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::Scalar,
             ],
             false,
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -687,7 +715,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::InputFieldDefinition,
             ],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -725,7 +753,7 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -763,7 +791,7 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::Union],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -791,7 +819,7 @@ impl JoinSpecDefinition {
             true, // repeatable
             &[DirectiveLocation::EnumValue],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -848,7 +876,7 @@ impl JoinSpecDefinition {
                 DirectiveLocation::FieldDefinition,
             ],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -876,7 +904,7 @@ impl JoinSpecDefinition {
             false, // not repeatable
             &[DirectiveLocation::Object],
             false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

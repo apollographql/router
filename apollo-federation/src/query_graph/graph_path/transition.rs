@@ -494,9 +494,8 @@ impl TransitionGraphPath {
                                 parent_type_pos, tail_type_pos, subgraph,
                             );
                         }
-                        let Some(Ok::<CompositeTypeDefinitionPosition, _>(
-                            parent_type_pos_in_subgraph,
-                        )) = parent_type_pos_in_subgraph.map(|pos| pos.try_into())
+                        let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
+                            .map(CompositeTypeDefinitionPosition::try_from)
                         else {
                             break 'details format!(
                                 "cannot find field \"{}\"",
@@ -840,9 +839,8 @@ impl TransitionPathWithLazyIndirectPaths {
                         }
                         let parent_type_pos_in_subgraph =
                             subgraph_schema.try_get_type(parent_type_pos.type_name().clone());
-                        let Some(Ok::<CompositeTypeDefinitionPosition, _>(
-                            parent_type_pos_in_subgraph,
-                        )) = parent_type_pos_in_subgraph.map(|pos| pos.try_into())
+                        let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
+                            .map(CompositeTypeDefinitionPosition::try_from)
                         else {
                             continue;
                         };
@@ -868,8 +866,10 @@ impl TransitionPathWithLazyIndirectPaths {
                             // `tail_type_pos_in_subgraph` exists, so it's either equal to
                             // `parent_type_pos_in_subgraph`, or it's an interface of it. In any
                             // case, it's composite.
-                            let Ok::<CompositeTypeDefinitionPosition, _>(tail_type_pos_in_subgraph) =
-                                tail_type_pos_in_subgraph.clone().try_into()
+                            let Ok(tail_type_pos_in_subgraph) =
+                                CompositeTypeDefinitionPosition::try_from(
+                                    tail_type_pos_in_subgraph.clone(),
+                                )
                             else {
                                 bail!(
                                     "Type {} in {} should be composite",

@@ -14,20 +14,29 @@ use apollo_compiler::validation::Valid;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::FederationSchema;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
-type Sources<T> = IndexMap<usize, Option<T>>;
+pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
 
 #[derive(Debug, Clone)]
 enum EnumTypeUsage {
@@ -66,16 +75,19 @@ pub(crate) struct CompositionOptions {
 pub(crate) struct Merger {
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
-    names: Vec<String>,
-    error_reporter: ErrorReporter,
-    merged: FederationSchema,
-    subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    compose_directive_manager: ComposeDirectiveManager,
+    pub(crate) names: Vec<String>,
+    pub(crate) error_reporter: ErrorReporter,
+    pub(crate) merged: FederationSchema,
+    pub(crate) subgraph_names_to_join_spec_name: HashMap<String, Name>,
     merged_federation_directive_names: HashSet<String>,
+    fields_with_from_context: DirectiveReferencers,
+    fields_with_override: DirectiveReferencers,
+    schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    join_directive_identities: HashSet<Identity>,
     enum_usages: HashMap<String, EnumTypeUsage>,
-    fields_with_from_context: HashSet<String>,
-    fields_with_override: HashSet<String>,
     inaccessible_directive_name_in_supergraph: Option<Name>,
-    join_spec_definition: &'static JoinSpecDefinition,
+    pub(crate) join_spec_definition: &'static JoinSpecDefinition,
 }
 
 #[allow(unused)]
@@ -84,27 +96,153 @@ impl Merger {
         subgraphs: Vec<Subgraph<Validated>>,
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
-        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        let mut error_reporter = ErrorReporter::new();
+        let latest_federation_version_used =
+            Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
+        let join_spec = JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
+        let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
-        // TODO: In the future, get this from getLatestFederationVersionUsed() instead of using latest
-        let join_spec_definition = JOIN_VERSIONS
-            .find(&crate::link::spec::Version { major: 0, minor: 5 })
-            .expect("JOIN_VERSIONS should have version 0.5");
+        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        let schema_to_import_to_feature_url = subgraphs
+            .iter()
+            .map(|s| {
+                (
+                    s.name.clone(),
+                    s.schema()
+                        .metadata()
+                        .map(|l| l.import_to_feature_url_map())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        let subgraph_names_to_join_spec_name = Self::prepare_supergraph()?;
+        let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
         Ok(Self {
             subgraphs,
             options,
             names,
-            error_reporter: ErrorReporter::new(),
+            compose_directive_manager: ComposeDirectiveManager::new(),
+            error_reporter,
             merged: FederationSchema::new(Schema::new())?,
-            subgraph_names_to_join_spec_name: todo!(),
+            subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
             enum_usages: HashMap::new(),
-            fields_with_from_context: todo!(),
-            fields_with_override: todo!(),
+            fields_with_from_context,
+            fields_with_override,
+            schema_to_import_to_feature_url,
+            join_directive_identities,
             inaccessible_directive_name_in_supergraph: todo!(),
-            join_spec_definition,
+            join_spec_definition: join_spec.expect("exists"), // TODO: handle this and bail up top
         })
+    }
+
+    fn get_latest_federation_version_used<'a>(
+        subgraphs: &'a [Subgraph<Validated>],
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
+        subgraphs
+            .iter()
+            .map(|subgraph| {
+                Self::get_latest_federation_version_used_in_subgraph(subgraph, error_reporter)
+            })
+            .max()
+            .unwrap_or_else(|| FEDERATION_VERSIONS.latest().version())
+    }
+
+    fn get_latest_federation_version_used_in_subgraph<'a>(
+        subgraph: &'a Subgraph<Validated>,
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
+        let linked_federation_version = subgraph.metadata().federation_spec_definition().version();
+
+        let linked_features = subgraph.schema().all_features().unwrap_or_default();
+        let spec_with_max_implied_version = linked_features
+            .iter()
+            .max_by_key(|spec| spec.minimum_federation_version());
+
+        if let Some(spec) = spec_with_max_implied_version {
+            if spec
+                .minimum_federation_version()
+                .satisfies(linked_federation_version)
+                && spec
+                    .minimum_federation_version()
+                    .gt(linked_federation_version)
+            {
+                error_reporter.add_hint(CompositionHint {
+                    code: HintCode::ImplicitlyUpgradedFederationVersion
+                        .code()
+                        .to_string(),
+                    message: format!(
+                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                        subgraph.name,
+                        linked_federation_version,
+                        spec.minimum_federation_version()
+                    ),
+                });
+                return spec.minimum_federation_version();
+            }
+        }
+        linked_federation_version
+    }
+
+    fn get_fields_with_from_context_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn get_fields_with_override_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
+        todo!("Prepare supergraph")
+    }
+
+    /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
+    pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
+        let subgraph_name = &self.names[subgraph_index];
+        let name = self
+            .subgraph_names_to_join_spec_name
+            .get(subgraph_name)
+            .ok_or_else(|| {
+                internal_error!(
+                    "Could not find join spec name for subgraph '{}'",
+                    subgraph_name
+                )
+            })?;
+        Ok(name)
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -384,8 +522,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(&value_pos.value_name)
                         })
                     },
                 );
@@ -500,16 +638,44 @@ impl Merger {
         self.error_reporter.add_error(enhanced_error);
     }
 
-    // TODO: These error reporting functions are not yet fully implemented
-    fn report_mismatch_hint<T>(
+    pub(crate) fn report_mismatch_hint<T>(
         &mut self,
         code: HintCode,
         message: String,
-        _sources: &Sources<T>,
-        _accessor: impl Fn(&Option<T>) -> &str,
+        sources: &Sources<T>,
+        accessor: impl Fn(&Option<T>) -> bool,
     ) {
-        // Stub implementation - just print the hint for now
-        println!("HINT [{}]: {}", code.definition().code(), message);
+        // Build detailed hint message showing which subgraphs have/don't have the element
+        let mut has_subgraphs = Vec::new();
+        let mut missing_subgraphs = Vec::new();
+
+        for (&idx, source) in sources.iter() {
+            let subgraph_name = if idx < self.names.len() {
+                &self.names[idx]
+            } else {
+                "unknown"
+            };
+            let result = accessor(source);
+            if result {
+                has_subgraphs.push(subgraph_name);
+            } else {
+                missing_subgraphs.push(subgraph_name);
+            }
+        }
+
+        let detailed_message = format!(
+            "{}defined in {} but not in {}",
+            message,
+            has_subgraphs.join(", "),
+            missing_subgraphs.join(", ")
+        );
+
+        // Add the hint to the error reporter
+        let hint = CompositionHint {
+            code: code.definition().code().to_string(),
+            message: detailed_message,
+        };
+        self.error_reporter.add_hint(hint);
     }
 
     // TODO: These error reporting functions are not yet fully implemented
@@ -530,8 +696,8 @@ impl Merger {
                     ),
                     sources,
                     |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(value_name) { "yes" } else { "no" }
+                        source.as_ref().is_some_and(|enum_type| {
+                            enum_type.values.contains_key(value_name)
                         })
                     },
                 );
@@ -551,8 +717,7 @@ pub(crate) fn merge_subgraphs(
 }
 
 #[cfg(test)]
-mod tests {
-    use apollo_compiler::Name;
+pub(crate) mod tests {
     use apollo_compiler::Node;
     use apollo_compiler::name;
     use apollo_compiler::schema::ComponentOrigin;
@@ -580,9 +745,9 @@ mod tests {
 
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
-    fn create_test_merger() -> Result<Merger, FederationError> {
+    pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
         let join_spec_definition = JOIN_VERSIONS
-            .find(&crate::link::spec::Version { major: 0, minor: 5 })
+            .find(&Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
         let schema = Schema::builder()
@@ -594,6 +759,7 @@ mod tests {
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
             
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
             "#,
                 "",
             )
@@ -606,6 +772,7 @@ mod tests {
             subgraphs: vec![],
             options: CompositionOptions::default(),
             names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
+            compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter: ErrorReporter::new(),
             merged: schema,
             subgraph_names_to_join_spec_name: [
@@ -622,10 +789,12 @@ mod tests {
             .collect(),
             merged_federation_directive_names: HashSet::new(),
             enum_usages: HashMap::new(),
-            fields_with_from_context: HashSet::new(),
-            fields_with_override: HashSet::new(),
+            fields_with_from_context: Default::default(),
+            fields_with_override: Default::default(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition,
+            join_directive_identities: HashSet::from([Identity::connect_identity()]),
+            schema_to_import_to_feature_url: HashMap::new(),
         })
     }
 
