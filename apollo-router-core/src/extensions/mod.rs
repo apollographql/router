@@ -97,7 +97,7 @@ struct ExtensionsInner {
 
 impl Default for Extensions {
     fn default() -> Self {
-        Self::new(1000)
+        Self::new(100)
     }
 }
 
@@ -136,7 +136,7 @@ impl Extensions {
     pub fn extend(&self) -> Self {
         Self {
             inner: Arc::new(ExtensionsInner {
-                cache: Cache::new(1000), // Default capacity for extended layers
+                cache: Cache::new(100), // Default capacity for extended layers
                 parent: Some(self.inner.clone()),
             }),
         }
@@ -161,7 +161,11 @@ impl Extensions {
         self.get_from_layer(&self.inner, type_id)
     }
 
-    fn get_from_layer<T: ExtensionValue>(&self, layer: &ExtensionsInner, type_id: TypeId) -> Option<T> {
+    fn get_from_layer<T: ExtensionValue>(
+        &self,
+        layer: &ExtensionsInner,
+        type_id: TypeId,
+    ) -> Option<T> {
         // First check parent layers (upstream takes precedence)
         if let Some(parent) = &layer.parent {
             if let Some(value) = self.get_from_layer::<T>(parent, type_id) {
@@ -176,7 +180,7 @@ impl Extensions {
                     .downcast::<T>()
                     .expect("Value is keyed by type id, qed")
                     .deref()
-                    .clone()
+                    .clone(),
             )
         } else {
             None
