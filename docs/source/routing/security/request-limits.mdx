@@ -31,7 +31,11 @@ limits:
 
 ## Operation-based limits
 
-<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+
+</PlanRequired>
 
 You can define **operation limits** in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected (unless you run your router in [`warn_only` mode](#warn_only-mode)).
 
