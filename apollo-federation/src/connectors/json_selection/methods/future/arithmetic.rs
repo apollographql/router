@@ -328,7 +328,141 @@ mod tests {
     use shape::Shape;
     use shape::location::SourceId;
 
+    use super::CheckNumericResult;
+    use super::check_numeric_shape;
     use crate::selection;
+
+    #[test]
+    fn test_check_numeric_shape() {
+        assert_eq!(
+            check_numeric_shape(&Shape::int([])),
+            CheckNumericResult::IntForSure
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::float([])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::unknown([])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::bool([])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::string([])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::null([])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::none()),
+            CheckNumericResult::Neither
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::int([])], [])),
+            CheckNumericResult::IntForSure
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::float([])], [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::unknown([])], [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::bool([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::string([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::null([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::none()], [])),
+            CheckNumericResult::Neither
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::int([])], [])),
+            CheckNumericResult::IntForSure
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::float([])], [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::unknown([])], [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::bool([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::string([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::null([])], [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::none()], [])),
+            CheckNumericResult::Neither
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::name("Person", [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::name("Person", []).field("age", [])),
+            CheckNumericResult::FloatPossible
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::int([]), [])),
+            CheckNumericResult::IntForSure
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::float([]), [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::unknown([]), [])),
+            CheckNumericResult::FloatPossible
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::bool([]), [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::string([]), [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::null([]), [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::none(), [])),
+            CheckNumericResult::Neither
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error("Error", [])),
+            CheckNumericResult::Neither
+        );
+    }
 
     #[test]
     fn add_should_add_whole_numbers() {
