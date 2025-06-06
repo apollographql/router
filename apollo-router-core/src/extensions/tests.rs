@@ -37,11 +37,6 @@ mod test {
 
         assert_eq!(extensions.get::<i32>(), Some(42));
         assert_eq!(extensions.get::<String>(), Some("hello".to_string()));
-
-        // Remove values
-        extensions.remove::<i32>();
-        assert!(extensions.get::<i32>().is_none());
-        assert_eq!(extensions.get::<String>(), Some("hello".to_string()));
     }
 
     #[test]
@@ -125,16 +120,104 @@ mod test {
     }
 
     #[test]
-    fn test_remove_nonexistent() {
-        let extensions = Extensions::default();
+    fn test_hierarchical_extensions() {
+        let root = Extensions::default();
+        root.insert("upstream_value".to_string());
+        root.insert(100i32);
 
-        // Removing non-existent values should not panic
-        extensions.remove::<i32>();
-        extensions.remove::<String>();
-        extensions.remove::<ExpensiveType>();
+        let child = root.extend();
+        child.insert(42i32); // Attempt to override, but parent takes precedence
+        child.insert(true); // Add a new value (new type)
 
-        assert!(extensions.get::<i32>().is_none());
-        assert!(extensions.get::<String>().is_none());
-        assert!(extensions.get::<ExpensiveType>().is_none());
+        // Child accesses parent values first, then its own
+        assert_eq!(child.get::<i32>(), Some(100)); // Parent's value takes precedence
+        assert_eq!(child.get::<String>(), Some("upstream_value".to_string())); // Inherited from parent
+        assert_eq!(child.get::<bool>(), Some(true)); // Child's own value (new type)
+
+        // Parent only has its own values and is not affected by child
+        assert_eq!(root.get::<i32>(), Some(100)); // Original parent value
+        assert_eq!(root.get::<String>(), Some("upstream_value".to_string()));
+        assert_eq!(root.get::<bool>(), None); // Not available in parent
+    }
+
+    #[test]
+    fn test_deep_hierarchy() {
+        let root = Extensions::default();
+        root.insert("root".to_string());
+
+        let level1 = root.extend();
+        level1.insert(1i32);
+
+        let level2 = level1.extend();
+        level2.insert(2i16);
+        level2.insert(100i32); // Attempt to override level1's i32, but level1 wins
+
+        let level3 = level2.extend();
+        level3.insert(3i8);
+        level3.insert("level3".to_string()); // Attempt to override root's string, but root wins
+
+        // Level 3 can access all values from the hierarchy, with parents taking precedence
+        assert_eq!(level3.get::<String>(), Some("root".to_string())); // Root's value wins
+        assert_eq!(level3.get::<i32>(), Some(1)); // Level1's value wins over level2's attempt
+        assert_eq!(level3.get::<i16>(), Some(2)); // Level2's value (no conflict)
+        assert_eq!(level3.get::<i8>(), Some(3)); // Level3's own value
+
+        // Earlier levels cannot access values from later levels
+        assert_eq!(level2.get::<String>(), Some("root".to_string())); // Root's value
+        assert_eq!(level2.get::<i32>(), Some(1)); // Level1's value wins over its own attempt
+        assert_eq!(level2.get::<i16>(), Some(2)); // Its own value
+        assert_eq!(level2.get::<i8>(), None); // Cannot see level3's value
+
+        assert_eq!(level1.get::<String>(), Some("root".to_string())); // Root's value
+        assert_eq!(level1.get::<i32>(), Some(1)); // Its own value
+        assert_eq!(level1.get::<i16>(), None); // Cannot see level2's value
+        assert_eq!(level1.get::<i8>(), None); // Cannot see level3's value
+
+        assert_eq!(root.get::<String>(), Some("root".to_string())); // Its own value
+        assert_eq!(root.get::<i32>(), None); // Cannot see descendants' values
+        assert_eq!(root.get::<i16>(), None);
+        assert_eq!(root.get::<i8>(), None);
+    }
+
+    #[test]
+    fn test_parent_precedence() {
+        let parent = Extensions::default();
+        parent.insert("parent_value".to_string());
+
+        let child = parent.extend();
+        child.insert("child_attempt".to_string()); // Attempt to override, but parent wins
+
+        // Child sees parent value, not its own attempt
+        assert_eq!(child.get::<String>(), Some("parent_value".to_string()));
+
+        // Parent is unaffected
+        assert_eq!(parent.get::<String>(), Some("parent_value".to_string()));
+    }
+
+    #[test]
+    fn test_mutable_values_with_sync_primitives() {
+        use std::sync::{Arc, Mutex};
+
+        let parent = Extensions::default();
+        let counter = Arc::new(Mutex::new(0));
+        parent.insert(counter.clone());
+
+        let child = parent.extend();
+        // Downstream can modify the shared value
+        let counter_ref = child.get::<Arc<Mutex<i32>>>().unwrap();
+        *counter_ref.lock().unwrap() += 5;
+
+        // Both layers see the updated value
+        assert_eq!(*parent.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5);
+        assert_eq!(*child.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5);
+
+        // Child can also add its own counter type
+        let child_counter = Arc::new(Mutex::new(10));
+        child.insert(child_counter);
+
+        // Parent doesn't see child's additions
+        assert_eq!(parent.get::<Arc<Mutex<i32>>>().is_some(), true); // Original counter
+        // But both have the same type, so parent wins
+        assert_eq!(*child.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5); // Parent's counter
     }
 }
