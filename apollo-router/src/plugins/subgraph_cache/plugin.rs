@@ -65,17 +65,17 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
+pub(crate) const SUBGRAPH_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
-pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_subgraph_cache::key";
 /// Context key to enable support of surrogate cache key
-pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
+pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::subgraph_cache::cached_keys_status";
 
-register_plugin!("apollo", "preview_entity_cache", EntityCache);
+register_private_plugin!("apollo", "experimental_subgraph_cache", SubgraphCache);
 
 #[derive(Clone)]
-pub(crate) struct EntityCache {
+pub(crate) struct SubgraphCache {
     storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
@@ -191,7 +191,7 @@ pub(crate) struct CacheHitMiss {
 }
 
 #[async_trait::async_trait]
-impl Plugin for EntityCache {
+impl Plugin for SubgraphCache {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -467,7 +467,7 @@ impl Plugin for EntityCache {
 
 #[cfg(test)]
 pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
-impl EntityCache {
+impl SubgraphCache {
     #[cfg(test)]
     pub(crate) async fn with_mocks(
         storage: RedisCacheStorage,
@@ -902,7 +902,7 @@ impl CacheService {
         if let Ok(requests) = from_value(invalidation_extensions) {
             if let Err(e) = self.invalidation.invalidate(origin, requests).await {
                 tracing::error!(error = %e,
-                   message = "could not invalidate entity cache entries",
+                   message = "could not invalidate subgraph cache entries",
                 );
             }
         }
@@ -992,7 +992,7 @@ async fn cache_lookup_root(
     }
 }
 
-struct EntityCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
+struct SubgraphCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_entities(
@@ -1004,7 +1004,7 @@ async fn cache_lookup_entities(
     private_id: Option<&str>,
     mut request: subgraph::Request,
     expose_keys_in_context: bool,
-) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, SubgraphCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
         &name,
@@ -1093,7 +1093,7 @@ async fn cache_lookup_entities(
 
         Ok(ControlFlow::Continue((
             request,
-            EntityCacheResults(cache_result, cache_control),
+            SubgraphCacheResults(cache_result, cache_control),
         )))
     } else {
         let entities = cache_result
@@ -1293,7 +1293,7 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
 }
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
-// This function can be removed outright later at the cost of invalidating all entity caches.
+// This function can be removed outright later at the cost of changing all hashes.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(query_hash.as_bytes());
@@ -1358,7 +1358,7 @@ fn extract_cache_key_root(
     let entity_type = entity_type_opt.unwrap_or("Query");
 
     // the cache key is written to easily find keys matching a prefix for deletion:
-    // - entity cache version: current version of the hash
+    // - subgraph cache version: current version of the hash
     // - subgraph name: subgraph name
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
@@ -1366,7 +1366,7 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
+        "version:{SUBGRAPH_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
@@ -1441,14 +1441,14 @@ fn extract_cache_keys(
         let hashed_entity_key = hash_entity_key(&representation_entity_key);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
-        // - entity cache version: current version of the hash
+        // - subgraph cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
+            "version:{SUBGRAPH_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         if is_known_private {
             if let Some(id) = private_id {
@@ -1912,8 +1912,8 @@ impl Ord for CacheKeyStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::cache::tests::MockStore;
-    use crate::plugins::cache::tests::SCHEMA;
+    use crate::plugins::subgraph_cache::tests::MockStore;
+    use crate::plugins::subgraph_cache::tests::SCHEMA;
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
@@ -1935,7 +1935,7 @@ mod tests {
             }
         });
 
-        let mut entity_cache = EntityCache::with_mocks(
+        let mut subgraph_cache = SubgraphCache::with_mocks(
             redis_cache.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
@@ -1943,18 +1943,18 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(entity_cache.subgraph_enabled("user"));
-        assert!(!entity_cache.subgraph_enabled("archive"));
+        assert!(subgraph_cache.subgraph_enabled("user"));
+        assert!(!subgraph_cache.subgraph_enabled("archive"));
         let subgraph_config = serde_json::json!({
             "all": {
                 "enabled": false
             },
-            "subgraphs": entity_cache.subgraphs.subgraphs.clone()
+            "subgraphs": subgraph_cache.subgraphs.subgraphs.clone()
         });
-        entity_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
-        assert!(!entity_cache.subgraph_enabled("archive"));
-        assert!(entity_cache.subgraph_enabled("user"));
-        assert!(entity_cache.subgraph_enabled("orga"));
+        subgraph_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        assert!(!subgraph_cache.subgraph_enabled("archive"));
+        assert!(subgraph_cache.subgraph_enabled("user"));
+        assert!(subgraph_cache.subgraph_enabled("orga"));
     }
 
     #[tokio::test]
@@ -1979,7 +1979,7 @@ mod tests {
             }
         });
 
-        let mut entity_cache = EntityCache::with_mocks(
+        let mut subgraph_cache = SubgraphCache::with_mocks(
             redis_cache.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
@@ -1988,45 +1988,45 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            entity_cache.subgraph_ttl("user", &redis_cache),
+            subgraph_cache.subgraph_ttl("user", &redis_cache),
             Some(Duration::from_secs(2))
         );
-        assert!(entity_cache.subgraph_ttl("orga", &redis_cache).is_none());
+        assert!(subgraph_cache.subgraph_ttl("orga", &redis_cache).is_none());
         assert_eq!(
-            entity_cache.subgraph_ttl("archive", &redis_cache),
+            subgraph_cache.subgraph_ttl("archive", &redis_cache),
             Some(Duration::from_millis(5000))
         );
         // update global storage TTL
         redis_cache.ttl = Some(Duration::from_secs(25));
         assert_eq!(
-            entity_cache.subgraph_ttl("user", &redis_cache),
+            subgraph_cache.subgraph_ttl("user", &redis_cache),
             Some(Duration::from_secs(2))
         );
         assert_eq!(
-            entity_cache.subgraph_ttl("orga", &redis_cache),
+            subgraph_cache.subgraph_ttl("orga", &redis_cache),
             Some(Duration::from_secs(25))
         );
         assert_eq!(
-            entity_cache.subgraph_ttl("archive", &redis_cache),
+            subgraph_cache.subgraph_ttl("archive", &redis_cache),
             Some(Duration::from_millis(5000))
         );
-        entity_cache.subgraphs = Arc::new(SubgraphConfiguration {
+        subgraph_cache.subgraphs = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: Some(Ttl(Duration::from_secs(42))),
                 ..Default::default()
             },
-            subgraphs: entity_cache.subgraphs.subgraphs.clone(),
+            subgraphs: subgraph_cache.subgraphs.subgraphs.clone(),
         });
         assert_eq!(
-            entity_cache.subgraph_ttl("user", &redis_cache),
+            subgraph_cache.subgraph_ttl("user", &redis_cache),
             Some(Duration::from_secs(2))
         );
         assert_eq!(
-            entity_cache.subgraph_ttl("orga", &redis_cache),
+            subgraph_cache.subgraph_ttl("orga", &redis_cache),
             Some(Duration::from_secs(42))
         );
         assert_eq!(
-            entity_cache.subgraph_ttl("archive", &redis_cache),
+            subgraph_cache.subgraph_ttl("archive", &redis_cache),
             Some(Duration::from_millis(5000))
         );
     }

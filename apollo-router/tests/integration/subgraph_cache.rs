@@ -23,7 +23,7 @@ fn base_config() -> serde_json::Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_entity_cache": {
+        "experimental_subgraph_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {

@@ -15,12 +15,12 @@ use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
-use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use super::plugin::Subgraph;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
-use crate::plugins::cache::invalidation::InvalidationRequest;
+use crate::plugins::subgraph_cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
@@ -255,8 +255,8 @@ mod tests {
 
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
-    use crate::plugins::cache::entity::Storage;
-    use crate::plugins::cache::tests::MockStore;
+    use crate::plugins::subgraph_cache::plugin::Storage;
+    use crate::plugins::subgraph_cache::tests::MockStore;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {

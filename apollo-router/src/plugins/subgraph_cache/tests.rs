@@ -15,18 +15,18 @@ use serde_json_bytes::ByteString;
 use tower::Service;
 use tower::ServiceExt;
 
-use super::entity::EntityCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
-use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
-use crate::plugins::cache::entity::CacheKeyContext;
-use crate::plugins::cache::entity::CacheKeysContext;
-use crate::plugins::cache::entity::Subgraph;
-use crate::plugins::cache::entity::hash_representation;
+use crate::plugins::subgraph_cache::plugin::CONTEXT_CACHE_KEYS;
+use crate::plugins::subgraph_cache::plugin::CacheKeyContext;
+use crate::plugins::subgraph_cache::plugin::CacheKeysContext;
+use crate::plugins::subgraph_cache::plugin::Subgraph;
+use crate::plugins::subgraph_cache::plugin::SubgraphCache;
+use crate::plugins::subgraph_cache::plugin::hash_representation;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -214,7 +214,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -225,7 +225,7 @@ async fn insert() {
         }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -260,8 +260,8 @@ async fn insert() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -269,7 +269,7 @@ async fn insert() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -357,7 +357,7 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -365,7 +365,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -401,8 +401,8 @@ async fn insert_with_requires() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -410,7 +410,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -489,7 +489,7 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -497,7 +497,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -538,8 +538,8 @@ async fn insert_with_nested_field_set() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -547,7 +547,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -608,8 +608,8 @@ async fn no_cache_control() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -617,7 +617,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -636,8 +636,8 @@ async fn no_cache_control() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -645,7 +645,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -726,7 +726,7 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -734,7 +734,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_plugin(plugin.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -763,7 +763,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -884,7 +884,7 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -892,7 +892,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -920,8 +920,8 @@ async fn no_data() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -957,7 +957,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .subgraph_hook(|name, service| {
             if name == "orga" {
                 let mut subgraph = MockSubgraphService::new();
@@ -1073,7 +1073,7 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -1081,7 +1081,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1096,8 +1096,8 @@ async fn missing_entities() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache =
-        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+    let plugin =
+        SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
 
@@ -1143,7 +1143,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1197,16 +1197,16 @@ async fn invalidate() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
+    let plugin = SubgraphCache::with_mocks(redis_cache.clone(), HashMap::new())
         .await
         .unwrap();
-    let mut invalidation = entity_cache.invalidation.clone();
+    let mut invalidation = plugin.invalidation.clone();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_plugin(plugin.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1229,7 +1229,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_plugin(plugin.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1260,7 +1260,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();

@@ -13,16 +13,16 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::entity::REPRESENTATIONS;
-use super::entity::Ttl;
-use super::entity::hash_query;
-use super::entity::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
+use crate::plugins::subgraph_cache::plugin::REPRESENTATIONS;
+use crate::plugins::subgraph_cache::plugin::Ttl;
+use crate::plugins::subgraph_cache::plugin::hash_query;
+use crate::plugins::subgraph_cache::plugin::hash_vary_headers;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
-pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
-    "apollo::router::entity_cache_info_subgraph";
+pub(crate) const CACHE_INFO_SUBGRAPH_NAME_CONTEXT_KEY: &str =
+    "apollo::router::subgraph_cache_info_subgraph_name";
 
 impl CacheMetricsService {
     pub(crate) fn create(
@@ -249,7 +249,7 @@ impl CacheCounter {
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
                 f64_histogram!(
-                    "apollo.router.operations.entity.cache_hit",
+                    "apollo.router.operations.subgraph_cache.cache_hit",
                     "Hit rate percentage of cached entities",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     // Can't just `Arc::clone` these because they're `Arc<String>`,
@@ -259,7 +259,7 @@ impl CacheCounter {
                 );
             } else {
                 f64_histogram!(
-                    "apollo.router.operations.entity.cache_hit",
+                    "apollo.router.operations.subgraph_cache.cache_hit",
                     "Hit rate percentage of cached entities",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     subgraph = subgraph_name.to_string()
@@ -290,6 +290,6 @@ impl CacheMetricContextKey {
 
 impl From<CacheMetricContextKey> for String {
     fn from(val: CacheMetricContextKey) -> Self {
-        format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}", val.0)
+        format!("{CACHE_INFO_SUBGRAPH_NAME_CONTEXT_KEY}_{}", val.0)
     }
 }

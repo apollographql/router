@@ -15,10 +15,10 @@ use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
-use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
-use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::subgraph_cache::plugin::SUBGRAPH_CACHE_VERSION;
+use crate::plugins::subgraph_cache::plugin::Storage as EntityStorage;
+use crate::plugins::subgraph_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -79,8 +79,8 @@ impl Invalidation {
             InvalidationOrigin::Extensions => "extensions",
         };
         u64_counter!(
-            "apollo.router.operations.entity.invalidation.event",
-            "Entity cache received a batch of invalidation requests",
+            "apollo.router.operations.subgraph_cache.invalidation.event",
+            "Subgraph cache received a batch of invalidation requests",
             1u64,
             "origin" = origin
         );
@@ -139,8 +139,8 @@ impl Invalidation {
         }
 
         u64_counter!(
-            "apollo.router.operations.entity.invalidation.entry",
-            "Entity cache counter for invalidated entries",
+            "apollo.router.operations.subgraph_cache.invalidation.entry",
+            "Subgraph cache counter for invalidated entries",
             count,
             "origin" = origin,
             "subgraph.name" = subgraph.clone()
@@ -233,10 +233,10 @@ impl InvalidationRequest {
     fn key_prefix(&mut self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:*",)
+                format!("version:{SUBGRAPH_CACHE_VERSION}:subgraph:{subgraph}:*",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:*",)
+                format!("version:{SUBGRAPH_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:*",)
             }
             InvalidationRequest::Entity {
                 subgraph,
@@ -245,7 +245,7 @@ impl InvalidationRequest {
             } => {
                 let entity_key = hash_entity_key(key);
                 format!(
-                    "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
+                    "version:{SUBGRAPH_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
                 )
             }
         }
