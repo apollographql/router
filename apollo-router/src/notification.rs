@@ -28,6 +28,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::Configuration;
 use crate::graphql;
+use crate::metrics::FutureMetricsExt;
 use crate::spec::Schema;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
@@ -155,7 +156,9 @@ where
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
         let receiver_stream: ReceiverStream<Notification<K, V>> = ReceiverStream::new(receiver);
-        tokio::task::spawn(task(receiver_stream, ttl, heartbeat_error_message));
+        tokio::task::spawn(
+            task(receiver_stream, ttl, heartbeat_error_message).with_current_meter_provider(),
+        );
         Notify {
             sender,
             queue_size,
@@ -1006,13 +1009,11 @@ impl RouterBroadcasts {
 mod tests {
 
     use futures::FutureExt;
-    use tokio::task;
     use tokio_stream::StreamExt;
     use uuid::Uuid;
 
-    use crate::metrics::FutureMetricsExt;
-
     use super::*;
+    use crate::metrics::FutureMetricsExt;
 
     #[tokio::test]
     async fn subscribe() {
@@ -1125,8 +1126,6 @@ mod tests {
                 .await
                 .unwrap();
             assert!(created);
-
-            println!("assert");
             assert_up_down_counter!(
                 "apollo.router.opened.subscriptions",
                 1i64,
