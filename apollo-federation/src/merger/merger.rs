@@ -7,6 +7,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
+use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
