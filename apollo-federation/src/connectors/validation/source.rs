@@ -33,6 +33,10 @@ use crate::connectors::validation::parse_url;
 pub(super) struct SourceDirective<'schema> {
     pub(crate) name: SourceName<'schema>,
     directive: &'schema Component<Directive>,
+    url: Option<UrlProperties<'schema>>,
+    headers: Option<Headers<'schema>>,
+    errors: Option<Errors<'schema>>,
+    schema: &'schema SchemaInfo<'schema>,
 }
 
 impl<'schema> SourceDirective<'schema> {
@@ -69,69 +73,30 @@ impl<'schema> SourceDirective<'schema> {
 
     fn from_directive(
         directive: &'schema Component<Directive>,
-        schema: &SchemaInfo,
+        schema: &'schema SchemaInfo<'schema>,
     ) -> (Option<SourceDirective<'schema>>, Vec<Message>) {
-        let mut errors = Vec::new();
-        let (name, name_errors) = SourceName::from_directive(directive, &schema.sources);
-        errors.extend(name_errors);
+        let mut messages = Vec::new();
+        let (name, name_messages) = SourceName::from_directive(directive, &schema.sources);
+        messages.extend(name_messages);
 
         let coordinate = SourceDirectiveCoordinate {
             directive,
             name: name.unwrap_or_default(),
         };
 
-        errors.extend(
-            Errors::parse(ErrorsCoordinate::Source { source: coordinate }, schema)
-                // TODO: Move type checking to a later phase so parsing can be shared with runtime
-                .and_then(|errors| errors.type_check(schema))
-                .err()
-                .into_iter()
-                .flatten(),
-        );
+        let errors = match Errors::parse(ErrorsCoordinate::Source { source: coordinate }, schema) {
+            Ok(errors) => Some(errors),
+            Err(errs) => {
+                messages.extend(errs);
+                None
+            }
+        };
 
-        if let Some(http_arg) = directive
+        let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
-        {
-            // Validate URL argument
-            if let Some(url_value) = http_arg
-                .iter()
-                .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
-            {
-                if let Some(url_error) = parse_url(
-                    url_value,
-                    BaseUrlCoordinate {
-                        source_directive_name: &directive.name,
-                    },
-                    schema,
-                )
-                .err()
-                {
-                    errors.push(url_error);
-                }
-            }
-
-            match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
-                Ok(url_properties) => errors.extend(url_properties.type_check(schema)),
-                Err(errs) => errors.extend(errs),
-            };
-
-            errors.extend(
-                Headers::parse(
-                    http_arg,
-                    HttpHeadersCoordinate::Source {
-                        directive_name: &directive.name,
-                    },
-                    schema,
-                )
-                // TODO: Move type checking to a later phase so parsing can be shared with runtime
-                .and_then(|headers| headers.type_check(schema))
-                .err()
-                .into_iter()
-                .flatten(),
-            );
-        } else {
-            errors.push(Message {
+        else {
+            messages.push(Message {
                 code: Code::GraphQLError,
                 message: format!(
                     "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
@@ -141,10 +106,87 @@ impl<'schema> SourceDirective<'schema> {
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            })
+            });
+            return (
+                name.map(|name| SourceDirective {
+                    name,
+                    schema,
+                    directive,
+                    url: None,
+                    headers: None,
+                    errors: None,
+                }),
+                messages,
+            );
+        };
+
+        if let Some(url_value) = http_arg
+            .iter()
+            .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
+        {
+            if let Some(url_error) = parse_url(
+                url_value,
+                BaseUrlCoordinate {
+                    source_directive_name: &directive.name,
+                },
+                schema,
+            )
+            .err()
+            {
+                messages.push(url_error);
+            }
         }
 
-        (name.map(|name| SourceDirective { name, directive }), errors)
+        let url = match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
+            Ok(url_properties) => Some(url_properties),
+            Err(errs) => {
+                messages.extend(errs);
+                None
+            }
+        };
+
+        let headers = match Headers::parse(
+            http_arg,
+            HttpHeadersCoordinate::Source {
+                directive_name: &directive.name,
+            },
+            schema,
+        ) {
+            Ok(headers) => Some(headers),
+            Err(header_messages) => {
+                messages.extend(header_messages);
+                None
+            }
+        };
+
+        (
+            name.map(|name| SourceDirective {
+                name,
+                directive,
+                url,
+                headers,
+                errors,
+                schema,
+            }),
+            messages,
+        )
+    }
+
+    /// Type-check each source, doing compile-time-only validations.
+    ///
+    /// Do not call this at runtime, as it may be prohibitively expensive.
+    pub(crate) fn type_check(self) -> Vec<Message> {
+        let mut messages = Vec::new();
+        if let Some(errors) = self.errors {
+            messages.extend(errors.type_check(self.schema).err().into_iter().flatten());
+        }
+        if let Some(url) = self.url {
+            messages.extend(url.type_check(self.schema));
+        }
+        if let Some(headers) = self.headers {
+            messages.extend(headers.type_check(self.schema).err().into_iter().flatten());
+        }
+        messages
     }
 }
 
