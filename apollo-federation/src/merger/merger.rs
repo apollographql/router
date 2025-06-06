@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
@@ -341,7 +342,7 @@ impl Merger {
         for subgraph in self.subgraphs.iter() {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
-                    && self.is_merged_directive(&subgraph.name, definition)
+                    && self.is_merged_directive_definition(&subgraph.name, definition)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -354,7 +355,24 @@ impl Merger {
         Ok(())
     }
 
-    fn is_merged_directive(&self, subgraph_name: &str, definition: &DirectiveDefinition) -> bool {
+    fn is_merged_directive(&self, subgraph_name: &str, directive: &Directive) -> bool {
+        if self
+            .compose_directive_manager
+            .should_compose_directive(subgraph_name, &directive.name)
+        {
+            return true;
+        }
+
+        self.merged_federation_directive_names
+            .contains(directive.name.as_str())
+            || BUILT_IN_DIRECTIVES.contains(&directive.name.as_str())
+    }
+
+    fn is_merged_directive_definition(
+        &self,
+        subgraph_name: &str,
+        definition: &DirectiveDefinition,
+    ) -> bool {
         if self
             .compose_directive_manager
             .should_compose_directive(subgraph_name, &definition.name)
@@ -362,16 +380,11 @@ impl Merger {
             return true;
         }
 
-        // TODO: There's a block here for handling directive applications instead of just definitions
-
-        if BUILT_IN_DIRECTIVES.contains(&definition.name.as_str()) {
-            return false;
-        }
-
-        definition
-            .locations
-            .iter()
-            .any(|loc| loc.is_executable_location())
+        !BUILT_IN_DIRECTIVES.contains(&definition.name.as_str())
+            && definition
+                .locations
+                .iter()
+                .any(|loc| loc.is_executable_location())
     }
 
     fn merge_implements(&mut self, _type_def: &Name) {
