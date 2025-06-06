@@ -80,8 +80,6 @@ then look at `apollo_router_schema_loading_time` and `apollo.router.query_planni
 
 If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 
-<<<<<<< HEAD
-=======
 #### Cache warm-up with headers
 
 <MinVersionBadge version="Router v1.61.0" />
@@ -93,7 +91,6 @@ With router v1.61.0+  and v2.x+, if you have enabled exposing query plans via `-
 
 After using `dry-run`, query plans are saved to your configured cache locations. Using real, mirrored, or similar to production operations is a great way to warmup the caches before transitioning traffic to new router instances.
 
->>>>>>> 9ddafafb (docs: update preview/minVersion components (#7612))
 ## Caching automatic persisted queries (APQ)
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
