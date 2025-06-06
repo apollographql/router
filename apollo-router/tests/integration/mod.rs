@@ -15,6 +15,8 @@ mod lifecycle;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+mod subgraph_cache;
 mod subgraph_response;
 mod supergraph;
 mod traffic_shaping;
