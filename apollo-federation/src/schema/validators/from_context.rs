@@ -225,48 +225,38 @@ fn validate_selection_format(
     }
 }
 
-/// Checks if a selection set has any directives
-fn selection_set_has_directives(selection_set: &SelectionSet) -> bool {
+fn has_selection_with_predicate(selection_set: &SelectionSet, predicate: &impl Fn(&Selection) -> bool) -> bool {
     for selection in selection_set.iter() {
-        match selection {
-            Selection::Field(field) => {
-                if !field.field.directives.is_empty() {
-                    return true;
-                }
-                if let Some(sub_selection) = &field.selection_set {
-                    if selection_set_has_directives(sub_selection) {
-                        return true;
-                    }
-                }
-            }
-            Selection::InlineFragment(frag) => {
-                if !frag.inline_fragment.directives.is_empty() {
-                    return true;
-                }
-                if selection_set_has_directives(&frag.selection_set) {
+        if predicate(selection) {
+            return true;
+        }
+        if let Selection::Field(field) = selection {
+            if let Some(sub_selection) = &field.selection_set {
+                if has_selection_with_predicate(sub_selection, predicate) {
                     return true;
                 }
             }
         }
     }
-    false
+    return false;
 }
 
-/// Checks if a selection set has any aliases
-fn selection_set_has_alias(selection_set: &SelectionSet) -> bool {
-    for selection in selection_set.iter() {
-        if let Selection::Field(field) = selection {
-            if field.field.alias.is_some() {
-                return true;
-            }
-            if let Some(sub_selection) = &field.selection_set {
-                if selection_set_has_alias(sub_selection) {
-                    return true;
-                }
-            }
+fn selection_set_has_directives(selection_set: &SelectionSet) -> bool {
+    has_selection_with_predicate(selection_set, &|selection| {
+        match selection {
+            Selection::Field(field) => !field.field.directives.is_empty(),
+            Selection::InlineFragment(frag) => !frag.inline_fragment.directives.is_empty(),
         }
-    }
-    false
+    })
+}
+
+fn selection_set_has_alias(selection_set: &SelectionSet) -> bool {
+    has_selection_with_predicate(selection_set, &|selection| {
+        match selection {
+            Selection::Field(field) => field.field.alias.is_some(),
+            Selection::InlineFragment(_) => false,
+        }
+    })
 }
 
 /// Check if one type is a valid implementation of another (following GraphQL interface rules)
