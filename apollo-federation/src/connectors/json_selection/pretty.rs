@@ -150,6 +150,26 @@ impl PrettyPrintable for PathList {
                         .as_str(),
                 );
             }
+            Self::OptionalKey(key, tail) => {
+                result.push_str("?.");
+                result.push_str(key.pretty_print().as_str());
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
+            }
+            Self::OptionalMethod(method, args, tail) => {
+                result.push_str("?->");
+                result.push_str(method.as_str());
+                if let Some(args) = args {
+                    result.push_str(
+                        args.pretty_print_with_indentation(true, indentation)
+                            .as_str(),
+                    );
+                }
+                result.push_str(
+                    tail.pretty_print_with_indentation(true, indentation)
+                        .as_str(),
+                );
+            }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push(' ');

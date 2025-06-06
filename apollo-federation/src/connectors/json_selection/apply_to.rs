@@ -639,6 +639,98 @@ impl ApplyToInternal for WithRange<PathList> {
                 // without an error.
                 (Some(data.clone()), vec![])
             }
+            PathList::OptionalKey(key, tail) => {
+                // If data is null, short-circuit and return null
+                if data.is_null() {
+                    return (Some(JSON::Null), vec![]);
+                }
+
+                let input_path_with_key = input_path.append(key.to_json());
+
+                if let JSON::Array(array) = data {
+                    // Same as regular Key case - apply to each array element
+                    let empty_tail = WithRange::new(PathList::Empty, tail.range());
+                    let self_with_empty_tail =
+                        WithRange::new(PathList::OptionalKey(key.clone(), empty_tail), key.range());
+
+                    self_with_empty_tail
+                        .apply_to_array(array, vars, input_path)
+                        .and_then_collecting_errors(|shallow_mapped_array| {
+                            tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
+                        })
+                } else {
+                    // Same behavior as regular Key - return errors for non-objects and missing properties
+                    if !matches!(data, JSON::Object(_)) {
+                        return (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        );
+                    }
+                    let Some(child) = data.get(key.as_str()) else {
+                        return (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        );
+                    };
+                    tail.apply_to_path(child, vars, &input_path_with_key)
+                }
+            }
+            PathList::OptionalMethod(method_name, method_args, tail) => {
+                // If data is null, short-circuit and return null
+                if data.is_null() {
+                    return (Some(JSON::Null), vec![]);
+                }
+
+                let method_path =
+                    input_path.append(JSON::String(format!("?->{}", method_name.as_ref()).into()));
+
+                // Same behavior as regular Method - return errors for unknown methods
+                ArrowMethod::lookup(method_name).map_or_else(
+                    || {
+                        (
+                            None,
+                            vec![ApplyToError::new(
+                                format!("Method ?->{} not found", method_name.as_ref()),
+                                method_path.to_vec(),
+                                method_name.range(),
+                            )],
+                        )
+                    },
+                    |method| {
+                        let (result_opt, errors) = method.apply(
+                            method_name,
+                            method_args.as_ref(),
+                            data,
+                            vars,
+                            &method_path,
+                        );
+
+                        if let Some(result) = result_opt {
+                            tail.apply_to_path(&result, vars, &method_path)
+                                .prepend_errors(errors)
+                        } else {
+                            // Same behavior as regular Method - propagate errors when method produces None
+                            (None, errors)
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -748,6 +840,84 @@ impl ApplyToInternal for WithRange<PathList> {
                 named_var_shapes,
                 source_id,
             ),
+
+            PathList::OptionalKey(key, rest) => {
+                // Optional key access always produces nullable output
+                if input_shape.is_none() {
+                    return input_shape;
+                }
+
+                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
+                    let mapped_prefix = prefix
+                        .iter()
+                        .map(|shape| {
+                            if shape.is_none() {
+                                shape.clone()
+                            } else {
+                                let result_shape = rest.compute_output_shape(
+                                    field(shape, key, source_id),
+                                    dollar_shape.clone(),
+                                    named_var_shapes,
+                                    source_id,
+                                );
+                                // Make result nullable since optional chaining can produce null
+                                Shape::one([result_shape, Shape::none()], vec![])
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    let mapped_rest = if tail.is_none() {
+                        tail.clone()
+                    } else {
+                        let field_shape = field(tail, key, source_id);
+                        let result_shape = rest.compute_output_shape(
+                            field_shape,
+                            dollar_shape,
+                            named_var_shapes,
+                            source_id,
+                        );
+                        // Make result nullable since optional chaining can produce null
+                        Shape::one([result_shape, Shape::none()], vec![])
+                    };
+
+                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
+                } else {
+                    let result_shape = rest.compute_output_shape(
+                        field(&input_shape, key, source_id),
+                        dollar_shape,
+                        named_var_shapes,
+                        source_id,
+                    );
+                    // Make result nullable since optional chaining can produce null
+                    Shape::one([result_shape, Shape::none()], vec![])
+                }
+            }
+
+            PathList::OptionalMethod(method_name, _method_args, _tail) => {
+                // Optional method access always produces nullable output
+                ArrowMethod::lookup(method_name).map_or_else(
+                    || {
+                        // For optional method, return nullable unknown instead of error
+                        Shape::one(
+                            [
+                                Shape::unknown(method_name.shape_location(source_id)),
+                                Shape::none(),
+                            ],
+                            vec![],
+                        )
+                    },
+                    |_method| {
+                        // For optional method, return nullable unknown
+                        Shape::one(
+                            [
+                                Shape::unknown(method_name.shape_location(source_id)),
+                                Shape::none(),
+                            ],
+                            vec![],
+                        )
+                    },
+                )
+            }
 
             PathList::Empty => input_shape,
         }
@@ -2965,5 +3135,245 @@ mod tests {
         //         .pretty_print(),
         //     "[{ k: \"wrapped\", v: $root }]",
         // );
+    }
+
+    #[test]
+    fn test_optional_key_access_with_existing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[test]
+    fn test_optional_key_access_with_null_value() {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    #[test]
+    fn test_optional_key_access_on_non_object() {
+        use serde_json_bytes::json;
+
+        let data_non_obj = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data_non_obj);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in string")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_key_access_with_missing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "other": "value"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in object")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_chained_optional_key_access() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile?.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[test]
+    fn test_chained_optional_access_with_null_in_middle() {
+        use serde_json_bytes::json;
+
+        let data_partial_null = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile?.name")
+            .unwrap()
+            .apply_to(&data_partial_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    #[test]
+    fn test_optional_method_on_null() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "items": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.items?->first")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    #[test]
+    fn test_optional_method_with_valid_method() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.values?->first")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(1)));
+    }
+
+    #[test]
+    fn test_optional_method_with_unknown_method() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.values?->length")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message().contains("Method ?->length not found"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection_on_valid_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "age": 30,
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile { name age }")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "age": 30
+            }))
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection_on_null_data() {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile { name age }")
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_chaining_working_case() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "response": {
+                "data": {
+                    "user": {
+                        "profile": {
+                            "name": "Bob"
+                        }
+                    }
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.response.data?.user.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Bob")));
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_chaining_with_null() {
+        use serde_json_bytes::json;
+
+        let data_null_data = json!({
+            "response": {
+                "data": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.response.data?.user.profile.name")
+            .unwrap()
+            .apply_to(&data_null_data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(null)));
     }
 }

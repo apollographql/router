@@ -553,6 +553,12 @@ pub(super) enum PathList {
     // middle/tail (not the beginning) of a PathSelection.
     Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
 
+    // Optional key access (?.) that returns null instead of errors.
+    OptionalKey(WithRange<Key>, WithRange<PathList>),
+
+    // Optional method call (?->) that returns null instead of errors.
+    OptionalMethod(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
+
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
     // by itself is not a valid PathList.
@@ -716,6 +722,19 @@ impl PathList {
         // be written as a subproperty of the $ variable, e.g. $.key, which is
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
+
+        // Optional key access: ?.key (note: we parse this before .key to avoid conflicts)
+        if let Ok((remainder, (question_dot, key))) = tuple((ranged_span("?."), Key::parse))(input)
+        {
+            let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
+            let question_key_range = merge_ranges(question_dot.range(), key.range());
+            let full_range = merge_ranges(question_key_range, rest.range());
+            return Ok((
+                remainder,
+                WithRange::new(Self::OptionalKey(key, rest), full_range),
+            ));
+        }
+
         if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input) {
             let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
@@ -730,6 +749,21 @@ impl PathList {
                 input,
                 "Path selection . must be followed by key (identifier or quoted string literal)",
             ));
+        }
+
+        // Optional method call: ?->method (note: we parse this before -> to avoid conflicts)
+        if let Ok((suffix, question_arrow)) = ranged_span("?->")(input) {
+            return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
+                Ok((suffix, (method, args))) => {
+                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                    let full_range = merge_ranges(question_arrow.range(), rest.range());
+                    Ok((
+                        remainder,
+                        WithRange::new(Self::OptionalMethod(method, args, rest), full_range),
+                    ))
+                }
+                Err(_) => Err(nom_fail_message(input, "Method name must follow ?->")),
+            };
         }
 
         // PathSelection can never start with a naked ->method (instead, use
@@ -799,6 +833,8 @@ impl PathList {
             Self::Key(_, tail) => tail.next_subselection(),
             Self::Expr(_, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
+            Self::OptionalKey(_, tail) => tail.next_subselection(),
+            Self::OptionalMethod(_, _, tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -812,6 +848,8 @@ impl PathList {
             Self::Key(_, tail) => tail.next_mut_subselection(),
             Self::Expr(_, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
+            Self::OptionalKey(_, tail) => tail.next_mut_subselection(),
+            Self::OptionalMethod(_, _, tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -831,11 +869,22 @@ impl ExternalVarPaths for PathList {
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
+            PathList::OptionalKey(_, rest) => {
+                paths.extend(rest.external_var_paths());
+            }
             PathList::Expr(expr, rest) => {
                 paths.extend(expr.external_var_paths());
                 paths.extend(rest.external_var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
+                if let Some(args) = opt_args {
+                    for lit_arg in &args.args {
+                        paths.extend(lit_arg.external_var_paths());
+                    }
+                }
+                paths.extend(rest.external_var_paths());
+            }
+            PathList::OptionalMethod(_, opt_args, rest) => {
                 if let Some(args) = opt_args {
                     for lit_arg in &args.args {
                         paths.extend(lit_arg.external_var_paths());
@@ -3153,5 +3202,171 @@ mod tests {
         assert_debug_snapshot!(selection_false_not_v0_2);
         assert_debug_snapshot!(selection_object_path_v0_2);
         assert_debug_snapshot!(selection_array_path_v0_2);
+    }
+
+    #[test]
+    fn test_optional_key_access() {
+        // Test optional key access: foo?.bar
+        check_path_selection(
+            "$.foo?.bar",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::OptionalKey(
+                            Key::field("bar").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_optional_method_call() {
+        // Test optional method call: foo?->method
+        check_path_selection(
+            "$.foo?->method",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::OptionalMethod(
+                            WithRange::new("method".to_string(), None),
+                            None,
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_chained_optional_accesses() {
+        // Test chained optional accesses: foo?.bar?.baz
+        check_path_selection(
+            "$.foo?.bar?.baz",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::OptionalKey(
+                            Key::field("bar").into_with_range(),
+                            PathList::OptionalKey(
+                                Key::field("baz").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_access() {
+        // Test mixed regular and optional access: foo.bar?.baz
+        check_path_selection(
+            "$.foo.bar?.baz",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Key(
+                            Key::field("bar").into_with_range(),
+                            PathList::OptionalKey(
+                                Key::field("baz").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection() {
+        // Test optional chaining with subselection: foo?.bar { id name }
+        check_path_selection(
+            "$.foo?.bar { id name }",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::OptionalKey(
+                            Key::field("bar").into_with_range(),
+                            PathList::Selection(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("id").into_with_range(),
+                                        None,
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("name").into_with_range(),
+                                        None,
+                                    ),
+                                ],
+                                ..Default::default()
+                            })
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_optional_method_with_arguments() {
+        // Test optional method with arguments: foo?->filter('active')
+        check_path_selection(
+            "$.foo?->filter('active')",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::OptionalMethod(
+                            WithRange::new("filter".to_string(), None),
+                            Some(MethodArgs {
+                                args: vec![LitExpr::String("active".to_string()).into_with_range()],
+                                ..Default::default()
+                            }),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
     }
 }
