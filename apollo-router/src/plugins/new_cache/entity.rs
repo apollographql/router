@@ -20,7 +20,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
-use serde_json_bytes::from_value;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::RwLock;
@@ -33,7 +32,6 @@ use tracing::Level;
 
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
-use super::invalidation::InvalidationOrigin;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
@@ -58,9 +56,9 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
-use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
@@ -70,8 +68,6 @@ pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
-/// Context key to enable support of surrogate cache key
-pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::entity_cache::debug_cached_keys";
 
@@ -369,7 +365,9 @@ impl Plugin for SubgraphCache {
             }
         };
 
-        let subgraph_ttl = self.subgraph_ttl(name);
+        let subgraph_ttl = self
+            .subgraph_ttl(name)
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
         let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
@@ -408,7 +406,6 @@ impl Plugin for SubgraphCache {
                     subgraph_ttl,
                     private_queries,
                     private_id,
-                    invalidation: self.invalidation.clone(),
                     debug: self.debug,
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
@@ -575,11 +572,10 @@ struct CacheService {
     name: String,
     entity_type: Option<String>,
     storage: PostgresCacheStorage,
-    subgraph_ttl: Option<Duration>,
+    subgraph_ttl: Duration,
     private_queries: Arc<RwLock<HashSet<String>>>,
     private_id: Option<String>,
     debug: bool,
-    invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: Arc<HashMap<String, String>>,
 }
@@ -685,24 +681,28 @@ impl CacheService {
                             root_operation_fields = request
                                 .executable_document
                                 .as_ref()
-                                .map(|executable_document| {
-                                    executable_document
-                                        .operations
-                                        .iter()
-                                        .next()
-                                        .unwrap()
-                                        .root_fields(executable_document)
-                                        .map(|f| f.name.to_string())
-                                        .collect()
+                                .and_then(|executable_document| {
+                                    Some(
+                                        executable_document
+                                            .operations
+                                            .iter()
+                                            .next()?
+                                            .root_fields(executable_document)
+                                            .map(|f| f.name.to_string())
+                                            .collect(),
+                                    )
                                 })
                                 .unwrap_or_default();
                             debug_subgraph_request = Some(request.subgraph_request.body().clone());
                         }
-                        let mut response = self.service.call(request).await?;
+                        let response = self.service.call(request).await?;
 
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
-                                CacheControl::new(response.response.headers(), self.subgraph_ttl)?
+                                CacheControl::new(
+                                    response.response.headers(),
+                                    self.subgraph_ttl.into(),
+                                )?
                             } else {
                                 let mut c = CacheControl::default();
                                 c.no_store = true;
@@ -749,19 +749,6 @@ impl CacheService {
                             }
                         }
 
-                        if let Some(invalidation_extensions) = response
-                            .response
-                            .body_mut()
-                            .extensions
-                            .remove("invalidation")
-                        {
-                            self.handle_invalidation(
-                                InvalidationOrigin::Extensions,
-                                invalidation_extensions,
-                            )
-                            .await;
-                        }
-
                         if cache_control.should_store() {
                             cache_store_root_from_response(
                                 self.storage,
@@ -779,24 +766,11 @@ impl CacheService {
                     }
                 }
             } else {
-                let mut response = self.service.call(request).await?;
-                if let Some(invalidation_extensions) = response
-                    .response
-                    .body_mut()
-                    .extensions
-                    .remove("invalidation")
-                {
-                    self.handle_invalidation(
-                        InvalidationOrigin::Extensions,
-                        invalidation_extensions,
-                    )
-                    .await;
-                }
+                let response = self.service.call(request).await?;
 
                 Ok(response)
             }
         } else {
-            let request_id = request.id.clone();
             match cache_lookup_entities(
                 self.name.clone(),
                 self.supergraph_schema.clone(),
@@ -835,9 +809,9 @@ impl CacheService {
                         );
                     }
 
-                    let mut debug_subgraph_request = None;
+                    // let mut debug_subgraph_request = None;
                     if self.debug {
-                        debug_subgraph_request = Some(request.subgraph_request.body().clone());
+                        // debug_subgraph_request = Some(request.subgraph_request.body().clone());
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| {
                                 CacheKeyContext {
@@ -907,12 +881,15 @@ impl CacheService {
                         }
                     };
 
-                    let mut cache_control =
-                        if response.response.headers().contains_key(CACHE_CONTROL) {
-                            CacheControl::new(response.response.headers(), self.subgraph_ttl)?
-                        } else {
-                            CacheControl::no_store()
-                        };
+                    let mut cache_control = if response
+                        .response
+                        .headers()
+                        .contains_key(CACHE_CONTROL)
+                    {
+                        CacheControl::new(response.response.headers(), self.subgraph_ttl.into())?
+                    } else {
+                        CacheControl::no_store()
+                    };
 
                     if let Some(control_from_cached) = cache_result.1 {
                         cache_control = cache_control.merge(&control_from_cached);
@@ -920,19 +897,6 @@ impl CacheService {
 
                     if !is_known_private && cache_control.private() {
                         self.private_queries.write().await.insert(query.to_string());
-                    }
-
-                    if let Some(invalidation_extensions) = response
-                        .response
-                        .body_mut()
-                        .extensions
-                        .remove("invalidation")
-                    {
-                        self.handle_invalidation(
-                            InvalidationOrigin::Extensions,
-                            invalidation_extensions,
-                        )
-                        .await;
                     }
 
                     cache_store_entities_from_response(
@@ -964,20 +928,6 @@ impl CacheService {
                 })
             })
         })
-    }
-
-    async fn handle_invalidation(
-        &mut self,
-        origin: InvalidationOrigin,
-        invalidation_extensions: Value,
-    ) {
-        if let Ok(requests) = from_value(invalidation_extensions) {
-            if let Err(e) = self.invalidation.invalidate(origin, requests).await {
-                tracing::error!(error = %e,
-                   message = "could not invalidate entity cache entries",
-                );
-            }
-        }
     }
 }
 
@@ -1039,15 +989,16 @@ async fn cache_lookup_root(
                     let root_operation_fields: Vec<String> = request
                         .executable_document
                         .as_ref()
-                        .map(|executable_document| {
-                            executable_document
-                                .operations
-                                .iter()
-                                .next()
-                                .unwrap()
-                                .root_fields(executable_document)
-                                .map(|f| f.name.to_string())
-                                .collect()
+                        .and_then(|executable_document| {
+                            Some(
+                                executable_document
+                                    .operations
+                                    .iter()
+                                    .next()?
+                                    .root_fields(executable_document)
+                                    .map(|f| f.name.to_string())
+                                    .collect(),
+                            )
                         })
                         .unwrap_or_default();
                     request.context.upsert::<_, CacheKeysContext>(
@@ -1140,17 +1091,30 @@ fn get_invalidation_root_keys_from_schema(
                         .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())?,
                 ))
             });
-            let args: serde_json_bytes::Map<ByteString, Value> = field
-                .arguments
-                .iter()
-                .map(|arg| {
-                    let name = arg.name.clone();
-                    let value =
-                        get_arg_value(&arg.value, &request.subgraph_request.body().variables);
+            let mut errors = Vec::new();
+            let args = coerce_argument_values(
+                &supergraph_schema,
+                executable_document,
+                &request.subgraph_request.body().variables,
+                &mut errors,
+                Default::default(),
+                field_def,
+                field,
+            )
+            .map_err(|_| FetchError::MalformedRequest {
+                reason: format!("cannot argument values for root fields {:?}", field.name),
+            })?;
 
-                    (name.to_string().into(), value)
-                })
-                .collect();
+            if !errors.is_empty() {
+                return Err(FetchError::MalformedRequest {
+                    reason: format!(
+                        "cannot coerce argument values for root fields {:?}, errors: {errors:?}",
+                        field.name,
+                    ),
+                }
+                .into());
+            }
+
             let mut vars = IndexMap::default();
             vars.insert("$args".to_string(), Value::Object(args));
             // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
@@ -1182,7 +1146,7 @@ async fn cache_lookup_entities(
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
-    expose_keys_in_context: bool,
+    _debug: bool,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, SubgraphCacheResults)>, BoxError> {
     let keys = extract_cache_keys(
         &name,
@@ -1307,18 +1271,18 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 
 async fn cache_store_root_from_response(
     cache: PostgresCacheStorage,
-    subgraph_ttl: Option<Duration>,
+    default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
     mut invalidation_keys: Vec<String>,
-    debug: bool,
+    _debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
-        let ttl: Option<Duration> = cache_control
+        let ttl = cache_control
             .ttl()
             .map(|secs| Duration::from_secs(secs as u64))
-            .or(subgraph_ttl);
+            .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             // Support surrogate keys coming from subgraph response header
@@ -1370,7 +1334,7 @@ async fn cache_store_root_from_response(
                 if let Err(err) = cache
                     .insert(
                         &cache_key,
-                        ttl.unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)), // FIXME: this should come from config
+                        ttl,
                         invalidation_keys,
                         data,
                         cache_control,
@@ -1390,7 +1354,7 @@ async fn cache_store_root_from_response(
 
 async fn cache_store_entities_from_response(
     cache: PostgresCacheStorage,
-    subgraph_ttl: Option<Duration>,
+    default_subgraph_ttl: Duration,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
     mut result_from_cache: Vec<IntermediateResult>,
@@ -1430,7 +1394,7 @@ async fn cache_store_entities_from_response(
                 })?,
             &response.response.body().errors,
             cache,
-            subgraph_ttl,
+            default_subgraph_ttl,
             cache_control,
             &mut result_from_cache,
             update_key_private,
@@ -1568,37 +1532,6 @@ fn extract_cache_key_root(
         }
     }
     (key, invalidation_keys)
-}
-
-// SIMON: FIXME use the right coercion function --> use coerce_argument_values function
-fn get_arg_value(arg_value: &apollo_compiler::ast::Value, variables: &Object) -> Value {
-    match arg_value {
-        apollo_compiler::ast::Value::Null => Value::Null,
-        apollo_compiler::ast::Value::Enum(name) => Value::String(name.to_string().into()),
-        apollo_compiler::ast::Value::Variable(name) => {
-            variables
-                .get(name.as_str())
-                .cloned()
-                .unwrap_or_else(|| Value::Null) // FIXME
-        }
-        apollo_compiler::ast::Value::String(val) => Value::String(val.clone().into()),
-        apollo_compiler::ast::Value::Float(float_value) => {
-            Value::Number(serde_json::Number::from_f64(float_value.try_to_f64().unwrap()).unwrap())
-        } // FIXME
-        apollo_compiler::ast::Value::Int(int_value) => {
-            Value::Number(int_value.try_to_i32().unwrap().into())
-        } //FIXME
-        apollo_compiler::ast::Value::Boolean(b) => Value::Bool(*b),
-        apollo_compiler::ast::Value::List(nodes) => {
-            Value::Array(nodes.iter().map(|n| get_arg_value(n, variables)).collect())
-        }
-        apollo_compiler::ast::Value::Object(items) => Value::Object(
-            items
-                .iter()
-                .map(|(key, val)| (key.to_string().into(), get_arg_value(val, variables)))
-                .collect(),
-        ),
-    }
 }
 
 // build a list of keys to get from the cache in one query
@@ -2023,7 +1956,7 @@ async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
     cache: PostgresCacheStorage,
-    subgraph_ttl: Option<Duration>,
+    default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
     update_key_private: Option<String>,
@@ -2034,8 +1967,7 @@ async fn insert_entities_in_result(
     let ttl = cache_control
         .ttl()
         .map(|secs| Duration::from_secs(secs as u64))
-        .or(subgraph_ttl)
-        .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // FIXME: it should come from config
+        .unwrap_or(default_subgraph_ttl);
 
     let mut new_entities = Vec::new();
     let mut new_errors = Vec::new();

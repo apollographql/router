@@ -67,6 +67,9 @@ pub(crate) struct PostgresCacheConfig {
     #[serde(default = "default_pool_size")]
     /// The size of the PostgreSQL connection pool
     pub(crate) pool_size: u32,
+    #[serde(default = "default_batch_size")]
+    /// The size of batch when inserting cache entries in PG (default: 100)
+    pub(crate) batch_size: usize,
 }
 
 fn default_required_to_start() -> bool {
@@ -75,6 +78,10 @@ fn default_required_to_start() -> bool {
 
 fn default_pool_size() -> u32 {
     5
+}
+
+const fn default_batch_size() -> usize {
+    100
 }
 
 impl TryFrom<CacheEntryRow> for CacheEntry {
@@ -95,6 +102,7 @@ impl TryFrom<CacheEntryRow> for CacheEntry {
 
 #[derive(Clone)]
 pub(crate) struct PostgresCacheStorage {
+    batch_size: usize,
     pg_pool: PgPool,
 }
 
@@ -115,7 +123,7 @@ impl PostgresCacheStorage {
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
-                Ok(Self { pg_pool })
+                Ok(Self { pg_pool, batch_size: conf.batch_size })
             }
             (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
                 "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
@@ -142,7 +150,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool })
+                Ok(Self { pg_pool, batch_size: conf.batch_size })
             }
         }
     }
@@ -223,7 +231,7 @@ impl PostgresCacheStorage {
     ) -> anyhow::Result<()> {
         let mut conn = self.pg_pool.acquire().await?;
 
-        let batch_docs = batch_docs.chunks(100);
+        let batch_docs = batch_docs.chunks(self.batch_size);
         for batch_docs in batch_docs {
             let mut transaction = conn.begin().await?;
             let tx = &mut transaction;

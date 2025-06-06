@@ -18,7 +18,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::subgraph;
 
-mod execution;
+pub(crate) mod execution;
 
 register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 

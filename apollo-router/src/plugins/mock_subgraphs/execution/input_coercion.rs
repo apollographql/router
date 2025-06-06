@@ -83,7 +83,7 @@ fn graphql_value_to_json(
 pub(crate) fn coerce_argument_values(
     schema: &Schema,
     document: &Valid<ExecutableDocument>,
-    variable_values: &Valid<JsonMap>,
+    variable_values: &JsonMap,
     errors: &mut Vec<GraphQLError>,
     path: LinkedPath<'_>,
     field_def: &FieldDefinition,
@@ -160,7 +160,7 @@ pub(crate) fn coerce_argument_values(
 fn coerce_argument_value(
     schema: &Schema,
     document: &Valid<ExecutableDocument>,
-    variable_values: &Valid<JsonMap>,
+    variable_values: &JsonMap,
     errors: &mut Vec<GraphQLError>,
     path: LinkedPath<'_>,
     kind: &str,
