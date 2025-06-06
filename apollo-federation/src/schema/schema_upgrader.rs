@@ -490,7 +490,7 @@ impl SchemaUpgrader {
                         .federation_spec_definition()
                         .key_directive_arguments(directive)?;
                     for field in collect_target_fields_from_field_set(
-                        Valid::assume_valid_ref(other_schema.schema().schema()),
+                        Valid::assume_valid_ref(schema.schema()),
                         ty.type_name().clone(),
                         args.fields,
                         false,
