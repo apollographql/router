@@ -24,6 +24,7 @@ use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
+use super::spec::schema::ConnectBatchArguments;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::ErrorsArguments;
 use super::spec::schema::SourceDirectiveArguments;
@@ -59,22 +60,9 @@ pub struct Connector {
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
 
-    pub batch_settings: Option<ConnectorBatchSettings>,
+    pub batch_settings: Option<ConnectBatchArguments>,
 
     pub error_settings: ConnectorErrorsSettings,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConnectorBatchSettings {
-    pub max_size: Option<usize>,
-}
-
-impl ConnectorBatchSettings {
-    fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
-        Some(Self {
-            max_size: connect.batch.as_ref().and_then(|b| b.max_size),
-        })
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -190,13 +178,12 @@ impl Connector {
         // Create our transport
         let connect_http = connect
             .http
-            .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
         // Get our batch and error settings
-        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        let batch_settings = connect.batch;
         let connect_errors = connect.errors.as_ref();
         let source_errors = source.and_then(|s| s.errors.as_ref());
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
@@ -223,7 +210,12 @@ impl Connector {
         let response_headers = extract_header_references(response_references);
 
         // Last couple of items here!
-        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
+        let entity_resolver = determine_entity_resolver(
+            &connect.position,
+            connect.entity,
+            schema,
+            &request_variables,
+        );
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
             subgraph_name: subgraph_name.to_string(),
@@ -350,13 +342,14 @@ fn make_label(
 }
 
 fn determine_entity_resolver(
-    connect: &ConnectDirectiveArguments,
+    position: &ConnectorPosition,
+    entity: bool,
     schema: &Schema,
     request_variables: &HashSet<Namespace>,
 ) -> Option<EntityResolver> {
-    match connect.position {
+    match position {
         ConnectorPosition::Field(_) => {
-            match (connect.entity, connect.position.on_root_type(schema)) {
+            match (entity, position.on_root_type(schema)) {
                 (true, _) => Some(EntityResolver::Explicit), // Query.foo @connect(entity: true)
                 (_, false) => Some(EntityResolver::Implicit), // Foo.bar @connect
                 _ => None,
