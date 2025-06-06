@@ -1,11 +1,10 @@
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::http_server::{Request as HttpRequest, Response as HttpResponse};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use std::pin::Pin;
-use std::sync::Arc;
 use tower::BoxError;
 use tower::{Layer, Service};
 
@@ -58,8 +57,15 @@ where
             let (parts, body) = req.into_parts();
             let body_bytes = body.collect().await?.to_bytes();
 
+            // Extract our Extensions from the HTTP request extensions, or create default
+            let extensions = parts
+                .extensions
+                .get::<crate::Extensions>()
+                .cloned()
+                .unwrap_or_default();
+
             let bytes_req = BytesRequest {
-                extensions: crate::Extensions::default(), // TODO: Convert http::Extensions to our Extensions
+                extensions,
                 body: body_bytes,
             };
 
@@ -67,11 +73,14 @@ where
             let bytes_resp = inner.call(bytes_req).await.map_err(Into::into)?;
 
             // Convert bytes response to HTTP response
-            let http_resp = http::Response::builder()
+            let mut http_resp = http::Response::builder()
                 .status(200)
                 .body(UnsyncBoxBody::new(http_body_util::StreamBody::new(
                     bytes_resp.responses.map(|chunk| Ok(Frame::data(chunk))),
                 )))?;
+
+            // Store our Extensions back into the HTTP response extensions
+            http_resp.extensions_mut().insert(bytes_resp.extensions);
 
             Ok(http_resp)
         })
