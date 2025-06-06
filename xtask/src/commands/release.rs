@@ -9,7 +9,6 @@ use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
-mod process;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -18,9 +17,6 @@ pub enum Command {
 
     /// Verify that a release is ready to be published
     PreVerify,
-
-    Start(process::Start),
-    Continue,
 }
 
 impl Command {
@@ -28,14 +24,12 @@ impl Command {
         match self {
             Command::Prepare(command) => command.run(),
             Command::PreVerify => PreVerify::run(),
-            Command::Start(start) => process::Process::start(start),
-            Command::Continue => process::Process::cont(),
         }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum Version {
+enum Version {
     Major,
     Minor,
     Patch,
@@ -84,10 +78,14 @@ macro_rules! replace_in_file {
 
 impl Prepare {
     pub fn run(&self) -> Result<()> {
-        self.prepare_release()
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async { self.prepare_release().await })
     }
 
-    fn prepare_release(&self) -> Result<(), Error> {
+    async fn prepare_release(&self) -> Result<(), Error> {
         self.ensure_pristine_checkout()?;
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;

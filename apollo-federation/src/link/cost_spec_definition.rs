@@ -268,7 +268,7 @@ impl CostSpecDefinition {
                 DirectiveLocation::Scalar,
             ],
             true,
-            Some(&|v| COST_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -313,7 +313,7 @@ impl CostSpecDefinition {
             false,
             &[DirectiveLocation::FieldDefinition],
             true,
-            Some(&|v| COST_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }

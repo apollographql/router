@@ -1,19 +1,15 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "errors": [
     {
-      "message": "Value \"C\" does not exist in \"InputEnum\" enum.",
-      "locations": [
-        {
-          "line": 1,
-          "column": 21
-        }
-      ],
+      "message": "invalid variable `$input`: found JSON string for GraphQL type `InputEnum`",
       "extensions": {
-        "code": "GRAPHQL_VALIDATION_FAILED"
+        "name": "input",
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE"
       }
     }
   ]

@@ -17,18 +17,22 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
+use itertools::Itertools;
 use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
+use crate::CONTEXT_VERSIONS;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::cost_spec_definition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
@@ -42,8 +46,13 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
+use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -166,6 +175,13 @@ impl FederationSchema {
 
     pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
         self.get_type(type_name).ok()
+    }
+
+    pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
+        self.schema()
+            .schema_definition
+            .iter_root_operations()
+            .any(|op| *op.1 == *type_name)
     }
 
     /// Return the possible runtime types for a definition.
@@ -702,6 +718,114 @@ impl FederationSchema {
 
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
         self.referencers().interface_types.contains_key(type_name)
+    }
+
+    pub(crate) fn all_features(
+        &self,
+    ) -> Result<Vec<&'static (dyn SpecDefinition)>, FederationError> {
+        let Some(links) = self.metadata() else {
+            return Ok(Vec::new());
+        };
+
+        let mut features: Vec<&'static (dyn SpecDefinition)> =
+            Vec::with_capacity(links.all_links().len());
+        if let Some(auth_link) = links.by_identity.get(&Identity::authenticated_identity()) {
+            let auth_spec = AUTHENTICATED_VERSIONS
+                .find(&auth_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &auth_link.url.identity.name,
+                        &auth_link.url.version,
+                        AUTHENTICATED_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(auth_spec);
+        }
+        if let Some(context_link) = links.by_identity.get(&Identity::context_identity()) {
+            let context_spec = CONTEXT_VERSIONS
+                .find(&context_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &context_link.url.identity.name,
+                        &context_link.url.version,
+                        CONTEXT_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(context_spec);
+        }
+        if let Some(cost_link) = links.by_identity.get(&Identity::cost_identity()) {
+            let cost_spec = COST_VERSIONS.find(&cost_link.url.version).ok_or_else(|| {
+                Self::unknown_version_error(
+                    &cost_link.url.identity.name,
+                    &cost_link.url.version,
+                    COST_VERSIONS.versions(),
+                )
+            })?;
+            features.push(cost_spec);
+        }
+        if let Some(inaccessible_link) = links.by_identity.get(&Identity::inaccessible_identity()) {
+            let inaccessible_spec = INACCESSIBLE_VERSIONS
+                .find(&inaccessible_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &inaccessible_link.url.identity.name,
+                        &inaccessible_link.url.version,
+                        INACCESSIBLE_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(inaccessible_spec);
+        }
+        if let Some(policy_link) = links.by_identity.get(&Identity::policy_identity()) {
+            let policy_spec = POLICY_VERSIONS
+                .find(&policy_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &policy_link.url.identity.name,
+                        &policy_link.url.version,
+                        POLICY_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(policy_spec);
+        }
+        if let Some(requires_scopes_link) =
+            links.by_identity.get(&Identity::requires_scopes_identity())
+        {
+            let requires_scopes_spec = REQUIRES_SCOPES_VERSIONS
+                .find(&requires_scopes_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &requires_scopes_link.url.identity.name,
+                        &requires_scopes_link.url.version,
+                        REQUIRES_SCOPES_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(requires_scopes_spec);
+        }
+        if let Some(tag_link) = links.by_identity.get(&Identity::tag_identity()) {
+            let tag_spec = TAG_VERSIONS.find(&tag_link.url.version).ok_or_else(|| {
+                Self::unknown_version_error(
+                    &tag_link.url.identity.name,
+                    &tag_link.url.version,
+                    TAG_VERSIONS.versions(),
+                )
+            })?;
+            features.push(tag_spec);
+        }
+
+        Ok(features)
+    }
+
+    fn unknown_version_error<'a>(
+        spec_name: &str,
+        version: &impl std::fmt::Display,
+        mut supported_versions: impl Iterator<Item = &'a Version>,
+    ) -> SingleFederationError {
+        SingleFederationError::UnknownLinkVersion {
+            message: format!(
+                "Detected unsupported {spec_name} specification version {version}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
+                supported_versions.join(", ")
+            ),
+        }
     }
 }
 
