@@ -58,14 +58,17 @@ where
             let body_bytes = body.collect().await?.to_bytes();
 
             // Extract our Extensions from the HTTP request extensions, or create default
-            let extensions = parts
+            let original_extensions = parts
                 .extensions
                 .get::<crate::Extensions>()
                 .cloned()
                 .unwrap_or_default();
 
+            // Create an extended layer for the inner service
+            let extended_extensions = original_extensions.extend();
+
             let bytes_req = BytesRequest {
-                extensions,
+                extensions: extended_extensions,
                 body: body_bytes,
             };
 
@@ -79,8 +82,8 @@ where
                     bytes_resp.responses.map(|chunk| Ok(Frame::data(chunk))),
                 )))?;
 
-            // Store our Extensions back into the HTTP response extensions
-            http_resp.extensions_mut().insert(bytes_resp.extensions);
+            // Store the original Extensions back into the HTTP response extensions
+            http_resp.extensions_mut().insert(original_extensions);
 
             Ok(http_resp)
         })

@@ -58,8 +58,12 @@ where
                 Err(e) => return Err(format!("Failed to parse JSON from bytes: {}", e).into()),
             };
 
+            // Create an extended layer for the inner service
+            let original_extensions = req.extensions;
+            let extended_extensions = original_extensions.extend();
+
             let json_req = JsonRequest {
-                extensions: req.extensions,
+                extensions: extended_extensions,
                 body: json_body,
             };
 
@@ -75,7 +79,7 @@ where
             });
 
             let bytes_resp = BytesResponse {
-                extensions: json_resp.extensions,
+                extensions: original_extensions,
                 responses: Box::pin(bytes_stream),
             };
 

@@ -166,6 +166,7 @@ pub trait ServiceBuilderExt<L> {
 #### Current Layers
 
 - `http_to_bytes` - HTTP to bytes transformation
+- `bytes_to_json` - Bytes to JSON transformation
 
 ### 3. Extensions (`src/extensions/`)
 
@@ -192,9 +193,160 @@ extensions.insert("hello".to_string());
 // Retrieve values
 let number: Option<i32> = extensions.get();
 let text: Option<String> = extensions.get();
+```
 
-// Remove values
-extensions.remove::<i32>();
+#### Hierarchical Extensions System
+
+Extensions supports a hierarchical architecture through the `extend()` method:
+
+```rust
+let parent = Extensions::default();
+parent.insert("upstream_value".to_string());
+
+let child = parent.extend();
+child.insert(42i32); // New type, allowed
+child.insert("downstream_attempt".to_string()); // Same type as parent
+
+// Parent values always take precedence
+assert_eq!(child.get::<String>(), Some("upstream_value".to_string()));
+assert_eq!(child.get::<i32>(), Some(42));
+
+// Parent only sees its own values
+assert_eq!(parent.get::<i32>(), None);
+```
+
+#### Extensions in Layers
+
+**Critical Rule**: When implementing layers that transform request types, always use `Extensions::extend()` and return the **original** extensions in the response.
+
+##### Correct Layer Implementation Pattern
+
+```rust
+impl<S> Service<InputRequest> for LayerService<S>
+where
+    S: Service<OutputRequest>,
+{
+    fn call(&mut self, req: InputRequest) -> Self::Future {
+        Box::pin(async move {
+            // 1. Preserve original extensions
+            let original_extensions = req.extensions;
+            
+            // 2. Create extended layer for inner service
+            let extended_extensions = original_extensions.extend();
+            
+            // 3. Transform request with extended extensions
+            let output_req = OutputRequest {
+                extensions: extended_extensions,
+                // ... other transformed fields
+            };
+            
+            // 4. Call inner service
+            let output_resp = inner.call(output_req).await?;
+            
+            // 5. Transform response back with ORIGINAL extensions
+            let input_resp = InputResponse {
+                extensions: original_extensions, // ✅ Always return original
+                // ... other transformed fields from output_resp
+            };
+            
+            Ok(input_resp)
+        })
+    }
+}
+```
+
+##### Why This Pattern Matters
+
+1. **Upstream Precedence**: Parent layers' decisions cannot be overridden by downstream services
+2. **Context Isolation**: Each layer can add context without affecting parent layers
+3. **Predictable Behavior**: Original request context is preserved throughout the pipeline
+4. **Hierarchical Inheritance**: Inner services can access parent context while adding their own
+
+##### Examples from Existing Layers
+
+**HttpToBytesLayer**:
+```rust
+// Extract and preserve original extensions
+let original_extensions = parts.extensions.get::<crate::Extensions>().cloned().unwrap_or_default();
+
+// Create extended layer for inner service
+let extended_extensions = original_extensions.extend();
+
+let bytes_req = BytesRequest {
+    extensions: extended_extensions, // Inner service gets extended layer
+    body: body_bytes,
+};
+
+// ... call inner service ...
+
+// Return original extensions in HTTP response
+http_resp.extensions_mut().insert(original_extensions);
+```
+
+**BytesToJsonLayer**:
+```rust
+// Preserve original extensions from bytes request
+let original_extensions = req.extensions;
+
+// Create extended layer for inner service
+let extended_extensions = original_extensions.extend();
+
+let json_req = JsonRequest {
+    extensions: extended_extensions, // Inner service gets extended layer
+    body: json_body,
+};
+
+// ... call inner service ...
+
+// Return original extensions in bytes response
+let bytes_resp = BytesResponse {
+    extensions: original_extensions, // Always return original
+    responses: Box::pin(bytes_stream),
+};
+```
+
+#### Testing Extensions in Layers
+
+When testing layer Extensions handling, verify:
+
+1. **Parent values are accessible** in the inner service
+2. **Original extensions are preserved** in responses
+3. **Inner service modifications are isolated** from original context
+
+```rust
+#[tokio::test]
+async fn test_extensions_passthrough() {
+    // Setup original extensions
+    let mut extensions = Extensions::default();
+    extensions.insert("original_value".to_string());
+    extensions.insert(42i32);
+
+    // ... setup layer and mock service ...
+
+    // Verify in mock service:
+    // - Parent values are accessible
+    let parent_string: Option<String> = request.extensions.get();
+    assert_eq!(parent_string, Some("original_value".to_string()));
+    
+    let parent_int: Option<i32> = request.extensions.get();
+    assert_eq!(parent_int, Some(42));
+    
+    // Add values to extended layer
+    request.extensions.insert(999i32); // Try to override
+    request.extensions.insert(3.14f64); // Add new type
+
+    // ... call layer ...
+
+    // Verify response preserves original context
+    let response_string: Option<String> = response.extensions.get();
+    assert_eq!(response_string, Some("original_value".to_string()));
+    
+    let response_int: Option<i32> = response.extensions.get();
+    assert_eq!(response_int, Some(42)); // Original value, not 999
+    
+    let response_float: Option<f64> = response.extensions.get();
+    assert_eq!(response_float, None); // Inner additions not visible
+}
 ```
 
 ### 4. JSON (`src/json/`)
@@ -219,6 +371,7 @@ Common JSON utilities and type definitions used across services.
 - Use `tower-test` for testing Tower layers and services
 - Externalize test fixtures using `include_str!` and prefer YAML format
 - Write tests that exercise real implementations, not just mocks
+- **Extensions Testing**: Always test that layers properly extend and return original Extensions
 
 ### Builder Pattern
 
@@ -251,25 +404,37 @@ let service = ServiceBuilder::new()
 
 ## Request/Response Flow
 
-Each service in the pipeline transforms requests and responses:
+Each service in the pipeline transforms requests and responses, with Extensions providing hierarchical context:
 
 ```
-HTTP Request
-    ↓ (http_server)
-Bytes Request
-    ↓ (bytes_server)
-JSON Request
+HTTP Request (Extensions Layer 0)
+    ↓ http_to_bytes layer
+    ↓ extends() → Extensions Layer 1
+Bytes Request (Extensions Layer 1)
+    ↓ bytes_to_json layer  
+    ↓ extends() → Extensions Layer 2
+JSON Request (Extensions Layer 2)
     ↓ (json_server)
-Query Parse Request
+    ↓ extends() → Extensions Layer 3
+Query Parse Request (Extensions Layer 3)
     ↓ (query_parse)
-Query Plan Request
+    ↓ extends() → Extensions Layer 4
+Query Plan Request (Extensions Layer 4)
     ↓ (query_plan)
-Execution Request
+    ↓ extends() → Extensions Layer 5
+Execution Request (Extensions Layer 5)
     ↓ (query_execution)
-Fetch Request
+    ↓ extends() → Extensions Layer 6
+Fetch Request (Extensions Layer 6)
     ↓ (fetch)
-HTTP Response
+HTTP Response (Returns Layer 0 - Original Extensions)
 ```
+
+**Extensions Flow Rules:**
+- Each layer transformation uses `extensions.extend()` 
+- Inner services receive extended Extensions with access to parent context
+- Response transformations return the **original** Extensions from the request
+- Parent values always take precedence over child values
 
 ## Extension Points
 
@@ -291,6 +456,8 @@ The architecture provides several extension points:
 ## Performance Considerations
 
 - **Extensions Cloning**: Values are cloned when retrieved; wrap expensive types in `Arc`
+- **Extensions Hierarchy**: The `extend()` method creates lightweight references to parent layers
+- **Extensions Memory**: Each layer adds minimal overhead; parent layers are referenced, not copied
 - **Service Composition**: Tower's zero-cost abstractions minimize overhead
 - **Async Efficiency**: Native async/await provides optimal performance
 - **Memory Management**: Services should be mindful of memory usage patterns

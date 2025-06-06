@@ -79,11 +79,12 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// let context = Extensions::default();
 ///
 /// // For expensive types, wrap in Arc
-/// let expensive_data = Arc::new(ExpensiveType::new());
+/// let expensive_data = Arc::new(vec![0u8; 1000]); // Large vector
 /// context.insert(expensive_data.clone());
 ///
-/// // Retrieving is now cheap
-/// let retrieved = context.get::<Arc<ExpensiveType>>().unwrap();
+/// // Retrieving is now cheap (cloning Arc, not the vector)
+/// let retrieved = context.get::<Arc<Vec<u8>>>().unwrap();
+/// assert_eq!(retrieved.len(), 1000);
 /// ```
 #[derive(Clone)]
 pub struct Extensions {
@@ -202,9 +203,13 @@ impl Extensions {
     /// // Simple value
     /// context.insert(42);
     ///
-    /// // Expensive to clone value
-    /// let expensive = Arc::new(ExpensiveType::new());
+    /// // Expensive to clone value (wrap in Arc)
+    /// let expensive = Arc::new(vec![0u8; 1000]); // Large vector
     /// context.insert(expensive.clone());
+    /// 
+    /// // Verify both values can be retrieved
+    /// assert_eq!(context.get::<i32>(), Some(42));
+    /// assert_eq!(context.get::<Arc<Vec<u8>>>().unwrap().len(), 1000);
     /// ```
     pub fn insert<T: ExtensionValue>(&self, value: T) {
         let type_id = TypeId::of::<T>();

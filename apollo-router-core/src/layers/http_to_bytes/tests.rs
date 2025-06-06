@@ -56,16 +56,19 @@ async fn test_extensions_passthrough() {
         let (request, response) = handle.next_request().await.expect("service must not fail");
         assert_eq!(request.body, "test body".as_bytes());
         
-        // Verify the extensions were passed through from HTTP request
+        // Verify the extensions were extended from HTTP request (parent values accessible)
         let test_value: Option<String> = request.extensions.get();
         assert_eq!(test_value, Some("test_context".to_string()));
         
-        // Store a response value in extensions
-        let mut response_extensions = request.extensions;
-        response_extensions.insert("response_data".to_string());
+        let test_int: Option<i32> = request.extensions.get();
+        assert_eq!(test_int, Some(42));
+        
+        // Add values to the extended layer (these should NOT affect the original)
+        request.extensions.insert(999i32); // Try to override parent value
+        request.extensions.insert(3.14f64); // Add new type
         
         response.send_response(BytesResponse {
-            extensions: response_extensions,
+            extensions: request.extensions,
             responses: Box::pin(stream::once(async { Bytes::from("test response") })),
         });
     });
@@ -78,6 +81,7 @@ async fn test_extensions_passthrough() {
     // Create our Extensions and store some test data
     let mut extensions = crate::Extensions::default();
     extensions.insert("test_context".to_string());
+    extensions.insert(42i32); // Add an integer for testing
 
     // Create a test HTTP request with our Extensions stored in HTTP extensions
     let mut http_req = http::Request::builder()
@@ -96,14 +100,22 @@ async fn test_extensions_passthrough() {
         .await
         .expect("response expected");
 
-    // Verify our Extensions were stored back in the HTTP response
+    // Verify the original Extensions were returned in the HTTP response
     let response_extensions = http_response
         .extensions()
         .get::<crate::Extensions>()
         .expect("Extensions should be present in response");
     
-    let response_data: Option<String> = response_extensions.get();
-    assert_eq!(response_data, Some("response_data".to_string()));
+    // Original values should be preserved exactly
+    let original_string: Option<String> = response_extensions.get();
+    assert_eq!(original_string, Some("test_context".to_string()));
+    
+    let original_int: Option<i32> = response_extensions.get();
+    assert_eq!(original_int, Some(42)); // Original value, not the 999 from inner service
+    
+    // Inner service values should NOT be visible (they were in an extended layer)
+    let inner_float: Option<f64> = response_extensions.get();
+    assert_eq!(inner_float, None); // Inner service's f64 should not be visible
 
     let collected = http_response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(collected, "test response".as_bytes());
