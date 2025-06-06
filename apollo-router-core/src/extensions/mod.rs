@@ -27,7 +27,7 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// use apollo_router_core::Extensions;
 /// use std::sync::Arc;
 ///
-/// let context = Extensions::new();
+/// let context = Extensions::default();
 ///
 /// // For expensive types, wrap in Arc
 /// let expensive_data = Arc::new(ExpensiveType::new());
@@ -42,7 +42,7 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// ```rust
 /// use apollo_router_core::Extensions;
 ///
-/// let context = Extensions::new();
+/// let context = Extensions::default();
 ///
 /// // Store simple values
 /// context.insert(42);
@@ -63,7 +63,7 @@ pub struct Extensions {
 
 impl Default for Extensions {
     fn default() -> Self {
-        Self::new(1000)
+        Self::new(100)
     }
 }
 
@@ -83,7 +83,7 @@ impl Extensions {
     /// ```rust
     /// use apollo_router_core::Extensions;
     ///
-    /// let context = Extensions::new();
+    /// let context = Extensions::default();
     /// context.insert(42);
     /// assert_eq!(context.get::<i32>(), Some(42));
     /// ```
@@ -107,7 +107,7 @@ impl Extensions {
     /// use apollo_router_core::Extensions;
     /// use std::sync::Arc;
     ///
-    /// let context = Extensions::new();
+    /// let context = Extensions::default();
     ///
     /// // Simple value
     /// context.insert(42);
@@ -129,7 +129,7 @@ impl Extensions {
     /// ```rust
     /// use apollo_router_core::Extensions;
     ///
-    /// let context = Extensions::new();
+    /// let context = Extensions::default();
     /// context.insert(42);
     /// context.remove::<i32>();
     /// assert!(context.get::<i32>().is_none());
@@ -142,15 +142,14 @@ impl Extensions {
 
 impl Debug for Extensions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut type_names: Vec<_> = self.cache
+        let mut type_names: Vec<_> = self
+            .cache
             .iter()
-            .map(|(_, value)| {
-                std::any::type_name_of_val(value.as_ref())
-            })
+            .map(|(_, value)| std::any::type_name_of_val(value.as_ref()))
             .collect();
-        
+
         type_names.sort();
-        
+
         f.debug_struct("Extensions")
             .field("types", &type_names)
             .finish()

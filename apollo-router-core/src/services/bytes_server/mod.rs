@@ -20,5 +20,14 @@ pub struct Response {
     pub responses: ResponseStream,
 }
 
+impl std::fmt::Debug for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("extensions", &self.extensions)
+            .field("responses", &"<stream>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Error)]
 enum Error {}

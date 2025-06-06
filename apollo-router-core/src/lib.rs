@@ -6,6 +6,7 @@ mod json;
 mod layers;
 mod services;
 
+use crate::layers::ServiceBuilderExt;
 pub use extensions::Extensions;
 
 #[test]
