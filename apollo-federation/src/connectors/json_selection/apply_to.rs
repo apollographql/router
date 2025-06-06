@@ -634,111 +634,30 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
-            PathList::OptionalSelection(selection) => {
-                // If data is null, short-circuit and return null
+            PathList::Question(continuation) => {
+                // Universal null check for any operation after ?
                 if data.is_null() {
                     return (Some(JSON::Null), vec![]);
                 }
 
-                // For non-null data, apply selection normally
-                selection.apply_to_path(data, vars, input_path)
+                // If not null, continue with the wrapped operation
+                let (result, mut errors) = continuation.apply_to_path(data, vars, input_path);
+
+                // Post-process errors to add ? prefix for method errors
+                if let PathList::Method(_, _, _) = continuation.as_ref() {
+                    for error in &mut errors {
+                        if error.message().starts_with("Method ->") {
+                            error.message = error.message().replace("Method ->", "Method ?->");
+                        }
+                    }
+                }
+
+                (result, errors)
             }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
                 (Some(data.clone()), vec![])
-            }
-            PathList::OptionalKey(key, tail) => {
-                // If data is null, short-circuit and return null
-                if data.is_null() {
-                    return (Some(JSON::Null), vec![]);
-                }
-
-                let input_path_with_key = input_path.append(key.to_json());
-
-                if let JSON::Array(array) = data {
-                    // Same as regular Key case - apply to each array element
-                    let empty_tail = WithRange::new(PathList::Empty, tail.range());
-                    let self_with_empty_tail =
-                        WithRange::new(PathList::OptionalKey(key.clone(), empty_tail), key.range());
-
-                    self_with_empty_tail
-                        .apply_to_array(array, vars, input_path)
-                        .and_then_collecting_errors(|shallow_mapped_array| {
-                            tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
-                        })
-                } else {
-                    // Same behavior as regular Key - return errors for non-objects and missing properties
-                    if !matches!(data, JSON::Object(_)) {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
-                    }
-                    let Some(child) = data.get(key.as_str()) else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
-                    };
-                    tail.apply_to_path(child, vars, &input_path_with_key)
-                }
-            }
-            PathList::OptionalMethod(method_name, method_args, tail) => {
-                // If data is null, short-circuit and return null
-                if data.is_null() {
-                    return (Some(JSON::Null), vec![]);
-                }
-
-                let method_path =
-                    input_path.append(JSON::String(format!("?->{}", method_name.as_ref()).into()));
-
-                // Same behavior as regular Method - return errors for unknown methods
-                ArrowMethod::lookup(method_name).map_or_else(
-                    || {
-                        (
-                            None,
-                            vec![ApplyToError::new(
-                                format!("Method ?->{} not found", method_name.as_ref()),
-                                method_path.to_vec(),
-                                method_name.range(),
-                            )],
-                        )
-                    },
-                    |method| {
-                        let (result_opt, errors) = method.apply(
-                            method_name,
-                            method_args.as_ref(),
-                            data,
-                            vars,
-                            &method_path,
-                        );
-
-                        if let Some(result) = result_opt {
-                            tail.apply_to_path(&result, vars, &method_path)
-                                .prepend_errors(errors)
-                        } else {
-                            // Same behavior as regular Method - propagate errors when method produces None
-                            (None, errors)
-                        }
-                    },
-                )
             }
         }
     }
@@ -850,94 +769,16 @@ impl ApplyToInternal for WithRange<PathList> {
                 source_id,
             ),
 
-            PathList::OptionalSelection(selection) => {
-                // Optional selection always produces nullable output
-                let result_shape = selection.compute_output_shape(
+            PathList::Question(continuation) => {
+                // Optional operation always produces nullable output
+                let result_shape = continuation.compute_output_shape(
                     input_shape,
                     dollar_shape,
                     named_var_shapes,
                     source_id,
                 );
-                // Make result nullable since optional selection can produce null
+                // Make result nullable since optional chaining can produce null
                 Shape::one([result_shape, Shape::none()], vec![])
-            }
-
-            PathList::OptionalKey(key, rest) => {
-                // Optional key access always produces nullable output
-                if input_shape.is_none() {
-                    return input_shape;
-                }
-
-                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
-                    let mapped_prefix = prefix
-                        .iter()
-                        .map(|shape| {
-                            if shape.is_none() {
-                                shape.clone()
-                            } else {
-                                let result_shape = rest.compute_output_shape(
-                                    field(shape, key, source_id),
-                                    dollar_shape.clone(),
-                                    named_var_shapes,
-                                    source_id,
-                                );
-                                // Make result nullable since optional chaining can produce null
-                                Shape::one([result_shape, Shape::none()], vec![])
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    let mapped_rest = if tail.is_none() {
-                        tail.clone()
-                    } else {
-                        let field_shape = field(tail, key, source_id);
-                        let result_shape = rest.compute_output_shape(
-                            field_shape,
-                            dollar_shape,
-                            named_var_shapes,
-                            source_id,
-                        );
-                        // Make result nullable since optional chaining can produce null
-                        Shape::one([result_shape, Shape::none()], vec![])
-                    };
-
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
-                } else {
-                    let result_shape = rest.compute_output_shape(
-                        field(&input_shape, key, source_id),
-                        dollar_shape,
-                        named_var_shapes,
-                        source_id,
-                    );
-                    // Make result nullable since optional chaining can produce null
-                    Shape::one([result_shape, Shape::none()], vec![])
-                }
-            }
-
-            PathList::OptionalMethod(method_name, _method_args, _tail) => {
-                // Optional method access always produces nullable output
-                ArrowMethod::lookup(method_name).map_or_else(
-                    || {
-                        // For optional method, return nullable unknown instead of error
-                        Shape::one(
-                            [
-                                Shape::unknown(method_name.shape_location(source_id)),
-                                Shape::none(),
-                            ],
-                            vec![],
-                        )
-                    },
-                    |_method| {
-                        // For optional method, return nullable unknown
-                        Shape::one(
-                            [
-                                Shape::unknown(method_name.shape_location(source_id)),
-                                Shape::none(),
-                            ],
-                            vec![],
-                        )
-                    },
-                )
             }
 
             PathList::Empty => input_shape,

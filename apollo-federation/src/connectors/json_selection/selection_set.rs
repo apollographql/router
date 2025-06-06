@@ -262,26 +262,12 @@ impl PathList {
                     path.range(),
                 ),
             ),
-            Self::OptionalKey(key, path) => Self::OptionalKey(
-                key.clone(),
-                WithRange::new(
-                    path.apply_selection_set(document, selection_set),
-                    path.range(),
-                ),
-            ),
-            Self::OptionalMethod(method_name, args, path) => Self::OptionalMethod(
-                method_name.clone(),
-                args.clone(),
-                WithRange::new(
-                    path.apply_selection_set(document, selection_set),
-                    path.range(),
-                ),
-            ),
+            Self::Question(continuation) => Self::Question(WithRange::new(
+                continuation.apply_selection_set(document, selection_set),
+                continuation.range(),
+            )),
             Self::Selection(sub) => {
                 Self::Selection(sub.apply_selection_set(document, selection_set))
-            }
-            Self::OptionalSelection(sub) => {
-                Self::OptionalSelection(sub.apply_selection_set(document, selection_set))
             }
             Self::Empty => Self::Empty,
         }

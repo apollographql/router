@@ -553,19 +553,14 @@ pub(super) enum PathList {
     // middle/tail (not the beginning) of a PathSelection.
     Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
 
-    // Optional key access (?.) that returns null instead of errors.
-    OptionalKey(WithRange<Key>, WithRange<PathList>),
-
-    // Optional method call (?->) that returns null instead of errors.
-    OptionalMethod(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
+    // Universal null guard that can wrap any path continuation.
+    // If data is null, returns null instead of continuing with the wrapped operation.
+    Question(WithRange<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
     // by itself is not a valid PathList.
     Selection(SubSelection),
-
-    // Optional selection set (?{...}) that returns null if data is null instead of errors.
-    OptionalSelection(SubSelection),
 
     // Every PathList must be terminated by either PathList::Selection or
     // PathList::Empty. PathList::Empty by itself is not a valid PathList.
@@ -726,15 +721,14 @@ impl PathList {
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
 
-        // Optional key access: ?.key (note: we parse this before .key to avoid conflicts)
-        if let Ok((remainder, (question_dot, key))) = tuple((ranged_span("?."), Key::parse))(input)
-        {
-            let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
-            let question_key_range = merge_ranges(question_dot.range(), key.range());
-            let full_range = merge_ranges(question_key_range, rest.range());
+        // Universal optional operator: ? (note: we parse this before other operators to avoid conflicts)
+        if let Ok((suffix, question)) = ranged_span("?")(input) {
+            // Parse whatever comes after the ? normally
+            let (remainder, continuation) = Self::parse_with_depth(suffix, depth)?;
+            let full_range = merge_ranges(question.range(), continuation.range());
             return Ok((
                 remainder,
-                WithRange::new(Self::OptionalKey(key, rest), full_range),
+                WithRange::new(Self::Question(continuation), full_range),
             ));
         }
 
@@ -752,21 +746,6 @@ impl PathList {
                 input,
                 "Path selection . must be followed by key (identifier or quoted string literal)",
             ));
-        }
-
-        // Optional method call: ?->method (note: we parse this before -> to avoid conflicts)
-        if let Ok((suffix, question_arrow)) = ranged_span("?->")(input) {
-            return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
-                Ok((suffix, (method, args))) => {
-                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                    let full_range = merge_ranges(question_arrow.range(), rest.range());
-                    Ok((
-                        remainder,
-                        WithRange::new(Self::OptionalMethod(method, args, rest), full_range),
-                    ))
-                }
-                Err(_) => Err(nom_fail_message(input, "Method name must follow ?->")),
-            };
         }
 
         // PathSelection can never start with a naked ->method (instead, use
@@ -787,24 +766,6 @@ impl PathList {
                 }
                 Err(_) => Err(nom_fail_message(input, "Method name must follow ->")),
             };
-        }
-
-        // Optional selection set: ?{...} (note: we parse this before { to avoid conflicts)
-        if let Ok((suffix, question_brace)) = ranged_span("?{")(input) {
-            // Parse the selection content as naked (without braces)
-            let (suffix, naked_selection) = SubSelection::parse_naked(suffix)?;
-            let (suffix, (_, close_brace)) = tuple((spaces_or_comments, ranged_span("}")))(suffix)?;
-
-            let selection_range = merge_ranges(question_brace.range(), close_brace.range());
-            let selection = SubSelection {
-                selections: naked_selection.selections,
-                range: selection_range.clone(),
-            };
-
-            return Ok((
-                suffix,
-                WithRange::new(Self::OptionalSelection(selection), selection_range),
-            ));
         }
 
         // Likewise, if the PathSelection has a SubSelection, it must appear at
@@ -854,10 +815,8 @@ impl PathList {
             Self::Key(_, tail) => tail.next_subselection(),
             Self::Expr(_, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
-            Self::OptionalKey(_, tail) => tail.next_subselection(),
-            Self::OptionalMethod(_, _, tail) => tail.next_subselection(),
+            Self::Question(tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
-            Self::OptionalSelection(sub) => Some(sub),
             Self::Empty => None,
         }
     }
@@ -870,10 +829,8 @@ impl PathList {
             Self::Key(_, tail) => tail.next_mut_subselection(),
             Self::Expr(_, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
-            Self::OptionalKey(_, tail) => tail.next_mut_subselection(),
-            Self::OptionalMethod(_, _, tail) => tail.next_mut_subselection(),
+            Self::Question(tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
-            Self::OptionalSelection(sub) => Some(sub),
             Self::Empty => None,
         }
     }
@@ -892,9 +849,6 @@ impl ExternalVarPaths for PathList {
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
-            PathList::OptionalKey(_, rest) => {
-                paths.extend(rest.external_var_paths());
-            }
             PathList::Expr(expr, rest) => {
                 paths.extend(expr.external_var_paths());
                 paths.extend(rest.external_var_paths());
@@ -907,16 +861,10 @@ impl ExternalVarPaths for PathList {
                 }
                 paths.extend(rest.external_var_paths());
             }
-            PathList::OptionalMethod(_, opt_args, rest) => {
-                if let Some(args) = opt_args {
-                    for lit_arg in &args.args {
-                        paths.extend(lit_arg.external_var_paths());
-                    }
-                }
+            PathList::Question(rest) => {
                 paths.extend(rest.external_var_paths());
             }
             PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
-            PathList::OptionalSelection(sub) => paths.extend(sub.external_var_paths()),
             PathList::Empty => {}
         }
         paths
@@ -3238,9 +3186,12 @@ mod tests {
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("foo").into_with_range(),
-                        PathList::OptionalKey(
-                            Key::field("bar").into_with_range(),
-                            PathList::Empty.into_with_range(),
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
                         )
                         .into_with_range(),
                     )
@@ -3261,10 +3212,13 @@ mod tests {
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("foo").into_with_range(),
-                        PathList::OptionalMethod(
-                            WithRange::new("method".to_string(), None),
-                            None,
-                            PathList::Empty.into_with_range(),
+                        PathList::Question(
+                            PathList::Method(
+                                WithRange::new("method".to_string(), None),
+                                None,
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
                         )
                         .into_with_range(),
                     )
@@ -3285,11 +3239,17 @@ mod tests {
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("foo").into_with_range(),
-                        PathList::OptionalKey(
-                            Key::field("bar").into_with_range(),
-                            PathList::OptionalKey(
-                                Key::field("baz").into_with_range(),
-                                PathList::Empty.into_with_range(),
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Question(
+                                    PathList::Key(
+                                        Key::field("baz").into_with_range(),
+                                        PathList::Empty.into_with_range(),
+                                    )
+                                    .into_with_range(),
+                                )
+                                .into_with_range(),
                             )
                             .into_with_range(),
                         )
@@ -3314,9 +3274,12 @@ mod tests {
                         Key::field("foo").into_with_range(),
                         PathList::Key(
                             Key::field("bar").into_with_range(),
-                            PathList::OptionalKey(
-                                Key::field("baz").into_with_range(),
-                                PathList::Empty.into_with_range(),
+                            PathList::Question(
+                                PathList::Key(
+                                    Key::field("baz").into_with_range(),
+                                    PathList::Empty.into_with_range(),
+                                )
+                                .into_with_range(),
                             )
                             .into_with_range(),
                         )
@@ -3339,23 +3302,26 @@ mod tests {
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("foo").into_with_range(),
-                        PathList::OptionalKey(
-                            Key::field("bar").into_with_range(),
-                            PathList::Selection(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("id").into_with_range(),
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("name").into_with_range(),
-                                        None,
-                                    ),
-                                ],
-                                ..Default::default()
-                            })
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Selection(SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("id").into_with_range(),
+                                            None,
+                                        ),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("name").into_with_range(),
+                                            None,
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                })
+                                .into_with_range(),
+                            )
                             .into_with_range(),
                         )
                         .into_with_range(),
@@ -3377,13 +3343,18 @@ mod tests {
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("foo").into_with_range(),
-                        PathList::OptionalMethod(
-                            WithRange::new("filter".to_string(), None),
-                            Some(MethodArgs {
-                                args: vec![LitExpr::String("active".to_string()).into_with_range()],
-                                ..Default::default()
-                            }),
-                            PathList::Empty.into_with_range(),
+                        PathList::Question(
+                            PathList::Method(
+                                WithRange::new("filter".to_string(), None),
+                                Some(MethodArgs {
+                                    args: vec![
+                                        LitExpr::String("active".to_string()).into_with_range(),
+                                    ],
+                                    ..Default::default()
+                                }),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
                         )
                         .into_with_range(),
                     )

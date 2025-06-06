@@ -231,18 +231,10 @@ pub(crate) mod strip_ranges {
                         opt_args.as_ref().map(|args| args.strip_ranges()),
                         rest.strip_ranges(),
                     ),
-                    PathList::OptionalKey(key, rest) => {
-                        PathList::OptionalKey(key.strip_ranges(), rest.strip_ranges())
+                    PathList::Question(continuation) => {
+                        PathList::Question(continuation.strip_ranges())
                     }
-                    PathList::OptionalMethod(method, opt_args, rest) => PathList::OptionalMethod(
-                        method.strip_ranges(),
-                        opt_args.as_ref().map(|args| args.strip_ranges()),
-                        rest.strip_ranges(),
-                    ),
                     PathList::Selection(sub) => PathList::Selection(sub.strip_ranges()),
-                    PathList::OptionalSelection(sub) => {
-                        PathList::OptionalSelection(sub.strip_ranges())
-                    }
                     PathList::Empty => PathList::Empty,
                 },
                 None,
