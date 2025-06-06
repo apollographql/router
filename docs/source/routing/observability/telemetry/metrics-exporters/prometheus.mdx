@@ -24,11 +24,20 @@ To export metrics to Prometheus, enable the Prometheus endpoint and set its addr
 ```yaml title="router.yaml"
 telemetry:
   exporters:
+<<<<<<< HEAD
      metrics:
        prometheus:
          enabled: true
          listen: 127.0.0.1:9090
          path: /metrics
+=======
+    metrics:
+      prometheus:
+        enabled: true
+        resource_selector: all # default: none
+        listen: 127.0.0.1:9090
+        path: /metrics
+>>>>>>> 731fd23c (fix(telemetry): export properly resources configured on prometheus (#7394))
 ```
 
 Once enabled, you will be able to access the Prometheus endpoint at `http://localhost:9090/metrics`.
@@ -46,6 +55,10 @@ The address and port to listen on for Prometheus metrics. Defaults to `127.0.0.1
 ### `path`
 
 The path to expose the Prometheus metrics. Defaults to `/metrics`.
+
+### `resource_selector`
+
+Resource selector is used to select which resource to export with every metrics. If it's set to `all`, it will export all resource attributes with every metrics. Defaults to `none`.
 
 ## Prometheus configuration reference
 

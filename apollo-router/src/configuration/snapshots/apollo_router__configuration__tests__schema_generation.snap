@@ -1813,6 +1813,10 @@ expression: "&schema"
           "description": "The optional output name",
           "nullable": true,
           "type": "string"
+        },
+        "resource_selector": {
+          "$ref": "#/definitions/ResourceSelectorConfig",
+          "description": "#/definitions/ResourceSelectorConfig"
         }
       },
       "required": [
@@ -4663,6 +4667,24 @@ expression: "&schema"
         "header_name"
       ],
       "type": "object"
+    },
+    "ResourceSelectorConfig": {
+      "oneOf": [
+        {
+          "description": "Export all resource attributes with every metrics.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Do not export any resource attributes with every metrics.",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ResponseStatus": {
       "oneOf": [

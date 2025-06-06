@@ -2109,6 +2109,7 @@ struct MetricsAttributes(HashMap<String, AttributeValue>);
 struct SubgraphMetricsAttributes(HashMap<String, AttributeValue>);
 
 struct EnableSubgraphFtv1;
+
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
 //
@@ -2185,10 +2186,31 @@ mod tests {
     use crate::services::SupergraphResponse;
     use crate::services::router::body::get_body_bytes;
 
+<<<<<<< HEAD
     async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
         let prometheus_support = config.contains("prometheus");
         let config: Value = serde_yaml::from_str(config).expect("yaml must be valid");
         let telemetry_config = config
+=======
+    macro_rules! assert_prometheus_metrics {
+        ($plugin:expr) => {{
+            let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let regexp = regex::Regex::new(
+                r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
+            )
+            .unwrap();
+            let prometheus_metrics = regexp.replace_all(&prometheus_metrics, "").to_owned();
+            assert_snapshot!(prometheus_metrics.replace(
+                &format!(r#"service_version="{}""#, std::env!("CARGO_PKG_VERSION")),
+                r#"service_version="X""#
+            ));
+        }};
+    }
+
+    async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
+        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        let telemetry_config = full_config
+>>>>>>> 731fd23c (fix(telemetry): export properly resources configured on prometheus (#7394))
             .as_object()
             .expect("must be an object")
             .get("telemetry")
@@ -3099,8 +3121,7 @@ mod tests {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3114,9 +3135,7 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3130,9 +3149,14 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
+<<<<<<< HEAD
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert_snapshot!(prometheus_metrics);
+=======
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+            assert_prometheus_metrics!(plugin);
+>>>>>>> 731fd23c (fix(telemetry): export properly resources configured on prometheus (#7394))
         }
         .with_metrics()
         .await;
@@ -3146,14 +3170,30 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert!(prometheus_metrics.is_empty());
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
     }
 
+<<<<<<< HEAD
+=======
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_units_are_included() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
+            f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
+
+            make_supergraph_request(plugin.as_ref()).await;
+            assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
+>>>>>>> 731fd23c (fix(telemetry): export properly resources configured on prometheus (#7394))
     #[test]
     fn it_test_send_headers_to_studio() {
         let fw_headers = ForwardHeaders::Only(vec![
