@@ -60,10 +60,8 @@ where
         use std::mem;
 
         let inner = self.inner.clone();
-        // In case the inner service has state that's driven to readiness and
-        // not tracked by clones (such as `Buffer`), pass the version we have
-        // already called `poll_ready` on into the future, and leave its clone
-        // behind.
+        // Clone is required here because we need to do async body collection
+        // before calling the service, unlike bytes_to_json which can parse JSON synchronously
         let mut inner = mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {

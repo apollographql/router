@@ -1,6 +1,5 @@
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
-use crate::json::JsonValue;
 use bytes::Bytes;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -36,7 +35,7 @@ pub struct BytesToJsonService<S> {
 
 impl<S> Service<BytesRequest> for BytesToJsonService<S>
 where
-    S: Service<JsonRequest, Response = JsonResponse> + Clone + Send + 'static,
+    S: Service<JsonRequest, Response = JsonResponse> + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<BoxError>,
 {
@@ -53,30 +52,27 @@ where
     }
 
     fn call(&mut self, req: BytesRequest) -> Self::Future {
-        use std::mem;
+        // Convert bytes to JSON synchronously - fail fast if invalid
+        let json_body = match serde_json::from_slice(&req.body) {
+            Ok(json) => json,
+            Err(e) => return Box::pin(async move { Err(Error::JsonDeserialization(e)) }),
+        };
 
-        let inner = self.inner.clone();
-        // In case the inner service has state that's driven to readiness and
-        // not tracked by clones (such as `Buffer`), pass the version we have
-        // already called `poll_ready` on into the future, and leave its clone
-        // behind.
-        let mut inner = mem::replace(&mut self.inner, inner);
+        // Create an extended layer for the inner service
+        let original_extensions = req.extensions;
+        let extended_extensions = original_extensions.extend();
+
+        let json_req = JsonRequest {
+            extensions: extended_extensions,
+            body: json_body,
+        };
+
+        // Call the inner service directly - no cloning needed
+        let future = self.inner.call(json_req);
 
         Box::pin(async move {
-            // Convert bytes to JSON
-            let json_body: JsonValue = serde_json::from_slice(&req.body)?;
-
-            // Create an extended layer for the inner service
-            let original_extensions = req.extensions;
-            let extended_extensions = original_extensions.extend();
-
-            let json_req = JsonRequest {
-                extensions: extended_extensions,
-                body: json_body,
-            };
-
-            // Call the inner service
-            let json_resp = inner.call(json_req).await.map_err(|e| Error::Downstream(e.into()))?;
+            // Await the inner service call
+            let json_resp = future.await.map_err(|e| Error::Downstream(e.into()))?;
 
             // Convert JSON response to bytes response
             let bytes_stream = json_resp.responses.map(|json_value| {
