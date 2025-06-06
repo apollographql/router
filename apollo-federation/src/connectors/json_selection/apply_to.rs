@@ -634,6 +634,15 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
+            PathList::OptionalSelection(selection) => {
+                // If data is null, short-circuit and return null
+                if data.is_null() {
+                    return (Some(JSON::Null), vec![]);
+                }
+
+                // For non-null data, apply selection normally
+                selection.apply_to_path(data, vars, input_path)
+            }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
@@ -840,6 +849,18 @@ impl ApplyToInternal for WithRange<PathList> {
                 named_var_shapes,
                 source_id,
             ),
+
+            PathList::OptionalSelection(selection) => {
+                // Optional selection always produces nullable output
+                let result_shape = selection.compute_output_shape(
+                    input_shape,
+                    dollar_shape,
+                    named_var_shapes,
+                    source_id,
+                );
+                // Make result nullable since optional selection can produce null
+                Shape::one([result_shape, Shape::none()], vec![])
+            }
 
             PathList::OptionalKey(key, rest) => {
                 // Optional key access always produces nullable output
@@ -1195,6 +1216,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connectors::json_selection::PrettyPrintable;
     use crate::selection;
 
     #[test]
@@ -3375,5 +3397,229 @@ mod tests {
             .apply_to(&data_null_data);
         assert!(errors.is_empty());
         assert_eq!(result, Some(json!(null)));
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_valid_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "name": "Alice"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123,
+                "name": "Alice"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_null_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, Some(json!(null)));
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_missing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "other": "value"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message().contains("Property .user not found"));
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_non_object() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        // When data is not null but not an object, SubSelection still tries to access properties
+        // This results in errors, but returns the original value since no properties were found
+        assert_eq!(result, Some(json!("not an object")));
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in string")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in string")
+        );
+    }
+
+    #[test]
+    fn test_nested_optional_selection_sets() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user.profile ?{ name email }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "email": "alice@example.com"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with null nested data
+        let data_with_null_profile = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user.profile ?{ name email }")
+            .unwrap()
+            .apply_to(&data_with_null_profile);
+        assert_eq!(result, Some(json!(null)));
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_mixed_optional_selection_and_optional_chaining() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id profileName: profile?.name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123,
+                "profileName": null
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with missing user
+        let data_no_user = json!({
+            "other": "value"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id profileName: profile?.name }")
+            .unwrap()
+            .apply_to(&data_no_user);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message().contains("Property .user not found"));
+    }
+
+    #[test]
+    fn test_optional_selection_set_parsing() {
+        // Test that the parser correctly handles optional selection sets
+        let selection = JSONSelection::parse("$.user ?{ id name }").unwrap();
+        assert_eq!(selection.pretty_print(), "$.user ?{\n  id\n  name\n}");
+
+        // Test with nested optional selection sets
+        let selection = JSONSelection::parse("$.user.profile ?{ name }").unwrap();
+        assert_eq!(selection.pretty_print(), "$.user.profile ?{\n  name\n}");
+
+        // Test mixed with regular selection sets
+        let selection = JSONSelection::parse("$.user ?{ id profile { name } }").unwrap();
+        assert_eq!(
+            selection.pretty_print(),
+            "$.user ?{\n  id\n  profile {\n    name\n  }\n}"
+        );
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_arrays() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "users": [
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.users ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!([
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]))
+        );
+        // When applying selection to arrays, null elements cause errors when trying to access properties
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in null")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in null")
+        );
     }
 }

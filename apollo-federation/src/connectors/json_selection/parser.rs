@@ -564,6 +564,9 @@ pub(super) enum PathList {
     // by itself is not a valid PathList.
     Selection(SubSelection),
 
+    // Optional selection set (?{...}) that returns null if data is null instead of errors.
+    OptionalSelection(SubSelection),
+
     // Every PathList must be terminated by either PathList::Selection or
     // PathList::Empty. PathList::Empty by itself is not a valid PathList.
     Empty,
@@ -786,6 +789,24 @@ impl PathList {
             };
         }
 
+        // Optional selection set: ?{...} (note: we parse this before { to avoid conflicts)
+        if let Ok((suffix, question_brace)) = ranged_span("?{")(input) {
+            // Parse the selection content as naked (without braces)
+            let (suffix, naked_selection) = SubSelection::parse_naked(suffix)?;
+            let (suffix, (_, close_brace)) = tuple((spaces_or_comments, ranged_span("}")))(suffix)?;
+
+            let selection_range = merge_ranges(question_brace.range(), close_brace.range());
+            let selection = SubSelection {
+                selections: naked_selection.selections,
+                range: selection_range.clone(),
+            };
+
+            return Ok((
+                suffix,
+                WithRange::new(Self::OptionalSelection(selection), selection_range),
+            ));
+        }
+
         // Likewise, if the PathSelection has a SubSelection, it must appear at
         // the end of a non-empty path. PathList::parse_with_depth is not
         // responsible for enforcing a trailing SubSelection in the
@@ -836,6 +857,7 @@ impl PathList {
             Self::OptionalKey(_, tail) => tail.next_subselection(),
             Self::OptionalMethod(_, _, tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
+            Self::OptionalSelection(sub) => Some(sub),
             Self::Empty => None,
         }
     }
@@ -851,6 +873,7 @@ impl PathList {
             Self::OptionalKey(_, tail) => tail.next_mut_subselection(),
             Self::OptionalMethod(_, _, tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
+            Self::OptionalSelection(sub) => Some(sub),
             Self::Empty => None,
         }
     }
@@ -893,6 +916,7 @@ impl ExternalVarPaths for PathList {
                 paths.extend(rest.external_var_paths());
             }
             PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
+            PathList::OptionalSelection(sub) => paths.extend(sub.external_var_paths()),
             PathList::Empty => {}
         }
         paths

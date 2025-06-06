@@ -240,6 +240,9 @@ pub(crate) mod strip_ranges {
                         rest.strip_ranges(),
                     ),
                     PathList::Selection(sub) => PathList::Selection(sub.strip_ranges()),
+                    PathList::OptionalSelection(sub) => {
+                        PathList::OptionalSelection(sub.strip_ranges())
+                    }
                     PathList::Empty => PathList::Empty,
                 },
                 None,

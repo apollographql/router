@@ -280,6 +280,9 @@ impl PathList {
             Self::Selection(sub) => {
                 Self::Selection(sub.apply_selection_set(document, selection_set))
             }
+            Self::OptionalSelection(sub) => {
+                Self::OptionalSelection(sub.apply_selection_set(document, selection_set))
+            }
             Self::Empty => Self::Empty,
         }
     }

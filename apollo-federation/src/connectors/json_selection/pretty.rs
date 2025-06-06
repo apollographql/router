@@ -175,6 +175,11 @@ impl PrettyPrintable for PathList {
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
+            Self::OptionalSelection(sub) => {
+                let sub = sub.pretty_print_with_indentation(true, indentation);
+                result.push_str(" ?");
+                result.push_str(sub.as_str());
+            }
             Self::Empty => {}
         }
 
