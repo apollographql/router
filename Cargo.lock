@@ -460,6 +460,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tower 0.5.2",
+ "tower-test",
 ]
 
 [[package]]
