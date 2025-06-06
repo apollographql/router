@@ -74,7 +74,14 @@ impl Merger {
         let mut error_reporter = ErrorReporter::new();
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
-        let join_spec = JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let Some(join_spec) =
+            JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No join spec version found for federation version {}",
+                latest_federation_version_used
+            )
+        };
         let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
@@ -110,7 +117,7 @@ impl Merger {
             schema_to_import_to_feature_url,
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: todo!(),
-            join_spec_definition: join_spec.expect("exists"), // TODO: handle this and bail up top
+            join_spec_definition: join_spec,
         })
     }
 
