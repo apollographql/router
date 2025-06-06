@@ -2,7 +2,6 @@ use apollo_compiler::collections::IndexMap;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
@@ -210,94 +209,38 @@ fn math_shape(
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CheckNumericResult {
+    /// The shape is definitely an integer (general Int, specific 123 value, or
+    /// union/intersection thereof).
     IntForSure,
+    /// While we can't be sure the shape is an integer, it might still be a
+    /// number. Note that Float contains all JSON number values, including all
+    /// the integers. We report this result for Unknown and Name shapes as well,
+    /// since they could resolve to a numeric value.
     FloatPossible,
+    /// The shape is definitely not a number.
     Neither,
 }
 
-fn check_numeric_shape(arg_shape: &Shape) -> CheckNumericResult {
-    match arg_shape.case() {
-        // This includes both the general Int case and any specific
-        // ShapeCase::Int(Some(value)) integer shapes.
-        ShapeCase::Int(_) => CheckNumericResult::IntForSure,
-
-        // Beside the obvious ShapeCase::Float variant, Name and Unknown shapes
-        // could potentially turn out to be numeric (i.e. Float but not
-        // necessarily Int), so they do not warrant an error (yet).
-        ShapeCase::Name(_, _) | ShapeCase::Unknown | ShapeCase::Float => {
-            CheckNumericResult::FloatPossible
-        }
-
-        ShapeCase::One(one) => {
-            let mut result = CheckNumericResult::IntForSure;
-
-            for shape in one.iter() {
-                match check_numeric_shape(shape) {
-                    CheckNumericResult::IntForSure => {
-                        // Leave result == IntForSure if not already
-                        // FloatPossible. This means all the member shapes have
-                        // to be Int in order the final result to be IntForSure.
-                    }
-                    CheckNumericResult::FloatPossible => {
-                        result = CheckNumericResult::FloatPossible;
-                    }
-                    CheckNumericResult::Neither => {
-                        // If any of the member shapes is not numeric, there's a
-                        // chance this math method will fail at runtime.
-                        return CheckNumericResult::Neither;
-                    }
-                };
-            }
-
-            result
-        }
-
-        ShapeCase::All(all) => {
-            let mut saw_int = false;
-            let mut saw_float = false;
-
-            for shape in all.iter() {
-                match check_numeric_shape(shape) {
-                    CheckNumericResult::IntForSure => {
-                        saw_int = true;
-                    }
-                    CheckNumericResult::FloatPossible => {
-                        saw_float = true;
-                    }
-                    CheckNumericResult::Neither => {}
-                };
-            }
-
-            // Because the ShapeCase::All intersection claims to be all the
-            // member shapes simultaneously, the answer is IntForSure if any
-            // member is an Int, even if some members are FloatPossible or even
-            // Neither. If no member is an Int, but some are FloatPossible,
-            // that's the answer. Otherwise, the answer is Neither.
-            if saw_int {
-                CheckNumericResult::IntForSure
-            } else if saw_float {
-                CheckNumericResult::FloatPossible
-            } else {
-                CheckNumericResult::Neither
-            }
-        }
-
-        // Math methods refuse to operate on definitely non-numeric values.
-        ShapeCase::Bool(_)
-        | ShapeCase::String(_)
-        | ShapeCase::Null
-        | ShapeCase::None
-        | ShapeCase::Object { .. }
-        | ShapeCase::Array { .. } => CheckNumericResult::Neither,
-
-        // An Error with a partial shape delegates to the partial shape.
-        ShapeCase::Error(shape::Error { partial, .. }) => {
-            if let Some(partial) = partial {
-                check_numeric_shape(partial)
-            } else {
-                CheckNumericResult::Neither
-            }
-        }
+fn check_numeric_shape(shape: &Shape) -> CheckNumericResult {
+    // Using the `Shape::accepts` method automatically handles cases like shape
+    // being a union or intersection.
+    if Shape::int([]).accepts(shape) {
+        CheckNumericResult::IntForSure
+    } else if Shape::float([]).accepts(shape)
+        // The only shapes that accept Unknown are Unknown and ShapeCase::Name
+        // shapes, since their shape is logically unknown. It is otherwise
+        // tricky to express a shape that accepts any ::Name shape, without
+        // knowing the possible names in advance.
+        || shape.accepts(&Shape::unknown([]))
+    {
+        // If shape meets the requirements of Float, or is an Unknown/Name shape
+        // that might resolve to a numeric value, math_shape returns Float
+        // (which is the same as saying "any numeric JSON value").
+        CheckNumericResult::FloatPossible
+    } else {
+        // If there's no chance the shape could be a number (because we know
+        // it's something else), math_shape will return an error.
+        CheckNumericResult::Neither
     }
 }
 
