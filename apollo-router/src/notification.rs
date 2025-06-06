@@ -1152,7 +1152,7 @@ mod tests {
             notify.try_delete(topic_1).unwrap();
             assert_up_down_counter!(
                 "apollo.router.opened.subscriptions",
-                0i64,
+                1i64,
                 "graphql.operation.name" = "TestSubscription"
             );
             assert_up_down_counter!(
@@ -1167,6 +1167,16 @@ mod tests {
             assert!(!notify.exist(topic_1).await.unwrap());
 
             notify.force_delete(topic_1).await.unwrap();
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
 
             let mut handle1 = handle1.into_stream();
             let new_msg = handle1.next().await.unwrap();
