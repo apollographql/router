@@ -68,8 +68,6 @@ pub struct ValidationResult {
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
 pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
-    // TODO: Use parse_and_validate (adding in directives as needed)
-    // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = SchemaBuilder::new()
         .adopt_orphan_extensions()
         .parse(&source_text, file_name)
@@ -98,9 +96,13 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
-        .into_iter()
+        .iter()
         .map(|directive| directive.name)
         .collect_vec();
+
+    for source in source_directives {
+        messages.extend(source.type_check())
+    }
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {
         Ok(fields_seen_by_connectors) => {
