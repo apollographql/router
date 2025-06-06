@@ -1,0 +1,7 @@
+---
+source: apollo-router/tests/integration/subgraph_cache.rs
+expression: "v.as_object().unwrap().get(\"data\").unwrap()"
+---
+{
+  "name": "test"
+}
