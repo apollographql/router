@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::QueryPlan;
 use std::collections::{HashMap, HashSet};
@@ -7,13 +7,13 @@ use tower::util::BoxCloneService;
 use tower::{BoxError, Service};
 
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     pub operation_name: Option<String>,
     pub query: ExecutableDocument,
 }
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub operation_name: Option<String>,
 
     // TODO maybe wrap to make immutable

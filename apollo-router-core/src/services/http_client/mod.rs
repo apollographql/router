@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use bytes::Bytes;
 use http_body::Body;
 use http_body_util::combinators::BoxBody;

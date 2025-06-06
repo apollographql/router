@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 /// A trait for types that can be stored in the context.
 /// Any type that is Clone, Send, Sync and 'static can be stored in the context.
-trait ContextValue: Clone + Send + Sync + 'static {}
+trait ExtensionValue: Clone + Send + Sync + 'static {}
 
-impl<T: Clone + Send + Sync + 'static> ContextValue for T {}
+impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 
 /// A thread-safe context that stores values by type.
 ///
@@ -23,10 +23,10 @@ impl<T: Clone + Send + Sync + 'static> ContextValue for T {}
 /// consider wrapping them in an `Arc` before storing them in the context:
 ///
 /// ```rust
-/// use apollo_router_core::Context;
+/// use apollo_router_core::Extensions;
 /// use std::sync::Arc;
 ///
-/// let context = Context::new();
+/// let context = Extensions::new();
 ///
 /// // For expensive types, wrap in Arc
 /// let expensive_data = Arc::new(ExpensiveType::new());
@@ -39,9 +39,9 @@ impl<T: Clone + Send + Sync + 'static> ContextValue for T {}
 /// # Examples
 ///
 /// ```rust
-/// use apollo_router_core::Context;
+/// use apollo_router_core::Extensions;
 ///
-/// let context = Context::new();
+/// let context = Extensions::new();
 ///
 /// // Store simple values
 /// context.insert(42);
@@ -56,11 +56,11 @@ impl<T: Clone + Send + Sync + 'static> ContextValue for T {}
 /// assert!(context.get::<i32>().is_none());
 /// ```
 #[derive(Clone)]
-pub struct Context {
+pub struct Extensions {
     cache: Arc<Cache<TypeId, Arc<dyn Any + Send + Sync + 'static>>>,
 }
 
-impl Context {
+impl Extensions {
     /// Creates a new empty context.
     pub fn new() -> Self {
         Self {
@@ -74,13 +74,13 @@ impl Context {
     /// # Examples
     ///
     /// ```rust
-    /// use apollo_router_core::Context;
+    /// use apollo_router_core::Extensions;
     ///
-    /// let context = Context::new();
+    /// let context = Extensions::new();
     /// context.insert(42);
     /// assert_eq!(context.get::<i32>(), Some(42));
     /// ```
-    pub fn get<T: ContextValue>(&self) -> Option<T> {
+    pub fn get<T: ExtensionValue>(&self) -> Option<T> {
         let type_id = TypeId::of::<T>();
         self.cache.get(&type_id).map(|value| {
             value
@@ -97,10 +97,10 @@ impl Context {
     /// # Examples
     ///
     /// ```rust
-    /// use apollo_router_core::Context;
+    /// use apollo_router_core::Extensions;
     /// use std::sync::Arc;
     ///
-    /// let context = Context::new();
+    /// let context = Extensions::new();
     ///
     /// // Simple value
     /// context.insert(42);
@@ -109,7 +109,7 @@ impl Context {
     /// let expensive = Arc::new(ExpensiveType::new());
     /// context.insert(expensive.clone());
     /// ```
-    pub fn insert<T: ContextValue>(&self, value: T) {
+    pub fn insert<T: ExtensionValue>(&self, value: T) {
         let type_id = TypeId::of::<T>();
         let value = Arc::new(value);
         self.cache.insert(type_id, value);
@@ -120,14 +120,14 @@ impl Context {
     /// # Examples
     ///
     /// ```rust
-    /// use apollo_router_core::Context;
+    /// use apollo_router_core::Extensions;
     ///
-    /// let context = Context::new();
+    /// let context = Extensions::new();
     /// context.insert(42);
     /// context.remove::<i32>();
     /// assert!(context.get::<i32>().is_none());
     /// ```
-    pub fn remove<T: ContextValue>(&self) {
+    pub fn remove<T: ExtensionValue>(&self) {
         let type_id = TypeId::of::<T>();
         self.cache.remove(&type_id);
     }

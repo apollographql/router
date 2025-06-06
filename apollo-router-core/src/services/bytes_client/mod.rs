@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use bytes::Bytes;
 use futures::Stream;
 use std::pin::Pin;
@@ -7,14 +7,14 @@ use tower::Service;
 
 #[derive(Clone)]
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     pub body: Bytes,
 }
 
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Bytes> + Send>>;
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub responses: ResponseStream,
 }
 

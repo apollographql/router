@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use crate::json::JsonValue;
 use apollo_federation::query_plan::QueryPlan;
 use bytes::Bytes;
@@ -11,7 +11,7 @@ use tower::BoxError;
 use tower::util::BoxCloneService;
 
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     // Services are cached by name in the FetchService.
     pub service_name: String,
     // This is opaque data identified by type ID when constructing the downstream service
@@ -22,7 +22,7 @@ pub struct Request {
 pub type ResponseStream = Pin<Box<dyn Stream<Item = JsonValue> + Send>>;
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub responses: ResponseStream,
 }
 

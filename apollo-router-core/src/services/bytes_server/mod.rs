@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use apollo_federation::query_plan::QueryPlan;
 use bytes::Bytes;
 use futures::Stream;
@@ -9,14 +9,14 @@ use tower::util::BoxCloneService;
 
 #[derive(Clone)]
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     pub body: Bytes,
 }
 
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Bytes> + Send>>;
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub responses: ResponseStream,
 }
 

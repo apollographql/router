@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use crate::json::JsonValue;
 use futures::Stream;
 use std::pin::Pin;
@@ -7,14 +7,14 @@ use tower::BoxError;
 use tower::util::BoxCloneService;
 
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     pub body: JsonValue,
 }
 
 pub type ResponseStream = Pin<Box<dyn Stream<Item = JsonValue> + Send>>;
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub responses: ResponseStream,
 }
 

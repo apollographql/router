@@ -1,4 +1,4 @@
-use crate::Context;
+use crate::Extensions;
 use crate::json::JsonValue;
 use apollo_federation::query_plan::QueryPlan;
 use futures::Stream;
@@ -10,7 +10,7 @@ use tower::BoxError;
 use tower::util::BoxCloneService;
 
 pub struct Request {
-    pub context: Context,
+    pub extensions: Extensions,
     pub operation_name: Option<String>,
     pub query_plan: QueryPlan,
     pub query_variables: HashMap<String, Value>,
@@ -19,7 +19,7 @@ pub struct Request {
 pub type ResponseStream = Pin<Box<dyn Stream<Item = JsonValue> + Send>>;
 
 pub struct Response {
-    pub context: Context,
+    pub extensions: Extensions,
     pub responses: ResponseStream,
 }
 
