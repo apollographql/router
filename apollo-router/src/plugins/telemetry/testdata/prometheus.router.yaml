@@ -9,3 +9,4 @@ telemetry:
           "test-resource": "test"
       prometheus:
         enabled: true
+        resource_selector: all
