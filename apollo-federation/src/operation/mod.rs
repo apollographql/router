@@ -24,6 +24,7 @@ use std::sync::atomic;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -31,6 +32,7 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
@@ -39,7 +41,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
@@ -51,6 +53,8 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
+use crate::supergraph::GRAPHQL_STRING_TYPE_NAME;
+use crate::utils::MultiIndexMap;
 
 mod contains;
 mod directive_list;
@@ -77,7 +81,7 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
 /// startup. It currently implements `Serialize` for debugging purposes. It should not implement
-/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
 /// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct SelectionId(usize);
@@ -449,8 +453,8 @@ impl Selection {
 
     /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
     /// - Note: The returned selection may have no subselection set or an empty one if the mapper
-    ///         returns so, which may make the returned selection invalid. It's caller's responsibility
-    ///         to appropriately handle invalid return values.
+    ///   returns so, which may make the returned selection invalid. It's caller's responsibility
+    ///   to appropriately handle invalid return values.
     pub(crate) fn map_selection_set(
         &self,
         mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
@@ -975,40 +979,10 @@ pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 use self::selection_map::OwnedSelectionKey;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
-/// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
-/// - Preserves the insertion order of keys and values.
-struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
-
-impl<K, V> Deref for MultiIndexMap<K, V> {
-    type Target = IndexMap<K, Vec<V>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<K, V> MultiIndexMap<K, V>
-where
-    K: Eq + Hash,
-{
-    fn new() -> Self {
-        Self(IndexMap::default())
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        self.0.entry(key).or_default().push(value);
-    }
-
-    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iterable: I) {
-        for (key, value) in iterable {
-            self.insert(key, value);
-        }
-    }
-}
-
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
 pub(crate) enum SelectionMapperReturn {
+    #[allow(unused)] // may be better to keep unused than to add back when necessary
     None,
     Selection(Selection),
     SelectionList(Vec<Selection>),
@@ -1324,7 +1298,7 @@ impl SelectionSet {
     /// so we can efficiently generate query plans. In order to prevent the query planner from spending time
     /// exploring those useless __typename options, we "remove" the unnecessary __typename selections from the
     /// operation. Since we need to ensure that the __typename field will still need to be queried, we "tag"
-    /// one of the "sibling" selections (using "attachement") to remember that __typename needs to be added
+    /// one of the "sibling" selections (using "attachment") to remember that __typename needs to be added
     /// back eventually. The core query planning algorithm will ignore that tag, and because __typename has been
     /// otherwise removed, we'll save any related work. As we build the final query plan, we'll check back for
     /// those "tags" and add back the __typename selections. As this only happen after the query planning
@@ -1698,7 +1672,7 @@ impl SelectionSet {
     ///
     /// The final selections are optional. If `path` ends on a leaf field, then no followup
     /// selections would make sense.
-    /// When final selections are provided, unecessary fragments will be automatically removed
+    /// When final selections are provided, unnecessary fragments will be automatically removed
     /// at the junction between the path and those final selections.
     ///
     /// For instance, suppose that we have:
@@ -1725,8 +1699,9 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
+                let element_key = element.key().to_owned_key();
                 let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
+                    .entry(element_key.as_borrowed_key())
                     .or_insert(|| {
                         Selection::from_element(
                             element,
@@ -2144,12 +2119,12 @@ fn compute_aliases_for_non_merging_fields(
                         };
                     }
                 } else {
-                    // We need to alias the new occurence.
+                    // We need to alias the new occurrence.
                     let alias = gen_alias_name(response_name, &seen_response_names);
 
                     // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
                     // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
-                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurence.
+                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurrence.
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();
@@ -2566,6 +2541,7 @@ impl InlineFragmentSelection {
         };
 
         let mut remove_defer = false;
+        #[expect(clippy::redundant_clone)]
         let mut args_copy = args.clone();
         if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
             if *b {
@@ -2901,11 +2877,43 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
             }
             flattened.push(selection);
         }
+        if flattened.is_empty() {
+            // In theory, for valid operations, we shouldn't have empty selection sets (field
+            // selections whose type is a leaf will have an undefined selection set, not an empty
+            // one). We do "abuse" this a bit however when create query "witness" during
+            // composition validation where, to make it easier for users to locate the issue, we
+            // want the created witness query to stop where the validation problem lies, even if
+            // we're not on a leaf type. To make this look nice and explicit, we handle that case
+            // by create a fake selection set that just contains an ellipsis, indicate there is
+            // supposed to be more but we elided it for clarity. And yes, the whole thing is a bit
+            // of a hack, albeit a convenient one.
+            flattened.push(ellipsis_field()?);
+        }
         Ok(Self {
             ty: val.type_position.type_name().clone(),
             selections: flattened,
         })
     }
+}
+
+/// Create a synthetic field named "...".
+fn ellipsis_field() -> Result<executable::Selection, FederationError> {
+    let field_name = Name::new_unchecked("...");
+    let field_def = ast::FieldDefinition {
+        description: None,
+        ty: ty!(String),
+        name: field_name.clone(),
+        arguments: vec![],
+        directives: Default::default(),
+    };
+    Ok(executable::Selection::Field(Node::new(executable::Field {
+        definition: Node::new(field_def),
+        alias: None,
+        name: field_name,
+        arguments: vec![],
+        directives: Default::default(),
+        selection_set: executable::SelectionSet::new(GRAPHQL_STRING_TYPE_NAME),
+    })))
 }
 
 impl TryFrom<&Selection> for executable::Selection {

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -57,7 +57,7 @@ assert_impl_all!(Response: Send);
 /// Request type for a single connector request
 #[derive(Debug)]
 #[non_exhaustive]
-pub(crate) struct Request {
+pub struct Request {
     /// The request context
     pub(crate) context: Context,
 
@@ -79,12 +79,15 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
+
+    /// Original request to the Router.
+    pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
 }
 
 /// Response type for a connector
 #[derive(Debug)]
 #[non_exhaustive]
-pub(crate) struct Response {
+pub struct Response {
     /// The response context
     #[allow(dead_code)]
     pub(crate) context: Context,
@@ -336,19 +339,16 @@ impl tower::Service<Request> for ConnectorRequestService {
                 )
             });
 
-        let log_request_level = connector_request_event.and_then(|s| match s.0.condition() {
-            Some(condition) => {
-                if condition.lock().evaluate_request(&request) == Some(true) {
-                    Some(s.0.level())
-                } else {
-                    None
-                }
+        let log_request_level = connector_request_event.and_then(|s| {
+            if s.condition.lock().evaluate_request(&request) == Some(true) {
+                Some(s.level)
+            } else {
+                None
             }
-            None => Some(s.0.level()),
         });
 
         Box::pin(async move {
-            let mut debug_request: Option<ConnectorDebugHttpRequest> = None;
+            let mut debug_request: Option<Box<ConnectorDebugHttpRequest>> = None;
             let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                 Err(Error::RequestLimitExceeded)
             } else {
@@ -404,6 +404,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 &request.context,
                 debug_request,
                 &debug,
+                request.supergraph_request,
             )
             .await)
         })

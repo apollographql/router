@@ -13,7 +13,7 @@ use super::SelectionSet;
 use super::normalize_operation;
 use crate::SingleFederationError;
 use crate::error::FederationError;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -981,7 +981,7 @@ fn converting_operation_types() {
     .unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
     insta::assert_snapshot!(Operation::parse(
-            schema.clone(),
+            schema,
             r#"
         {
             intf {
@@ -1345,7 +1345,7 @@ fn add_at_path_merge_subselections() {
             &path_to_c,
             Some(
                 &SelectionSet::parse(
-                    schema.clone(),
+                    schema,
                     ObjectTypeDefinitionPosition::new(name!("C")).into(),
                     "e(arg: 1)",
                 )

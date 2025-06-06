@@ -35,6 +35,7 @@ mod cancel;
 mod context;
 mod debug_max_evaluated_plans_configuration;
 mod defer;
+mod disable_subgraphs;
 mod entities;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
@@ -1212,13 +1213,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }
@@ -1239,13 +1242,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }

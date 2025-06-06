@@ -68,13 +68,34 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
-    /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
-    /// (default: true)
-    pub(crate) enable_deduplication: bool,
+    /// Configure subgraph subscription deduplication
+    pub(crate) deduplication: DeduplicationConfig,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+}
+
+/// Subscription deduplication configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeduplicationConfig {
+    /// Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.
+    /// (default: true)
+    pub(crate) enabled: bool,
+    /// List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical.
+    /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
+    /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
+    pub(crate) ignored_headers: HashSet<String>,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ignored_headers: Default::default(),
+        }
+    }
 }
 
 impl Default for SubscriptionConfig {
@@ -82,7 +103,7 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -354,7 +375,7 @@ pub(crate) enum SubscriptionPayload {
     #[serde(rename = "next")]
     Next {
         id: String,
-        payload: Response,
+        payload: Box<Response>,
         verifier: String,
     },
     #[serde(rename = "complete")]
@@ -509,7 +530,7 @@ impl Service<router::Request> for CallbackService {
                                     1,
                                     subscriptions.mode = "callback"
                                 );
-                                handle.send_sync(payload)?;
+                                handle.send_sync(*payload)?;
 
                                 Ok(router::Response {
                                     response: http::Response::builder()
@@ -694,24 +715,25 @@ pub(crate) fn create_verifier(sub_id: &str) -> Result<String, BoxError> {
     Ok(verifier)
 }
 
+#[allow(clippy::result_large_err)]
 fn ensure_id_consistency(
     context: &Context,
     id_from_path: &str,
     id_from_body: &str,
 ) -> Result<(), router::Response> {
-    (id_from_path != id_from_body)
-        .then(|| {
-            Err(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(router::body::from_bytes(
-                        "id from url path and id from body are different",
-                    ))
-                    .expect("this body is valid"),
-                context: context.clone(),
-            })
+    if id_from_path != id_from_body {
+        Err(router::Response {
+            response: http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(router::body::from_bytes(
+                    "id from url path and id from body are different",
+                ))
+                .expect("this body is valid"),
+            context: context.clone(),
         })
-        .unwrap_or_else(|| Ok(()))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -818,9 +840,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -847,9 +869,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -955,9 +977,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -1052,9 +1074,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -1115,9 +1137,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier,
             }))
             .unwrap(),
@@ -1426,7 +1448,7 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.enable_deduplication);
+        assert!(sub_config.deduplication.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
     }

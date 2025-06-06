@@ -15,6 +15,7 @@ use std::time::Duration;
 use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
+use itertools::Either;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
@@ -25,6 +26,7 @@ use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
+use schema::Mode;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -43,6 +45,8 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
+pub(crate) use self::schema::validate_yaml_configuration;
+use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
@@ -64,7 +68,8 @@ pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
-mod schema;
+pub(crate) mod schema;
+pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -153,6 +158,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
+    /// Configuration for the server
+    #[serde(default)]
+    pub(crate) server: Server,
+
     /// Configuration for the supergraph
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
@@ -225,6 +234,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             health_check: HealthCheck,
             sandbox: Sandbox,
             homepage: Homepage,
+            server: Server,
             supergraph: Supergraph,
             cors: Cors,
             plugins: UserPlugins,
@@ -259,6 +269,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             health_check: ad_hoc.health_check,
             sandbox: ad_hoc.sandbox,
             homepage: ad_hoc.homepage,
+            server: ad_hoc.server,
             supergraph: ad_hoc.supergraph,
             cors: ad_hoc.cors,
             tls: ad_hoc.tls,
@@ -307,12 +318,14 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
+        server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_default(),
+            server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
@@ -442,9 +455,11 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
+        server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
+            server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
@@ -558,15 +573,24 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
     }
 }
 
-fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
+fn gen_schema(
+    plugins: schemars::Map<String, Schema>,
+    hidden_plugins: Option<schemars::Map<String, Schema>>,
+) -> Schema {
     let plugins_object = SchemaObject {
         object: Some(Box::new(ObjectValidation {
             properties: plugins,
             additional_properties: Option::Some(Box::new(Schema::Bool(false))),
+            pattern_properties: hidden_plugins
+                .unwrap_or_default()
+                .into_iter()
+                // Wrap plugin name with regex start/end to enforce exact match
+                .map(|(k, v)| (format!("^{}$", k), v))
+                .collect(),
             ..Default::default()
         })),
         ..Default::default()
@@ -595,17 +619,23 @@ impl JsonSchema for ApolloPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = crate::plugin::plugins()
+        let (plugin_entries, hidden_plugin_entries): (Vec<_>, Vec<_>) = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|factory| {
-                (
-                    factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
-                    factory.create_schema(generator),
-                )
-            })
-            .collect::<schemars::Map<String, Schema>>();
-        gen_schema(plugins)
+            .partition_map(|factory| {
+                let key = factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string();
+                let schema = factory.create_schema(generator);
+                // Separate any plugins we're hiding
+                if factory.hidden_from_config_json_schema {
+                    Either::Right((key, schema))
+                } else {
+                    Either::Left((key, schema))
+                }
+            });
+        gen_schema(
+            plugin_entries.into_iter().collect(),
+            Some(hidden_plugin_entries.into_iter().collect()),
+        )
     }
 }
 
@@ -633,7 +663,7 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect::<schemars::Map<String, Schema>>();
-        gen_schema(plugins)
+        gen_schema(plugins, None)
     }
 }
 
@@ -645,6 +675,11 @@ pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     pub(crate) listen: ListenAddr,
+
+    /// The timeout for shutting down connections during a router shutdown or a schema reload.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_connection_shutdown_timeout")]
+    pub(crate) connection_shutdown_timeout: Duration,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
@@ -695,6 +730,7 @@ impl Supergraph {
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -705,6 +741,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -723,6 +761,7 @@ impl Supergraph {
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -733,6 +772,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -1388,6 +1429,10 @@ fn default_graphql_introspection() -> bool {
     false
 }
 
+fn default_connection_shutdown_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum BatchingMode {
@@ -1409,6 +1454,10 @@ pub(crate) struct Batching {
 
     /// Subgraph options for batching
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+
+    /// Maximum size for a batch
+    #[serde(default)]
+    pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
@@ -1441,6 +1490,13 @@ impl Batching {
                         .is_some_and(|x| x.enabled)
                 }
             }
+            None => false,
+        }
+    }
+
+    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
+        match self.maximum_size {
+            Some(maximum_size) => batch.len() > maximum_size,
             None => false,
         }
     }

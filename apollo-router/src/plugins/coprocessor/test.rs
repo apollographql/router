@@ -13,13 +13,14 @@ mod tests {
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
     use router::body::RouterBody;
-    use serde_json::json;
-    use serde_json_bytes::Value;
+    use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
+    use crate::json_ext::Object;
+    use crate::json_ext::Value;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -36,7 +37,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_plugin() {
-        let config = json!({
+        let config = serde_json::json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081"
             }
@@ -54,48 +55,18 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_fields_are_denied() {
-        let config = json!({
+        let config = serde_json::json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081",
                 "thisFieldDoesntExist": true
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
+        // it, but in this case it's enough to start building the harness and
+        // ensure building the Configuration fails.
         assert!(
             crate::TestHarness::builder()
                 .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_with_stages_wont_load_without_graph_ref() {
-        let config = json!({
-            "coprocessor": {
-                "url": "http://127.0.0.1:8081",
-                "stages": {
-                    "subgraph": {
-                        "request": {
-                            "uri": true
-                        }
-                    }
-                },
-            }
-        });
-        // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
-        assert!(
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
                 .is_err()
         );
     }
@@ -331,7 +302,7 @@ mod tests {
         let request = subgraph::Request::fake_builder().build();
 
         assert_eq!(
-            "couldn't deserialize coprocessor output body: missing field `message`",
+            "couldn't deserialize coprocessor output body: GraphQL response was malformed: missing required `message` property within error",
             service
                 .oneshot(request)
                 .await
@@ -394,7 +365,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -403,11 +374,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
                     Some("5678")
@@ -478,7 +448,7 @@ mod tests {
 
         assert_eq!("5678", &*response.id);
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -535,7 +505,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -544,11 +514,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
                     Some("5678")
@@ -639,7 +608,7 @@ mod tests {
 
         assert_eq!("5678", &*response.id);
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -701,7 +670,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -710,11 +679,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
                 assert_eq!(
                     deserialized_request.subgraph_request_id.as_deref(),
                     Some("5678")
@@ -806,7 +774,7 @@ mod tests {
 
         assert_eq!("5678", &*response.id);
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -822,8 +790,7 @@ mod tests {
                         default: None,
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
-                ])
-                .into(),
+                ]),
                 body: true,
                 ..Default::default()
             },
@@ -841,7 +808,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build())
@@ -878,7 +845,7 @@ mod tests {
         let request = subgraph::Request::fake_builder().build();
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             service
                 .oneshot(request)
                 .await
@@ -1004,7 +971,7 @@ mod tests {
 
         assert_eq!(
             actual_response,
-            serde_json::from_value(json!({
+            serde_json_bytes::from_value(json!({
                 "errors": [{
                    "message": "my error message",
                    "extensions": {
@@ -1038,7 +1005,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1133,7 +1100,7 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 5678_u32 }),
+            json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -1163,7 +1130,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1173,7 +1140,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
                 let (_, body) = r.into_parts();
-                let deserialized_response: Externalizable<serde_json::Value> =
+                let deserialized_response: Externalizable<Value> =
                     serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
                 assert_eq!(
@@ -1282,7 +1249,7 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 5678_u32 }),
+            json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -1310,7 +1277,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1320,7 +1287,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
                 let (_, body) = r.into_parts();
-                let deserialized_response: Externalizable<serde_json::Value> =
+                let deserialized_response: Externalizable<Value> =
                     serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
                 assert_eq!(
@@ -1438,7 +1405,7 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 5678_u32 }),
+            json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -1453,8 +1420,7 @@ mod tests {
                     response_context: String::from("context_value"),
                     redact: None,
                     default: None,
-                })
-                .into(),
+                }),
                 body: true,
                 ..Default::default()
             },
@@ -1472,7 +1438,7 @@ mod tests {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build())
@@ -1557,7 +1523,7 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 5678_u32 }),
+            json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
     }
@@ -1659,7 +1625,7 @@ mod tests {
             mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
                 Box::pin(async {
                     let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<serde_json::Value> =
+                    let deserialized_response: Externalizable<Value> =
                         serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
                             .unwrap();
                     let context = deserialized_response.context.unwrap_or_default();
@@ -1763,7 +1729,7 @@ mod tests {
             mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
                 Box::pin(async {
                     let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<serde_json::Value> =
+                    let deserialized_response: Externalizable<Value> =
                         serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
                             .unwrap();
                     let context = deserialized_response.context.unwrap_or_default();
@@ -1877,11 +1843,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -2002,11 +1967,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(
                     deserialized_request
@@ -2157,11 +2121,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -2285,11 +2248,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -2386,11 +2348,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -2445,7 +2406,7 @@ mod tests {
 
         assert_eq!("a value", value);
 
-        let actual_response = serde_json::from_slice::<serde_json::Value>(
+        let actual_response = serde_json::from_slice::<Value>(
             &router::body::into_bytes(response.into_body())
                 .await
                 .unwrap(),
@@ -2481,11 +2442,10 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(
-                        &router::body::into_bytes(req.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(req.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -2528,7 +2488,7 @@ mod tests {
             .response;
 
         assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
-        let actual_response = serde_json::from_slice::<serde_json::Value>(
+        let actual_response = serde_json::from_slice::<Value>(
             &router::body::into_bytes(response.into_body())
                 .await
                 .unwrap(),
@@ -2574,11 +2534,10 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(
-                            &router::body::into_bytes(res.into_body()).await.unwrap(),
-                        )
-                        .unwrap();
+                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
@@ -2675,7 +2634,7 @@ mod tests {
         // the body should have changed:
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
-            serde_json::from_slice::<serde_json::Value>(
+            serde_json::from_slice::<Value>(
                 &router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap()

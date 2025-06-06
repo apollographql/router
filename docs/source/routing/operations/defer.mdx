@@ -1,19 +1,17 @@
 ---
-title: Router Support for @defer
+title: "@defer Directive Support"
 subtitle: Improve performance by delivering fields incrementally
 description: Improve your GraphQL query performance with GraphOS Router and Apollo Router Core's support for the @defer directive. Incrementally deliver response data by deferring certain fields.
-minVersion: 1.8.0
+minVersion: Router v1.8.0
 ---
 
-Queries sent to GraphOS Router or Apollo Router Core can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
+Apollo Router's support of the `@defer` directive helps client developers tackle the common challenge of how to create a responsive user experience when certain fields of a query take longer to resolve than others. `@defer` improves application performance by delivering response data incrementally. This is important for real-time applications like dashboards or reports. By deferring data for some fields, the router can resolve and return data for the query's other fields more quickly, improving responsiveness.
 
-The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
-
-## What is `@defer`?
+## What is the `@defer` directive?
 
 The `@defer` directive enables a client query to specify sets of fields that it doesn't need to receive data for _immediately_. This is helpful whenever some fields in a query take much longer to resolve than others.
 
-Deferred fields are always contained within a GraphQL fragment, and the `@defer` directive is applied to that fragment (_not_ to the individual fields).
+The `@defer` directive is applied to a GraphQL query. Specifically, deferred fields are always contained within a GraphQL fragment, and the `@defer` directive is applied to that fragment.
 
 Here's an example query that uses `@defer`:
 
@@ -33,7 +31,8 @@ query GetTopProducts {
 
 To respond incrementally, the router uses a multipart-encoded HTTP response. To use `@defer` successfully with the router, a client's GraphQL library must _also_ support the directive by handling multipart HTTP responses correctly.
 
-The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
+The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
+
 
 ## Which fields can my router defer?
 
@@ -143,7 +142,7 @@ To use `@defer` successfully, your supergraph and its clients must meet the requ
   - This functionality is currently supported in Apollo Client for [Web](/react/data/defer) and [Kotlin (experimental)](/kotlin/fetching/defer).
 - Your supergraph must be one of:
   - A [cloud supergraph](/graphos/routing/cloud#cloud-supergraphs)
-  - A [self-hosted supergraph](/graphos/routing/self-hosted#self-hosted-supergraphs) running the [GraphOS Router](/graphos/routing/about-router)
+  - A [self-hosted supergraph](/graphos/routing/self-hosted#self-hosted-supergraphs) running the GraphOS Router
 
 ### Entity-specific requirements
 

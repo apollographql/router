@@ -28,7 +28,7 @@ impl IncompatiblePlugin for UrlOverrideIncompatPlugin {
     }
 
     fn configured_subgraphs(&self) -> super::ConfiguredSubgraphs<'_> {
-        // Overrides cannot be explicily disabled, so all present overrides
+        // Overrides cannot be explicitly disabled, so all present overrides
         // are always enabled
         ConfiguredSubgraphs {
             enabled: self.configured.iter().by_ref().collect(),
@@ -39,7 +39,7 @@ impl IncompatiblePlugin for UrlOverrideIncompatPlugin {
     fn inform_incompatibilities(
         &self,
         subgraphs: HashSet<&String>,
-        _connectors: &apollo_federation::sources::connect::expand::Connectors,
+        _connectors: &apollo_federation::connectors::expand::Connectors,
     ) {
         for subgraph in subgraphs {
             tracing::warn!(

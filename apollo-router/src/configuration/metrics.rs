@@ -400,7 +400,9 @@ impl InstrumentData {
             opt.signature_normalization_algorithm,
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
-            "$.metrics_reference_mode"
+            "$.metrics_reference_mode",
+            opt.errors.preview_extended_error_metrics,
+            "$.errors.preview_extended_error_metrics"
         );
 
         populate_config_instrument!(
@@ -477,6 +479,15 @@ impl InstrumentData {
         attributes.insert(
             "opt.apollo.dev".to_string(),
             atomic_is_true(&crate::executable::APOLLO_ROUTER_DEV_MODE),
+        );
+        attributes.insert(
+            "opt.security.recursive_selections".to_string(),
+            crate::services::layers::query_analysis::recursive_selections_check_enabled().into(),
+        );
+        attributes.insert(
+            "opt.security.non_local_selections".to_string(),
+            crate::query_planner::query_planner_service::non_local_selections_check_enabled()
+                .into(),
         );
 
         self.data

@@ -92,8 +92,9 @@ pub(crate) fn test_planner(
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> QueryPlanner {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
-    let supergraph = apollo_federation::Supergraph::new(&supergraph).expect("valid supergraph");
-    QueryPlanner::new(&supergraph, config.clone()).expect("can create query planner")
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    QueryPlanner::new(&supergraph, config).expect("can create query planner")
 }
 
 #[track_caller]

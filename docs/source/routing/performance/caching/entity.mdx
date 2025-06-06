@@ -2,12 +2,11 @@
 title: Subgraph Entity Caching for the GraphOS Router
 subtitle: Configure Redis-backed caching for entities
 description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
-minVersion: 1.40.0
+minVersion: Router v1.40.0
+releaseStage: preview
 ---
 
 <EnterpriseFeature />
-
-<PreviewFeature />
 
 Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
@@ -340,7 +339,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "type",
   "subgraph": "accounts",
   "type": "User"
 }
@@ -350,7 +349,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "entity",
   "subgraph": "accounts",
   "type": "User",
   "key": {

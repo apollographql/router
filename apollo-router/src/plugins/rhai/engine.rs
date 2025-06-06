@@ -17,6 +17,7 @@ use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
+use http::uri::Scheme;
 use parking_lot::Mutex;
 use rhai::AST;
 use rhai::Array;
@@ -1187,6 +1188,21 @@ mod router_plugin {
         }
     }
 
+    // Uri.scheme
+    #[rhai_fn(get = "scheme", pure, return_raw)]
+    pub(crate) fn uri_scheme_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.scheme_str())
+    }
+
+    #[rhai_fn(set = "scheme", return_raw)]
+    pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        parts.scheme = Some(new_scheme);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
@@ -1735,8 +1751,9 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.engine
-                    .call_fn(
+                let _ = self
+                    .engine
+                    .call_fn::<Dynamic>(
                         &mut guard,
                         &self.ast,
                         function_name,
@@ -1745,8 +1762,9 @@ impl Rhai {
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.engine
-                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
+                let _ = self
+                    .engine
+                    .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }

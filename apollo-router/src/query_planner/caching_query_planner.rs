@@ -24,6 +24,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
@@ -273,12 +274,25 @@ where
             config_mode_hash: _,
         } in all_cache_keys
         {
-            let doc = match query_analysis
-                .parse_document(&query, operation_name.as_deref())
-                .await
-            {
-                Ok(doc) => doc,
-                Err(_) => continue,
+            // NB: warmup tasks have a low priority so that real requests are prioritized
+            let doc = loop {
+                match query_analysis
+                    .parse_document(
+                        &query,
+                        operation_name.as_deref(),
+                        ComputeJobType::QueryParsingWarmup,
+                    )
+                    .await
+                {
+                    Ok(doc) => break doc,
+                    Err(MaybeBackPressureError::PermanentError(_)) => {
+                        continue 'all_cache_keys_loop;
+                    }
+                    Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // try again
+                    }
+                }
             };
 
             let caching_key = CachingQueryKey {
@@ -316,26 +330,6 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = loop {
-                    match query_analysis
-                        .parse_document(&query, operation_name.as_deref())
-                        .await
-                    {
-                        Ok(doc) => break doc,
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            let e = Arc::new(QueryPlannerError::SpecError(error));
-                            tokio::spawn(async move {
-                                entry.insert(Err(e)).await;
-                            });
-                            continue 'all_cache_keys_loop;
-                        }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            // try again
-                        }
-                    }
-                };
-
                 loop {
                     let request = QueryPlannerRequest {
                         query: query.clone(),
@@ -343,6 +337,7 @@ where
                         document: doc.clone(),
                         metadata: caching_key.metadata.clone(),
                         plan_options: caching_key.plan_options.clone(),
+                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
                     };
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
@@ -420,13 +415,10 @@ where
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = context.insert(
-                        APOLLO_OPERATION_ID,
-                        stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
-                    );
+                    let _ = context.insert(APOLLO_OPERATION_ID, usage_reporting.get_operation_id());
                     let _ = context.insert(
                         "apollo_operation_signature",
-                        usage_reporting.stats_report_key.clone(),
+                        usage_reporting.get_stats_report_key(),
                     );
                 }
             })
@@ -513,6 +505,7 @@ where
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
+                .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,
@@ -636,13 +629,6 @@ where
     }
 }
 
-fn stats_report_key_hash(stats_report_key: &str) -> String {
-    let mut hasher = sha1::Sha1::new();
-    hasher.update(stats_report_key.as_bytes());
-    let result = hasher.finalize();
-    hex::encode(result)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
@@ -734,8 +720,10 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use mockall::mock;
-    use mockall::predicate::*;
+    use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
 
@@ -875,11 +863,8 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    usage_reporting: UsageReporting {
-                        stats_report_key: "this is a test report key".to_string(),
-                        referenced_fields_by_type: Default::default(),
-                    }
-                    .into(),
+                    usage_reporting: UsageReporting::Error("this is a test report key".to_string())
+                        .into(),
                     query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),
@@ -936,14 +921,6 @@ mod tests {
                     .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
             );
         }
-    }
-
-    #[test]
-    fn apollo_operation_id_hash() {
-        assert_eq!(
-            "d1554552698157b05c2a462827fb4367a4548ee5",
-            stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")
-        );
     }
 
     #[test(tokio::test)]
@@ -1040,5 +1017,243 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    // Expect that if we call the CQP twice, the second call will return cached data
+    #[test(tokio::test)]
+    async fn test_cache_works() {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(2).returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            planner
+                .expect_sync_call()
+                // Don't allow the delegate to be called more than once
+                .times(1)
+                .returning(|_| {
+                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
+                        response: Box::new(
+                            crate::graphql::Response::builder()
+                                .data(json!(r#"{"data":{"me":{"name":"Ada Lovelace"}}}%"#))
+                                .build(),
+                        ),
+                    };
+
+                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
+                });
+            planner
+        });
+
+        let configuration = Default::default();
+        let schema = include_str!("../testdata/starstuff@current.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query ExampleQuery { me { name } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        let _ = planner
+            .call(query_planner::CachingRequest::new(
+                "query ExampleQuery {
+                  me {
+                    name
+                  }
+                }"
+                .to_string(),
+                None,
+                context.clone(),
+            ))
+            .await
+            .unwrap();
+
+        let _ = planner
+            .call(query_planner::CachingRequest::new(
+                "query ExampleQuery {
+                  me {
+                    name
+                  }
+                }"
+                .to_string(),
+                None,
+                context.clone(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[test(tokio::test)]
+    async fn test_temporary_errors_arent_cached() {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate
+            .expect_clone()
+            // We're calling the caching QP twice, so we expect the delegate to be cloned twice
+            .times(2)
+            .returning(|| {
+                // Expect each clone to be called once since the return value isn't cached
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(1).returning(|_| {
+                    Err(MaybeBackPressureError::TemporaryError(
+                        ComputeBackPressureError,
+                    ))
+                });
+                planner
+            });
+
+        let configuration = Default::default();
+        let schema = include_str!("../testdata/starstuff@current.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query ExampleQuery { me { name } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        let r = planner
+            .call(query_planner::CachingRequest::new(
+                "query ExampleQuery {
+                  me {
+                    name
+                  }
+                }"
+                .to_string(),
+                None,
+                context.clone(),
+            ))
+            .await;
+
+        let r2 = planner
+            .call(query_planner::CachingRequest::new(
+                "query ExampleQuery {
+                  me {
+                    name
+                  }
+                }"
+                .to_string(),
+                None,
+                context.clone(),
+            ))
+            .await;
+
+        if let (Err(e), Err(e2)) = (r, r2) {
+            assert_eq!(e.to_string(), e2.to_string());
+        } else {
+            panic!("Expected both calls to return same error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cache_warmup() {
+        let create_delegate = |call_count| {
+            let mut delegate = MockMyQueryPlanner::new();
+            delegate.expect_clone().times(1).returning(move || {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(call_count).returning(|_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+            delegate
+        };
+
+        let configuration: Configuration = Default::default();
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../testdata/starstuff@current.graphql"),
+                &configuration,
+            )
+            .unwrap(),
+        );
+
+        let create_planner = async |delegate| {
+            CachingQueryPlanner::new(
+                delegate,
+                schema.clone(),
+                Default::default(),
+                &configuration,
+                IndexMap::default(),
+            )
+            .await
+            .unwrap()
+        };
+
+        let create_request = || {
+            let query_str = "query ExampleQuery { me { name } }".to_string();
+            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+            query_planner::CachingRequest::new(query_str, None, context)
+        };
+
+        // send query to caching planner. it should save this query plan in its cache
+        let mut planner = create_planner(create_delegate(1)).await;
+        let response = planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(planner.cache.len().await, 1);
+
+        // create and warm up a new planner. new planner's delegate should be called once during
+        // the warm-up phase to populate the cache
+        let query_analysis_layer =
+            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+        let mut new_planner = create_planner(create_delegate(1)).await;
+        new_planner
+            .warm_up(
+                &query_analysis_layer,
+                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                Some(planner.previous_cache()),
+                Some(1),
+                Default::default(),
+                &Default::default(),
+            )
+            .await;
+        // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(new_planner.cache.len().await, 1);
+
+        // create a new delegate that _shouldn't_ be called since the new planner already has the
+        // result in its cache
+        new_planner.delegate = create_delegate(0);
+        let response = new_planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(new_planner.cache.len().await, 1);
     }
 }

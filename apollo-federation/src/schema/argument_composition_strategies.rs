@@ -86,11 +86,7 @@ pub(crate) struct FixedTypeSupportValidator {
 
 impl FixedTypeSupportValidator {
     fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
-        let is_supported = self
-            .supported_types
-            .iter()
-            .any(|supported_ty| *supported_ty == *ty);
-        if is_supported {
+        if self.supported_types.contains(ty) {
             return Ok(());
         }
 
@@ -140,7 +136,7 @@ impl ArgumentComposition for MaxArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -180,7 +176,7 @@ impl ArgumentComposition for MinArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -220,7 +216,7 @@ impl ArgumentComposition for SumArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -247,7 +243,7 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).
@@ -259,7 +255,7 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
                 let mut result = first_ls.to_vec();
                 for val in rest {
                     let val_ls = val.as_list().unwrap();
-                    result.retain(|result_item| val_ls.iter().any(|n| *n == *result_item));
+                    result.retain(|result_item| val_ls.contains(result_item));
                 }
                 Value::List(result)
             })
@@ -280,7 +276,7 @@ impl ArgumentComposition for UnionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).

@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
+use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
@@ -40,13 +41,15 @@ use crate::graphql::Response;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::query_planner::CachingQueryPlanner;
@@ -73,12 +76,10 @@ use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
-use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -93,7 +94,7 @@ pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
-/// Containing [`Service`] in the request lifecyle.
+/// Containing [`Service`] in the request lifecycle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
@@ -204,7 +205,6 @@ async fn service_call(
         planning,
         body.operation_name.clone(),
         context.clone(),
-        schema.clone(),
         // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
         // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
         // places the results in context. Therefore plugins that have modified the query won't actually take effect.
@@ -434,10 +434,11 @@ async fn service_call(
                         ));
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            if let Some(condition) = supergraph_response_event.0.condition() {
-                                if !condition.lock().evaluate_event_response(resp, &ctx) {
-                                    return;
-                                }
+                            if !supergraph_response_event
+                                .condition
+                                .evaluate_event_response(resp, &ctx)
+                            {
+                                return;
                             }
                             attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
@@ -446,7 +447,7 @@ async fn service_call(
                                 ),
                             ));
                             log_event(
-                                supergraph_response_event.0.level(),
+                                supergraph_response_event.level,
                                 "supergraph.response",
                                 attrs.clone(),
                                 "",
@@ -534,7 +535,7 @@ async fn subscription_task(
         .extensions()
         .with_lock(|lock| {
             lock.get::<Arc<UsageReporting>>()
-                .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+                .map(|usage_reporting| usage_reporting.get_stats_report_key().clone())
         })
         .unwrap_or_default();
 
@@ -559,9 +560,17 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
-    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
-
-    let mut timeout = Box::pin(tokio::time::sleep(expires_in));
+    let mut timeout = if supergraph_req
+        .context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .is_some()
+    {
+        let expires_in =
+            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        tokio::time::sleep(expires_in).boxed()
+    } else {
+        futures::future::pending().boxed()
+    };
 
     loop {
         tokio::select! {
@@ -777,31 +786,8 @@ async fn plan_query(
     mut planning: CachingQueryPlanner<QueryPlannerService>,
     operation_name: Option<String>,
     context: Context,
-    schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
-    // none of those tests create an executable document to put it in the context, and the document cannot be created
-    // from inside the supergraph request fake builder, because it needs a schema matching the query.
-    // So while we are updating the tests to create a document manually, this here will make sure current
-    // tests will pass.
-    // During a regular request, `ParsedDocument` is already populated during query analysis.
-    // Some tests do populate the document, so we only do it if it's not already there.
-    if !context.extensions().with_lock(|lock| {
-        lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
-    }) {
-        let doc = crate::spec::Query::parse_document(
-            &query_str,
-            operation_name.as_deref(),
-            &schema,
-            &Configuration::default(),
-        )
-        .map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().with_lock(|lock| {
-            lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
-        });
-    }
-
     let qpr = planning
         .call(
             query_planner::CachingRequest::builder()
@@ -999,7 +985,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let sb = Buffer::new(
             ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
                         .iter()

@@ -595,7 +595,7 @@ impl Merger {
         let existing_type = types
             .entry(object_name.clone())
             .or_insert(copy_object_type_stub(
-                object_name.clone(),
+                object_name,
                 object,
                 is_interface_object,
             ));
@@ -822,10 +822,9 @@ impl Merger {
         union_name: NamedType,
         union: &Node<UnionType>,
     ) {
-        let existing_type = types.entry(union_name.clone()).or_insert(copy_union_type(
-            union_name.clone(),
-            union.description.clone(),
-        ));
+        let existing_type = types
+            .entry(union_name.clone())
+            .or_insert(copy_union_type(union_name, union.description.clone()));
 
         if let ExtendedType::Union(u) = existing_type {
             let join_type_directives =
@@ -1337,7 +1336,7 @@ fn add_core_feature_join(
     supergraph: &mut Schema,
     subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, EnumValue)>,
 ) {
-    // @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    // @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
     supergraph
         .schema_definition
         .make_mut()
@@ -1347,7 +1346,7 @@ fn add_core_feature_join(
             arguments: vec![
                 Node::new(Argument {
                     name: name!("url"),
-                    value: "https://specs.apollo.dev/join/v0.3".into(),
+                    value: "https://specs.apollo.dev/join/v0.5".into(),
                 }),
                 Node::new(Argument {
                     name: name!("for"),
@@ -1366,6 +1365,77 @@ fn add_core_feature_join(
     supergraph
         .types
         .insert(join_field_set_name, join_field_set_scalar);
+
+    // scalar join__FieldValue
+    let join_field_value_name = name!("join__FieldValue");
+    let join_field_value_scalar = ExtendedType::Scalar(Node::new(ScalarType {
+        directives: Default::default(),
+        name: join_field_value_name.clone(),
+        description: None,
+    }));
+    supergraph
+        .types
+        .insert(join_field_value_name, join_field_value_scalar);
+
+    // input join__ContextArgument {
+    //   name: String!
+    //   type: String!
+    //   context: String!
+    //   selection: join__FieldValue!
+    // }
+    let join_context_argument_name = name!("join__ContextArgument");
+    let join_context_argument_input = ExtendedType::InputObject(Node::new(InputObjectType {
+        description: None,
+        name: join_context_argument_name.clone(),
+        directives: Default::default(),
+        fields: vec![
+            (
+                name!("name"),
+                Component::new(InputValueDefinition {
+                    name: name!("name"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("type"),
+                Component::new(InputValueDefinition {
+                    name: name!("type"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("context"),
+                Component::new(InputValueDefinition {
+                    name: name!("context"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("selection"),
+                Component::new(InputValueDefinition {
+                    name: name!("selection"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(join__FieldValue!).into(),
+                    default_value: None,
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    }));
+    supergraph
+        .types
+        .insert(join_context_argument_name, join_context_argument_input);
 
     let join_graph_directive_definition = join_graph_directive_definition();
     supergraph.directive_definitions.insert(
@@ -1550,6 +1620,13 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 ty: ty!(Boolean).into(),
                 default_value: None,
             }),
+            Node::new(InputValueDefinition {
+                name: name!("contextArguments"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!([join__ContextArgument!]).into(),
+                default_value: None,
+            }),
         ],
         locations: vec![
             DirectiveLocation::FieldDefinition,
@@ -1559,6 +1636,9 @@ fn join_field_directive_definition() -> DirectiveDefinition {
     }
 }
 
+// NOTE: the logic for constructing the contextArguments argument
+// is not trivial and is not implemented here. For connectors "expansion",
+// it's handled in carryover.rs.
 fn join_field_applied_directive(
     subgraph_name: &EnumValue,
     requires: Option<&str>,
@@ -1874,7 +1954,10 @@ mod test_enum_value {
 
 fn add_core_feature_inaccessible(supergraph: &mut Schema) {
     // @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
-    let spec = InaccessibleSpecDefinition::new(Version { major: 0, minor: 2 });
+    let spec = InaccessibleSpecDefinition::new(
+        Version { major: 0, minor: 2 },
+        Version { major: 2, minor: 0 },
+    );
 
     supergraph
         .schema_definition

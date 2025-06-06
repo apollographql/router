@@ -88,15 +88,27 @@ impl FilterMeterProvider {
         }
     }
 
+    fn get_private_realtime_regex() -> Regex {
+        Regex::new(r"apollo\.router\.operations\.error").expect("regex should have been valid")
+    }
+
+    pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
+        FilterMeterProvider::builder()
+            .delegate(delegate)
+            .allow(Self::get_private_realtime_regex().clone())
+            .build()
+    }
+
     pub(crate) fn private<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                  r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
+            .deny(Self::get_private_realtime_regex().clone())
             .build()
     }
 
@@ -141,11 +153,9 @@ macro_rules! filter_instrument_fn {
             unit: Option<Cow<'static, str>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
-                (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
-                    self.noop.$name(name)
-                }
-                (Some(deny), None) if deny.is_match(&name) => self.noop.$name(name),
-                (None, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
+                // Deny match takes precedence over allow match
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
                 (_, _) => self.delegate.$name(name),
             };
             if let Some(description) = &description {
@@ -169,11 +179,9 @@ macro_rules! filter_observable_instrument_fn {
             callback: Vec<Callback<$ty>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
-                (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
-                    self.noop.$name(name)
-                }
-                (Some(deny), None) if deny.is_match(&name) => self.noop.$name(name),
-                (None, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
+                // Deny match takes precedence over allow match
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
                 (_, _) => self.delegate.$name(name),
             };
             if let Some(description) = &description {
@@ -264,6 +272,7 @@ mod test {
                 .build(),
         );
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
             .init()
@@ -274,10 +283,6 @@ mod test {
             .add(1, &[]);
         filtered
             .u64_counter("apollo.graphos.cloud.test")
-            .init()
-            .add(1, &[]);
-        filtered
-            .u64_counter("apollo.router.unknown.test")
             .init()
             .add(1, &[]);
         filtered
@@ -296,6 +301,19 @@ mod test {
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
             .init();
+
+        // Mismatches allow
+        filtered
+            .u64_counter("apollo.router.unknown.test")
+            .init()
+            .add(1, &[]);
+
+        // Matches deny
+        filtered
+            .u64_counter("apollo.router.operations.error")
+            .init()
+            .add(1, &[]);
+
         meter_provider.force_flush().unwrap();
 
         let metrics: Vec<_> = exporter
@@ -305,6 +323,8 @@ mod test {
             .flat_map(|m| m.scope_metrics.into_iter())
             .flat_map(|m| m.metrics)
             .collect();
+
+        // Matches allow
         assert!(
             metrics
                 .iter()
@@ -317,12 +337,6 @@ mod test {
             metrics
                 .iter()
                 .any(|m| m.name == "apollo.graphos.cloud.test")
-        );
-
-        assert!(
-            !metrics
-                .iter()
-                .any(|m| m.name == "apollo.router.unknown.test")
         );
 
         assert!(
@@ -340,6 +354,20 @@ mod test {
             metrics
                 .iter()
                 .any(|m| m.name == "apollo.router.schema.connectors")
+        );
+
+        // Mismatches allow
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.unknown.test")
+        );
+
+        // Matches deny
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.error")
         );
     }
 
@@ -459,6 +487,47 @@ mod test {
             !metrics
                 .iter()
                 .any(|m| m.name == "apollo.router.schema.connectors")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_private_realtime_metrics() {
+        let exporter = InMemoryMetricsExporter::default();
+        let meter_provider = FilterMeterProvider::private_realtime(
+            MeterProviderBuilder::default()
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .build(),
+        );
+        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        filtered
+            .u64_counter("apollo.router.operations.error")
+            .init()
+            .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.operations.mismatch")
+            .init()
+            .add(1, &[]);
+        meter_provider.force_flush().unwrap();
+
+        let metrics: Vec<_> = exporter
+            .get_finished_metrics()
+            .unwrap()
+            .into_iter()
+            .flat_map(|m| m.scope_metrics.into_iter())
+            .flat_map(|m| m.metrics)
+            .collect();
+        // Matches
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.error")
+        );
+
+        // Mismatches
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.mismatch")
         );
     }
 }

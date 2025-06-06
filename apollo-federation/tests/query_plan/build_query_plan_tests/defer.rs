@@ -1,4 +1,3 @@
-use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -336,7 +335,7 @@ fn defer_test_non_router_based_defer_case_one() {
 fn defer_test_non_router_based_defer_case_two() {
     // @defer on entity but with no @key
     // While the @defer in the operation is on an entity, the @key in the first subgraph
-    // is explicitely marked as non-resovable, so we cannot use it to actually defer the
+    // is explicitly marked as non-resovable, so we cannot use it to actually defer the
     // fetch to `v1`. Note that example still compose because, defer excluded, `v1` can
     // still be fetched for all queries (which is only `t` here).
     let planner = planner!(
@@ -1745,11 +1744,11 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
     "###
     );
 
-    // TODO: the following plan is admittedly not as effecient as it could be, as the 2 queries to
+    // TODO: the following plan is admittedly not as efficient as it could be, as the 2 queries to
     // subgraph 2 and 3 are done in the "primary" section, but all they do is handle transitive
     // key dependencies for the deferred block, so it would make more sense to defer those fetches
     // as well. It is however tricky to both improve this here _and_ maintain the plan generate
-    // just above (which is admittedly optimial). More precisely, what the code currently does is
+    // just above (which is admittedly optimal). More precisely, what the code currently does is
     // that when it gets to a defer, then it defers the fetch that gets the deferred fields (the
     // fetch to subgraph 4 here), but it puts the "condition" resolution for the key of that fetch
     // in the non-deferred section. Here, resolving that fetch conditions is what creates the
@@ -2094,7 +2093,7 @@ fn defer_test_defer_on_query_root_type() {
             Flatten(path: "op2.next") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on Query {
+                  ... {
                     op3
                   }
                 }
@@ -2108,7 +2107,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       op1
                     }
                   }
@@ -2117,7 +2116,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph2") {
                   {
-                    ... on Query {
+                    ... {
                       op4
                     }
                   }
@@ -2175,7 +2174,7 @@ fn defer_test_defer_on_everything_queried() {
               Flatten(path: "") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       t {
                         __typename
                         id
@@ -2330,8 +2329,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2413,8 +2410,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2517,8 +2512,6 @@ fn defer_test_defer_with_condition_on_single_subgraph() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2623,8 +2616,6 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond1) {
@@ -3178,7 +3169,7 @@ fn defer_test_fragments_expand_into_same_field_regardless_of_defer() {
 fn defer_test_can_request_typename_in_fragment() {
     // NOTE: There is nothing super special about __typename in theory, but because it's a field
     // that is always available in all subghraph (for a type the subgraph has), it tends to create
-    // multiple options for the query planner, and so excercises some code-paths that triggered an
+    // multiple options for the query planner, and so exercises some code-paths that triggered an
     // early bug in the handling of `@defer`
     // (https://github.com/apollographql/federation/issues/2128).
     let planner = planner!(
@@ -3476,6 +3467,56 @@ fn defer_test_the_path_in_defer_includes_traversed_fragments() {
                 {
                   ... on T {
                     v2
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn defer_on_renamed_root_type() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+          type MyQuery {
+            thing: Thing
+          }
+
+          type Thing {
+            i: Int
+          }
+
+          schema { query: MyQuery }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          ... @defer {
+            thing { i }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {}, [
+          Deferred(depends: [], path: "") {
+            { thing { i } }:
+            Flatten(path: "") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... {
+                    thing {
+                      i
+                    }
                   }
                 }
               },

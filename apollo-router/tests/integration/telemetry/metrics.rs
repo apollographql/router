@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use regex::Regex;
 use serde_json::json;
-use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -76,10 +74,10 @@ async fn test_metrics_reloading() {
 
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
         router.assert_metrics_contains_multiple(vec![
-                r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
-                r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
-                r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
-                r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
+            r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
+            r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
+            r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
+            r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
             ], Some(Duration::from_secs(10)))
             .await;
     }
@@ -204,7 +202,7 @@ async fn test_bad_queries() {
         .await;
     router
         .assert_metrics_contains(
-            r#"http_server_request_duration_seconds_count{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router"} 1"#,
+           r#"http_server_request_duration_seconds_count{error_type="Payload Too Large",http_request_method="POST",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -228,8 +226,15 @@ async fn test_graphql_metrics() {
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
+    router.print_logs();
     router
         .assert_log_not_contains("this is a bug and should not happen")
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"my_custom_router_instrument_total{my_response_body="{\"data\":{\"topProducts\":[{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
         .await;
     router
         .assert_metrics_contains(
@@ -250,23 +255,35 @@ async fn test_graphql_metrics() {
         )
         .await;
     router
-            .assert_metrics_contains(r#"graphql_field_list_length_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
-            .await;
+        .assert_metrics_contains(r#"graphql_field_list_length_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
     router
-            .assert_metrics_contains(r#"graphql_field_list_length_bucket{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",le="5"} 1"#, None)
-            .await;
+        .assert_metrics_contains(r#"graphql_field_list_length_bucket{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",le="5"} 1"#, None)
+        .await;
     router
-            .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
-            .await;
+        .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
     router
-            .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 1"#, None)
-            .await;
+        .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
     router
-            .assert_metrics_contains(r#"custom_counter_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
-            .await;
+        .assert_metrics_contains(r#"custom_counter_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
     router
-            .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
-            .await;
+        .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_seconds_count{job_outcome="executed_ok",job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_seconds_count{job_outcome="executed_ok",job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_queue_wait_duration_seconds_count{job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
+    router
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_execution_duration_seconds_count{job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -324,42 +341,18 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
         .await;
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_multi_pipelines() {
-    if !graph_os_enabled() {
-        eprintln!("test skipped");
-        return;
-    }
-    let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_CONFIG)
-        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    let query = router.execute_default_query();
-    // Long running request 1
-    let _h1 = tokio::task::spawn(query);
     router
-        .update_config(include_str!("fixtures/prometheus_updated.router.yaml"))
+        .assert_metrics_contains(
+            r#"apollo_router_compute_jobs_queued{otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
         .await;
 
-    router.assert_reloaded().await;
-    // Long running request 2
-    let query = router.execute_default_query();
-    let _h2 = tokio::task::spawn(query);
-    let metrics = router
-        .get_metrics_response()
-        .await
-        .expect("metrics")
-        .text()
-        .await
-        .expect("metrics");
-    // There should be two instances of the pipeline metrics
-    let regex = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
-    assert_eq!(regex.captures_iter(&metrics).count(), 2);
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_compute_jobs_active_jobs{job_type="query_parsing",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
 }

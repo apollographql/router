@@ -43,13 +43,12 @@ All cache metrics listed above have the following attributes:
 
 ### Coprocessor
 
-- `apollo.router.operations.coprocessor.total` - Total operations with coprocessors enabled.
+- `apollo.router.operations.coprocessor` - Total operations with coprocessors enabled.
+  - `coprocessor.succeeded`: bool
+  - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
+
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
-
-The coprocessor operations metric has the following attributes:
-
-- `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
-- `coprocessor.succeeded`: bool
+  - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
 ### Performance
 
@@ -60,16 +59,21 @@ The coprocessor operations metric has the following attributes:
 - `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
-- `apollo.router.query_planning.queued` - When the legacy planner is used, a gauge of the number of queued plans requests.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
-- `apollo.router.v8.heap.used` - heap memory used by V8, in bytes.
-- `apollo.router.v8.heap.total` - total heap allocated by V8, in bytes.
 
 ### Compute jobs
 
-- `apollo.router.compute_jobs.queued` - A gauge of the number of jobs queued for the thread pool dedicated to CPU-heavy components like GraphQL parsing and validation, and the (new) query planner.
-- `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full
-
+- `apollo.router.compute_jobs.queued` - A gauge of the number of jobs queued for the thread pool dedicated to CPU-heavy components like GraphQL parsing and validation, and the query planner.
+- `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
+- `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+  - `job.outcome`: (`ExecutedOk`, `ExecutedError`, `ChannelError`, `RejectedQueueFull`, `Abandoned`)
+- `apollo.router.compute_jobs.queue.wait.duration` - A histogram of time spent in the compute queue by the job.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+- `apollo.router.compute_jobs.execution.duration` - A histogram of time spent to execute job (excludes time spent in the queue).
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+- `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
 ### Uplink
 
 <Tip>
@@ -122,8 +126,21 @@ The initial call to Uplink during router startup is not reflected in metrics.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
+
 ### Internals
+
 - `apollo.router.pipelines` - The number of request pipelines active in the router
-    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
-    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
-    - `config.hash` - The hash of the configuration
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration
+
+### Server
+
+- `apollo.router.open_connections` - The number of open connections to the Router.
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration.
+  - `server.address` - The address that the router is listening on.
+  - `server.port` - The port that the router is listening on if not a unix socket.
+  - `http.connection.state` - Either `active` or `terminating`.

@@ -394,8 +394,27 @@ impl Literal {
 pub struct Clause(Vec<Literal>);
 
 impl Clause {
+    pub fn literals(&self) -> &[Literal] {
+        &self.0
+    }
+
     pub fn is_always_true(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// check if `self` implies `other`
+    /// - The literals in `other` is a subset of `self`.
+    pub fn implies(&self, other: &Clause) -> bool {
+        let mut self_variables: IndexMap<Name, bool> = IndexMap::default();
+        // Assume that `self` has no conflicts.
+        for lit in &self.0 {
+            self_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+        other.0.iter().all(|lit| {
+            self_variables
+                .get(lit.variable())
+                .is_some_and(|pol| *pol == lit.polarity())
+        })
     }
 
     /// Creates a clause from a vector of literals.
@@ -421,6 +440,8 @@ impl Clause {
         Clause(buf)
     }
 
+    /// `self` ∧ `other` (logical conjunction of clauses, which is also set-union)
+    /// - Returns None if there is a conflict.
     pub fn concatenate(&self, other: &Clause) -> Option<Clause> {
         let mut variables: IndexMap<Name, bool> = IndexMap::default();
         // Assume that `self` has no conflicts.
@@ -432,6 +453,33 @@ impl Clause {
             let entry = variables.entry(var.clone()).or_insert(lit.polarity());
             if *entry != lit.polarity() {
                 return None; // conflict
+            }
+        }
+        Some(Self::from_variable_map(&variables))
+    }
+
+    /// `self` - `other` (set subtraction)
+    /// - Returns None if `self` and `other` are conflicting.
+    pub fn subtract(&self, other: &Clause) -> Option<Clause> {
+        let mut other_variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &other.0 {
+            other_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+
+        let mut variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &self.0 {
+            let var = lit.variable();
+            if let Some(pol) = other_variables.get(var) {
+                if *pol == lit.polarity() {
+                    // Match => Skip `lit`
+                    continue;
+                } else {
+                    // Conflict
+                    return None;
+                }
+            } else {
+                // Keep `lit`
+                variables.insert(var.clone(), lit.polarity());
             }
         }
         Some(Self::from_variable_map(&variables))
@@ -640,6 +688,14 @@ impl DefinitionVariant {
 
     pub fn sub_selection_response_shape(&self) -> Option<&ResponseShape> {
         self.sub_selection_response_shape.as_ref()
+    }
+
+    pub fn with_updated_clause(&self, boolean_clause: Clause) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            representative_field: self.representative_field.clone(),
+            sub_selection_response_shape: self.sub_selection_response_shape.clone(),
+        }
     }
 
     pub fn with_updated_sub_selection_response_shape(&self, new_shape: ResponseShape) -> Self {
@@ -1215,6 +1271,29 @@ fn get_fragment_type_condition(
         }
         _ => bail!("Expected a fragment under the `_entities` selection"),
     })
+}
+
+/// Used for field sets like `@key`/`@requires` fields.
+pub fn compute_response_shape_for_selection_set(
+    schema: &ValidFederationSchema,
+    selection_set: &SelectionSet,
+) -> Result<ResponseShape, FederationError> {
+    let type_condition = &selection_set.ty;
+    let Some(normalized_type_condition) =
+        NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?
+    else {
+        bail!("Unexpected empty type condition for field set: {type_condition}")
+    };
+    let context = ResponseShapeContext {
+        schema: schema.clone(),
+        fragment_defs: Default::default(), // empty
+        parent_type: type_condition.clone(),
+        type_condition: normalized_type_condition,
+        inherited_clause: Clause::default(), // empty
+        current_clause: Clause::default(),   // empty
+        skip_introspection: false,           // false by default
+    };
+    context.process_selection_set(selection_set)
 }
 
 //==================================================================================================

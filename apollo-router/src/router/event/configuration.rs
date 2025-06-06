@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use derivative::Derivative;
 use derive_more::Display;
@@ -25,17 +26,17 @@ pub enum ConfigurationSource {
     ///
     /// Can be created through `serde::Deserialize` from various formats,
     /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-    #[display(fmt = "Static")]
-    #[from(types(Configuration))]
+    #[display("Static")]
+    #[from(Configuration, Box<Configuration>)]
     Static(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] ConfigurationStream),
 
     /// A yaml file that may be watched for changes
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the configuration file.
         path: PathBuf,
@@ -60,12 +61,12 @@ impl ConfigurationSource {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
-                stream::iter(vec![UpdateConfiguration(*instance)]).boxed()
+                stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
-                    UpdateConfiguration(c)
+                    UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
             ConfigurationSource::File { path, watch } => {
@@ -90,7 +91,9 @@ impl ConfigurationSource {
                                             {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
-                                                    Some(UpdateConfiguration(configuration))
+                                                    Some(UpdateConfiguration(Arc::new(
+                                                        configuration,
+                                                    )))
                                                 }
                                                 Err(err) => {
                                                     tracing::error!("{}", err);
@@ -128,8 +131,10 @@ impl ConfigurationSource {
                                 }
                             } else {
                                 configuration.uplink = uplink_config.clone();
-                                stream::once(future::ready(UpdateConfiguration(configuration)))
-                                    .boxed()
+                                stream::once(future::ready(UpdateConfiguration(Arc::new(
+                                    configuration,
+                                ))))
+                                .boxed()
                             }
                         }
                         Err(err) => {

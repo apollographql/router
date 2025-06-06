@@ -4,29 +4,61 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
-use position::ObjectFieldDefinitionPosition;
+use apollo_compiler::validation::WithErrors;
+use itertools::Itertools;
+use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
+use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
+use crate::CONTEXT_VERSIONS;
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
+use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cost_spec_definition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
+use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_SERVICE_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
+use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -39,10 +71,12 @@ pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
+pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
+pub(crate) mod validators;
 
-fn compute_subgraph_metadata(
-    schema: &Valid<FederationSchema>,
+pub(crate) fn compute_subgraph_metadata(
+    schema: &FederationSchema,
 ) -> Result<Option<SubgraphMetadata>, FederationError> {
     Ok(
         if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
@@ -56,7 +90,7 @@ fn compute_subgraph_metadata(
 pub(crate) mod type_and_directive_specification;
 
 /// A GraphQL schema with federation data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FederationSchema {
     schema: Schema,
     referencers: Referencers,
@@ -143,6 +177,13 @@ impl FederationSchema {
         self.get_type(type_name).ok()
     }
 
+    pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
+        self.schema()
+            .schema_definition
+            .iter_root_operations()
+            .any(|op| *op.1 == *type_name)
+    }
+
     /// Return the possible runtime types for a definition.
     ///
     /// For a union, the possible runtime types are its members.
@@ -204,6 +245,7 @@ impl FederationSchema {
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
+    // PORT_NOTE: Corresponds to `FederationMetadata.entityType` in JS
     pub(crate) fn entity_type(
         &self,
     ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
@@ -220,6 +262,94 @@ impl FederationSchema {
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
             ))),
             None => Ok(None),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.serviceType` in JS
+    pub(crate) fn service_type(&self) -> Result<ObjectTypeDefinitionPosition, FederationError> {
+        // Note: `_Service` type name can't be renamed.
+        match self.schema.types.get(&FEDERATION_SERVICE_TYPE_NAME_IN_SPEC) {
+            Some(ExtendedType::Object(_)) => Ok(ObjectTypeDefinitionPosition {
+                type_name: FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{spec_name}` type definition",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
+            None => bail!(
+                "Unexpected: type not found for federation spec's `{spec_name}`",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.isFed2Schema` in JS
+    // This works even if the schema bootstrapping was not completed.
+    pub(crate) fn is_fed_2(&self) -> bool {
+        self.federation_link()
+            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
+    fn federation_link(&self) -> Option<&Arc<Link>> {
+        self.metadata().and_then(|metadata| {
+            metadata
+                .by_identity
+                .get(FederationSpecDefinition::latest().identity())
+        })
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.fieldSetType` in JS.
+    pub(crate) fn field_set_type(&self) -> Result<ScalarTypeDefinitionPosition, FederationError> {
+        let name_in_schema =
+            self.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
+        match self.schema.types.get(&name_in_schema) {
+            Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
+                type_name: name_in_schema,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{name_in_schema}` type definition"
+            ),
+            None => {
+                bail!("Unexpected: type not found for federation spec's `{name_in_schema}`")
+            }
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationTypeNameInSchema` in JS.
+    // Note: Unfortunately, this overlaps with `ValidFederationSchema`'s
+    //       `federation_type_name_in_schema` method. This method was added because it's used
+    //       during composition before `ValidFederationSchema` is created.
+    pub(crate) fn federation_type_name_in_schema(
+        &self,
+        name: Name,
+    ) -> Result<Name, FederationError> {
+        // Currently, the types used to define the federation operations, that is _Any, _Entity and
+        // _Service, are not considered part of the federation spec, and are instead hardcoded to
+        // the names above. The reason being that there is no way to maintain backward
+        // compatibility with fed2 if we were to add those to the federation spec without requiring
+        // users to add those types to their @link `import`, and that wouldn't be a good user
+        // experience (because most users don't really know what those types are/do). And so we
+        // special case it.
+        if name.starts_with('_') {
+            return Ok(name);
+        }
+
+        if self.is_fed_2() {
+            let Some(links) = self.metadata() else {
+                bail!("Schema should be a core schema")
+            };
+            let Some(federation_link) = links
+                .by_identity
+                .get(FederationSpecDefinition::latest().identity())
+            else {
+                bail!("Schema should have the latest federation link")
+            };
+            Ok(federation_link.type_name_in_schema(&name))
+        } else {
+            // The only type here so far is the the `FieldSet` one. And in fed1, it's called `_FieldSet`, so ...
+            Name::new(&format!("_{name}"))
+                .map_err(|e| internal_error!("Invalid name `_{name}`: {e}"))
         }
     }
 
@@ -301,8 +431,10 @@ impl FederationSchema {
                     let directives = &interface_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: interface_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -316,8 +448,10 @@ impl FederationSchema {
                     let directives = &object_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications
-                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            target: object_field_argument_position.clone().into(),
+                        }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -339,13 +473,28 @@ impl FederationSchema {
                 Ok(object_type) => {
                     let directives = &object_type.directives;
                     for directive in directives.get_all(&key_directive_definition.name) {
-                        let arguments = federation_spec.key_directive_arguments(directive);
-                        applications.push(arguments.map(|args| KeyDirective {
-                            arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
-                            target: object_type_position.clone().into(),
-                        }));
+                        if !matches!(
+                            directive
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.key_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(SingleFederationError::KeyInvalidFieldsType {
+                                target_type: object_type_position.type_name.clone(),
+                                application: directive.to_string(),
+                            }
+                            .into()))
+                        } else {
+                            let arguments = federation_spec.key_directive_arguments(directive);
+                            applications.push(arguments.map(|args| KeyDirective {
+                                arguments: args,
+                                schema_directive: directive,
+                                sibling_directives: directives,
+                                target: object_type_position.clone().into(),
+                            }));
+                        }
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -381,19 +530,39 @@ impl FederationSchema {
             .get_directive(&provides_directive_definition.name)?;
 
         let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
-        for field_definition_position in &provides_directive_referencers.object_fields {
+        for field_definition_position in provides_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
                     for provides_directive_application in
                         directives.get_all(&provides_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .provides_directive_arguments(provides_directive_application);
-                        applications.push(arguments.map(|args| ProvidesDirective {
-                            arguments: args,
-                            target_return_type: field_definition.ty.inner_named_type(),
-                        }));
+                        if !matches!(
+                            provides_directive_application
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.provides_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(
+                                SingleFederationError::ProvidesInvalidFieldsType {
+                                    coordinate: field_definition_position.coordinate(),
+                                    application: provides_directive_application.to_string(),
+                                }
+                                .into(),
+                            ))
+                        } else {
+                            let arguments = federation_spec
+                                .provides_directive_arguments(provides_directive_application);
+                            applications.push(arguments.map(|args| ProvidesDirective {
+                                arguments: args,
+                                schema_directive: provides_directive_application,
+                                target: field_definition_position.clone(),
+                                target_return_type: field_definition.ty.inner_named_type(),
+                            }));
+                        }
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -412,18 +581,91 @@ impl FederationSchema {
             .get_directive(&requires_directive_definition.name)?;
 
         let mut applications = Vec::new();
-        for field_definition_position in &requires_directive_referencers.object_fields {
+        for field_definition_position in requires_directive_referencers.object_or_interface_fields()
+        {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
                     let directives = &field_definition.directives;
-                    for provides_directive_application in
+                    for requires_directive_application in
                         directives.get_all(&requires_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .requires_directive_arguments(provides_directive_application);
-                        applications.push(arguments.map(|args| RequiresDirective {
+                        if !matches!(
+                            requires_directive_application
+                                .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, self.schema())
+                                .map(|arg| arg.as_ref()),
+                            Ok(Value::String(_)),
+                        ) {
+                            // Not ideal, but the call to `federation_spec.requires_directive_arguments` below will return an internal error
+                            // when this isn't the right type. We preempt that here to provide a better error to the user during validation.
+                            applications.push(Err(
+                                SingleFederationError::RequiresInvalidFieldsType {
+                                    coordinate: field_definition_position.coordinate(),
+                                    application: requires_directive_application.to_string(),
+                                }
+                                .into(),
+                            ))
+                        } else {
+                            let arguments = federation_spec
+                                .requires_directive_arguments(requires_directive_application);
+                            applications.push(arguments.map(|args| RequiresDirective {
+                                arguments: args,
+                                schema_directive: requires_directive_application,
+                                target: field_definition_position.clone(),
+                            }));
+                        }
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    // TODO: This currently only returns targets for object_fields and interface_fields
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
+        let tag_directive_referencers = self
+            .referencers()
+            .get_directive(&tag_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
-                            target: field_definition_position,
+                            target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for field_definition_position in &tag_directive_referencers.interface_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InterfaceField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
                         }));
                     }
                 }
@@ -431,6 +673,159 @@ impl FederationSchema {
             }
         }
         Ok(applications)
+    }
+
+    pub(crate) fn list_size_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ListSizeDirective> {
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        else {
+            return Ok(Vec::new());
+        };
+        let Ok(list_size_directive_referencers) = self
+            .referencers()
+            .get_directive(list_size_directive_name.as_str())
+        else {
+            return Ok(Vec::new());
+        };
+
+        let mut applications = Vec::new();
+        for field_definition_position in
+            list_size_directive_referencers.object_or_interface_fields()
+        {
+            let field_definition = field_definition_position.get(self.schema())?;
+            match CostSpecDefinition::list_size_directive_from_field_definition(
+                self,
+                field_definition,
+            ) {
+                Ok(Some(list_size_directive)) => {
+                    applications.push(Ok(ListSizeDirective {
+                        directive: list_size_directive,
+                        parent_type: field_definition_position.type_name().clone(),
+                        target: field_definition,
+                    }));
+                }
+                Ok(None) => {
+                    // No listSize directive found, continue
+                }
+                Err(error) => {
+                    applications.push(Err(error));
+                }
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
+        self.referencers().interface_types.contains_key(type_name)
+    }
+
+    pub(crate) fn all_features(
+        &self,
+    ) -> Result<Vec<&'static (dyn SpecDefinition)>, FederationError> {
+        let Some(links) = self.metadata() else {
+            return Ok(Vec::new());
+        };
+
+        let mut features: Vec<&'static (dyn SpecDefinition)> =
+            Vec::with_capacity(links.all_links().len());
+        if let Some(auth_link) = links.by_identity.get(&Identity::authenticated_identity()) {
+            let auth_spec = AUTHENTICATED_VERSIONS
+                .find(&auth_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &auth_link.url.identity.name,
+                        &auth_link.url.version,
+                        AUTHENTICATED_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(auth_spec);
+        }
+        if let Some(context_link) = links.by_identity.get(&Identity::context_identity()) {
+            let context_spec = CONTEXT_VERSIONS
+                .find(&context_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &context_link.url.identity.name,
+                        &context_link.url.version,
+                        CONTEXT_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(context_spec);
+        }
+        if let Some(cost_link) = links.by_identity.get(&Identity::cost_identity()) {
+            let cost_spec = COST_VERSIONS.find(&cost_link.url.version).ok_or_else(|| {
+                Self::unknown_version_error(
+                    &cost_link.url.identity.name,
+                    &cost_link.url.version,
+                    COST_VERSIONS.versions(),
+                )
+            })?;
+            features.push(cost_spec);
+        }
+        if let Some(inaccessible_link) = links.by_identity.get(&Identity::inaccessible_identity()) {
+            let inaccessible_spec = INACCESSIBLE_VERSIONS
+                .find(&inaccessible_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &inaccessible_link.url.identity.name,
+                        &inaccessible_link.url.version,
+                        INACCESSIBLE_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(inaccessible_spec);
+        }
+        if let Some(policy_link) = links.by_identity.get(&Identity::policy_identity()) {
+            let policy_spec = POLICY_VERSIONS
+                .find(&policy_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &policy_link.url.identity.name,
+                        &policy_link.url.version,
+                        POLICY_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(policy_spec);
+        }
+        if let Some(requires_scopes_link) =
+            links.by_identity.get(&Identity::requires_scopes_identity())
+        {
+            let requires_scopes_spec = REQUIRES_SCOPES_VERSIONS
+                .find(&requires_scopes_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &requires_scopes_link.url.identity.name,
+                        &requires_scopes_link.url.version,
+                        REQUIRES_SCOPES_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(requires_scopes_spec);
+        }
+        if let Some(tag_link) = links.by_identity.get(&Identity::tag_identity()) {
+            let tag_spec = TAG_VERSIONS.find(&tag_link.url.version).ok_or_else(|| {
+                Self::unknown_version_error(
+                    &tag_link.url.identity.name,
+                    &tag_link.url.version,
+                    TAG_VERSIONS.versions(),
+                )
+            })?;
+            features.push(tag_spec);
+        }
+
+        Ok(features)
+    }
+
+    fn unknown_version_error<'a>(
+        spec_name: &str,
+        version: &impl std::fmt::Display,
+        mut supported_versions: impl Iterator<Item = &'a Version>,
+    ) -> SingleFederationError {
+        SingleFederationError::UnknownLinkVersion {
+            message: format!(
+                "Detected unsupported {spec_name} specification version {version}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
+                supported_versions.join(", ")
+            ),
+        }
     }
 }
 
@@ -446,31 +841,113 @@ pub(crate) struct ContextDirective<'schema> {
 pub(crate) struct FromContextDirective<'schema> {
     /// The parsed arguments of this `@fromContext` application
     arguments: FromContextDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: FieldArgumentDefinitionPosition,
 }
 
 pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
     target: ObjectOrInterfaceTypeDefinitionPosition,
 }
 
+impl HasFields for KeyDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
+}
+
+impl KeyDirective<'_> {
+    pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
+        &self.target
+    }
+}
+
+pub(crate) struct ListSizeDirective<'schema> {
+    /// The parsed directive
+    directive: cost_spec_definition::ListSizeDirective,
+    /// The parent type of `target`
+    parent_type: Name,
+    /// The schema position to which this directive is applied
+    target: &'schema FieldDefinition,
+}
+
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema Node<Directive>,
+    /// The schema position to which this directive is applied
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
+}
+
+impl HasFields for ProvidesDirective<'_> {
+    /// The string representation of the field set
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    /// The type from which the field set selects
+    fn target_type(&self) -> &Name {
+        self.target_return_type
+    }
 }
 
 pub(crate) struct RequiresDirective<'schema> {
     /// The parsed arguments of this `@requires` application
     arguments: RequiresDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema Node<Directive>,
     /// The schema position to which this directive is applied
-    target: &'schema ObjectFieldDefinitionPosition,
+    /// - Although the directive is not allowed on interfaces, we still need to collect them
+    ///   for validation purposes.
+    target: ObjectOrInterfaceFieldDefinitionPosition,
+}
+
+impl HasFields for RequiresDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
+}
+
+pub(crate) struct TagDirective<'schema> {
+    /// The parsed arguments of this `@tag` application
+    arguments: TagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: TagDirectiveTargetPosition, // TODO: Make this a reference
+    /// Reference to the directive in the schema
+    directive: &'schema Node<Directive>,
+}
+
+pub(crate) trait HasFields {
+    fn fields(&self) -> &str;
+    fn target_type(&self) -> &Name;
+
+    fn parse_fields(&self, schema: &Schema) -> Result<FieldSet, WithErrors<FieldSet>> {
+        FieldSet::parse(
+            Valid::assume_valid_ref(schema),
+            self.target_type().clone(),
+            self.fields(),
+            "field_set.graphql",
+        )
+    }
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
@@ -488,7 +965,7 @@ impl ValidFederationSchema {
 
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
     #[allow(clippy::result_large_err)] // lint is accurate but this is not in a hot path
-    fn new_assume_valid(
+    pub fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
         // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
@@ -526,7 +1003,7 @@ impl ValidFederationSchema {
     ) -> Result<Name, FederationError> {
         // Currently, the types used to define the federation operations, that is _Any, _Entity and _Service,
         // are not considered part of the federation spec, and are instead hardcoded to the names above.
-        // The reason being that there is no way to maintain backward compatbility with fed2 if we were to add
+        // The reason being that there is no way to maintain backward compatibility with fed2 if we were to add
         // those to the federation spec without requiring users to add those types to their @link `import`,
         // and that wouldn't be a good user experience (because most users don't really know what those types
         // are/do). And so we special case it.
@@ -590,5 +1067,55 @@ impl Hash for ValidFederationSchema {
 impl std::fmt::Debug for ValidFederationSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ValidFederationSchema @ {:?}", Arc::as_ptr(&self.schema))
+    }
+}
+
+pub(crate) trait SchemaElement {
+    fn origins(&self) -> HashSet<&ComponentOrigin>;
+
+    #[allow(unused)]
+    fn has_non_extension_elements(&self) -> bool {
+        self.origins()
+            .iter()
+            .any(|origin| matches!(origin, ComponentOrigin::Definition))
+    }
+
+    #[allow(unused)]
+    fn has_extension_elements(&self) -> bool {
+        self.origins()
+            .iter()
+            .any(|origin| matches!(origin, ComponentOrigin::Extension(_)))
+    }
+
+    fn origin_to_use(&self) -> ComponentOrigin {
+        let origins = self.origins();
+        let has_definition = origins.contains(&ComponentOrigin::Definition);
+        // Find an arbitrary extension origin if the schema definition has any extension elements.
+        // TODO: No ordering between origins.
+        let first_extension = origins
+            .into_iter()
+            .find(|origin| matches!(origin, ComponentOrigin::Extension(_)));
+        if has_definition {
+            // Use the existing definition if exists
+            ComponentOrigin::Definition
+        } else if let Some(first_extension) = first_extension {
+            // If there is an extension, use the first extension.
+            first_extension.clone()
+        } else {
+            // Otherwise, use a new definition
+            ComponentOrigin::Definition
+        }
+    }
+}
+
+impl SchemaElement for SchemaDefinition {
+    fn origins(&self) -> HashSet<&ComponentOrigin> {
+        self.directives
+            .iter()
+            .map(|component| &component.origin)
+            .chain(self.query.iter().map(|name| &name.origin))
+            .chain(self.mutation.iter().map(|name| &name.origin))
+            .chain(self.subscription.iter().map(|name| &name.origin))
+            .collect()
     }
 }

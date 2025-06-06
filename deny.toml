@@ -58,7 +58,9 @@ allow = [
     "OpenSSL", # required by aws-lc-sys
     "Unicode-DFS-2016",
     "Unicode-3.0",
-    "Zlib"
+    "Zlib",
+    "NCSA", # similar to MIT/BSD-3-Clause, used by libfuzzer
+    "CDLA-Permissive-2.0", # webpki-roots
 ]
 confidence-threshold = 0.8
 

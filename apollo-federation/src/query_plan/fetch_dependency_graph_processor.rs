@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -302,7 +302,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 // Note that currently `ConditionNode` only works for variables
                 // (`ConditionNode.condition` is expected to be a variable name and nothing else).
                 // We could change that, but really, why have a trivial `ConditionNode`
-                // when we can optimise things righ away.
+                // when we can optimise things right away.
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
@@ -457,7 +457,7 @@ fn flat_wrap_nodes(
     let mut iter = nodes.into_iter().flatten();
     let first = iter.next()?;
     let Some(second) = iter.next() else {
-        return Some(first.clone());
+        return Some(first);
     };
     let mut nodes = Vec::new();
     for node in [first, second].into_iter().chain(iter) {

@@ -29,3 +29,7 @@ jobs:
           title: 'chore: Update Apollo Protobuf'
           body: |
             This updates the copy of `reports.proto` which this repository relies on with the latest copy fetched via our public endpoint.
+
+            > [!IMPORTANT]
+            > This PR will be continuously force-pushed with the new `reports.proto` copy. If the update requires code changes, apply them
+            > in a separate PR. This PR will be automatically closed if it is no longer necessary.

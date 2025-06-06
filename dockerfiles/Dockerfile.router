@@ -61,7 +61,7 @@ ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
 # Create a wrapper script to run the router, use exec to ensure signals are handled correctly
 RUN \
-  echo '#!/usr/bin/env bash \
+  echo '#!/bin/bash \
 \nset -e \
 \n \
 \nif [ -f "/usr/bin/heaptrack" ]; then \

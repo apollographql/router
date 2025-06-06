@@ -1,0 +1,56 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect"]
+)
+
+type Query {
+    dollar: String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$" # INVALID - there is no input
+        }
+        selection: "$"
+    )
+    dollarField: String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$.foo" # INVALID - there is no input
+        }
+        selection: "$"
+    )
+    objectLiteral: String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$({ userid: 'foo' })" # VALID
+        }
+        selection: "$"
+    )
+    objectLiteralWithVariable(userid: ID!): String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$({ userid: $args.userid })" # VALID
+        }
+        selection: "$"
+    )
+    invalidArrowMethod(userid: ID!): String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$({ userid: $args.userid })->no_such_method" # INVALID - no such method
+        }
+        selection: "$"
+    )
+    invalidVariable(userid: ID!): String
+    @connect(
+        http: {
+            POST: "http://127.0.0.1",
+            body: "$({ userid: $nosuchvariable })" # INVALID - no such variable
+        }
+        selection: "$"
+    )
+}

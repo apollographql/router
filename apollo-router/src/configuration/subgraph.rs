@@ -70,7 +70,7 @@ use serde::de::Visitor;
 // This `SubgraphConfiguration` type handles overrides through a custom deserializer that works in three steps:
 // - deserialize `all` and `subgraphs` fields to `serde_yaml::Mapping`
 // - for each specific subgraph configuration, start from the `all` configuration (or default implementation),
-// and replace the overriden fields
+// and replace the overridden fields
 // - deserialize to the plugin configuration
 
 /// Configuration options pertaining to the subgraph server component.

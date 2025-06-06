@@ -1,0 +1,21 @@
+# Simple config for testing file uploads with rhai header modifications
+
+csrf:
+  required_headers:
+    - x-my-header
+    - apollo-require-preflight
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 512kb
+        max_files: 5
+include_subgraph_errors:
+  all: true
+
+rhai:
+  scripts: ./tests/fixtures/file_upload
+  main: add_header.rhai

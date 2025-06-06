@@ -8,12 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
-use fred::clients::RedisClient;
+use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
-use fred::prelude::RedisConfig;
-use fred::types::ScanType;
-use fred::types::Scanner;
+use fred::prelude::Config as RedisConfig;
+use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -330,7 +330,15 @@ impl Telemetry {
         let headers: HashMap<String, String> = request
             .headers
             .iter()
-            .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value
+                        .to_str()
+                        .expect("non-UTF-8 header value in tests")
+                        .to_string(),
+                )
+            })
             .collect();
 
         match self {
@@ -428,8 +436,8 @@ impl IntegrationTest {
 
         // Allow for GET or POST so that connectors works
         let http_method = match http_method.unwrap_or("POST".to_string()).as_str() {
-            "GET" => Method::Get,
-            "POST" => Method::Post,
+            "GET" => Method::GET,
+            "POST" => Method::POST,
             _ => panic!("Unknown http method specified"),
         };
         let subgraph_context = Arc::new(Mutex::new(None));
@@ -838,7 +846,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn pid(&mut self) -> i32 {
+    pub(crate) fn pid(&self) -> i32 {
         self.router
             .as_ref()
             .expect("router must have been started")
@@ -882,14 +890,28 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn print_logs(&mut self) {
-        while let Ok(line) = self.stdio_rx.try_recv() {
-            self.logs.push(line.to_string());
-        }
-
+    pub fn print_logs(&self) {
         for line in &self.logs {
             println!("{}", line);
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn read_logs(&mut self) {
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            self.logs.push(line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn capture_logs<T>(&mut self, try_match_line: impl Fn(String) -> Option<T>) -> Vec<T> {
+        let mut logs = Vec::new();
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            if let Some(log) = try_match_line(line) {
+                logs.push(log);
+            }
+        }
+        logs
     }
 
     #[allow(dead_code)]
@@ -1043,7 +1065,7 @@ impl IntegrationTest {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn dump_stack_traces(&mut self) {
+    pub fn dump_stack_traces(&self) {
         if let Ok(trace) = rstack::TraceOptions::new()
             .symbols(true)
             .thread_names(true)
@@ -1069,7 +1091,7 @@ impl IntegrationTest {
         }
     }
     #[cfg(not(target_os = "linux"))]
-    pub fn dump_stack_traces(&mut self) {}
+    pub fn dump_stack_traces(&self) {}
 
     #[allow(dead_code)]
     pub(crate) fn force_flush(&self) {

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::connectors::expand::Connectors;
 use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
@@ -34,7 +34,7 @@ struct ConfiguredSubgraphs<'a> {
     enabled: HashSet<&'a String>,
 
     /// Subgraphs that are explicitly disabled
-    /// Note: Not all plugins allow for explicitely disabling a subgraph
+    /// Note: Not all plugins allow for explicitly disabling a subgraph
     disabled: HashSet<&'a String>,
 }
 

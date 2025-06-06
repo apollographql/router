@@ -154,6 +154,11 @@ where
     pub(crate) fn activate(&self) {
         self.storage.activate()
     }
+
+    #[cfg(test)]
+    pub(crate) async fn len(&self) -> usize {
+        self.storage.len().await
+    }
 }
 
 pub(crate) struct Entry<K: KeyType, V: ValueType, UncachedError> {

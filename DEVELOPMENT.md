@@ -48,6 +48,10 @@ docker-compose up -d
 have issues and you want to see the logs or if you want to run the service
 in foreground.
 
+### Testing
+
+Tests on this repository are run using [nextest](https://nexte.st/).
+
 ### Run against the docker-compose or Node.js setup
 
 Once the subgraphs are up and running, run the router with this command:
@@ -101,12 +105,12 @@ cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 e.g.: heap allocation tracing
 
 ```shell
-cargo build --profile release-dhat --features dhat-heap 
+cargo build --profile release-dhat --features dhat-heap
 ```
 
 This will create a router in `./target/release-dhat`, which can be run with:
 ```shell
-cargo run --profile release-dhat --feautures dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+cargo run --profile release-dhat --features dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
 ```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
@@ -117,6 +121,18 @@ For more details on interpreting these files and running tests, see the [dhat-rs
 ### Troubleshoot
 
 * If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.
+
+### Code coverage
+
+Code coverage is run in CI nightly, but not done on every commit.  To view coverage from nightly runs visit [our coverage on Codecov](https://codecov.io/gh/apollographql/router).
+
+To run code coverage locally, you can `cargo install cargo-llvm-cov`, and run:
+
+```shell
+cargo llvm-cov nextest -- --summary
+```
+
+For full information on available options, including HTML reports and `lcov.info` file support, see [nextest documentation](https://nexte.st/book/coverage.html) and [cargo llvm-cov documentation](https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-cc-code-linked-to-rust-librarybinary).
 
 ## Project maintainers
 

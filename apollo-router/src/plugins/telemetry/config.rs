@@ -21,6 +21,7 @@ use serde::Serialize;
 use super::*;
 use crate::Configuration;
 use crate::plugin::serde::deserialize_option_header_name;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
@@ -687,7 +688,7 @@ fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
-        // Because when datadog is enabled the global sampling is overriden to always_on
+        // Because when Datadog is enabled the global sampling is overridden to always_on
         if self
             .exporters
             .tracing
@@ -779,6 +780,18 @@ impl Conf {
                 }
             }
             _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
+    }
+
+    pub(crate) fn apollo(configuration: &Configuration) -> ApolloTelemetryConfig {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo,
+                    _ => ApolloTelemetryConfig::default(),
+                }
+            }
+            _ => ApolloTelemetryConfig::default(),
         }
     }
 }

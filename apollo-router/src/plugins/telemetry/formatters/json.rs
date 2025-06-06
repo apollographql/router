@@ -357,7 +357,7 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
     if let Some(root_span) = root.next() {
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
-        if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
+        if let Some(otel_data) = ext.get::<OtelData>() {
             if let Some(attributes) = otel_data.builder.attributes.as_ref() {
                 if let Some(kv) = attributes
                     .iter()
@@ -460,9 +460,7 @@ impl io::Write for WriteAdaptor<'_> {
         let s =
             std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        self.fmt_write
-            .write_str(s)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        self.fmt_write.write_str(s).map_err(io::Error::other)?;
 
         Ok(s.len())
     }

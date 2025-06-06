@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -31,8 +30,8 @@ use crate::subgraph::spec::LinkSpecDefinitions;
 use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
 
-mod database;
 pub mod spec;
+pub mod typestate; // TODO: Move here to overwrite Subgraph after API is reasonable
 
 pub struct Subgraph {
     pub name: String,
@@ -305,32 +304,6 @@ impl std::fmt::Debug for Subgraph {
     }
 }
 
-pub struct Subgraphs {
-    subgraphs: BTreeMap<String, Arc<Subgraph>>,
-}
-
-#[allow(clippy::new_without_default)]
-impl Subgraphs {
-    pub fn new() -> Self {
-        Subgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    pub fn add(&mut self, subgraph: Subgraph) -> Result<(), String> {
-        if self.subgraphs.contains_key(&subgraph.name) {
-            return Err(format!("A subgraph named {} already exists", subgraph.name));
-        }
-        self.subgraphs
-            .insert(subgraph.name.clone(), Arc::new(subgraph));
-        Ok(())
-    }
-
-    pub fn get(&self, name: &str) -> Option<Arc<Subgraph>> {
-        self.subgraphs.get(name).cloned()
-    }
-}
-
 pub struct ValidSubgraph {
     pub name: String,
     pub url: String,
@@ -353,48 +326,209 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::subgraph::database::keys;
+/// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
+/// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
+/// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
+/// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
+/// for missing error codes and the like.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct SubgraphError {
+    pub(crate) subgraph: String,
+    pub(crate) error: FederationError,
+}
 
-    #[test]
-    fn can_inspect_a_type_key() {
-        // TODO: no schema expansion currently, so need to having the `@link` to `link` and the
-        // @link directive definition for @link-bootstrapping to work. Also, we should
-        // theoretically have the @key directive definition added too (but validation is not
-        // wired up yet, so we get away without). Point being, this is just some toy code at
-        // the moment.
+impl SubgraphError {
+    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+        let subgraph = subgraph.into();
+        let error = error.into();
+        SubgraphError { subgraph, error }
+    }
 
-        let schema = r#"
-          extend schema
-            @link(url: "https://specs.apollo.dev/link/v1.0", import: ["Import"])
-            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+    pub fn error(&self) -> &FederationError {
+        &self.error
+    }
 
-          type Query {
-            t: T
-          }
+    pub fn into_inner(self) -> FederationError {
+        self.error
+    }
 
-          type T @key(fields: "id") {
-            id: ID!
-            x: Int
-          }
+    // Format subgraph errors in the same way as `Rover` does.
+    // And return them as a vector of (error_code, error_message) tuples
+    // - Gather associated errors from the validation error.
+    // - Split each error into its code and message.
+    // - Add the subgraph name prefix to CompositionError message.
+    pub fn format_errors(&self) -> Vec<(String, String)> {
+        self.error
+            .errors()
+            .iter()
+            .map(|e| {
+                (
+                    e.code_string(),
+                    format!("[{subgraph}] {e}", subgraph = self.subgraph),
+                )
+            })
+            .collect()
+    }
+}
 
-          enum link__Purpose {
-            SECURITY
-            EXECUTION
-          }
+impl Display for SubgraphError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.subgraph, self.error)
+    }
+}
 
-          scalar Import
+pub mod test_utils {
+    use super::SubgraphError;
+    use super::typestate::Expanded;
+    use super::typestate::Subgraph;
+    use super::typestate::Validated;
 
-          directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-        "#;
+    pub enum BuildOption {
+        AsIs,
+        AsFed2,
+    }
 
-        let subgraph = Subgraph::new("S1", "http://s1", schema).unwrap();
-        let keys = keys(&subgraph.schema, &name!("T"));
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys.first().unwrap().type_name, name!("T"));
+    pub fn build_inner(
+        schema_str: &str,
+        build_option: BuildOption,
+    ) -> Result<Subgraph<Validated>, SubgraphError> {
+        let name = "S";
+        let subgraph =
+            Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
+        let subgraph = if matches!(build_option, BuildOption::AsFed2) {
+            subgraph.into_fed2_test_subgraph()?
+        } else {
+            subgraph
+        };
+        let mut subgraph = subgraph.expand_links()?.assume_upgraded();
+        subgraph.normalize_root_types()?;
+        subgraph.validate()
+    }
 
-        // TODO: no accessible selection yet.
+    pub fn build_inner_expanded(
+        schema_str: &str,
+        build_option: BuildOption,
+    ) -> Result<Subgraph<Expanded>, SubgraphError> {
+        let name = "S";
+        let subgraph =
+            Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
+        let subgraph = if matches!(build_option, BuildOption::AsFed2) {
+            subgraph.into_fed2_test_subgraph()?
+        } else {
+            subgraph
+        };
+        subgraph.expand_links()
+    }
+
+    pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
+        build_inner(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
+    }
+
+    pub fn build_and_expand(schema_str: &str) -> Subgraph<Expanded> {
+        build_inner_expanded(schema_str, BuildOption::AsIs).expect("expanded subgraph to be valid")
+    }
+
+    pub fn build_for_errors_with_option(
+        schema: &str,
+        build_option: BuildOption,
+    ) -> Vec<(String, String)> {
+        build_inner(schema, build_option)
+            .expect_err("subgraph error was expected")
+            .format_errors()
+    }
+
+    /// Build subgraph expecting errors, assuming fed 2.
+    pub fn build_for_errors(schema: &str) -> Vec<(String, String)> {
+        build_for_errors_with_option(schema, BuildOption::AsFed2)
+    }
+
+    pub fn remove_indentation(s: &str) -> String {
+        // count the last lines that are space-only
+        let first_empty_lines = s.lines().take_while(|line| line.trim().is_empty()).count();
+        let last_empty_lines = s
+            .lines()
+            .rev()
+            .take_while(|line| line.trim().is_empty())
+            .count();
+
+        // lines without the space-only first/last lines
+        let lines = s
+            .lines()
+            .skip(first_empty_lines)
+            .take(s.lines().count() - first_empty_lines - last_empty_lines);
+
+        // compute the indentation
+        let indentation = lines
+            .clone()
+            .map(|line| line.chars().take_while(|c| *c == ' ').count())
+            .min()
+            .unwrap_or(0);
+
+        // remove the indentation
+        lines
+            .map(|line| {
+                line.trim_end()
+                    .chars()
+                    .skip(indentation)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// True if a and b contain the same error messages
+    pub fn check_errors(a: &[(String, String)], b: &[(&str, &str)]) -> Result<(), String> {
+        if a.len() != b.len() {
+            return Err(format!(
+                "Mismatched error counts: {} != {}\n\nexpected:\n{}\n\nactual:\n{}",
+                b.len(),
+                a.len(),
+                b.iter()
+                    .map(|(code, msg)| { format!("- {}: {}", code, msg) })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                a.iter()
+                    .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ));
+        }
+
+        // remove indentations from messages to ignore indentation differences
+        let b_iter = b
+            .iter()
+            .map(|(code, message)| (*code, remove_indentation(message)));
+        let diff: Vec<_> = a
+            .iter()
+            .map(|(code, message)| (code.as_str(), remove_indentation(message)))
+            .zip(b_iter)
+            .filter(|(a_i, b_i)| a_i.0 != b_i.0 || a_i.1 != b_i.1)
+            .collect();
+        if diff.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Mismatched errors:\n{}\n",
+                diff.iter()
+                    .map(|(a_i, b_i)| { format!("- {}: {}\n+ {}: {}", b_i.0, b_i.1, a_i.0, a_i.1) })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ))
+        }
+    }
+
+    #[macro_export]
+    macro_rules! assert_errors {
+        ($a:expr, $b:expr) => {
+            match apollo_federation::subgraph::test_utils::check_errors(&$a, &$b) {
+                Ok(()) => {
+                    // Success
+                }
+                Err(e) => {
+                    panic!("{e}")
+                }
+            }
+        };
     }
 }

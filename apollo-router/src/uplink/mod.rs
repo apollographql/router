@@ -14,8 +14,10 @@ use tower::BoxError;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
+pub(crate) mod feature_gate_enforcement;
 pub(crate) mod license_enforcement;
 pub(crate) mod license_stream;
+mod parsed_link_spec;
 pub(crate) mod persisted_queries_manifest_stream;
 pub(crate) mod schema;
 pub(crate) mod schema_stream;
@@ -503,7 +505,7 @@ mod test {
     use buildstructor::buildstructor;
     use futures::StreamExt;
     use graphql_client::GraphQLQuery;
-    use http_0_2::StatusCode;
+    use http::StatusCode;
     use insta::assert_yaml_snapshot;
     use parking_lot::Mutex;
     use serde_json::json;

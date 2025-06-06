@@ -18,10 +18,16 @@ use crate::query_planner::fetch::Variables;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::SubscriptionNode;
 
-const FETCH_SUBGRAPH_NAME_EXTENSION_KEY: &str = "fetch_subgraph_name";
+/// This extension key is private to apollo and may change in the future. Users should not rely on
+/// its existence.
+const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
+// XXX(@goto-bus-stop): instead of two variants of wildly different
+// size, should there be two separate services with one request type
+// each?
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Request {
     Fetch(FetchRequest),
     Subscription(SubscriptionRequest),
@@ -135,20 +141,33 @@ impl<T> ErrorMapping<T> for Result<T, BoxError> {
 /// Extension trait for adding a subgraph name associated with an error.
 pub(crate) trait AddSubgraphNameExt {
     /// Add the subgraph name associated with an error
-    fn add_subgraph_name(self, subgraph_name: &str) -> Self;
+    fn with_subgraph_name(self, subgraph_name: &str) -> Self;
+
+    /// Add the subgraph name associated with an error
+    fn add_subgraph_name(&mut self, subgraph_name: &str);
 }
 
 impl AddSubgraphNameExt for Error {
-    fn add_subgraph_name(mut self, subgraph_name: &str) -> Self {
-        self.extensions
-            .insert(FETCH_SUBGRAPH_NAME_EXTENSION_KEY, json!(subgraph_name));
+    fn with_subgraph_name(mut self, subgraph_name: &str) -> Self {
+        self.add_subgraph_name(subgraph_name);
         self
+    }
+
+    fn add_subgraph_name(&mut self, subgraph_name: &str) {
+        self.extensions
+            .insert(SUBGRAPH_NAME_EXTENSION_KEY, json!(subgraph_name));
     }
 }
 
 impl<T> AddSubgraphNameExt for Result<T, Error> {
-    fn add_subgraph_name(self, subgraph_name: &str) -> Self {
-        self.map_err(|e| e.add_subgraph_name(subgraph_name))
+    fn with_subgraph_name(self, subgraph_name: &str) -> Self {
+        self.map_err(|e| e.with_subgraph_name(subgraph_name))
+    }
+
+    fn add_subgraph_name(&mut self, subgraph_name: &str) {
+        if let Err(e) = self {
+            e.add_subgraph_name(subgraph_name);
+        }
     }
 }
 
@@ -160,7 +179,7 @@ pub(crate) trait SubgraphNameExt {
 
 impl SubgraphNameExt for Error {
     fn subgraph_name(&mut self) -> Option<String> {
-        if let Some(subgraph_name) = self.extensions.remove(FETCH_SUBGRAPH_NAME_EXTENSION_KEY) {
+        if let Some(subgraph_name) = self.extensions.remove(SUBGRAPH_NAME_EXTENSION_KEY) {
             subgraph_name
                 .as_str()
                 .map(|subgraph_name| subgraph_name.to_string())

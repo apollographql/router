@@ -29,7 +29,7 @@ impl From<String> for Label {
 #[derive(Clone, Debug)]
 pub(crate) enum Value {
     // These types are not currently used.
-    // In theory if we want to parse the yaml properly then we need them, but we're only interrested
+    // In theory if we want to parse the YAML properly then we need them, but we're only interested
     // in the markers, so maybe we don't need them?
     // Null(Marker),
     // Bool(bool, Marker),

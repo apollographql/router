@@ -26,7 +26,7 @@ impl EntityCacheIncompatPlugin {
 
 impl IncompatiblePlugin for EntityCacheIncompatPlugin {
     fn is_applied_to_all(&self) -> bool {
-        self.config.subgraph.all.enabled
+        self.config.subgraph.all.enabled.unwrap_or_default()
     }
 
     fn configured_subgraphs(&self) -> super::ConfiguredSubgraphs<'_> {
@@ -36,8 +36,10 @@ impl IncompatiblePlugin for EntityCacheIncompatPlugin {
                 .subgraphs
                 .iter()
                 .partition_map(|(name, sub)| match sub.enabled {
-                    true => Either::Left(name),
-                    false => Either::Right(name),
+                    Some(true) => Either::Left(name),
+                    Some(false) => Either::Right(name),
+                    // Because default value of sub.enabled is true, we can assume that None means true
+                    None => Either::Left(name),
                 });
 
         super::ConfiguredSubgraphs { enabled, disabled }
@@ -46,7 +48,7 @@ impl IncompatiblePlugin for EntityCacheIncompatPlugin {
     fn inform_incompatibilities(
         &self,
         subgraphs: std::collections::HashSet<&String>,
-        _connectors: &apollo_federation::sources::connect::expand::Connectors,
+        _connectors: &apollo_federation::connectors::expand::Connectors,
     ) {
         for subgraph in subgraphs {
             if self.config.subgraph.subgraphs.contains_key(subgraph) {

@@ -14,13 +14,13 @@ pub(crate) struct ConnectorContext {
 impl ConnectorContext {
     pub(crate) fn push_response(
         &mut self,
-        request: Option<ConnectorDebugHttpRequest>,
+        request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
         json_body: &serde_json_bytes::Value,
         selection_data: Option<SelectionData>,
     ) {
         if let Some(request) = request {
-            self.requests.push(request);
+            self.requests.push(*request);
             self.responses
                 .push(serialize_response(parts, json_body, selection_data));
         } else {
@@ -32,12 +32,12 @@ impl ConnectorContext {
 
     pub(crate) fn push_invalid_response(
         &mut self,
-        request: Option<ConnectorDebugHttpRequest>,
+        request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
         body: &Bytes,
     ) {
         if let Some(request) = request {
-            self.requests.push(request);
+            self.requests.push(*request);
             self.responses.push(ConnectorDebugHttpResponse {
                 status: parts.status.as_u16(),
                 headers: parts

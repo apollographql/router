@@ -5,6 +5,8 @@ use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use serde::de::Error as DeserializeError;
+use serde::ser::Error as SerializeError;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -35,7 +37,6 @@ use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-#[cfg(test)]
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -154,18 +155,21 @@ impl<'a> TestHarness<'a> {
         self,
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
-        let configuration: Configuration = serde_json::from_value(configuration)?;
+        // Convert from a json Value to yaml str to Configuration so that we can ensure we validate
+        // and populate the Configuration's validated_yaml attribute
+        let yaml = serde_yaml::to_string(&configuration).map_err(SerializeError::custom)?;
+        let configuration: Configuration =
+            Configuration::from_str(&yaml).map_err(DeserializeError::custom)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
-    /// Specifies the (static) router configuration as a YAML string,
-    /// such as from the `serde_json::json!` macro.
+    /// Specifies the (static) router configuration as a YAML string
     pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
         let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
-    /// Adds an extra, already instanciated plugin.
+    /// Adds an extra, already instantiated plugin.
     ///
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
@@ -268,7 +272,7 @@ impl<'a> TestHarness<'a> {
 
     pub(crate) async fn build_common(
         self,
-    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
+    ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -279,31 +283,21 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
-        let builder = if builder.subgraph_network_requests {
-            builder
-        } else {
-            builder.subgraph_hook(|name, _default| {
-                let my_name = name.to_string();
-                tower::service_fn(move |request: subgraph::Request| {
-                    let empty_response = subgraph::Response::builder()
-                        .extensions(crate::json_ext::Object::new())
-                        .context(request.context)
-                        .subgraph_name(my_name.clone())
-                        .id(request.id)
-                        .build();
-                    std::future::ready(Ok(empty_response))
-                })
-                .boxed()
-            })
-        };
-        let config = builder.configuration.unwrap_or_default();
+        let mut config = builder.configuration.unwrap_or_default();
+        if !builder.subgraph_network_requests {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("experimental_mock_subgraphs")
+                .or_insert(serde_json::json!({}));
+        }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
-                schema,
+                schema.clone(),
                 None,
                 None,
                 Some(builder.extra_plugins),
@@ -311,15 +305,40 @@ impl<'a> TestHarness<'a> {
             )
             .await?;
 
-        Ok((config, supergraph_creator))
+        Ok((config, schema, supergraph_creator))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
 
-        Ok(tower::service_fn(move |request| {
+        Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_creator.make();
+
+            // The supergraph service expects a ParsedDocument in the context. In the real world,
+            // that is always populated by the router service. For the testing harness, however,
+            // tests normally craft a supergraph request manually, and it's inconvenient to
+            // manually populate the ParsedDocument. Instead of doing it many different ways
+            // over and over in different tests, we simulate that part of the router service here.
+            let body = request.supergraph_request.body();
+            // If we don't have a query we definitely won't have a parsed document.
+            if let Some(query_str) = body.query.as_deref() {
+                let operation_name = body.operation_name.as_deref();
+                if !request.context.extensions().with_lock(|lock| {
+                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                }) {
+                    let doc = crate::spec::Query::parse_document(
+                        query_str,
+                        operation_name,
+                        &schema,
+                        &config,
+                    )
+                    .expect("parse error in test");
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                    });
+                }
+            }
 
             async move { router.oneshot(request).await }
         })
@@ -328,7 +347,7 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
@@ -350,13 +369,13 @@ impl<'a> TestHarness<'a> {
         .boxed_clone())
     }
 
-    #[cfg(test)]
-    pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
+    /// Build the HTTP service
+    pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
-        use crate::axum_factory::tests::make_axum_router;
+        use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::router_factory::RouterFactory;
 
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
@@ -379,8 +398,7 @@ impl<'a> TestHarness<'a> {
 }
 
 /// An HTTP-level service, as would be given to Hyper’s server
-#[cfg(test)]
-pub(crate) type HttpService = tower::util::BoxService<
+pub type HttpService = tower::util::BoxService<
     http::Request<crate::services::router::Body>,
     http::Response<axum::body::Body>,
     std::convert::Infallible,
@@ -460,7 +478,7 @@ where
 }
 
 /// a list of subgraphs with pregenerated responses
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
 
 impl MockedSubgraphs {
@@ -547,4 +565,49 @@ pub fn make_fake_batch(
         result.push(b']');
         router::body::from_bytes(result)
     })
+}
+
+#[tokio::test]
+async fn test_intercept_subgraph_network_requests() {
+    use futures::StreamExt;
+    let request = crate::services::supergraph::Request::canned_builder()
+        .build()
+        .unwrap();
+    let response = TestHarness::builder()
+        .schema(include_str!("../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "topProducts": null
+      },
+      "errors": [
+        {
+          "message": "subgraph mock not configured",
+          "path": [],
+          "extensions": {
+            "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+            "service": "products"
+          }
+        }
+      ]
+    }
+    "###);
 }

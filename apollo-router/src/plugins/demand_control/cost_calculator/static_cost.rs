@@ -644,6 +644,7 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::assert_snapshot_subscriber;
+    use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerContent;
@@ -745,6 +746,7 @@ mod tests {
                 query,
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
+                ComputeJobType::QueryPlanning,
             ))
             .await
             .unwrap();
@@ -819,7 +821,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
@@ -847,7 +849,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)

@@ -29,13 +29,13 @@ pub struct QueryPlan {
 #[derive(Debug, PartialEq, derive_more::From, Serialize, Deserialize)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
-    #[from(types(FetchNode))]
+    #[from(FetchNode, Box<FetchNode>)]
     Fetch(Box<FetchNode>),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
     Flatten(FlattenNode),
     Defer(DeferNode),
-    #[from(types(ConditionNode))]
+    #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
 }
 
@@ -48,13 +48,13 @@ pub struct SubscriptionNode {
 
 #[derive(Debug, Clone, PartialEq, derive_more::From, Serialize, Deserialize)]
 pub enum PlanNode {
-    #[from(types(FetchNode))]
+    #[from(FetchNode, Box<FetchNode>)]
     Fetch(Box<FetchNode>),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
     Flatten(FlattenNode),
     Defer(DeferNode),
-    #[from(types(ConditionNode))]
+    #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
 }
 
@@ -246,4 +246,18 @@ pub type Conditions = Vec<Name>;
 pub enum QueryPathElement {
     Field { response_key: Name },
     InlineFragment { type_condition: Name },
+}
+
+impl PlanNode {
+    /// Returns the kind of plan node this is as a human-readable string. Exact output not guaranteed.
+    fn node_kind(&self) -> &'static str {
+        match self {
+            Self::Fetch(_) => "Fetch",
+            Self::Sequence(_) => "Sequence",
+            Self::Parallel(_) => "Parallel",
+            Self::Flatten(_) => "Flatten",
+            Self::Defer(_) => "Defer",
+            Self::Condition(_) => "Condition",
+        }
+    }
 }
