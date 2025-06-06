@@ -225,7 +225,7 @@ async fn insert() {
         }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -269,7 +269,7 @@ async fn insert() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -365,7 +365,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -410,7 +410,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -497,7 +497,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -547,7 +547,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -617,7 +617,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -645,7 +645,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -734,7 +734,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin.clone())
+        .extra_private_plugin(plugin.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -763,7 +763,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();
@@ -892,7 +892,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -957,7 +957,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .subgraph_hook(|name, service| {
             if name == "orga" {
                 let mut subgraph = MockSubgraphService::new();
@@ -1081,7 +1081,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1143,7 +1143,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1206,7 +1206,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin.clone())
+        .extra_private_plugin(plugin.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1229,7 +1229,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin.clone())
+        .extra_private_plugin(plugin.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1260,7 +1260,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(plugin)
+        .extra_private_plugin(plugin)
         .build_supergraph()
         .await
         .unwrap();

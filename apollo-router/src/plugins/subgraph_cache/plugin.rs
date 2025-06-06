@@ -54,8 +54,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -191,7 +191,8 @@ pub(crate) struct CacheHitMiss {
 }
 
 #[async_trait::async_trait]
-impl Plugin for SubgraphCache {
+impl PluginPrivate for SubgraphCache {
+    const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
