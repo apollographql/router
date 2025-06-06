@@ -151,6 +151,12 @@ pub struct Merged {
     hints: Vec<CompositionHint>,
 }
 
+impl Merged {
+    pub fn schema(&self) -> &Valid<Schema> {
+        &self.schema
+    }
+}
+
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub struct Satisfiable {

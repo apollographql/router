@@ -838,6 +838,16 @@ pub(crate) struct ContextDirective<'schema> {
     target: CompositeTypeDefinitionPosition,
 }
 
+impl ContextDirective<'_> {
+    pub(crate) fn arguments(&self) -> &ContextDirectiveArguments<'_> {
+        &self.arguments
+    }
+
+    pub(crate) fn target(&self) -> &CompositeTypeDefinitionPosition {
+        &self.target
+    }
+}
+
 pub(crate) struct FromContextDirective<'schema> {
     /// The parsed arguments of this `@fromContext` application
     arguments: FromContextDirectiveArguments<'schema>,
