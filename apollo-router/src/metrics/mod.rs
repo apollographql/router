@@ -2325,4 +2325,29 @@ mod test {
         .with_metrics()
         .await;
     }
+
+    #[tokio::test]
+    async fn test_metrics_across_tasks() {
+        async {
+            // Initial metric in the main task
+            u64_counter!("apollo.router.test", "metric", 1);
+            assert_counter!("apollo.router.test", 1);
+
+            // Spawn a task that also records metrics
+            let handle = tokio::spawn(
+                async move {
+                    u64_counter!("apollo.router.test", "metric", 2);
+                }
+                .with_current_meter_provider(),
+            );
+
+            // Wait for the spawned task to complete
+            handle.await.unwrap();
+
+            // The metric should now be 3 since both tasks contributed
+            assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
+    }
 }
