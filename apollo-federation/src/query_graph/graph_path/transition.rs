@@ -1,4 +1,5 @@
-use std::borrow::Cow;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::ops::Not;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -62,14 +63,42 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
     }
 }
 
+/// Wraps a "composition validation" path (one built from `QueryGraphEdgeTransition`s) along with
+/// some of the information necessary to compute the indirect paths following that path, and caches
+/// the result of that computation when triggered.
+///
+/// In other words, this is a `GraphPath<QueryGraphEdgeTransition, EdgeIndex>` plus lazy memoization
+/// of the computation of its following indirect options.
+///
+/// The rationale is that after we've reached a given path, we might never need to compute the
+/// indirect paths following it (maybe all the fields we'll care about will be available "directly",
+/// i.e. from the same subgraph), or we might need to compute it once, or we might need those paths
+/// multiple times; but the way the algorithm works, we don't know this in advance. So this
+/// abstraction ensures that we only compute such indirect paths lazily, if we ever need them, while
+/// ensuring we don't recompute those paths multiple times if we do need them multiple times.
 pub(crate) struct TransitionPathWithLazyIndirectPaths {
-    pub(crate) path: TransitionGraphPath,
+    pub(crate) path: Arc<TransitionGraphPath>,
     #[allow(dead_code)]
     pub(crate) lazily_computed_indirect_paths: Option<TransitionIndirectPaths>,
 }
 
+impl Display for TransitionPathWithLazyIndirectPaths {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.path.fmt(f)
+    }
+}
+
 pub(crate) type TransitionIndirectPaths =
     IndirectPaths<QueryGraphEdgeTransition, EdgeIndex, UnadvanceableClosures>;
+
+impl Clone for TransitionIndirectPaths {
+    fn clone(&self) -> Self {
+        Self {
+            paths: self.paths.clone(),
+            dead_ends: self.dead_ends.clone(),
+        }
+    }
+}
 
 impl TransitionGraphPath {
     /// Because Fed 1 used to (somewhat wrongly) require @external on key fields of type extensions
@@ -154,7 +183,7 @@ impl TransitionGraphPath {
     }
 
     // PORT_NOTE: Named `findOverriddingSourcesIfOverridden()` in the JS codebase, but we've changed
-    // sources to subgraphs here for clarity that we don't need to handle the federated root source.
+    // sources to subgraphs here to clarify that we don't need to handle the federated root source.
     fn find_overriding_subgraphs_if_overridden(
         field_pos_in_subgraph: &FieldDefinitionPosition,
         field_subgraph: &Arc<str>,
@@ -221,18 +250,17 @@ impl TransitionGraphPath {
     ///
     /// For the second element, it is true if the result only has type-exploded results.
     // PORT_NOTE: In the JS codebase, this was named `advancePathWithDirectTransition`.
-    #[allow(dead_code)]
     fn advance_with_transition(
         &self,
         transition: &QueryGraphEdgeTransition,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &Arc<EnabledOverrideConditions>,
-    ) -> Result<Either<Vec<TransitionGraphPath>, UnadvanceableClosures>, FederationError> {
+    ) -> Result<Either<Vec<Arc<TransitionGraphPath>>, UnadvanceableClosures>, FederationError> {
         ensure!(
             transition.collect_operation_elements(),
             "Supergraphs shouldn't have transitions that don't collect elements",
         );
-        let mut to_advance = Cow::Borrowed(self);
+        let mut to_advance = Either::Left(self);
         if let QueryGraphEdgeTransition::FieldCollection {
             source,
             field_definition_position,
@@ -282,13 +310,14 @@ impl TransitionGraphPath {
                             num_options,
                         );
                     };
-                    to_advance = Cow::Owned(updated_path);
+                    to_advance = Either::Right(updated_path);
                     // We can now continue on dealing with the actual field.
                 }
             }
         }
+        let to_advance: &Self = either::for_both!(&to_advance, p => p);
 
-        let mut options: Vec<TransitionGraphPath> = vec![];
+        let mut options: Vec<Arc<TransitionGraphPath>> = vec![];
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
 
         for edge in to_advance.next_edges()? {
@@ -314,7 +343,7 @@ impl TransitionGraphPath {
                     let (head, tail) = graph.edge_endpoints(edge)?;
                     let head_weight = graph.node_weight(head)?;
                     let tail_weight = graph.node_weight(tail)?;
-                    Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
+                    Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
                         reason: UnadvanceableReason::UnsatisfiableOverrideCondition,
                         from_subgraph: head_weight.source.clone(),
                         to_subgraph: tail_weight.source.clone(),
@@ -324,7 +353,7 @@ impl TransitionGraphPath {
                             override_condition.label,
                             override_conditions.contains(&override_condition.label)
                         ),
-                    })]))
+                    })])))
                 }))));
                 continue;
             }
@@ -339,12 +368,12 @@ impl TransitionGraphPath {
             )?;
             match condition_resolution {
                 ConditionResolution::Satisfied { .. } => {
-                    options.push(to_advance.add(
+                    options.push(Arc::new(to_advance.add(
                         transition.clone(),
                         edge,
                         condition_resolution,
                         None,
-                    )?);
+                    )?));
                 }
                 ConditionResolution::Unsatisfied { reason } => {
                     let transition = transition.clone();
@@ -400,12 +429,12 @@ impl TransitionGraphPath {
                                         )
                                     }
                                 };
-                                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
+                                Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
                                     reason: UnadvanceableReason::UnsatisfiableRequiresCondition,
                                     from_subgraph: head_weight.source.clone(),
                                     to_subgraph: head_weight.source.clone(),
                                     details,
-                                })]))
+                                })])))
                             }
                             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
                                 from_type_position,
@@ -429,12 +458,12 @@ impl TransitionGraphPath {
                                         )
                                     }
                                 };
-                                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
+                                Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
                                     reason: UnadvanceableReason::UnresolvableInterfaceObject,
                                     from_subgraph: head_weight.source.clone(),
                                     to_subgraph: head_weight.source.clone(),
                                     details,
-                                })]))
+                                })])))
                             }
                             _ => {
                                 bail!(
@@ -455,10 +484,10 @@ impl TransitionGraphPath {
         let transition = transition.clone();
         let graph = self.graph.clone();
         let tail = self.tail;
-        Ok(Either::Right(UnadvanceableClosures(vec![Arc::new(
-            LazyLock::new(Box::new(move || {
+        Ok(Either::Right(UnadvanceableClosures(Arc::new(vec![
+            Arc::new(LazyLock::new(Box::new(move || {
                 let dead_ends: Unadvanceables =
-                    UnadvanceableClosures(dead_end_closures).try_into()?;
+                    UnadvanceableClosures(Arc::new(dead_end_closures)).try_into()?;
                 if !dead_ends.is_empty() {
                     return Ok(dead_ends);
                 }
@@ -570,21 +599,21 @@ impl TransitionGraphPath {
                         bail!("Unhandled direct transition {}", transition);
                     }
                 };
-                Ok(Unadvanceables(vec![Arc::new(Unadvanceable {
+                Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
                     reason: UnadvanceableReason::NoMatchingTransition,
                     from_subgraph: subgraph.clone(),
                     to_subgraph: subgraph.clone(),
                     details,
-                })]))
-            })),
-        )])))
+                })])))
+            }))),
+        ]))))
     }
 }
 
 impl TransitionPathWithLazyIndirectPaths {
     // PORT_NOTE: Named `initial()` in the JS codebase, but conventionally in Rust this kind of
     // constructor is named `new()`.
-    fn new(path: TransitionGraphPath) -> Self {
+    fn new(path: Arc<TransitionGraphPath>) -> Self {
         Self {
             path,
             lazily_computed_indirect_paths: None,
@@ -593,11 +622,40 @@ impl TransitionPathWithLazyIndirectPaths {
 
     fn indirect_options(
         &mut self,
-        _condition_resolver: &mut impl ConditionResolver,
-        _override_conditions: &EnabledOverrideConditions,
+        condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<TransitionIndirectPaths, FederationError> {
-        // FED-573
-        todo!()
+        if let Some(indirect_paths) = &self.lazily_computed_indirect_paths {
+            Ok(indirect_paths.clone())
+        } else {
+            let new_indirect_paths =
+                self.compute_indirect_paths(condition_resolver, override_conditions)?;
+            self.lazily_computed_indirect_paths = Some(new_indirect_paths.clone());
+            Ok(new_indirect_paths)
+        }
+    }
+
+    fn compute_indirect_paths(
+        &self,
+        condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
+    ) -> Result<TransitionIndirectPaths, FederationError> {
+        self.path
+            .advance_with_non_collecting_and_type_preserving_transitions(
+                &Default::default(),
+                condition_resolver,
+                &Default::default(),
+                &Default::default(),
+                override_conditions,
+                // The transitions taken by this method are non-collecting transitions, in which case
+                // the trigger is the context (which is really a hack to provide context information for
+                // keys during fetch dependency graph updating).
+                |transition, _| transition.clone(),
+                |graph, node, trigger, override_conditions| {
+                    graph.edge_for_transition_graph_path_trigger(node, trigger, override_conditions)
+                },
+                &Default::default(),
+            )
     }
 
     /// Returns an `UnadvanceableClosures` if there is no way to advance the path with this
@@ -724,7 +782,7 @@ impl TransitionPathWithLazyIndirectPaths {
             condition_resolver,
             override_conditions,
         )?;
-        let mut options: Vec<TransitionGraphPath> = vec![];
+        let mut options: Vec<Arc<TransitionGraphPath>> = vec![];
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
         match direct_options {
             Either::Left(direct_options) => {
@@ -750,7 +808,7 @@ impl TransitionPathWithLazyIndirectPaths {
             Either::Right(closures) => {
                 drop(direct_options_guard);
                 debug!("No direct options");
-                dead_end_closures = closures.0;
+                dead_end_closures = Arc::unwrap_or_clone(closures.0)
             }
         }
         // Otherwise, let's try non-collecting edges and see if we can find some (more) options
@@ -785,10 +843,10 @@ impl TransitionPathWithLazyIndirectPaths {
                         debug!("Adding valid option: {:?}", paths_with_transition);
                         options.append(&mut paths_with_transition);
                     }
-                    Either::Right(mut closures) => {
+                    Either::Right(closures) => {
                         drop(indirect_option_guard);
                         debug!("Cannot be advanced with {}", transition);
-                        dead_end_closures.append(&mut closures.0);
+                        dead_end_closures.extend(closures.0.iter().cloned());
                     }
                 }
             }
@@ -813,12 +871,13 @@ impl TransitionPathWithLazyIndirectPaths {
         let transition = transition.clone();
         let graph = self.path.graph.clone();
         let tail = self.path.tail;
-        let mut indirect_dead_end_closures = paths_with_non_collecting_edges.dead_ends.0;
-        Ok(Either::Right(UnadvanceableClosures(vec![Arc::new(
-            LazyLock::new(Box::new(move || {
-                dead_end_closures.append(&mut indirect_dead_end_closures);
-                let mut all_dead_ends: Unadvanceables =
-                    UnadvanceableClosures(dead_end_closures).try_into()?;
+        let indirect_dead_end_closures = paths_with_non_collecting_edges.dead_ends.0;
+        Ok(Either::Right(UnadvanceableClosures(Arc::new(vec![
+            Arc::new(LazyLock::new(Box::new(move || {
+                dead_end_closures.extend(indirect_dead_end_closures.iter().cloned());
+                let mut all_dead_ends: Vec<Arc<Unadvanceable>> = Arc::unwrap_or_clone(
+                    Unadvanceables::try_from(UnadvanceableClosures(Arc::new(dead_end_closures)))?.0,
+                );
                 if let QueryGraphEdgeTransition::FieldCollection {
                     field_definition_position,
                     ..
@@ -922,7 +981,7 @@ impl TransitionPathWithLazyIndirectPaths {
                                     kind_of_type, tail_type_pos, subgraph,
                                 )
                             };
-                            all_dead_ends.0.push(Arc::new(Unadvanceable {
+                            all_dead_ends.push(Arc::new(Unadvanceable {
                                 reason: UnadvanceableReason::UnreachableType,
                                 from_subgraph: tail_weight.source.clone(),
                                 to_subgraph: subgraph.clone(),
@@ -941,7 +1000,7 @@ impl TransitionPathWithLazyIndirectPaths {
                             // 2. the subgraph we're looking at actually doesn't have that interface
                             //    (to be able to jump to that subgraph, we would need the interface
                             //    and it would need to have a resolvable key, but it has neither).
-                            all_dead_ends.0.push(Arc::new(Unadvanceable {
+                            all_dead_ends.push(Arc::new(Unadvanceable {
                                 reason: UnadvanceableReason::UnreachableType,
                                 from_subgraph: tail_weight.source.clone(),
                                 to_subgraph: subgraph.clone(),
@@ -958,8 +1017,8 @@ impl TransitionPathWithLazyIndirectPaths {
                     }
                 }
 
-                Ok(all_dead_ends)
-            })),
-        )])))
+                Ok(Unadvanceables(Arc::new(all_dead_ends)))
+            }))),
+        ]))))
     }
 }
