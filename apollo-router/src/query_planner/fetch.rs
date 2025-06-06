@@ -371,9 +371,7 @@ impl FetchNode {
                                                 values_path.0.iter().chain(&path.0[2..]).cloned(),
                                             ))
                                             .message(error.message.clone())
-                                            .extension_code(
-                                                error.extension_code().unwrap_or_default(),
-                                            )
+                                            .and_extension_code(error.extension_code())
                                             .extensions(error.extensions.clone())
                                             .build(),
                                     )
@@ -459,7 +457,7 @@ impl FetchNode {
                         .locations(error.locations.clone())
                         .path(path)
                         .message(error.message.clone())
-                        .extension_code(error.extension_code().unwrap_or_default())
+                        .and_extension_code(error.extension_code())
                         .extensions(error.extensions.clone())
                         .apollo_id(error.apollo_id())
                         .build()

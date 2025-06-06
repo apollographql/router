@@ -535,7 +535,6 @@ mod tests {
 
     use http::StatusCode;
     use tower::Service as _;
-
     use super::*;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
@@ -651,6 +650,7 @@ mod tests {
                 .unwrap();
 
             // THEN operation size metrics should exist
+            // TODO check with fleet people to see if the value here actually matters
             assert_counter!("apollo.router.operations.request_size", 7, &[]);
             assert_counter!("apollo.router.operations.response_size", 7, &[]);
         }

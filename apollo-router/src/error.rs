@@ -660,6 +660,6 @@ mod tests {
             )
             .build();
 
-        assert_eq!(expected_gql_error, error.to_graphql_error(None));
+        assert_eq!(expected_gql_error.with_null_id(), error.to_graphql_error(None).with_null_id());
     }
 }

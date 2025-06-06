@@ -1325,7 +1325,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
+        let mut res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
                 response_key_plaintext,
@@ -1372,6 +1372,16 @@ mod tests {
             .mapped_response,
         ])
         .unwrap();
+
+        // Take ownership of the original errors then null out error IDs so we can compare without
+        // randomness of Uuid::new_v4()
+        let body = res.response.body_mut();
+        let old_errors = std::mem::take(&mut body.errors);
+        let new_errors = old_errors
+            .into_iter()
+            .map(|e| e.with_null_id())
+            .collect();
+        body.errors = new_errors;
 
         assert_debug_snapshot!(res, @r#"
         Response {
@@ -1432,6 +1442,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1465,6 +1476,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1498,6 +1510,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                     ],
                     extensions: {},

@@ -253,6 +253,14 @@ impl Error {
     pub fn apollo_id(&self) -> Uuid {
         self.apollo_id
     }
+
+    #[cfg(test)]
+    /// Null out the ID for comparing errors in tests where you cannot extract the randomly
+    /// generated Uuid
+    pub fn with_null_id(mut self) -> Self {
+        self.apollo_id = Uuid::nil();
+        self
+    }
 }
 
 /// Generate a random Uuid. For use in generating a default [`Error:apollo_id`] when not supplied

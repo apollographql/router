@@ -258,26 +258,36 @@ impl From<ExecutionResponse> for Response {
 mod tests {
     use serde_json::json;
     use serde_json_bytes::json as bjson;
-
+    use uuid::Uuid;
     use super::*;
     use crate::graphql::Location;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
+        let uuid1 = Uuid::new_v4();
+        let uuid2 = Uuid::new_v4();
         let expected_errors = vec![
             Error::builder()
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
+                .apollo_id(uuid1)
                 .build(),
-            Error::builder().message("I mean for real").build(),
+            Error::builder()
+                .message("I mean for real")
+                .apollo_id(uuid2)
+                .build(),
         ];
 
         let mut errors_to_append = vec![
             Error::builder()
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
+                .apollo_id(uuid1)
                 .build(),
-            Error::builder().message("I mean for real").build(),
+            Error::builder()
+                .message("I mean for real")
+                .apollo_id(uuid2)
+                .build(),
         ];
 
         let mut response = Response::builder().build();
