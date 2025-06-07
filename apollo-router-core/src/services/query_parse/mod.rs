@@ -1,8 +1,7 @@
 use crate::Extensions;
 use apollo_compiler::ExecutableDocument;
 use serde_json::Value;
-use thiserror::Error;
-use miette::{Diagnostic, SourceSpan};
+use miette::SourceSpan;
 use tower::Service;
 use std::future::Future;
 use std::pin::Pin;
@@ -21,18 +20,20 @@ pub struct Response {
     pub query: ExecutableDocument,
 }
 
-/// Enhanced error type using the new error handling strategy
-#[derive(Debug, Error, Diagnostic)]
+/// Query parsing errors with comprehensive diagnostics and GraphQL extension support
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
     /// GraphQL parse error with rich diagnostics
     #[error("GraphQL parsing failed: {message}")]
     #[diagnostic(
-        code(apollo_router::query_parse::syntax_error),
-        url(docsrs),
+        code(APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR),
         help("Ensure your GraphQL query syntax is correct. Check for missing braces, invalid tokens, or malformed operations.")
     )]
     ParseError {
+        #[extension("parseMessage")]
         message: String,
+        #[extension("hasSourceCode")]
+        has_source_code: bool,
         #[source_code]
         query_source: Option<String>,
         #[label("Parse error occurred here")]
@@ -42,12 +43,16 @@ pub enum Error {
     /// Invalid query format with context
     #[error("Invalid query format: {reason}")]
     #[diagnostic(
-        code(apollo_router::query_parse::invalid_format),
-        url(docsrs),
+        code(APOLLO_ROUTER_QUERY_PARSE_INVALID_FORMAT),
         help("Query must be provided as a string. Check your request format.")
     )]
     InvalidQuery {
+        #[extension("invalidReason")]
         reason: String,
+        #[extension("actualType")]
+        actual_type: String,
+        #[extension("isEmpty")]
+        is_empty: bool,
         #[source_code]
         query_data: Option<String>,
         #[label("Invalid format")]
@@ -57,25 +62,32 @@ pub enum Error {
     /// JSON extraction failure with diagnostic context
     #[error("JSON extraction failed: {details}")]
     #[diagnostic(
-        code(apollo_router::query_parse::json_extraction_error),
-        url(docsrs),
+        code(APOLLO_ROUTER_QUERY_PARSE_JSON_EXTRACTION_ERROR),
         help("Ensure the request body contains valid JSON with a 'query' field.")
     )]
     JsonExtraction {
+        #[extension("extractionDetails")]
         details: String,
         #[source]
         json_error: Option<serde_json::Error>,
     },
-}
 
-impl crate::error::RouterError for Error {
-    fn error_code(&self) -> &'static str {
-        match self {
-            Self::ParseError { .. } => "apollo_router::query_parse::syntax_error",
-            Self::InvalidQuery { .. } => "apollo_router::query_parse::invalid_format",
-            Self::JsonExtraction { .. } => "apollo_router::query_parse::json_extraction_error",
-        }
-    }
+    /// Schema validation failure during parsing
+    #[error("Schema validation failed: {reason}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PARSE_SCHEMA_VALIDATION_ERROR),
+        help("Check that your query is valid against the provided schema.")
+    )]
+    SchemaValidation {
+        #[extension("validationReason")]
+        reason: String,
+        #[extension("operationType")]
+        operation_type: Option<String>,
+        #[source_code]
+        schema_source: Option<String>,
+        #[label("Schema validation error")]
+        error_span: Option<SourceSpan>,
+    },
 }
 
 /// Query parsing service that transforms JSON query values into parsed ExecutableDocuments
@@ -96,6 +108,8 @@ impl QueryParseService {
                 let other_str = other.to_string();
                 return Err(Error::InvalidQuery {
                     reason: format!("Expected string, found {}", other.type_name()),
+                    actual_type: other.type_name().to_string(),
+                    is_empty: false,
                     query_data: Some(other_str.clone()),
                     error_location: Some((0, other_str.len()).into()),
                 });
@@ -106,12 +120,14 @@ impl QueryParseService {
         if query_string.trim().is_empty() {
             return Err(Error::InvalidQuery {
                 reason: "Query string cannot be empty".to_string(),
+                actual_type: "string".to_string(),
+                is_empty: true,
                 query_data: Some(query_string.clone()),
                 error_location: Some((0, 0).into()),
             });
         }
 
-        // Parse the GraphQL query using apollo_compiler with enhanced error reporting
+        // Create minimal schema for parsing validation
         let schema_sdl = r#"
             type Query {
                 user: User
@@ -140,14 +156,16 @@ impl QueryParseService {
                     .map(|d| d.error.to_string())
                     .collect::<Vec<_>>()
                     .join("; ");
-                return Err(Error::ParseError {
-                    message: format!("Failed to create minimal schema: {}", error_msg),
-                    query_source: Some(schema_sdl.to_string()),
+                return Err(Error::SchemaValidation {
+                    reason: format!("Failed to create minimal schema: {}", error_msg),
+                    operation_type: None,
+                    schema_source: Some(schema_sdl.to_string()),
                     error_span: Some((0, schema_sdl.len()).into()),
                 });
             }
         };
         
+        // Parse the GraphQL query using apollo_compiler with enhanced error reporting
         match apollo_compiler::ExecutableDocument::parse(&minimal_schema, query_string, "query.graphql") {
             Ok(doc) => Ok(doc),
             Err(diagnostics) => {
@@ -157,11 +175,12 @@ impl QueryParseService {
                     .map(|d| d.error.to_string())
                     .collect();
                 
-                // Position information not easily extractable from current apollo_compiler version
+                // TODO: Extract position information from apollo_compiler diagnostics when available
                 let error_span = None;
                 
                 Err(Error::ParseError {
                     message: error_messages.join("; "),
+                    has_source_code: true,
                     query_source: Some(query_string.clone()),
                     error_span,
                 })
@@ -221,115 +240,6 @@ impl ValueTypeName for Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::RouterError;
-
-    #[test]
-    fn test_error_codes_match_strategy() {
-        let parse_error = Error::ParseError {
-            message: "test".to_string(),
-            query_source: None,
-            error_span: None,
-        };
-        
-        assert_eq!(
-            parse_error.error_code(),
-            "apollo_router::query_parse::syntax_error"
-        );
-
-        let invalid_error = Error::InvalidQuery {
-            reason: "test".to_string(),
-            query_data: None,
-            error_location: None,
-        };
-        
-        assert_eq!(
-            invalid_error.error_code(),
-            "apollo_router::query_parse::invalid_format"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_enhanced_error_reporting() {
-        let mut service = QueryParseService::new();
-
-        let request = Request {
-            extensions: Extensions::default(),
-            operation_name: None,
-            query: serde_json::json!(123), // Invalid: should be string
-        };
-
-        let result = service.call(request).await;
-        assert!(result.is_err());
-        
-        if let Err(Error::InvalidQuery { reason, query_data, .. }) = result {
-            assert!(reason.contains("Expected string"));
-            assert!(query_data.is_some());
-        } else {
-            panic!("Expected InvalidQuery error");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_parse_error_with_source_context() {
-        let mut service = QueryParseService::new();
-
-        let request = Request {
-            extensions: Extensions::default(),
-            operation_name: None,
-            query: serde_json::json!("query { invalid syntax here }}}"), // Malformed query
-        };
-
-        let result = service.call(request).await;
-        assert!(result.is_err());
-        
-        if let Err(Error::ParseError { message: _, query_source, error_span }) = result {
-            assert!(query_source.is_some());
-            // Error span information depends on apollo_compiler's error reporting
-            println!("Error span: {:?}", error_span);
-        } else {
-            panic!("Expected ParseError");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_empty_query_error() {
-        let mut service = QueryParseService::new();
-
-        let request = Request {
-            extensions: Extensions::default(),
-            operation_name: None,
-            query: serde_json::json!("   "), // Empty/whitespace query
-        };
-
-        let result = service.call(request).await;
-        assert!(result.is_err());
-        
-        if let Err(Error::InvalidQuery { reason, error_location, .. }) = result {
-            assert!(reason.contains("cannot be empty"));
-            assert_eq!(error_location, Some((0, 0).into()));
-        } else {
-            panic!("Expected InvalidQuery error for empty query");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_successful_parse() {
-        let mut service = QueryParseService::new();
-
-        let request = Request {
-            extensions: Extensions::default(),
-            operation_name: Some("GetUser".to_string()),
-            query: serde_json::json!("query GetUser { user { id name } }"),
-        };
-
-        let result = service.call(request).await;
-        assert!(result.is_ok());
-        
-        let response = result.unwrap();
-        assert_eq!(response.operation_name, Some("GetUser".to_string()));
-    }
-}
+mod tests;
 
 

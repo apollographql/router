@@ -1,0 +1,13 @@
+---
+source: apollo-router-core/src/services/query_parse/tests.rs
+expression: graphql_error
+---
+message: "GraphQL parsing failed: Expected closing brace"
+extensions:
+  code: APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR
+  timestamp: "[timestamp]"
+  service: apollo-router
+  details:
+    errorType: PARSE_ERROR
+    hasSourceCode: true
+    parseMessage: Expected closing brace

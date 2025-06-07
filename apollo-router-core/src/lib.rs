@@ -22,7 +22,7 @@ pub use extensions::Extensions;
 
 // Re-export error types for convenience
 pub use error::{
-    CoreError, LayerError, RouterError, Result as CoreResult, LayerResult,
+    CoreError, LayerError, Error, Result as CoreResult, LayerResult,
     // GraphQL error format support
     GraphQLError, GraphQLErrorLocation, GraphQLPathSegment, GraphQLErrorExtensions,
     GraphQLErrorContext, GraphQLErrorContextBuilder,
@@ -82,7 +82,7 @@ mod example_integration {
         
         assert!(result.is_err());
         if let Err(error) = result {
-            use crate::error::RouterError;
+            use apollo_router_error::Error;
             assert_eq!(error.error_code(), "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR");
         }
     }
@@ -94,7 +94,7 @@ mod example_integration {
         
         assert!(result.is_err());
         if let Err(error) = result {
-            use crate::error::RouterError;
+            use apollo_router_error::Error;
             assert_eq!(error.error_code(), "APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR");
         }
     }

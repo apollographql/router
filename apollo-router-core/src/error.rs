@@ -3,14 +3,11 @@ use miette::SourceSpan;
 // Re-export the derive macro for user convenience
 // Re-export error trait and GraphQL types from apollo-router-error
 pub use apollo_router_error::{
-    Error as RouterError, GraphQLError, GraphQLErrorContext, GraphQLErrorContextBuilder,
-    GraphQLErrorExtensions, GraphQLErrorLocation, GraphQLPathSegment,
+    Error, GraphQLError, GraphQLErrorContext, GraphQLErrorContextBuilder, GraphQLErrorExtensions,
+    GraphQLErrorLocation, GraphQLPathSegment,
 };
 
-
-
 // Re-export error registry functions for introspection
-use apollo_router_error::Error;
 pub use apollo_router_error::{
     ErrorRegistryEntry, ErrorStats, ErrorVariantInfo, export_error_registry_json,
     get_all_error_codes, get_error_by_code, get_error_by_variant_code, get_error_stats,
@@ -164,10 +161,7 @@ mod tests {
             error_span: Some((20, 1).into()),
         };
 
-        assert_eq!(
-            error.error_code(),
-            "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR"
-        );
+        assert_eq!(error.error_code(), "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR");
     }
 
     #[test]
@@ -367,8 +361,6 @@ mod tests {
         assert!(matches!(path[1], GraphQLPathSegment::Index(2)));
         assert!(matches!(path[2], GraphQLPathSegment::Field(ref s) if s == "users"));
     }
-
-
 
     #[test]
     fn test_graphql_error_extensions_optional_fields() {

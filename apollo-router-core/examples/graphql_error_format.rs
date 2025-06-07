@@ -3,8 +3,8 @@
 //! This example shows how Apollo Router Core errors can be converted to standard
 //! GraphQL error format with documented extensions.
 
-use apollo_router_core::error::{
-    CoreError, LayerError, RouterError, GraphQLErrorContext
+use apollo_router_core::{
+    CoreError, LayerError, GraphQLErrorContext, Error
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

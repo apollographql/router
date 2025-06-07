@@ -113,7 +113,7 @@ fn generate_error_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
                 }
             }
 
-            fn populate_graphql_extensions(&self, extensions_map: &mut std::collections::HashMap<String, serde_json::Value>) {
+            fn populate_graphql_extensions(&self, extensions_map: &mut std::collections::BTreeMap<String, serde_json::Value>) {
                 match self {
                     #(#graphql_extensions_arms)*
                 }

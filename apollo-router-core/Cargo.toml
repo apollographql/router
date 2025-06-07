@@ -36,7 +36,7 @@ quote = { version = "1.0", optional = true }
 proc-macro2 = { version = "1.0", optional = true }
 
 [dev-dependencies]
-
+insta.workspace = true
 tokio-test = "0.4.4"
 tower-test = "0.4.0"
 

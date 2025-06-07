@@ -43,7 +43,7 @@ pub use apollo_router_error_derive::Error;
 use chrono::{DateTime, Utc};
 use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Error registration entry for introspection
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +104,7 @@ pub trait Error: std::error::Error + Diagnostic {
                 .unwrap_or_else(|| "apollo-router".to_string()),
             trace_id: context.trace_id,
             request_id: context.request_id,
-            details: HashMap::new(),
+            details: BTreeMap::new(),
         };
 
         // Add error-specific details
@@ -122,7 +122,7 @@ pub trait Error: std::error::Error + Diagnostic {
     ///
     /// This method can be overridden by specific error types to add
     /// additional context to the GraphQL error extensions.
-    fn populate_graphql_extensions(&self, _extensions_map: &mut HashMap<String, serde_json::Value>) {
+    fn populate_graphql_extensions(&self, _extensions_map: &mut BTreeMap<String, serde_json::Value>) {
         // Default implementation - specific errors can override
     }
 }
@@ -209,8 +209,8 @@ pub struct GraphQLErrorExtensions {
     /// Additional error-specific details
     ///
     /// This field contains structured data specific to each error type.
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub details: HashMap<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub details: BTreeMap<String, serde_json::Value>,
 }
 
 /// Context information for creating GraphQL errors

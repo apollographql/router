@@ -1,0 +1,21 @@
+---
+source: apollo-router-core/src/services/query_parse/tests.rs
+expression: graphql_error
+---
+message: "GraphQL parsing failed: Missing closing brace"
+locations:
+  - line: 1
+    column: 34
+path:
+  - query
+  - user
+extensions:
+  code: APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR
+  timestamp: "[timestamp]"
+  service: query-parser
+  traceId: trace-123
+  requestId: req-456
+  details:
+    errorType: PARSE_ERROR
+    hasSourceCode: true
+    parseMessage: Missing closing brace

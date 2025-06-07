@@ -1,0 +1,17 @@
+---
+source: apollo-router-core/src/services/query_parse/tests.rs
+expression: graphql_error
+---
+message: "Invalid query format: Query string cannot be empty"
+locations:
+  - line: 1
+    column: 1
+extensions:
+  code: APOLLO_ROUTER_QUERY_PARSE_INVALID_FORMAT
+  timestamp: "[timestamp]"
+  service: query-validation
+  details:
+    actualType: string
+    errorType: INVALID_QUERY
+    invalidReason: Query string cannot be empty
+    isEmpty: true
