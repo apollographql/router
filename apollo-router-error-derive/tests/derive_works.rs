@@ -1,6 +1,6 @@
-// Simple integration test to verify the derive macro generates working code  
+// Simple integration test to verify the derive macro generates working code
 use apollo_router_error::{Error as RouterError, Error};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
 pub enum TestError {
@@ -10,13 +10,13 @@ pub enum TestError {
 
     #[error("Config error: {message}")]
     #[diagnostic(code(apollo_router::test::config_error), help("Check your config"))]
-        ConfigError {
+    ConfigError {
         #[extension("messageString")]
         message: String,
         #[extension]
         line: u32,
     },
-    
+
     #[error("Network error for endpoint: {endpoint}")]
     #[diagnostic(code(apollo_router::test::network_error))]
     NetworkError {
@@ -63,7 +63,7 @@ fn test_graphql_extensions() {
     };
 
     // Test config error extensions
-    let mut details = HashMap::new();
+    let mut details = BTreeMap::new();
     config_error.populate_graphql_extensions(&mut details);
 
     assert_eq!(

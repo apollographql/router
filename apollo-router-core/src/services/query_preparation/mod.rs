@@ -20,10 +20,6 @@ pub struct Response {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Query parsing failed: {0}
-    #[error("Query parsing failed: {0}")]
-    QueryParsing(#[from] crate::services::query_parse::Error),
-
     /// Query planning failed: {0}
     #[error("Query planning failed: {0}")]
     QueryPlanning(#[from] crate::services::query_plan::Error),

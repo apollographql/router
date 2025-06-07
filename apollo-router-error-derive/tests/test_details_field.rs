@@ -29,7 +29,7 @@ fn test_details_field_no_collision() {
     };
 
     // This should work without compilation errors
-    let mut extensions = std::collections::HashMap::new();
+    let mut extensions = std::collections::BTreeMap::<String, serde_json::Value>::new();
     apollo_router_error::Error::populate_graphql_extensions(&error, &mut extensions);
     
     // Verify the extensions were populated correctly

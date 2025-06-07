@@ -1,116 +1,34 @@
 #![allow(unexpected_cfgs)]
 
+pub mod error;
 pub mod extensions;
 pub mod json;
 pub mod layers;
 pub mod services;
 
-// Export the comprehensive error handling system
-pub mod error;
-
 #[cfg(test)]
 pub mod test_utils;
 
 use crate::layers::ServiceBuilderExt;
-use crate::services::query_execution;
-use crate::services::json_client;
 use crate::services::fetch;
 use crate::services::http_server;
+use crate::services::json_client;
+use crate::services::query_execution;
 use crate::services::query_parse;
-use crate::services::query_plan::{QueryPlanning};
-use tower::{ServiceBuilder, Service};
+use crate::services::query_plan::QueryPlanning;
+use tower::{Service, ServiceBuilder};
 
 pub use extensions::Extensions;
 
-// Re-export error types for convenience
-pub use error::{
-    CoreError, LayerError, Error, Result as CoreResult, LayerResult,
-    // GraphQL error format support
-    GraphQLError, GraphQLErrorLocation, GraphQLPathSegment, GraphQLErrorExtensions,
-    GraphQLErrorContext, GraphQLErrorContextBuilder,
-};
-
-// Re-export miette types that users might need
-pub use miette::{Diagnostic, Report, SourceSpan, NamedSource, Context, IntoDiagnostic};
-
-/// Example service demonstrating error handling integration
-#[cfg(test)]
-mod example_integration {
-
-    use crate::error::{CoreError, LayerError};
-    
-
-    /// Example of how a service would integrate with the error handling system
-    pub fn example_query_parsing(query: &str) -> crate::error::Result<String> {
-        if query.is_empty() {
-            return Err(CoreError::QueryParseSyntax {
-                reason: "Query cannot be empty".to_string(),
-                query_source: Some(query.to_string()),
-                error_span: Some((0, 0).into()),
-            });
-        }
-
-        if !query.contains('{') || !query.contains('}') {
-            let error_pos = query.len();
-            return Err(CoreError::QueryParseSyntax {
-                reason: "Missing opening or closing braces".to_string(),
-                query_source: Some(query.to_string()),
-                error_span: Some((error_pos, 1).into()),
-            });
-        }
-
-        Ok("Parsed successfully".to_string())
-    }
-
-    /// Example of layer error handling
-    pub fn example_json_conversion(input: &[u8]) -> crate::error::LayerResult<serde_json::Value> {
-        match serde_json::from_slice(input) {
-            Ok(value) => Ok(value),
-            Err(json_err) => {
-                // Convert to our rich error type with context
-                Err(LayerError::BytesToJsonConversion {
-                    json_error: json_err,
-                    input_data: String::from_utf8_lossy(input).into_owned().into(),
-                    error_position: Some((0, input.len()).into()),
-                })
-            }
-        }
-    }
-
-    #[test]
-    fn test_error_integration() {
-        let invalid_query = "query { user { name ";
-        let result = example_query_parsing(invalid_query);
-        
-        assert!(result.is_err());
-        if let Err(error) = result {
-            use apollo_router_error::Error;
-            assert_eq!(error.error_code(), "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR");
-        }
-    }
-
-    #[test]
-    fn test_layer_error_integration() {
-        let invalid_json = b"{ invalid json }";
-        let result = example_json_conversion(invalid_json);
-        
-        assert!(result.is_err());
-        if let Err(error) = result {
-            use apollo_router_error::Error;
-            assert_eq!(error.error_code(), "APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR");
-        }
-    }
-}
-
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
-/// 
+///
 /// Example usage:
 /// ```no_run
 /// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse}};
 /// use tower::{Service, service_fn};
-/// 
+///
 /// let parse_service = query_parse::QueryParseService::new();
-/// 
+///
 /// let execute_service = service_fn(|req: query_execution::Request| async move {
 ///     // Your query execution logic here
 ///     Ok::<_, std::convert::Infallible>(query_execution::Response {
@@ -118,7 +36,7 @@ mod example_integration {
 ///         responses: Box::pin(futures::stream::empty())
 ///     })
 /// });
-/// 
+///
 /// // Note: This example is simplified - you would need a query planning service implementation
 /// // let pipeline = server_pipeline(parse_service, plan_service, execute_service);
 /// ```
@@ -132,7 +50,10 @@ where
     P::Future: Send + 'static,
     P::Error: Into<tower::BoxError>,
     Pl: QueryPlanning + Clone + Send + 'static,
-    S: Service<query_execution::Request, Response = query_execution::Response> + Clone + Send + 'static,
+    S: Service<query_execution::Request, Response = query_execution::Response>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
     S::Error: Into<tower::BoxError>,
 {
@@ -146,12 +67,12 @@ where
 }
 
 /// Builds a complete client-side fetch pipeline from fetch requests to JSON client operations
-/// 
+///
 /// Example usage:
 /// ```no_run
 /// use apollo_router_core::{client_pipeline, services::{fetch, json_client}};
 /// use tower::{Service, service_fn};
-/// 
+///
 /// let json_service = service_fn(|req: json_client::Request| async move {
 ///     // Your JSON client logic here
 ///     Ok::<_, std::convert::Infallible>(json_client::Response {
@@ -159,10 +80,12 @@ where
 ///         responses: Box::pin(futures::stream::empty())
 ///     })
 /// });
-/// 
+///
 /// let pipeline = client_pipeline(json_service);
 /// ```
-pub fn client_pipeline<S>(json_client_service: S) -> impl Service<fetch::Request, Response = fetch::Response>
+pub fn client_pipeline<S>(
+    json_client_service: S,
+) -> impl Service<fetch::Request, Response = fetch::Response>
 where
     S: Service<json_client::Request, Response = json_client::Response> + Clone + Send + 'static,
     S::Future: Send + 'static,

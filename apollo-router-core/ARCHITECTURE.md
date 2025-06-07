@@ -132,16 +132,42 @@ The `query_preparation` service is a composite service that combines `query_pars
 ```rust
 JSON Request
     ↓ query_parse service
-QueryParse Response (ExecutableDocument)
-    ↓ query_plan service  
+QueryParse Response (Result<Valid<ExecutableDocument>, WithErrors<ExecutableDocument>>)
+    ↓ error conversion & query_plan service  
 QueryPlan Response (QueryPlan)
     ↓ transformed to
 Execution Request
 ```
 
-**Structure**:
+**Error Handling Strategy**:
+The query preparation service is responsible for converting executable document validation errors from failed parsing results into appropriate service-level errors. This design allows:
+
+- **Query Parser Focus**: The query parse service focuses purely on parsing GraphQL and returns a clear Result type
+- **Centralized Error Conversion**: All error handling and conversion logic is centralized in the composite service
+- **Rich Error Context**: Validation errors are preserved with full document context for better error reporting
+- **Clean Separation**: Parse success vs. validation failure is clearly represented by Result type
+- **Type Safety**: Valid documents are wrapped in `Valid<>` providing additional compile-time guarantees
+
+**Service Architecture**:
 ```rust
-// QueryPreparation takes JSON input and produces Execution output
+// QueryParseService now takes a schema and returns Result<Valid<ExecutableDocument>, WithErrors<ExecutableDocument>>
+pub struct QueryParseService {
+    schema: Valid<Schema>,
+}
+
+impl QueryParseService {
+    pub fn new(schema: Valid<Schema>) -> Self {
+        Self { schema }
+    }
+    
+    // Returns Result to clearly separate success/failure cases
+    fn parse_query(&self, query_string: &str) -> Result<Valid<ExecutableDocument>, WithErrors<ExecutableDocument>> {
+        // Direct delegation to apollo_compiler's parse_and_validate
+        ExecutableDocument::parse_and_validate(&self.schema, query_string, "query.graphql")
+    }
+}
+
+// QueryPreparation handles error conversion from WithErrors<ExecutableDocument>
 pub struct QueryPreparationService<ParseService, PlanService> {
     parse_service: ParseService,
     plan_service: PlanService,
@@ -162,17 +188,25 @@ where
         // 2. Call query_parse service
         let parse_resp = self.parse_service.call(parse_req).await?;
         
-        // 3. Transform QueryParse response to QueryPlan request
-        let plan_req = transform_parse_to_plan(parse_resp)?;
+        // 3. Handle Result<Valid<ExecutableDocument>, WithErrors<ExecutableDocument>> - convert validation errors
+        let executable_doc = match parse_resp.query {
+            Ok(valid_doc) => valid_doc.into_inner(), // Extract document from Valid wrapper
+            Err(with_errors) => {
+                // Convert apollo_compiler validation errors to service errors
+                return Err(Self::convert_validation_errors(with_errors.errors));
+            }
+        };
         
-        // 4. Call query_plan service
+        // 4. Transform to QueryPlan request with validated document
+        let plan_req = transform_parse_to_plan_with_doc(executable_doc, parse_resp)?;
+        
+        // 5. Call query_plan service
         let plan_resp = self.plan_service.call(plan_req).await?;
         
-        // 5. Transform QueryPlan response to Execution request
+        // 6. Transform QueryPlan response to Execution request
         Ok(transform_plan_to_execution(plan_resp)?)
     }
 }
-```
 
 This pattern allows:
 - **Simplified Integration**: Consumers only need to interact with one service

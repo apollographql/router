@@ -34,19 +34,6 @@ pub enum Error {
         request_body: Option<String>,
     },
 
-    /// Query parsing service error during preparation
-    #[error("Query parsing service error during preparation")]
-    #[diagnostic(
-        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_PARSE_SERVICE_ERROR),
-        help("Check that the GraphQL query syntax is valid")
-    )]
-    QueryParseService {
-        #[source]
-        parse_error: query_parse::Error,
-        #[extension("context")]
-        context: String,
-    },
-
     /// Query planning service error during preparation
     #[error("Query planning service error during preparation")]
     #[diagnostic(
