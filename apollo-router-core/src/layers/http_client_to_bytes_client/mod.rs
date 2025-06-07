@@ -6,15 +6,33 @@ use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Failed to serialize HTTP request body: {0}
-    #[error("Failed to serialize HTTP request body: {0}")]
-    RequestSerialization(String),
-    
-    /// Downstream service error: {0}
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] BoxError),
+    /// HTTP request serialization failed
+    #[error("HTTP request serialization failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_HTTP_CLIENT_TO_BYTES_CLIENT_REQUEST_SERIALIZATION_ERROR),
+        help("Check that the HTTP request can be properly serialized to bytes")
+    )]
+    RequestSerialization {
+        #[extension("context")]
+        context: String,
+        #[extension("details")]
+        details: String,
+    },
+
+    /// HTTP response building failed
+    #[error("HTTP response building failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_HTTP_CLIENT_TO_BYTES_CLIENT_RESPONSE_BUILD_ERROR),
+        help("Check that the HTTP response can be properly constructed from bytes")
+    )]
+    ResponseBuilder {
+        #[source]
+        http_error: http::Error,
+        #[extension("context")]
+        context: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -77,7 +95,10 @@ where
                 .status(200)
                 .header("content-type", "application/json")
                 .body(body)
-                .expect("Failed to build HTTP response");
+                .map_err(|http_error| Error::ResponseBuilder {
+                    http_error,
+                    context: "Building HTTP response from bytes in client layer".to_string(),
+                })?;
 
             Ok(http_resp)
         })

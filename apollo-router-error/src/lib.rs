@@ -122,7 +122,7 @@ pub trait Error: std::error::Error + Diagnostic {
     ///
     /// This method can be overridden by specific error types to add
     /// additional context to the GraphQL error extensions.
-    fn populate_graphql_extensions(&self, _details: &mut HashMap<String, serde_json::Value>) {
+    fn populate_graphql_extensions(&self, _extensions_map: &mut HashMap<String, serde_json::Value>) {
         // Default implementation - specific errors can override
     }
 }

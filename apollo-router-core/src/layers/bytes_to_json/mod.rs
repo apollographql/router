@@ -2,16 +2,27 @@ use crate::services::bytes_server::{Request as BytesRequest, Response as BytesRe
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
 use bytes::Bytes;
 use futures::StreamExt;
+use miette::SourceSpan;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Failed to parse JSON from bytes: {0}
-    #[error("Failed to parse JSON from bytes: {0}")]
-    JsonDeserialization(#[from] serde_json::Error),
+    /// Bytes to JSON conversion failed
+    #[error("Bytes to JSON conversion failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR),
+        help("Ensure the input is valid JSON")
+    )]
+    JsonDeserialization {
+        #[source]
+        json_error: serde_json::Error,
+        #[source_code]
+        input_data: Option<String>,
+        #[label("Invalid JSON")]
+        error_position: Option<SourceSpan>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -52,7 +63,15 @@ where
         // Convert bytes to JSON synchronously - fail fast if invalid
         let json_body = match serde_json::from_slice(&req.body) {
             Ok(json) => json,
-            Err(e) => return Box::pin(async move { Err(Error::JsonDeserialization(e).into()) }),
+            Err(json_error) => {
+                let input_data = String::from_utf8_lossy(&req.body).into_owned();
+                let error = Error::JsonDeserialization {
+                    json_error,
+                    input_data: Some(input_data),
+                    error_position: None, // Could be enhanced with actual position parsing
+                };
+                return Box::pin(async move { Err(error.into()) });
+            }
         };
 
         // Create an extended layer for the inner service

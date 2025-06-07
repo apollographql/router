@@ -222,25 +222,25 @@ impl apollo_router_error::Error for ComplexError {
     }
     fn populate_graphql_extensions(
         &self,
-        details: &mut std::collections::HashMap<String, serde_json::Value>,
+        extensions_map: &mut std::collections::HashMap<String, serde_json::Value>,
     ) {
         match self {
             Self::ParseError { .. } => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("PARSE_ERROR".to_string()),
                     );
             }
             Self::NetworkError { .. } => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("NETWORK_ERROR".to_string()),
                     );
             }
             Self::JsonError(..) => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("JSON_ERROR".to_string()),

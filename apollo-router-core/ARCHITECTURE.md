@@ -460,7 +460,7 @@ Each service defines its own error enum using the re-exported derive macro:
 ```rust
 use apollo_router_error::Error; // Gets both trait and derive macro
 
-#[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum MyServiceError {
     #[error("Configuration error: {message}")]
     #[diagnostic(
@@ -616,6 +616,28 @@ This pattern ensures that error information flows correctly through the service 
 - Externalize test fixtures using `include_str!` and prefer YAML format
 - Write tests that exercise real implementations, not just mocks
 - **Extensions Testing**: Always test that layers properly extend and return original Extensions
+
+#### Error Testing
+
+Use the `assert_error!` macro for type-safe error testing:
+
+```rust
+use crate::assert_error;
+
+// Test specific error variant with pattern matching
+assert_error!(result, MyLayerError, MyLayerError::SpecificVariant { .. });
+
+// Test error type only (any variant)
+assert_error!(result, MyLayerError);
+```
+
+The `assert_error!` macro provides:
+- **Type-safe downcasting** from `BoxError` to specific error types
+- **Pattern matching** on error variants with compile-time verification
+- **Clear failure messages** when assertions fail
+- **Concise syntax** replacing verbose downcasting boilerplate
+
+This approach is preferred over testing error messages or error codes as it catches changes at compile time and is more maintainable.
 
 #### Testing Tower Services and Layers
 

@@ -49,10 +49,10 @@
 //! If any of these derives are missing, the compiler will provide helpful error messages
 //! indicating which traits need to be implemented.
 
+use inflector::Inflector;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DataEnum, DeriveInput, Fields, Variant, parse_macro_input};
-use inflector::Inflector;
 
 /// Derive macro for automatically implementing Error and registering with the error registry
 #[proc_macro_derive(Error, attributes(extension))]
@@ -113,7 +113,7 @@ fn generate_error_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
                 }
             }
 
-            fn populate_graphql_extensions(&self, details: &mut std::collections::HashMap<String, serde_json::Value>) {
+            fn populate_graphql_extensions(&self, extensions_map: &mut std::collections::HashMap<String, serde_json::Value>) {
                 match self {
                     #(#graphql_extensions_arms)*
                 }
@@ -132,16 +132,12 @@ struct ErrorVariantInfo {
     error_code: String,
     help_text: Option<String>,
     fields: Vec<ErrorFieldInfo>,
-    graphql_error_type: Option<String>,
     is_tuple_variant: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ErrorFieldInfo {
     name: syn::Ident,
-    is_source: bool,
-    is_source_code: bool,
-    is_label: bool,
     extension_name: Option<String>,
 }
 
@@ -168,15 +164,11 @@ fn parse_single_variant(variant: &Variant) -> syn::Result<ErrorVariantInfo> {
     // Parse fields for GraphQL extensions generation
     let fields = parse_variant_fields(&variant.fields)?;
 
-    // Determine GraphQL error type based on error code patterns
-    let graphql_error_type = infer_graphql_error_type(&error_code);
-
     Ok(ErrorVariantInfo {
         variant_name,
         error_code,
         help_text,
         fields,
-        graphql_error_type,
         is_tuple_variant,
     })
 }
@@ -253,9 +245,6 @@ fn parse_variant_fields(fields: &Fields) -> syn::Result<Vec<ErrorFieldInfo>> {
                 let field_name = field.ident.as_ref().unwrap().clone();
 
                 // Check for special attributes
-                let is_source = has_attribute(&field.attrs, "source");
-                let is_source_code = has_attribute(&field.attrs, "source_code");
-                let is_label = has_attribute(&field.attrs, "label");
                 let mut extension_name = extract_extension_name(&field.attrs)?;
 
                 // If extension_name is the special marker, replace with camelCase field name
@@ -265,9 +254,6 @@ fn parse_variant_fields(fields: &Fields) -> syn::Result<Vec<ErrorFieldInfo>> {
 
                 field_info.push(ErrorFieldInfo {
                     name: field_name,
-                    is_source,
-                    is_source_code,
-                    is_label,
                     extension_name,
                 });
             }
@@ -277,7 +263,6 @@ fn parse_variant_fields(fields: &Fields) -> syn::Result<Vec<ErrorFieldInfo>> {
             for (i, field) in fields.iter().enumerate() {
                 let field_name = format_ident!("field_{}", i);
 
-                let is_source = has_attribute(&field.attrs, "source");
                 let mut extension_name = extract_extension_name(&field.attrs)?;
 
                 // If extension_name is the special marker, replace with camelCase field name
@@ -287,9 +272,6 @@ fn parse_variant_fields(fields: &Fields) -> syn::Result<Vec<ErrorFieldInfo>> {
 
                 field_info.push(ErrorFieldInfo {
                     name: field_name,
-                    is_source,
-                    is_source_code: false,
-                    is_label: false,
                     extension_name,
                 });
             }
@@ -300,10 +282,6 @@ fn parse_variant_fields(fields: &Fields) -> syn::Result<Vec<ErrorFieldInfo>> {
     }
 
     Ok(field_info)
-}
-
-fn has_attribute(attrs: &[Attribute], name: &str) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
 fn to_camel_case(s: &str) -> String {
@@ -323,8 +301,6 @@ fn to_camel_case(s: &str) -> String {
 
     result
 }
-
-
 
 fn extract_extension_name(attrs: &[Attribute]) -> syn::Result<Option<String>> {
     for attr in attrs {
@@ -350,24 +326,6 @@ fn extract_extension_name(attrs: &[Attribute]) -> syn::Result<Option<String>> {
         }
     }
     Ok(None)
-}
-
-fn infer_graphql_error_type(error_code: &str) -> Option<String> {
-    if error_code.contains("::syntax_error") || error_code.contains("::parse") {
-        Some("syntax".to_string())
-    } else if error_code.contains("::config") {
-        Some("config".to_string())
-    } else if error_code.contains("::timeout") {
-        Some("timeout".to_string())
-    } else if error_code.contains("::network") {
-        Some("network".to_string())
-    } else if error_code.contains("::conversion") {
-        Some("conversion".to_string())
-    } else if error_code.contains("::json") {
-        Some("json".to_string())
-    } else {
-        None
-    }
 }
 
 fn generate_error_code_match_arms(variants: &[ErrorVariantInfo]) -> Vec<proc_macro2::TokenStream> {
@@ -412,7 +370,7 @@ fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_m
     if variant.fields.is_empty() {
         return quote! {
             Self::#variant_name => {
-                details.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
+                extensions_map.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
             },
         };
     }
@@ -434,13 +392,13 @@ fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_m
         if variant.is_tuple_variant {
             quote! {
                 Self::#variant_name(..) => {
-                    details.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
+                    extensions_map.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
                 },
             }
         } else {
             quote! {
                 Self::#variant_name { .. } => {
-                    details.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
+                    extensions_map.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
                 },
             }
         }
@@ -464,7 +422,7 @@ fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_m
 
             quote! {
                 Self::#variant_name(#(#field_patterns),*) => {
-                    details.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
+                    extensions_map.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
                     #(#field_insertions)*
                 },
             }
@@ -480,7 +438,7 @@ fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_m
 
             quote! {
                 Self::#variant_name { #(#field_bindings),*, .. } => {
-                    details.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
+                    extensions_map.insert("errorType".to_string(), serde_json::Value::String(#error_type.to_string()));
                     #(#field_insertions)*
                 },
             }
@@ -496,7 +454,7 @@ fn generate_field_insertion(field: &ErrorFieldInfo) -> Option<proc_macro2::Token
 
     // Generate appropriate insertion based on field type
     Some(quote! {
-        details.insert(#extension_field_name.to_string(), serde_json::to_value(#field_name).unwrap_or(serde_json::Value::Null));
+        extensions_map.insert(#extension_field_name.to_string(), serde_json::to_value(#field_name).unwrap_or(serde_json::Value::Null));
     })
 }
 
@@ -652,37 +610,7 @@ mod tests {
         assert_eq!(category, "conversion");
     }
 
-    #[test]
-    fn test_graphql_error_type_inference() {
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::syntax_error"),
-            Some("syntax".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::config_error"),
-            Some("config".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::timeout"),
-            Some("timeout".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::network_error"),
-            Some("network".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::conversion_error"),
-            Some("conversion".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::json_error"),
-            Some("json".to_string())
-        );
-        assert_eq!(
-            infer_graphql_error_type("apollo_router::service::other_error"),
-            None
-        );
-    }
+    // Removed test_graphql_error_type_inference as the function no longer exists
 
     #[test]
     fn test_field_parsing() {
@@ -694,8 +622,7 @@ mod tests {
                 source_error: std::io::Error,
                 #[source_code]
                 source_text: Option<String>,
-                #[label("Error location")]
-                error_span: Option<miette::SourceSpan>,
+                regular_field: String,
             }
         };
 
@@ -707,33 +634,21 @@ mod tests {
 
         // Regular field with extension
         assert_eq!(field_info[0].name.to_string(), "message");
-        assert!(!field_info[0].is_source);
-        assert!(!field_info[0].is_source_code);
-        assert!(!field_info[0].is_label);
         assert_eq!(
             field_info[0].extension_name,
             Some("errorMessage".to_string())
         );
 
-        // Source field
+        // Source field (no extension)
         assert_eq!(field_info[1].name.to_string(), "source_error");
-        assert!(field_info[1].is_source);
-        assert!(!field_info[1].is_source_code);
-        assert!(!field_info[1].is_label);
         assert_eq!(field_info[1].extension_name, None);
 
-        // Source code field
+        // Source code field (no extension)
         assert_eq!(field_info[2].name.to_string(), "source_text");
-        assert!(!field_info[2].is_source);
-        assert!(field_info[2].is_source_code);
-        assert!(!field_info[2].is_label);
         assert_eq!(field_info[2].extension_name, None);
 
-        // Label field
-        assert_eq!(field_info[3].name.to_string(), "error_span");
-        assert!(!field_info[3].is_source);
-        assert!(!field_info[3].is_source_code);
-        assert!(field_info[3].is_label);
+        // Regular field (no extension)
+        assert_eq!(field_info[3].name.to_string(), "regular_field");
         assert_eq!(field_info[3].extension_name, None);
     }
 
@@ -761,8 +676,6 @@ mod tests {
         assert_eq!(to_camel_case("single"), "single");
         assert_eq!(to_camel_case("a_b_c"), "aBC");
     }
-
-
 
     #[test]
     fn test_extension_attribute_parsing() {

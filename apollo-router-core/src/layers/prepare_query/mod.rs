@@ -3,27 +3,62 @@ use crate::services::query_execution::{Request as ExecutionRequest, Response as 
 use crate::services::query_parse;
 use crate::services::query_plan::{self, QueryPlanning};
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Query parsing failed: {0}
-    #[error("Query parsing failed: {0}")]
-    QueryParse(#[from] query_parse::Error),
+    /// Query preparation orchestration failed
+    #[error("Query preparation orchestration failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_ORCHESTRATION_ERROR),
+        help("Check that query parsing and planning services are properly configured")
+    )]
+    Orchestration {
+        #[extension("phase")]
+        phase: String,
+        #[extension("details")]
+        details: String,
+    },
 
-    /// Query planning failed: {0}
-    #[error("Query planning failed: {0}")]
-    QueryPlan(#[from] query_plan::Error),
+    /// JSON extraction failed during query preparation
+    #[error("JSON extraction failed during query preparation")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_JSON_EXTRACTION_ERROR),
+        help("Ensure the JSON request contains valid GraphQL query fields")
+    )]
+    JsonExtraction {
+        #[extension("field")]
+        missing_field: String,
+        #[source_code]
+        request_body: Option<String>,
+    },
 
-    /// JSON extraction failed: {0}
-    #[error("JSON extraction failed: {0}")]
-    JsonExtraction(String),
+    /// Query parsing service error during preparation
+    #[error("Query parsing service error during preparation")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_PARSE_SERVICE_ERROR),
+        help("Check that the GraphQL query syntax is valid")
+    )]
+    QueryParseService {
+        #[source]
+        parse_error: query_parse::Error,
+        #[extension("context")]
+        context: String,
+    },
 
-    /// Downstream service error: {0}
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] BoxError),
+    /// Query planning service error during preparation
+    #[error("Query planning service error during preparation")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_PLAN_SERVICE_ERROR),
+        help("Check that the query plan can be generated from the parsed query")
+    )]
+    QueryPlanService {
+        #[source]
+        plan_error: query_plan::Error,
+        #[extension("context")]
+        context: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -138,7 +173,10 @@ where
 fn extract_query_details(json_body: &crate::json::JsonValue) -> Result<(serde_json::Value, Option<String>, std::collections::HashMap<String, serde_json::Value>), Error> {
     // Extract the GraphQL query string
     let query_string = json_body.get("query")
-        .ok_or_else(|| Error::JsonExtraction("Missing 'query' field in JSON body".to_string()))?
+        .ok_or_else(|| Error::JsonExtraction {
+            missing_field: "query".to_string(),
+            request_body: Some(json_body.to_string()),
+        })?
         .clone();
 
     // Extract operation name (optional)

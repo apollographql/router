@@ -115,46 +115,46 @@ impl apollo_router_error::Error for InferenceError {
     }
     fn populate_graphql_extensions(
         &self,
-        details: &mut std::collections::HashMap<String, serde_json::Value>,
+        extensions_map: &mut std::collections::HashMap<String, serde_json::Value>,
     ) {
         match self {
             Self::SyntaxError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("SYNTAX_ERROR".to_string()),
                     );
             }
             Self::ConfigError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("CONFIG_ERROR".to_string()),
                     );
             }
             Self::TimeoutError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("TIMEOUT_ERROR".to_string()),
                     );
             }
             Self::NetworkError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("NETWORK_ERROR".to_string()),
                     );
             }
             Self::ConversionError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("CONVERSION_ERROR".to_string()),
                     );
             }
             Self::JsonError => {
-                details
+                extensions_map
                     .insert(
                         "errorType".to_string(),
                         serde_json::Value::String("JSON_ERROR".to_string()),

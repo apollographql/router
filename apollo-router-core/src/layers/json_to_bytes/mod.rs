@@ -2,16 +2,27 @@ use crate::services::bytes_client::{Request as BytesRequest, Response as BytesRe
 use crate::services::json_client::{Request as JsonRequest, Response as JsonResponse};
 use bytes::Bytes;
 use futures::StreamExt;
+use std::future::Future;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Failed to serialize JSON to bytes: {0}
-    #[error("Failed to serialize JSON to bytes: {0}")]
-    JsonSerialization(#[from] serde_json::Error),
+    /// JSON to bytes serialization failed
+    #[error("JSON to bytes serialization failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_JSON_TO_BYTES_SERIALIZATION_ERROR),
+        help("Ensure the JSON value can be serialized")
+    )]
+    JsonSerialization {
+        #[source]
+        json_error: serde_json::Error,
+        #[source_code]
+        json_content: Option<String>,
+        #[extension("serializationContext")]
+        context: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -51,7 +62,14 @@ where
         // Convert JSON to bytes synchronously - fail fast if invalid
         let bytes_body = match serde_json::to_vec(&req.body) {
             Ok(bytes) => Bytes::from(bytes),
-            Err(e) => return Box::pin(async move { Err(Error::JsonSerialization(e).into()) }),
+            Err(json_error) => {
+                let error = Error::JsonSerialization {
+                    json_error,
+                    json_content: Some(req.body.to_string()),
+                    context: "Converting JSON request to bytes".to_string(),
+                };
+                return Box::pin(async move { Err(error.into()) });
+            }
         };
 
         // Create an extended layer for the inner service

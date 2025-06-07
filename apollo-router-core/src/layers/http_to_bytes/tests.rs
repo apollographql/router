@@ -1,6 +1,7 @@
-use crate::layers::http_to_bytes::HttpToBytesLayer;
+use crate::layers::http_to_bytes::{HttpToBytesLayer, Error as HttpToBytesError};
 use crate::services::bytes_server::Response as BytesResponse;
 use crate::test_utils::TowerTest;
+use crate::assert_error;
 use bytes::Bytes;
 use futures::stream;
 use http_body_util::BodyExt;
@@ -177,3 +178,10 @@ async fn test_empty_body() {
     let collected = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(collected, "empty response".as_bytes());
 }
+
+// Note: Error testing for HttpToBytesError::HttpResponseBuilder would require
+// more complex setup to trigger http::Response::builder() failures.
+// In practice, this error is rare since we use simple, valid response parameters.
+//
+// If we needed to test this error, we would use:
+// assert_error!(result, HttpToBytesError, HttpToBytesError::HttpResponseBuilder { .. });

@@ -4,18 +4,26 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, combinators::UnsyncBoxBody};
 use std::convert::Infallible;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
 // Type alias to match exactly what http_client uses
 type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Failed to build HTTP request: {0}
-    #[error("Failed to build HTTP request: {0}")]
-    HttpRequestBuilder(#[from] http::Error),
+    /// HTTP request building failed
+    #[error("HTTP request building failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_BYTES_TO_HTTP_REQUEST_BUILD_ERROR),
+        help("Check that the HTTP request parameters are valid")
+    )]
+    HttpRequestBuilder {
+        #[source]
+        http_error: http::Error,
+        #[extension("requestContext")]
+        context: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -111,7 +119,10 @@ impl<S> BytesToHttpService<S> {
             .uri("/")
             .header("content-type", "application/json")
             .body(body)
-            .map_err(Error::HttpRequestBuilder)?;
+            .map_err(|http_error| Error::HttpRequestBuilder {
+                http_error,
+                context: "Building HTTP request from bytes".to_string(),
+            })?;
 
         Ok(http_req)
     }

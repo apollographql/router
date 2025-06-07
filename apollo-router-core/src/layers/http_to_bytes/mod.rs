@@ -5,18 +5,26 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Failed to build HTTP response: {0}
-    #[error("Failed to build HTTP response: {0}")]
-    HttpResponseBuilder(#[from] http::Error),
+    /// HTTP response building failed
+    #[error("HTTP response building failed")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_LAYERS_HTTP_TO_BYTES_RESPONSE_BUILD_ERROR),
+        help("Check that the HTTP response parameters are valid")
+    )]
+    HttpResponseBuilder {
+        #[source]
+        http_error: http::Error,
+        #[extension("responseContext")]
+        context: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -87,7 +95,10 @@ where
                 .body(UnsyncBoxBody::new(http_body_util::StreamBody::new(
                     bytes_resp.responses.map(|chunk| Ok(Frame::data(chunk))),
                 )))
-                .map_err(Error::HttpResponseBuilder)?;
+                .map_err(|http_error| Error::HttpResponseBuilder {
+                    http_error,
+                    context: "Building HTTP response from bytes stream".to_string(),
+                })?;
 
             // Convert original Extensions back to http::Extensions
             let http_extensions: http::Extensions = original_extensions.into();
