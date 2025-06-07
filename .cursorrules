@@ -29,5 +29,6 @@ Keep functions small, single purpose and testable.
 Remember to use the request and response types from the services mod when creating services that do something, e.g. request response transformation. However for http request and response types remember to construct them you have to use http::Request::builder() or http::Response::builder(), you can't use the type aliases in our service.
 Tower services should always have an error type, but they will always use an associated type of BoxError so that upstream errors can be propagated.
 Always make sure linter errors pass before moving onto the next task.
-Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps making sure that you do a git commit between each step. Make sure to use conventional commit names.
+Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps making sure that you do a git commit between each step. Make sure to use conventional commit names. Git messages should include why the change was made and the rationale.
+
 
