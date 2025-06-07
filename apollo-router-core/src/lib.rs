@@ -1,10 +1,13 @@
 use apollo_federation::sources::connect::validation::Code::HttpHeaderNameCollision;
 use tower::{Service, ServiceBuilder};
 
-mod extensions;
-mod json;
-mod layers;
-mod services;
+pub mod extensions;
+pub mod json;
+pub mod layers;
+pub mod services;
+
+#[cfg(test)]
+pub mod test_utils;
 
 use crate::layers::ServiceBuilderExt;
 pub use extensions::Extensions;
