@@ -21,26 +21,25 @@ pub use extensions::Extensions;
 /// 
 /// Example usage:
 /// ```no_run
-/// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse, query_plan}};
+/// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse}};
 /// use tower::{Service, service_fn};
 /// 
-/// let parse_service = service_fn(|req: query_parse::Request| async move {
-///     // Your query parsing logic here
-///     Ok::<_, std::convert::Infallible>(query_parse::Response {
-///         extensions: req.extensions,
-///         operation_name: req.operation_name,
-///         query: apollo_compiler::ExecutableDocument::default(),
-///     })
-/// });
+/// // Mock implementation of QueryParse trait
+/// #[derive(Clone)]
+/// struct MockQueryParse;
 /// 
-/// let plan_service = service_fn(|req: query_plan::Request| async move {
-///     // Your query planning logic here
-///     Ok::<_, std::convert::Infallible>(query_plan::Response {
-///         extensions: req.extensions,
-///         operation_name: req.operation_name,
-///         query_plan: apollo_federation::query_plan::QueryPlan::default(),
-///     })
-/// });
+/// impl query_parse::QueryParse for MockQueryParse {
+///     async fn call(&self, req: query_parse::Request) -> Result<query_parse::Response, query_parse::Error> {
+///         // Your query parsing logic here
+///         Ok(query_parse::Response {
+///             extensions: req.extensions,
+///             operation_name: req.operation_name,
+///             query: apollo_compiler::ExecutableDocument::default(),
+///         })
+///     }
+/// }
+/// 
+/// let parse_service = MockQueryParse;
 /// 
 /// let execute_service = service_fn(|req: query_execution::Request| async move {
 ///     // Your query execution logic here
@@ -50,7 +49,8 @@ pub use extensions::Extensions;
 ///     })
 /// });
 /// 
-/// let pipeline = server_pipeline(parse_service, plan_service, execute_service);
+/// // Note: This example is simplified - actual implementation will need query planning service
+/// // let pipeline = server_pipeline(parse_service, plan_service, execute_service);
 /// ```
 pub fn server_pipeline<P, Pl, S>(
     query_parse_service: P,
