@@ -83,7 +83,7 @@ mod example_integration {
         assert!(result.is_err());
         if let Err(error) = result {
             use crate::error::RouterError;
-            assert_eq!(error.error_code(), "apollo_router::query_parse::syntax_error");
+            assert_eq!(error.error_code(), "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR");
         }
     }
 
@@ -95,7 +95,7 @@ mod example_integration {
         assert!(result.is_err());
         if let Err(error) = result {
             use crate::error::RouterError;
-            assert_eq!(error.error_code(), "apollo_router::layers::bytes_to_json::conversion_error");
+            assert_eq!(error.error_code(), "APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR");
         }
     }
 }

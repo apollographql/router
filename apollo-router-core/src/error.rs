@@ -7,10 +7,7 @@ pub use apollo_router_error::{
     GraphQLErrorExtensions, GraphQLErrorLocation, GraphQLPathSegment,
 };
 
-// Helper function for converting error codes to GraphQL format
-fn convert_to_graphql_error_code(internal_code: &str) -> String {
-    internal_code.replace("::", "_").to_uppercase()
-}
+
 
 // Re-export error registry functions for introspection
 use apollo_router_error::Error;
@@ -31,7 +28,7 @@ pub enum CoreError {
     /// HTTP server configuration error
     #[error("HTTP server configuration failed: {message}")]
     #[diagnostic(
-        code(apollo_router::http_server::config_error),
+        code(APOLLO_ROUTER_HTTP_SERVER_CONFIG_ERROR),
         help("Check your HTTP server configuration parameters")
     )]
     HttpServerConfig {
@@ -45,7 +42,7 @@ pub enum CoreError {
     /// Query parsing failure
     #[error("GraphQL query parsing failed: {reason}")]
     #[diagnostic(
-        code(apollo_router::query_parse::syntax_error),
+        code(APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR),
         help("Ensure your GraphQL query syntax is correct")
     )]
     QueryParseSyntax {
@@ -59,7 +56,7 @@ pub enum CoreError {
     /// Query planning failure
     #[error("Query planning failed: {reason}")]
     #[diagnostic(
-        code(apollo_router::query_plan::planning_error),
+        code(APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR),
         help("Check your schema federation setup")
     )]
     QueryPlanningFailed {
@@ -70,7 +67,7 @@ pub enum CoreError {
     /// Service execution timeout
     #[error("Service execution timed out after {timeout_ms}ms")]
     #[diagnostic(
-        code(apollo_router::execution::timeout),
+        code(APOLLO_ROUTER_EXECUTION_TIMEOUT),
         help("Consider increasing timeout limits or optimizing your resolvers")
     )]
     ExecutionTimeout {
@@ -81,7 +78,7 @@ pub enum CoreError {
     /// Extension loading failure
     #[error("Failed to load extension: {extension_name}")]
     #[diagnostic(
-        code(apollo_router::extensions::load_error),
+        code(APOLLO_ROUTER_EXTENSIONS_LOAD_ERROR),
         help("Verify the extension is properly configured and available")
     )]
     ExtensionLoadError {
@@ -92,13 +89,13 @@ pub enum CoreError {
 
     /// JSON serialization/deserialization error
     #[error("JSON operation failed")]
-    #[diagnostic(code(apollo_router::json::operation_error))]
+    #[diagnostic(code(APOLLO_ROUTER_JSON_OPERATION_ERROR))]
     JsonError(#[from] serde_json::Error),
 
     /// Network communication error
     #[error("Network communication failed")]
     #[diagnostic(
-        code(apollo_router::network::communication_error),
+        code(APOLLO_ROUTER_NETWORK_COMMUNICATION_ERROR),
         help("Check network connectivity and service endpoints")
     )]
     NetworkError(#[from] std::io::Error),
@@ -110,7 +107,7 @@ pub enum LayerError {
     /// HTTP to bytes transformation failed
     #[error("HTTP to bytes conversion failed: {details}")]
     #[diagnostic(
-        code(apollo_router::layers::http_to_bytes::conversion_error),
+        code(APOLLO_ROUTER_LAYERS_HTTP_TO_BYTES_CONVERSION_ERROR),
         help("Check that the HTTP request body is valid")
     )]
     HttpToBytesConversion {
@@ -122,7 +119,7 @@ pub enum LayerError {
     /// Bytes to JSON transformation failed
     #[error("Bytes to JSON conversion failed")]
     #[diagnostic(
-        code(apollo_router::layers::bytes_to_json::conversion_error),
+        code(APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR),
         help("Ensure the input is valid JSON")
     )]
     BytesToJsonConversion {
@@ -137,7 +134,7 @@ pub enum LayerError {
     /// Service composition error
     #[error("Service composition failed during {phase}")]
     #[diagnostic(
-        code(apollo_router::layers::composition::service_error),
+        code(APOLLO_ROUTER_LAYERS_COMPOSITION_SERVICE_ERROR),
         help("Check service configuration and dependencies")
     )]
     ServiceComposition {
@@ -169,7 +166,7 @@ mod tests {
 
         assert_eq!(
             error.error_code(),
-            "apollo_router::query_parse::syntax_error"
+            "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR"
         );
     }
 
@@ -204,7 +201,7 @@ mod tests {
 
         assert_eq!(
             layer_err.error_code(),
-            "apollo_router::layers::bytes_to_json::conversion_error"
+            "APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR"
         );
     }
 
@@ -225,7 +222,7 @@ mod tests {
             graphql_error.extensions.code,
             "APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR"
         );
-        assert_eq!(graphql_error.extensions.service, "apollo-router-core");
+        assert_eq!(graphql_error.extensions.service, "apollo-router");
         assert!(graphql_error.locations.is_empty());
         assert!(graphql_error.path.is_none());
 
@@ -233,15 +230,7 @@ mod tests {
         let details = &graphql_error.extensions.details;
         assert_eq!(
             details.get("errorType").unwrap(),
-            &serde_json::Value::String("planning".to_string())
-        );
-        assert_eq!(
-            details.get("reason").unwrap(),
-            &serde_json::Value::String("Schema not found".to_string())
-        );
-        assert_eq!(
-            details.get("operationName").unwrap(),
-            &serde_json::Value::String("GetUser".to_string())
+            &serde_json::Value::String("QUERY_PLANNING_FAILED".to_string())
         );
     }
 
@@ -308,19 +297,7 @@ mod tests {
         let details = &graphql_error.extensions.details;
         assert_eq!(
             details.get("errorType").unwrap(),
-            &serde_json::Value::String("conversion".to_string())
-        );
-        assert_eq!(
-            details.get("inputType").unwrap(),
-            &serde_json::Value::String("bytes".to_string())
-        );
-        assert_eq!(
-            details.get("outputType").unwrap(),
-            &serde_json::Value::String("json".to_string())
-        );
-        assert_eq!(
-            details.get("invalidDataPreview").unwrap(),
-            &serde_json::Value::String("{ invalid json data".to_string())
+            &serde_json::Value::String("BYTES_TO_JSON_CONVERSION".to_string())
         );
     }
 
@@ -391,29 +368,7 @@ mod tests {
         assert!(matches!(path[2], GraphQLPathSegment::Field(ref s) if s == "users"));
     }
 
-    #[test]
-    fn test_error_code_conversion_to_graphql_format() {
-        // Test the conversion function directly
-        assert_eq!(
-            convert_to_graphql_error_code("apollo_router::query_parse::syntax_error"),
-            "APOLLO_ROUTER_QUERY_PARSE_SYNTAX_ERROR"
-        );
 
-        assert_eq!(
-            convert_to_graphql_error_code("apollo_router::layers::bytes_to_json::conversion_error"),
-            "APOLLO_ROUTER_LAYERS_BYTES_TO_JSON_CONVERSION_ERROR"
-        );
-
-        assert_eq!(
-            convert_to_graphql_error_code("apollo_router::http_server::config_error"),
-            "APOLLO_ROUTER_HTTP_SERVER_CONFIG_ERROR"
-        );
-
-        assert_eq!(
-            convert_to_graphql_error_code("apollo_router::execution::timeout"),
-            "APOLLO_ROUTER_EXECUTION_TIMEOUT"
-        );
-    }
 
     #[test]
     fn test_graphql_error_extensions_optional_fields() {

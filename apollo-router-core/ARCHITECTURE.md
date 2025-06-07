@@ -464,7 +464,7 @@ use apollo_router_error::Error; // Gets both trait and derive macro
 pub enum MyServiceError {
     #[error("Configuration error: {message}")]
     #[diagnostic(
-        code(apollo_router::my_service::config_error),
+        code(APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR),
         help("Check your configuration file")
     )]
     ConfigError {
@@ -485,7 +485,7 @@ pub enum MyServiceError {
 - **No Clone**: Errors should **never** implement `Clone`
 - **No Downstream**: Errors should **never** have a `Downstream` variant
 - **Rich Diagnostics**: Use `thiserror::Error` and `miette::Diagnostic` for comprehensive error information
-- **Structured Codes**: Follow hierarchical error code pattern (`apollo_router::component::category::error`)
+- **Structured Codes**: Follow hierarchical error code pattern using screaming snake case (`APOLLO_ROUTER_COMPONENT_CATEGORY_ERROR`)
 
 #### GraphQL Extension Control
 
@@ -523,7 +523,7 @@ use apollo_router_error::Error;
 pub enum ServiceError {
     /// Service-specific error variant
     #[error("Specific error description: {message}")]
-    #[diagnostic(code(apollo_router::service::specific_error))]
+    #[diagnostic(code(APOLLO_ROUTER_SERVICE_SPECIFIC_ERROR))]
     SpecificError {
         #[extension("errorMessage")]
         message: String,
@@ -531,7 +531,7 @@ pub enum ServiceError {
     
     /// Another service-specific error variant  
     #[error("Another error occurred")]
-    #[diagnostic(code(apollo_router::service::another_error))]
+    #[diagnostic(code(APOLLO_ROUTER_SERVICE_ANOTHER_ERROR))]
     AnotherError {
         #[source]
         cause: SomeSpecificError,
@@ -552,7 +552,7 @@ use apollo_router_error::Error;
 pub enum LayerError {
     /// Layer-specific error variants
     #[error("Layer operation failed: {operation}")]
-    #[diagnostic(code(apollo_router::layers::operation_failed))]
+    #[diagnostic(code(APOLLO_ROUTER_LAYERS_OPERATION_FAILED))]
     LayerSpecificError {
         #[extension("failedOperation")]
         operation: String,
@@ -562,7 +562,7 @@ pub enum LayerError {
     
     /// Other layer-specific error variants as needed
     #[error("Configuration error: {reason}")]
-    #[diagnostic(code(apollo_router::layers::configuration_error))]
+    #[diagnostic(code(APOLLO_ROUTER_LAYERS_CONFIGURATION_ERROR))]
     ConfigurationError {
         #[extension("configReason")]
         reason: String,

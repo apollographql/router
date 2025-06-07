@@ -229,21 +229,21 @@ impl apollo_router_error::Error for ComplexError {
                 details
                     .insert(
                         "errorType".to_string(),
-                        serde_json::Value::String("syntax".to_string()),
+                        serde_json::Value::String("PARSE_ERROR".to_string()),
                     );
             }
             Self::NetworkError { .. } => {
                 details
                     .insert(
                         "errorType".to_string(),
-                        serde_json::Value::String("network".to_string()),
+                        serde_json::Value::String("NETWORK_ERROR".to_string()),
                     );
             }
             Self::JsonError(..) => {
                 details
                     .insert(
                         "errorType".to_string(),
-                        serde_json::Value::String("json".to_string()),
+                        serde_json::Value::String("JSON_ERROR".to_string()),
                     );
             }
         }

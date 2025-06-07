@@ -111,14 +111,14 @@ impl apollo_router_error::Error for BasicError {
                 details
                     .insert(
                         "errorType".to_string(),
-                        serde_json::Value::String("generic".to_string()),
+                        serde_json::Value::String("BASIC_ERROR".to_string()),
                     );
             }
             Self::ConfigError { .. } => {
                 details
                     .insert(
                         "errorType".to_string(),
-                        serde_json::Value::String("config".to_string()),
+                        serde_json::Value::String("CONFIG_ERROR".to_string()),
                     );
             }
         }

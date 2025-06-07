@@ -68,7 +68,7 @@ fn test_graphql_extensions() {
 
     assert_eq!(
         details.get("errorType").unwrap(),
-        &serde_json::Value::String("config".to_string())
+        &serde_json::Value::String("CONFIG_ERROR".to_string())
     );
     assert_eq!(
         details.get("messageString").unwrap(),
@@ -85,7 +85,7 @@ fn test_graphql_extensions() {
 
     assert_eq!(
         details.get("errorType").unwrap(),
-        &serde_json::Value::String("network".to_string())
+        &serde_json::Value::String("NETWORK_ERROR".to_string())
     );
     assert_eq!(
         details.get("endpoint").unwrap(),

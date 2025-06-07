@@ -52,6 +52,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DataEnum, DeriveInput, Fields, Variant, parse_macro_input};
+use inflector::Inflector;
 
 /// Derive macro for automatically implementing Error and registering with the error registry
 #[proc_macro_derive(Error, attributes(extension))]
@@ -323,6 +324,8 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
+
+
 fn extract_extension_name(attrs: &[Attribute]) -> syn::Result<Option<String>> {
     for attr in attrs {
         if attr.path().is_ident("extension") {
@@ -404,7 +407,7 @@ fn generate_graphql_extensions_arms(
 
 fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_macro2::TokenStream {
     let variant_name = &variant.variant_name;
-    let error_type = variant.graphql_error_type.as_deref().unwrap_or("generic");
+    let error_type = variant_name.to_string().to_screaming_snake_case();
 
     if variant.fields.is_empty() {
         return quote! {
@@ -758,6 +761,8 @@ mod tests {
         assert_eq!(to_camel_case("single"), "single");
         assert_eq!(to_camel_case("a_b_c"), "aBC");
     }
+
+
 
     #[test]
     fn test_extension_attribute_parsing() {
