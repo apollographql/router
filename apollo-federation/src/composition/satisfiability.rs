@@ -62,10 +62,10 @@ impl ValidationContext {
             };
             let context_directive =
                 context_spec.context_directive_definition(&supergraph_schema)?;
-            for app in supergraph_schema.context_directive_applications()? {
-                let Ok(app) = app else {
-                    continue;
-                };
+            let context_applications =
+                supergraph_schema.context_directive_applications_in_supergraph(context_spec)?;
+            for app in context_applications {
+                let app = app?;
                 let args = app.arguments();
                 let target_type = supergraph_schema.get_type(app.target().type_name().clone())?;
                 let mut type_names = vec![target_type.type_name().clone()];
