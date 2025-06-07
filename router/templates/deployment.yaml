@@ -1,0 +1,189 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "router.fullname" . }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
+  {{/* There may not be much configuration so check that there is something */}}
+  {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
+  {{- if ((((((.Values.router).configuration).telemetry).exporters).metrics).prometheus).enabled }}
+  annotations:
+    prometheus.io/path: {{ .Values.router.configuration.telemetry.exporters.metrics.prometheus.path | default "/metrics" }}
+    prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen | last) | default "9090" | quote }}
+    prometheus.io/scrape: "true"
+  {{- else if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
+  annotations:
+    prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
+    prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
+    prometheus.io/scrape: "true"
+  {{- end }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "router.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: {{ .Chart.Name }}
+        {{- if .Values.supergraphFile }}
+        checksum/supergraph-config-map: {{ .Values.supergraphFile | sha256sum }}
+        {{- end }}
+        {{- if .Values.podAnnotations }}
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "router.labels" . | nindent 8 }}
+        {{- if .Values.extraLabels }}
+        {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "router.serviceAccountName" . }}
+      {{- if .Values.restartPolicy }}
+      restartPolicy: {{.Values.restartPolicy}}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        {{- if .Values.extraContainers }}
+          {{- include "apollographql.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
+        {{- end }}
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if or .Values.router.args .Values.router.configuration }}
+          args:
+            {{- if .Values.router.args }}
+            {{- toYaml .Values.router.args | nindent 12 }}
+            {{- end }}
+            {{- if .Values.router.configuration }}
+            - --config
+            - /app/configuration.yaml
+            {{- end }}
+          {{- end }}
+          env:
+            - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
+              value: "true"
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
+            {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
+            - name: APOLLO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "router.managedFederation.apiSecretName" . }}
+                  key: {{ (.Values.managedFederation.existingSecretKeyRefKey | default "managedFederationApiKey") }}
+                  optional: true
+            {{- end }}
+            {{- if not (empty .Values.managedFederation.graphRef) }}
+            - name: APOLLO_GRAPH_REF
+              value: {{ .Values.managedFederation.graphRef }}
+            {{- end }}
+            {{- if .Values.extraEnvVars }}
+            {{- tpl (toYaml .Values.extraEnvVars) $ | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if or .Values.extraEnvVarsCM .Values.extraEnvVarsSecret }}
+          envFrom:
+            {{- if .Values.extraEnvVarsCM }}
+            - configMapRef:
+                name: {{ .Values.extraEnvVarsCM }}
+            {{- end }}
+            {{- if .Values.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ .Values.extraEnvVarsSecret }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPorts.http }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.containerPorts.health }}
+              protocol: TCP
+            {{- if .Values.serviceMonitor.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.containerPorts.metrics }}
+              protocol: TCP
+            {{- end }}
+          lifecycle:
+            {{- toYaml .Values.lifecycle | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
+              port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
+            initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
+          readinessProbe:
+            httpGet:
+              path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
+            initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- if .Values.router.configuration }}
+            - name: router-configuration
+              mountPath: /app/
+              readOnly: true
+            {{- end }}
+            {{- if .Values.extraVolumeMounts }}
+              {{- include "apollographql.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
+            {{- end }}
+          {{- end }}
+      {{- if .Values.initContainers }}
+      initContainers:
+        {{- include "apollographql.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.router.configuration .Values.extraVolumes }}
+      volumes:
+        {{- if .Values.router.configuration }}
+        - name: router-configuration
+          configMap:
+            name: {{ include "router.fullname" . }}
+        {{- end }}
+        {{- if .Values.extraVolumes }}
+          {{- include "apollographql.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.rollingUpdate }}
+  strategy:
+    rollingUpdate:
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      {{- end }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      {{- end }}
+  {{- end }}

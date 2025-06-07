@@ -5,14 +5,17 @@ use std::sync::atomic::AtomicUsize;
 
 // Simple value type for basic operations
 #[derive(Debug, PartialEq, Clone)]
+#[allow(dead_code)]
 struct TestValue {
     value: String,
 }
 
 // Expensive to clone type that should be wrapped in Arc
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ExpensiveType {
     data: Vec<u8>,
+    #[allow(dead_code)]
     count: Arc<AtomicUsize>,
 }
 

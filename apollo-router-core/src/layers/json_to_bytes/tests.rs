@@ -1,9 +1,8 @@
-use super::{JsonToBytesLayer, Error as JsonToBytesError};
+use super::JsonToBytesLayer;
 use crate::Extensions;
 use crate::services::bytes_client::Response as BytesResponse;
 use crate::services::json_client::Request as JsonRequest;
 use crate::test_utils::TowerTest;
-use crate::assert_error;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream;

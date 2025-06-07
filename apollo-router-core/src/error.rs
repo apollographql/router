@@ -151,7 +151,7 @@ pub type LayerResult<T> = std::result::Result<T, LayerError>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use miette::NamedSource;
+    
 
     #[test]
     fn test_error_codes_are_machine_readable() {

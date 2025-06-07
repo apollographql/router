@@ -38,6 +38,7 @@ pub enum Error {
 }
 
 #[cfg_attr(test, mry::mry)]
+#[allow(async_fn_in_trait)]
 pub trait QueryPreparation {
     async fn call(&self, req: Request) -> Result<Response, Error>;
 }

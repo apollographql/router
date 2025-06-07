@@ -1,0 +1,21 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - path: {{ include "router.prometheusMetricsPath" . }}
+    port: metrics
+  namespaceSelector:
+    matchNames:
+    - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "router.selectorLabels" . |  nindent 6 }}
+{{- end }}

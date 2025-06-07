@@ -1,0 +1,53 @@
+{{- if .Values.virtualservice.enabled -}}
+{{- $fullName := include "router.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- $hostName := printf "%s.%s.svc.cluster.local" $fullName .Release.Namespace }}
+
+{{ if .Values.serviceentry.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: {{ $fullName }}-serviceentry
+  namespace: {{ .Values.virtualservice.namespace }}
+  labels:
+    app.fullName: {{ $fullName }}
+    {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
+  {{- with .Values.serviceentry.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  hosts:
+  {{- range .Values.serviceentry.hosts }}
+    - {{ . | quote }}
+  {{- end }}
+  location: MESH_EXTERNAL
+  ports:
+  - name: https
+    number: 443
+    protocol: HTTPS
+  resolution: DNS
+
+{{- range .Values.serviceentry.hosts }}
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: {{ $fullName }}-{{ . }}-destinationrule
+  namespace: {{ $.Values.virtualservice.namespace }}
+spec:
+  host: {{ . | quote }}
+  subsets:
+  - name: {{ $fullName }}-serviceentry
+    labels:
+      app.fullName: {{ $fullName }}
+  trafficPolicy:
+    tls:
+      mode: SIMPLE
+{{- end }}
+
+{{- end }}
+{{- end }}

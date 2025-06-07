@@ -1,0 +1,15 @@
+{{- if .Values.supergraphFile }}
+{{- $routerFullName := include "router.fullname" .  -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $routerFullName }}-supergraph
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
+data:
+  supergraph-schema.graphql: |-
+{{ .Values.supergraphFile | indent 4 }}
+{{- end }}

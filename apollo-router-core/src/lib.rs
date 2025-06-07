@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 pub mod extensions;
 pub mod json;
 pub mod layers;
@@ -34,9 +36,9 @@ pub use miette::{Diagnostic, Report, SourceSpan, NamedSource, Context, IntoDiagn
 /// Example service demonstrating error handling integration
 #[cfg(test)]
 mod example_integration {
-    use super::*;
+
     use crate::error::{CoreError, LayerError};
-    use miette::{NamedSource, SourceSpan};
+    
 
     /// Example of how a service would integrate with the error handling system
     pub fn example_query_parsing(query: &str) -> crate::error::Result<String> {

@@ -2,7 +2,6 @@ use crate::services::http_client::{Request as HttpClientRequest, Response as Htt
 use crate::services::bytes_client::{Request as BytesClientRequest, Response as BytesClientResponse};
 use bytes::Bytes;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 

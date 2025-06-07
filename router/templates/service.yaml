@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "router.fullname" . }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ (splitList ":" (index .Values.router.configuration "health_check").listen | last ) | default "8088" }}
+      targetPort: health
+      protocol: TCP
+      name: health
+    {{- /* Should we expose an entity cache invalidation port? */}}
+    {{- if and (.Values.router.configuration.preview_entity_cache).enabled (.Values.router.configuration.preview_entity_cache).invalidation }}
+    - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.invalidation.listen | last) }}
+      targetPort: invalidation
+      protocol: TCP
+      name: invalidation
+    {{- end }}
+    {{- if .Values.serviceMonitor.enabled }}
+    {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
+    {{- if .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen }}
+    - port: {{ (splitList ":" .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen | last) | default "9090" }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- else if .Values.router.configuration.telemetry.metrics.prometheus.listen }}
+    - port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
+    {{- end }}
+  selector:
+    {{- include "router.selectorLabels" . | nindent 4 }}

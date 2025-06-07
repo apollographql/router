@@ -1,7 +1,6 @@
-use crate::layers::http_to_bytes::{HttpToBytesLayer, Error as HttpToBytesError};
+use crate::layers::http_to_bytes::HttpToBytesLayer;
 use crate::services::bytes_server::Response as BytesResponse;
 use crate::test_utils::TowerTest;
-use crate::assert_error;
 use bytes::Bytes;
 use futures::stream;
 use http_body_util::BodyExt;

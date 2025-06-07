@@ -1,0 +1,6 @@
+apiVersion: v2
+appVersion: v2.0.0
+description: Rust Graph Routing runtime for Apollo Federation
+name: router
+type: application
+version: 2.0.0

@@ -129,14 +129,14 @@ where
         let extended_extensions = original_extensions.extend();
 
         // Extract query string, operation name and variables from JSON body
-        let (query_string, operation_name, query_variables) = match extract_query_details(&req.body) {
+        let (_query_string, operation_name, query_variables) = match extract_query_details(&req.body) {
             Ok(details) => details,
             Err(e) => return Box::pin(async move { Err(e.into()) }),
         };
 
-        // Clone services for async usage
-        let mut query_parse_service = self.query_parse_service.clone();
-        let mut query_plan_service = self.query_plan_service.clone();
+        // Clone services for async usage (will be used in future implementation)
+        let _query_parse_service = self.query_parse_service.clone();
+        let _query_plan_service = self.query_plan_service.clone();
         let mut inner_service = self.inner.clone();
 
         Box::pin(async move {

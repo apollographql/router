@@ -2,7 +2,6 @@ use crate::services::bytes_client::{Request as BytesClientRequest, Response as B
 use crate::services::json_client::{Request as JsonClientRequest, Response as JsonClientResponse};
 use futures::StreamExt;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 

@@ -1,0 +1,14 @@
+# This coprocessor doesn't point to anything
+coprocessor:
+  url: "<replace>"
+  supergraph:
+    response:
+      condition:
+        eq: # This doesn't work
+          - on_graphql_error: true
+          - true
+      headers: true
+      body: false
+      context: all
+      sdl: false
+      status_code: true
