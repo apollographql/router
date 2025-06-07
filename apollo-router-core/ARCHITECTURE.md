@@ -110,11 +110,75 @@ services/
 - `json_server` - JSON request/response handling
 - `query_parse` - GraphQL query parsing
 - `query_plan` - Query planning
+- `query_preparation` - Composite service combining query parsing and planning
 - `query_execution` - Query execution
 - `fetch` - Data fetching coordination
 - `http_client` - HTTP client operations
 - `bytes_client` - Byte stream client operations
 - `json_client` - JSON client operations
+
+#### Composite Services
+
+Some services are **composite services** that internally orchestrate multiple sub-services to provide a higher-level abstraction:
+
+##### QueryPreparation Service
+
+The `query_preparation` service is a composite service that combines `query_parse` and `query_plan` services. It provides a single interface for the complete query preparation phase.
+
+**Input**: JSON request containing a GraphQL query string
+**Output**: Execution request containing a query plan ready for execution
+
+**Internal Flow**:
+```rust
+JSON Request
+    ↓ query_parse service
+QueryParse Response (ExecutableDocument)
+    ↓ query_plan service  
+QueryPlan Response (QueryPlan)
+    ↓ transformed to
+Execution Request
+```
+
+**Structure**:
+```rust
+// QueryPreparation takes JSON input and produces Execution output
+pub struct QueryPreparationService<ParseService, PlanService> {
+    parse_service: ParseService,
+    plan_service: PlanService,
+}
+
+impl<P, Pl> Service<JsonRequest> for QueryPreparationService<P, Pl>
+where
+    P: Service<QueryParseRequest, Response = QueryParseResponse>,
+    Pl: Service<QueryPlanRequest, Response = QueryPlanResponse>,
+{
+    type Response = ExecutionRequest;
+    type Error = QueryPreparationError;
+    
+    async fn call(&mut self, req: JsonRequest) -> Result<Self::Response, Self::Error> {
+        // 1. Transform JSON to QueryParse request
+        let parse_req = transform_json_to_parse(req)?;
+        
+        // 2. Call query_parse service
+        let parse_resp = self.parse_service.call(parse_req).await?;
+        
+        // 3. Transform QueryParse response to QueryPlan request
+        let plan_req = transform_parse_to_plan(parse_resp)?;
+        
+        // 4. Call query_plan service
+        let plan_resp = self.plan_service.call(plan_req).await?;
+        
+        // 5. Transform QueryPlan response to Execution request
+        Ok(transform_plan_to_execution(plan_resp)?)
+    }
+}
+```
+
+This pattern allows:
+- **Simplified Integration**: Consumers only need to interact with one service
+- **Internal Optimization**: The composite service can optimize the transition between sub-services
+- **Testing Flexibility**: Sub-services can be tested independently or as a composite
+- **Service Reuse**: Individual sub-services can still be used independently when needed
 
 ### 2. Layers (`src/layers/`)
 
@@ -644,16 +708,18 @@ Bytes Request (Extensions Layer 1)
 JSON Request (Extensions Layer 2)
     ↓ (json_server)
     ↓ extends() → Extensions Layer 3
-Query Parse Request (Extensions Layer 3)
-    ↓ (query_parse)
+Query Preparation Request (Extensions Layer 3)
+    ↓ (query_preparation) - Composite Service:
+    │   JSON Request 
+    │       ↓ query_parse
+    │   QueryParse Response 
+    │       ↓ query_plan
+    │   QueryPlan Response
     ↓ extends() → Extensions Layer 4
-Query Plan Request (Extensions Layer 4)
-    ↓ (query_plan)
-    ↓ extends() → Extensions Layer 5
-Execution Request (Extensions Layer 5)
+Execution Request (Extensions Layer 4)
     ↓ (query_execution)
-    ↓ extends() → Extensions Layer 6
-Fetch Request (Extensions Layer 6)
+    ↓ extends() → Extensions Layer 5
+Fetch Request (Extensions Layer 5)
     ↓ (fetch)
 HTTP Response (Returns Layer 0 - Original Extensions)
 ```
@@ -663,6 +729,7 @@ HTTP Response (Returns Layer 0 - Original Extensions)
 - Inner services receive extended Extensions with access to parent context
 - Response transformations return the **original** Extensions from the request
 - Parent values always take precedence over child values
+- **Composite Services**: Internal sub-service calls within composite services (like QueryPreparation) maintain the same Extensions layer - they don't create additional extension layers
 
 ## Extension Points
 
