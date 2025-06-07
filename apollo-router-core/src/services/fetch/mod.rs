@@ -1,14 +1,9 @@
 use crate::Extensions;
 use crate::json::JsonValue;
-use apollo_federation::query_plan::QueryPlan;
-use bytes::Bytes;
 use futures::Stream;
 use std::any::Any;
 use std::collections::HashMap;
 use std::pin::Pin;
-use thiserror::Error;
-use tower::BoxError;
-use tower::util::BoxCloneService;
 
 pub struct Request {
     pub extensions: Extensions,

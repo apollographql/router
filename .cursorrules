@@ -19,12 +19,14 @@ Check the crates directory to make sure you are not implementing a new crate tha
 When adding a crate make sure to use the latest version from the internet also check to see if the workspace dependency is already specified.
 Use rust edition = "2024"
 Do not create tests that only exercise mocks of traits. There is no benefit to this.
-Whenever you create a tests.rs file you must use
+Whenever you create a tests.rs in the related mod.rs file use:
 ```rust
 #[cfg(test)]
 mod tests
 ```
-in the related mod.rs file.
+Do not use `mod test` from within a test.rs file.
 Keep functions small, single purpose and testable.
-Always use tower-test for testing tower layers and services.
 Remember to use the request and response types from the services mod when creating services that do something, e.g. request response transformation. However for http request and response types remember to construct them you have to use http::Request::builder() or http::Response::builder(), you can't use the type aliases in our service.
+Tower services should always have an error type, but they will always use an associated type of BoxError so that upstream errors can be propagated.
+Always make sure linter errors pass before moving onto the next task.
+

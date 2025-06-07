@@ -2,8 +2,6 @@ use crate::Extensions;
 use bytes::Bytes;
 use futures::Stream;
 use std::pin::Pin;
-use thiserror::Error;
-use tower::Service;
 
 #[derive(Clone)]
 pub struct Request {

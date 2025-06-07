@@ -1,33 +1,15 @@
 use crate::layers::http_to_bytes::HttpToBytesLayer;
-use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
+use crate::services::bytes_server::Response as BytesResponse;
+use crate::test_utils::TowerTest;
 use bytes::Bytes;
 use futures::stream;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
-use tower::ServiceBuilder;
-use tower::{Service, ServiceExt};
-use tower_test::mock;
 
 #[tokio::test]
 async fn test_http_to_bytes_conversion() {
-    let (mut mock_service, mut handle) = mock::pair::<BytesRequest, BytesResponse>();
-    // Set up the mock to expect a bytes request and return a bytes response
-    handle.allow(1);
-    let _ = tokio::task::spawn(async move {
-        let (request, response) = handle.next_request().await.expect("service must not fail");
-        assert_eq!(request.body, "test body".as_bytes());
-        response.send_response(BytesResponse {
-            extensions: crate::Extensions::default(),
-            responses: Box::pin(stream::once(async { Bytes::from("test response") })),
-        });
-    });
+    let layer = HttpToBytesLayer;
 
-    // Set up the service under test
-    let mut service = ServiceBuilder::new()
-        .layer(HttpToBytesLayer)
-        .service(mock_service);
-
-    // Create a test HTTP request
     let http_req = http::Request::builder()
         .uri("http://example.com")
         .body(UnsyncBoxBody::new(
@@ -35,53 +17,39 @@ async fn test_http_to_bytes_conversion() {
         ))
         .unwrap();
 
-    // Call the service and verify the response
-    let body = service
-        .oneshot(http_req)
-        .await
-        .expect("response expected")
-        .into_body();
+    let response = TowerTest::builder()
+        .layer(layer)
+        .oneshot(http_req, |mut downstream| async move {
+            downstream.allow(1);
+            let (request, response) = downstream
+                .next_request()
+                .await
+                .expect("service must not fail");
 
-    let collected = body.collect().await.unwrap().to_bytes();
+            // Verify the request was transformed correctly
+            assert_eq!(request.body, "test body".as_bytes());
+
+            // Send back a bytes response
+            response.send_response(BytesResponse {
+                extensions: crate::Extensions::default(),
+                responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+            });
+        })
+        .await
+        .expect("Test should succeed");
+
+    let collected = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(collected, "test response".as_bytes());
 }
 
 #[tokio::test]
 async fn test_extensions_passthrough() {
-    let (mut mock_service, mut handle) = mock::pair::<BytesRequest, BytesResponse>();
-    
-    // Set up the mock to verify extensions are passed through
-    handle.allow(1);
-    let _ = tokio::task::spawn(async move {
-        let (request, response) = handle.next_request().await.expect("service must not fail");
-        assert_eq!(request.body, "test body".as_bytes());
-        
-        // Verify the extensions were extended from HTTP request (parent values accessible)
-        let test_value: Option<String> = request.extensions.get();
-        assert_eq!(test_value, Some("test_context".to_string()));
-        
-        let test_int: Option<i32> = request.extensions.get();
-        assert_eq!(test_int, Some(42));
-        
-        // Add values to the extended layer (these should NOT affect the original)
-        request.extensions.insert(999i32); // Try to override parent value
-        request.extensions.insert(3.14f64); // Add new type
-        
-        response.send_response(BytesResponse {
-            extensions: request.extensions,
-            responses: Box::pin(stream::once(async { Bytes::from("test response") })),
-        });
-    });
-
-    // Set up the service under test
-    let mut service = ServiceBuilder::new()
-        .layer(HttpToBytesLayer)
-        .service(mock_service);
+    let layer = HttpToBytesLayer;
 
     // Create our Extensions and store some test data
     let mut extensions = crate::Extensions::default();
     extensions.insert("test_context".to_string());
-    extensions.insert(42i32); // Add an integer for testing
+    extensions.insert(42i32);
 
     // Create a test HTTP request with our Extensions stored in HTTP extensions
     let mut http_req = http::Request::builder()
@@ -90,54 +58,57 @@ async fn test_extensions_passthrough() {
             http_body_util::Full::from("test body").map_err(Into::into),
         ))
         .unwrap();
-    
+
     // Store our Extensions in the HTTP request extensions
-    http_req.extensions_mut().insert(extensions);
+    http_req.extensions_mut().insert(extensions.clone());
 
-    // Call the service and verify the response
-    let http_response = service
-        .oneshot(http_req)
+    let response = TowerTest::builder()
+        .layer(layer)
+        .oneshot(http_req, |mut downstream| async move {
+            downstream.allow(1);
+            let (request, response) = downstream
+                .next_request()
+                .await
+                .expect("service must not fail");
+
+            assert_eq!(request.body, "test body".as_bytes());
+
+            // Verify the extensions were extended from HTTP request (parent values accessible)
+            let test_value: Option<String> = request.extensions.get();
+            assert_eq!(test_value, Some("test_context".to_string()));
+
+            let test_int: Option<i32> = request.extensions.get();
+            assert_eq!(test_int, Some(42));
+
+            // Add values to the extended layer (these should NOT affect the original)
+            request.extensions.insert(999i32); // Try to override parent value
+            request.extensions.insert(3.14f64); // Add new type
+
+            response.send_response(BytesResponse {
+                extensions: request.extensions,
+                responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+            });
+        })
         .await
-        .expect("response expected");
+        .expect("Test should succeed");
 
-    // Verify the original Extensions were returned in the HTTP response
-    let response_extensions = http_response
-        .extensions()
-        .get::<crate::Extensions>()
-        .expect("Extensions should be present in response");
-    
-    // Original values should be preserved exactly
-    let original_string: Option<String> = response_extensions.get();
-    assert_eq!(original_string, Some("test_context".to_string()));
-    
-    let original_int: Option<i32> = response_extensions.get();
-    assert_eq!(original_int, Some(42)); // Original value, not the 999 from inner service
-    
-    // Inner service values should NOT be visible (they were in an extended layer)
-    let inner_float: Option<f64> = response_extensions.get();
-    assert_eq!(inner_float, None); // Inner service's f64 should not be visible
+    // Verify response preserves original extensions (parent values take precedence)
+    let original_extensions = response.extensions().get::<crate::Extensions>().unwrap();
 
-    let collected = http_response.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(collected, "test response".as_bytes());
+    let preserved_string: Option<String> = original_extensions.get();
+    assert_eq!(preserved_string, Some("test_context".to_string()));
+
+    let preserved_int: Option<i32> = original_extensions.get();
+    assert_eq!(preserved_int, Some(42)); // Original value, not 999
+
+    let preserved_float: Option<f64> = original_extensions.get();
+    assert_eq!(preserved_float, None); // Inner additions not visible
 }
 
 #[tokio::test]
 async fn test_downstream_service_error() {
-    let (mut mock_service, mut handle) = mock::pair::<BytesRequest, BytesResponse>();
-    
-    // Set up the mock to return an error
-    handle.allow(1);
-    let _ = tokio::task::spawn(async move {
-        let (_request, response) = handle.next_request().await.expect("service must not fail");
-        response.send_error(tower::BoxError::from("Downstream service failed"));
-    });
+    let layer = HttpToBytesLayer;
 
-    // Set up the service under test
-    let mut service = ServiceBuilder::new()
-        .layer(HttpToBytesLayer)
-        .service(mock_service);
-
-    // Create a test HTTP request
     let http_req = http::Request::builder()
         .uri("http://example.com")
         .body(UnsyncBoxBody::new(
@@ -145,31 +116,63 @@ async fn test_downstream_service_error() {
         ))
         .unwrap();
 
-    // Call the service and expect an error
-    let result = service.oneshot(http_req).await;
-    assert!(result.is_err(), "Should return error when downstream service fails");
-    
+    let result = TowerTest::builder()
+        .layer(layer)
+        .oneshot(http_req, |mut downstream| async move {
+            downstream.allow(1);
+            let (_request, response) = downstream
+                .next_request()
+                .await
+                .expect("service must not fail");
+
+            response.send_error(tower::BoxError::from("Downstream service failed"));
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "Should return error when downstream service fails"
+    );
+
+    // Since we use BoxError directly, we can check the error message
     if let Err(error) = result {
         let error_message = error.to_string();
-        assert!(error_message.contains("Downstream service error"));
+        assert!(error_message.contains("Downstream service failed"));
     }
 }
 
 #[tokio::test]
-async fn test_http_response_builder_error() {
-    // Note: HTTP response builder errors are difficult to trigger in practice
-    // since http::Response::builder() is quite forgiving. This test demonstrates
-    // the error handling path using direct error construction.
-    use crate::layers::http_to_bytes::Error;
-    
-    // Create an HTTP error by trying to build an invalid response
-    let http_error = http::Response::builder()
-        .header("invalid\0header", "value") // Invalid header name with null byte
-        .body(())
-        .unwrap_err();
-    let layer_error = Error::HttpResponseBuilder(http_error);
-    
-    // Verify the error message format
-    let error_message = layer_error.to_string();
-    assert!(error_message.contains("Failed to build HTTP response"));
+async fn test_empty_body() {
+    let layer = HttpToBytesLayer;
+
+    let http_req = http::Request::builder()
+        .uri("http://example.com")
+        .body(UnsyncBoxBody::new(
+            http_body_util::Empty::<Bytes>::new().map_err(Into::into),
+        ))
+        .unwrap();
+
+    let response = TowerTest::builder()
+        .layer(layer)
+        .oneshot(http_req, |mut downstream| async move {
+            downstream.allow(1);
+            let (request, response) = downstream
+                .next_request()
+                .await
+                .expect("service must not fail");
+
+            // Verify empty body becomes empty bytes
+            assert_eq!(request.body, Bytes::new());
+
+            // Send back a response
+            response.send_response(BytesResponse {
+                extensions: crate::Extensions::default(),
+                responses: Box::pin(stream::once(async { Bytes::from("empty response") })),
+            });
+        })
+        .await
+        .expect("Test should succeed");
+
+    let collected = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(collected, "empty response".as_bytes());
 }

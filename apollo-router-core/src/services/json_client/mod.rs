@@ -2,9 +2,6 @@ use crate::Extensions;
 use crate::json::JsonValue;
 use futures::Stream;
 use std::pin::Pin;
-use thiserror::Error;
-use tower::BoxError;
-use tower::util::BoxCloneService;
 
 pub struct Request {
     pub extensions: Extensions,

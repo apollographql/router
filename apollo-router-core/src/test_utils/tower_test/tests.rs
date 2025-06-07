@@ -6,7 +6,6 @@ use http_body_util::combinators::UnsyncBoxBody;
 
 use crate::layers::http_to_bytes::HttpToBytesLayer;
 use crate::services::bytes_server::Response as BytesResponse;
-use crate::test_utils::LayerTestBuilder;
 
 #[tokio::test]
 async fn test_clean_builder_api_oneshot() {
@@ -19,7 +18,7 @@ async fn test_clean_builder_api_oneshot() {
         ))
         .unwrap();
 
-    let result: http::Response<_> = LayerTestBuilder::new()
+    let result: http::Response<_> = TowerTest::builder()
         .layer(layer)
         .oneshot(http_req, |mut downstream| async move {
             downstream.allow(1);
@@ -51,7 +50,7 @@ async fn test_clean_builder_api_with_timeout() {
         ))
         .unwrap();
 
-    let result = LayerTestBuilder::new()
+    let result = TowerTest::builder()
         .layer(layer)
         .timeout(Duration::from_millis(100))
         .oneshot(http_req, |mut _downstream| async move {
@@ -77,7 +76,7 @@ async fn test_clean_builder_api_panic_detection() {
         ))
         .unwrap();
 
-    let result = LayerTestBuilder::new()
+    let result = TowerTest::builder()
         .layer(layer)
         .timeout(Duration::from_millis(100))
         .oneshot(http_req, |mut _downstream| async move {
@@ -94,7 +93,7 @@ async fn test_clean_builder_api_panic_detection() {
 async fn test_clean_builder_api_custom_test() {
     let layer = HttpToBytesLayer;
 
-    let result = LayerTestBuilder::new()
+    let result = TowerTest::builder()
         .layer(layer)
         .test(
             |mut service| async move {

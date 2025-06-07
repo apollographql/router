@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use http_body_util::combinators::UnsyncBoxBody;
-use tower::BoxError;
+use std::convert::Infallible;
 
-pub type Request = http::Request<UnsyncBoxBody<Bytes, BoxError>>;
-pub type Response = http::Response<UnsyncBoxBody<Bytes, BoxError>>;
+pub type Request = http::Request<UnsyncBoxBody<Bytes, Infallible>>;
+pub type Response = http::Response<UnsyncBoxBody<Bytes, Infallible>>;

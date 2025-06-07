@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// A trait for types that can be stored in the context.
 /// Any type that is Clone, Send, Sync and 'static can be stored in the context.
-trait ExtensionValue: Clone + Send + Sync + 'static {}
+pub trait ExtensionValue: Clone + Send + Sync + 'static {}
 
 impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 
@@ -206,7 +206,7 @@ impl Extensions {
     /// // Expensive to clone value (wrap in Arc)
     /// let expensive = Arc::new(vec![0u8; 1000]); // Large vector
     /// context.insert(expensive.clone());
-    /// 
+    ///
     /// // Verify both values can be retrieved
     /// assert_eq!(context.get::<i32>(), Some(42));
     /// assert_eq!(context.get::<Arc<Vec<u8>>>().unwrap().len(), 1000);

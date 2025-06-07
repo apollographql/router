@@ -4,7 +4,7 @@ use std::time::Duration;
 use tower::{Layer, Service, ServiceExt};
 
 /// Example service for documentation and testing purposes
-/// 
+///
 /// This service simply passes requests through unchanged to demonstrate
 /// tower test patterns without coupling to specific business logic.
 #[derive(Clone)]
@@ -39,7 +39,7 @@ where
 }
 
 /// Example layer for documentation and testing purposes
-/// 
+///
 /// This layer wraps services with the ExampleService to demonstrate
 /// tower test patterns without coupling to specific business logic.
 #[derive(Clone)]

@@ -5,9 +5,6 @@ use futures::Stream;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
-use thiserror::Error;
-use tower::BoxError;
-use tower::util::BoxCloneService;
 
 pub struct Request {
     pub extensions: Extensions,

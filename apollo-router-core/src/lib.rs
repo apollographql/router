@@ -1,6 +1,3 @@
-use apollo_federation::sources::connect::validation::Code::HttpHeaderNameCollision;
-use tower::{Service, ServiceBuilder};
-
 pub mod extensions;
 pub mod json;
 pub mod layers;

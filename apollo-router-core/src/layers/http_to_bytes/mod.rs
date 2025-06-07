@@ -9,17 +9,14 @@ use thiserror::Error;
 use tower::BoxError;
 use tower::{Layer, Service};
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Failed to collect HTTP body: {0}
-    #[error("Failed to collect HTTP body: {0}")]
-    HttpBodyCollection(tower::BoxError),
     /// Failed to build HTTP response: {0}
     #[error("Failed to build HTTP response: {0}")]
     HttpResponseBuilder(#[from] http::Error),
-    /// Downstream service error: {0}
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] BoxError),
 }
 
 #[derive(Clone, Debug)]
@@ -45,7 +42,7 @@ where
     S::Error: Into<BoxError>,
 {
     type Response = HttpResponse;
-    type Error = Error;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -53,7 +50,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(|e| Error::Downstream(e.into()))
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, req: HttpRequest) -> Self::Future {
@@ -67,7 +64,8 @@ where
         Box::pin(async move {
             // Convert HTTP request to bytes request
             let (parts, body) = req.into_parts();
-            let body_bytes = body.collect().await.map_err(|e| Error::HttpBodyCollection(e.into()))?;
+            // Since body error type is now Infallible, collection cannot fail
+            let body_bytes = body.collect().await.unwrap().to_bytes();
 
             // Extract our Extensions from the HTTP request extensions, or create default
             let original_extensions = parts
@@ -81,18 +79,19 @@ where
 
             let bytes_req = BytesRequest {
                 extensions: extended_extensions,
-                body: body_bytes.to_bytes(),
+                body: body_bytes,
             };
 
             // Call the inner service
-            let bytes_resp = inner.call(bytes_req).await.map_err(|e| Error::Downstream(e.into()))?;
+            let bytes_resp = inner.call(bytes_req).await.map_err(Into::into)?;
 
             // Convert bytes response to HTTP response
             let mut http_resp = http::Response::builder()
                 .status(200)
                 .body(UnsyncBoxBody::new(http_body_util::StreamBody::new(
                     bytes_resp.responses.map(|chunk| Ok(Frame::data(chunk))),
-                )))?;
+                )))
+                .map_err(Error::HttpResponseBuilder)?;
 
             // Store the original Extensions back into the HTTP response extensions
             http_resp.extensions_mut().insert(original_extensions);
@@ -101,6 +100,3 @@ where
         })
     }
 }
-
-#[cfg(test)]
-mod tests;

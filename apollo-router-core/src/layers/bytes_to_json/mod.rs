@@ -12,9 +12,6 @@ pub enum Error {
     /// Failed to parse JSON from bytes: {0}
     #[error("Failed to parse JSON from bytes: {0}")]
     JsonDeserialization(#[from] serde_json::Error),
-    /// Downstream service error: {0}
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] BoxError),
 }
 
 #[derive(Clone, Debug)]
@@ -40,7 +37,7 @@ where
     S::Error: Into<BoxError>,
 {
     type Response = BytesResponse;
-    type Error = Error;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -48,14 +45,14 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(|e| Error::Downstream(e.into()))
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, req: BytesRequest) -> Self::Future {
         // Convert bytes to JSON synchronously - fail fast if invalid
         let json_body = match serde_json::from_slice(&req.body) {
             Ok(json) => json,
-            Err(e) => return Box::pin(async move { Err(Error::JsonDeserialization(e)) }),
+            Err(e) => return Box::pin(async move { Err(Error::JsonDeserialization(e).into()) }),
         };
 
         // Create an extended layer for the inner service
@@ -72,7 +69,7 @@ where
 
         Box::pin(async move {
             // Await the inner service call
-            let json_resp = future.await.map_err(|e| Error::Downstream(e.into()))?;
+            let json_resp = future.await.map_err(Into::into)?;
 
             // Convert JSON response to bytes response
             let bytes_stream = json_resp.responses.map(|json_value| {
@@ -93,4 +90,4 @@ where
 }
 
 #[cfg(test)]
-mod tests; 
+mod tests;

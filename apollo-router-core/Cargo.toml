@@ -22,7 +22,9 @@ tower.workspace = true
 quick_cache = "0.6.14"
 tokio = { version = "1.45.1", features = ["macros", "full"] }
 
+
 [dev-dependencies]
+bon = "3.6"
 mry = "0.14.0"
 tokio-test = "0.4.4"
 tower-test = "0.4.0"

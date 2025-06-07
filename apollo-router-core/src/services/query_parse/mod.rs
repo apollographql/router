@@ -1,9 +1,6 @@
 use crate::Extensions;
 use apollo_compiler::ExecutableDocument;
 use serde_json::Value;
-use thiserror::Error;
-use tower::BoxError;
-use tower::util::BoxCloneService;
 
 pub struct Request {
     pub extensions: Extensions,

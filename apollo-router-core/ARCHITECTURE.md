@@ -211,7 +211,7 @@ child.insert("downstream_attempt".to_string()); // Same type as parent
 assert_eq!(child.get::<String>(), Some("upstream_value".to_string()));
 assert_eq!(child.get::<i32>(), Some(42));
 
-// Parent only sees its own values
+// Parent only sees  its own values
 assert_eq!(parent.get::<i32>(), None);
 ```
 
@@ -381,10 +381,9 @@ pub enum ServiceError {
     #[error("Another error: {0}")]
     AnotherError(#[from] SomeSpecificError),
     
-    /// Downstream service error (always present)
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] tower::BoxError),
 }
+
+Service error types should be Into<BoxError> so that errors from downstream can be passed through without wrapping.  
 ```
 
 #### Layer Error Type Pattern
@@ -450,6 +449,157 @@ This pattern ensures that error information flows correctly through the service 
 - Externalize test fixtures using `include_str!` and prefer YAML format
 - Write tests that exercise real implementations, not just mocks
 - **Extensions Testing**: Always test that layers properly extend and return original Extensions
+
+#### Testing Tower Services and Layers
+
+For testing Tower services and layers, use the `TowerTest` builder utility from `test_utils::tower_test`. This provides a fluent API with automatic timeout protection, panic detection, and clean separation of test configuration.
+
+##### Key Features
+
+- **Automatic timeout protection**: Prevents hanging tests (default: 1 second)
+- **Panic detection**: Catches panics in expectation handlers and provides clear error messages
+- **Type inference**: No type annotations required for expectations
+- **Fluent API**: Clean, readable test configuration
+- **Flexible testing**: Supports both oneshot and custom test scenarios
+
+##### Basic Layer Testing Pattern
+
+```rust
+use crate::test_utils::tower_test::TowerTest;
+use std::time::Duration;
+
+#[tokio::test]
+async fn test_my_layer() -> Result<(), Box<dyn std::error::Error>> {
+    let layer = MyLayer::new();
+    let request = MyRequest::new("test");
+
+    let response = TowerTest::builder()
+        .timeout(Duration::from_secs(2)) // Optional: override default timeout
+        .layer(layer)
+        .oneshot(request, |mut downstream| async move {
+            // Set up downstream service expectations
+            downstream.allow(1); // Allow one request
+            
+            let (received_req, send_response) = downstream
+                .next_request()
+                .await
+                .expect("should receive downstream request");
+            
+            // Verify the transformed request
+            assert_eq!(received_req.some_field, "expected_value");
+            
+            // Send mock response back
+            send_response.send_response(MyDownstreamResponse::success());
+        })
+        .await?;
+
+    // Verify the final response
+    assert_eq!(response.status, "success");
+    Ok(())
+}
+```
+
+##### Custom Test Scenarios
+
+For more complex testing scenarios, use the `test()` method:
+
+```rust
+#[tokio::test] 
+async fn test_multiple_requests() -> Result<(), Box<dyn std::error::Error>> {
+    let layer = MyLayer::new();
+
+    let result = TowerTest::builder()
+        .layer(layer)
+        .test(
+            |mut service| async move {
+                // Custom test logic with multiple service calls
+                let response1 = service.call(MyRequest::new("first")).await?;
+                let response2 = service.call(MyRequest::new("second")).await?;
+                
+                Ok((response1, response2))
+            },
+            |mut downstream| async move {
+                // Handle multiple downstream expectations
+                downstream.allow(2);
+                
+                for expected in ["transformed_first", "transformed_second"] {
+                    let (req, resp) = downstream.next_request().await.unwrap();
+                    assert_eq!(req.data, expected);
+                    resp.send_response(MyDownstreamResponse::ok());
+                }
+            }
+        )
+        .await?;
+
+    // Verify both responses
+    assert!(result.0.is_success());
+    assert!(result.1.is_success());
+    Ok(())
+}
+```
+
+##### Testing Service Implementations
+
+When testing service implementations (not layers), use `tower_test::mock::spawn` for terminal services:
+
+```rust
+use tower_test::mock;
+use tower::ServiceExt;
+
+#[tokio::test]
+async fn test_terminal_service() {
+    let service = MyTerminalService::new();
+    let mut mock = mock::spawn();
+    
+    // No downstream service needed for terminal services
+    let response = service.oneshot(MyRequest::new()).await.unwrap();
+    
+    assert_eq!(response.result, "expected");
+}
+```
+
+##### Testing Guidelines for Tower Components
+
+1. **Layer Tests**: Use `TowerTest::builder().layer()` for middleware layers
+2. **Terminal Service Tests**: Use `tower_test::mock::spawn()` for services without downstream dependencies  
+3. **Timeout Configuration**: Adjust timeouts for slow operations, but keep them reasonable
+4. **Expectation Clarity**: Set clear expectations in the closure - the test will fail if they're not met
+5. **Error Propagation**: Use the `?` operator to propagate errors from test operations
+6. **Panic Safety**: The test utility catches panics in expectations and converts them to test failures
+
+##### Common Testing Patterns
+
+**Testing Request Transformation**:
+```rust
+// Verify layer transforms request correctly
+let (received_req, _) = downstream.next_request().await.unwrap();
+assert_eq!(received_req.transformed_field, expected_value);
+```
+
+**Testing Response Transformation**:
+```rust  
+// Send specific response and verify transformation
+send_response.send_response(DownstreamResponse::with_data("test"));
+// Then verify the final response outside the expectations closure
+assert_eq!(response.processed_data, "processed_test");
+```
+
+**Testing Error Handling**:
+```rust
+send_response.send_error(SomeError::new("test error"));
+// Verify error is properly transformed or propagated
+```
+
+##### Timeout and Deadlock Prevention
+
+The test utility automatically applies timeouts to prevent hanging tests. Common causes of timeouts:
+
+- Not calling `downstream.allow(n)` with the correct number of expected requests
+- Not calling `next_request()` for each allowed request
+- Deadlocks in service logic
+- Infinite loops or blocking operations
+
+If tests timeout, check that expectations match actual service behavior and that all async operations are properly awaited.
 
 ### Builder Pattern
 

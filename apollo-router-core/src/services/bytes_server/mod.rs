@@ -1,12 +1,7 @@
 use crate::Extensions;
-use apollo_federation::query_plan::QueryPlan;
 use bytes::Bytes;
 use futures::Stream;
-use std::fmt::Debug;
 use std::pin::Pin;
-use thiserror::Error;
-use tower::BoxError;
-use tower::util::BoxCloneService;
 
 pub struct Request {
     pub extensions: Extensions,

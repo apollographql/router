@@ -1,10 +1,6 @@
 use crate::Extensions;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::QueryPlan;
-use std::collections::{HashMap, HashSet};
-use thiserror::Error;
-use tower::util::BoxCloneService;
-use tower::{BoxError, Service};
 
 pub struct Request {
     pub extensions: Extensions,
