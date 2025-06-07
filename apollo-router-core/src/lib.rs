@@ -11,7 +11,7 @@ use crate::services::query_execution;
 use crate::services::json_client;
 use crate::services::fetch;
 use crate::services::http_server;
-use crate::services::query_parse::{QueryParse};
+use crate::services::query_parse;
 use crate::services::query_plan::{QueryPlanning};
 use tower::{ServiceBuilder, Service};
 
@@ -24,22 +24,7 @@ pub use extensions::Extensions;
 /// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse}};
 /// use tower::{Service, service_fn};
 /// 
-/// // Mock implementation of QueryParse trait
-/// #[derive(Clone)]
-/// struct MockQueryParse;
-/// 
-/// impl query_parse::QueryParse for MockQueryParse {
-///     async fn call(&self, req: query_parse::Request) -> Result<query_parse::Response, query_parse::Error> {
-///         // Your query parsing logic here
-///         Ok(query_parse::Response {
-///             extensions: req.extensions,
-///             operation_name: req.operation_name,
-///             query: apollo_compiler::ExecutableDocument::default(),
-///         })
-///     }
-/// }
-/// 
-/// let parse_service = MockQueryParse;
+/// let parse_service = query_parse::QueryParseService::new();
 /// 
 /// let execute_service = service_fn(|req: query_execution::Request| async move {
 ///     // Your query execution logic here
@@ -49,7 +34,7 @@ pub use extensions::Extensions;
 ///     })
 /// });
 /// 
-/// // Note: This example is simplified - actual implementation will need query planning service
+/// // Note: This example is simplified - you would need a query planning service implementation
 /// // let pipeline = server_pipeline(parse_service, plan_service, execute_service);
 /// ```
 pub fn server_pipeline<P, Pl, S>(
@@ -58,7 +43,9 @@ pub fn server_pipeline<P, Pl, S>(
     execute_service: S,
 ) -> impl Service<http_server::Request, Response = http_server::Response>
 where
-    P: QueryParse + Clone + Send + 'static,
+    P: Service<query_parse::Request, Response = query_parse::Response> + Clone + Send + 'static,
+    P::Future: Send + 'static,
+    P::Error: Into<tower::BoxError>,
     Pl: QueryPlanning + Clone + Send + 'static,
     S: Service<query_execution::Request, Response = query_execution::Response> + Clone + Send + 'static,
     S::Future: Send + 'static,
