@@ -451,11 +451,62 @@ Common JSON utilities and type definitions used across services.
 
 ### Error Handling
 
-- Each service defines its own `Error` enum
-- Errors should **never** implement `Clone`
-- Errors should **never** have a `Downstream` variant
-- Use `thiserror::Error` for error definitions
-- Errors should be descriptive and actionable
+Apollo Router Core uses a comprehensive error handling strategy with automatic derive macros:
+
+#### Error Definition Pattern
+
+Each service defines its own error enum using the re-exported derive macro:
+
+```rust
+use apollo_router_error::Error; // Gets both trait and derive macro
+
+#[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
+pub enum MyServiceError {
+    #[error("Configuration error: {message}")]
+    #[diagnostic(
+        code(apollo_router::my_service::config_error),
+        help("Check your configuration file")
+    )]
+    ConfigError {
+        #[extension("configMessage")] // Explicit GraphQL extension field
+        message: String,
+        #[extension] // Will be camelCase: "errorCode"
+        error_code: u32,
+        #[source_code] // NOT included in GraphQL extensions
+        config_source: Option<String>,
+    },
+}
+```
+
+#### Error Handling Principles
+
+- **Derive Macro**: Use `#[derive(Error)]` for automatic trait implementation
+- **Explicit Extensions**: Only fields with `#[extension]` attributes appear in GraphQL errors
+- **No Clone**: Errors should **never** implement `Clone`
+- **No Downstream**: Errors should **never** have a `Downstream` variant
+- **Rich Diagnostics**: Use `thiserror::Error` and `miette::Diagnostic` for comprehensive error information
+- **Structured Codes**: Follow hierarchical error code pattern (`apollo_router::component::category::error`)
+
+#### GraphQL Extension Control
+
+The new error system provides precise control over GraphQL error extensions:
+
+```rust
+ErrorVariant {
+    #[extension("customName")] // ✅ Included as "customName"
+    field1: String,
+    
+    #[extension] // ✅ Included as "camelCaseField"
+    camel_case_field: String,
+    
+    regular_field: String, // ❌ NOT included in extensions
+    
+    #[source] // ❌ NOT included (diagnostic field)
+    source_error: SomeError,
+}
+```
+
+This approach provides explicit control over error data exposure and ensures type safety for GraphQL extensions.
 
 ### BoxError for Service Error Types
 
@@ -466,19 +517,28 @@ Common JSON utilities and type definitions used across services.
 Services should follow this error type pattern:
 
 ```rust
-#[derive(Debug, Error)]
+use apollo_router_error::Error;
+
+#[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
 pub enum ServiceError {
     /// Service-specific error variant
-    #[error("Specific error description: {0}")]
-    SpecificError(String),
+    #[error("Specific error description: {message}")]
+    #[diagnostic(code(apollo_router::service::specific_error))]
+    SpecificError {
+        #[extension("errorMessage")]
+        message: String,
+    },
     
     /// Another service-specific error variant  
-    #[error("Another error: {0}")]
-    AnotherError(#[from] SomeSpecificError),
-    
+    #[error("Another error occurred")]
+    #[diagnostic(code(apollo_router::service::another_error))]
+    AnotherError {
+        #[source]
+        cause: SomeSpecificError,
+        #[extension("errorContext")]
+        context: String,
+    },
 }
-
-Service error types should be Into<BoxError> so that errors from downstream can be passed through without wrapping.  
 ```
 
 #### Layer Error Type Pattern
@@ -486,15 +546,27 @@ Service error types should be Into<BoxError> so that errors from downstream can 
 Layers should follow this error type pattern:
 
 ```rust
-#[derive(Debug, Error)]
+use apollo_router_error::Error;
+
+#[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
 pub enum LayerError {
     /// Layer-specific error variants
-    #[error("Layer operation failed: {0}")]
-    LayerSpecificError(#[from] SomeLayerError),
+    #[error("Layer operation failed: {operation}")]
+    #[diagnostic(code(apollo_router::layers::operation_failed))]
+    LayerSpecificError {
+        #[extension("failedOperation")]
+        operation: String,
+        #[source]
+        cause: SomeLayerError,
+    },
     
     /// Other layer-specific error variants as needed
-    #[error("Configuration error: {0}")]
-    ConfigurationError(String),
+    #[error("Configuration error: {reason}")]
+    #[diagnostic(code(apollo_router::layers::configuration_error))]
+    ConfigurationError {
+        #[extension("configReason")]
+        reason: String,
+    },
 }
 ```
 

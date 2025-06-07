@@ -23,7 +23,23 @@ tokio = { version = "1.45.1", features = ["macros", "full"] }
 mry = "0.14"
 bon = "3.6"
 
+# Error handling strategy
+miette = { version = "7.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+apollo-router-error = { path = "../apollo-router-error" }
+
+# Optional: For procedural macros if we want custom error code generation
+syn = { version = "2.0", optional = true, features = ["full"] }
+quote = { version = "1.0", optional = true }
+proc-macro2 = { version = "1.0", optional = true }
+
 [dev-dependencies]
 
 tokio-test = "0.4.4"
 tower-test = "0.4.0"
+
+[features]
+# ... existing features ...
+error-code-generation = ["syn", "quote", "proc-macro2"]

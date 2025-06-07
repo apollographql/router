@@ -3,6 +3,9 @@ pub mod json;
 pub mod layers;
 pub mod services;
 
+// Export the comprehensive error handling system
+pub mod error;
+
 #[cfg(test)]
 pub mod test_utils;
 
@@ -16,6 +19,86 @@ use crate::services::query_plan::{QueryPlanning};
 use tower::{ServiceBuilder, Service};
 
 pub use extensions::Extensions;
+
+// Re-export error types for convenience
+pub use error::{
+    CoreError, LayerError, RouterError, Result as CoreResult, LayerResult,
+    // GraphQL error format support
+    GraphQLError, GraphQLErrorLocation, GraphQLPathSegment, GraphQLErrorExtensions,
+    GraphQLErrorContext, GraphQLErrorContextBuilder,
+};
+
+// Re-export miette types that users might need
+pub use miette::{Diagnostic, Report, SourceSpan, NamedSource, Context, IntoDiagnostic};
+
+/// Example service demonstrating error handling integration
+#[cfg(test)]
+mod example_integration {
+    use super::*;
+    use crate::error::{CoreError, LayerError};
+    use miette::{NamedSource, SourceSpan};
+
+    /// Example of how a service would integrate with the error handling system
+    pub fn example_query_parsing(query: &str) -> crate::error::Result<String> {
+        if query.is_empty() {
+            return Err(CoreError::QueryParseSyntax {
+                reason: "Query cannot be empty".to_string(),
+                query_source: Some(query.to_string()),
+                error_span: Some((0, 0).into()),
+            });
+        }
+
+        if !query.contains('{') || !query.contains('}') {
+            let error_pos = query.len();
+            return Err(CoreError::QueryParseSyntax {
+                reason: "Missing opening or closing braces".to_string(),
+                query_source: Some(query.to_string()),
+                error_span: Some((error_pos, 1).into()),
+            });
+        }
+
+        Ok("Parsed successfully".to_string())
+    }
+
+    /// Example of layer error handling
+    pub fn example_json_conversion(input: &[u8]) -> crate::error::LayerResult<serde_json::Value> {
+        match serde_json::from_slice(input) {
+            Ok(value) => Ok(value),
+            Err(json_err) => {
+                // Convert to our rich error type with context
+                Err(LayerError::BytesToJsonConversion {
+                    json_error: json_err,
+                    input_data: String::from_utf8_lossy(input).into_owned().into(),
+                    error_position: Some((0, input.len()).into()),
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn test_error_integration() {
+        let invalid_query = "query { user { name ";
+        let result = example_query_parsing(invalid_query);
+        
+        assert!(result.is_err());
+        if let Err(error) = result {
+            use crate::error::RouterError;
+            assert_eq!(error.error_code(), "apollo_router::query_parse::syntax_error");
+        }
+    }
+
+    #[test]
+    fn test_layer_error_integration() {
+        let invalid_json = b"{ invalid json }";
+        let result = example_json_conversion(invalid_json);
+        
+        assert!(result.is_err());
+        if let Err(error) = result {
+            use crate::error::RouterError;
+            assert_eq!(error.error_code(), "apollo_router::layers::bytes_to_json::conversion_error");
+        }
+    }
+}
 
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
 /// 
@@ -91,8 +174,6 @@ where
         .bytes_client_to_json_client()
         .service(json_client_service)
 }
-
-
 
 #[test]
 fn test() {
