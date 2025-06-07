@@ -7,7 +7,105 @@ pub mod services;
 pub mod test_utils;
 
 use crate::layers::ServiceBuilderExt;
+use crate::services::query_execution;
+use crate::services::json_client;
+use crate::services::fetch;
+use crate::services::http_server;
+use crate::services::query_parse::{QueryParse};
+use crate::services::query_plan::{QueryPlanning};
+use tower::{ServiceBuilder, Service};
+
 pub use extensions::Extensions;
+
+/// Builds a complete server-side transformation pipeline from HTTP requests to query execution
+/// 
+/// Example usage:
+/// ```no_run
+/// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse, query_plan}};
+/// use tower::{Service, service_fn};
+/// 
+/// let parse_service = service_fn(|req: query_parse::Request| async move {
+///     // Your query parsing logic here
+///     Ok::<_, std::convert::Infallible>(query_parse::Response {
+///         extensions: req.extensions,
+///         operation_name: req.operation_name,
+///         query: apollo_compiler::ExecutableDocument::default(),
+///     })
+/// });
+/// 
+/// let plan_service = service_fn(|req: query_plan::Request| async move {
+///     // Your query planning logic here
+///     Ok::<_, std::convert::Infallible>(query_plan::Response {
+///         extensions: req.extensions,
+///         operation_name: req.operation_name,
+///         query_plan: apollo_federation::query_plan::QueryPlan::default(),
+///     })
+/// });
+/// 
+/// let execute_service = service_fn(|req: query_execution::Request| async move {
+///     // Your query execution logic here
+///     Ok::<_, std::convert::Infallible>(query_execution::Response {
+///         extensions: req.extensions,
+///         responses: Box::pin(futures::stream::empty())
+///     })
+/// });
+/// 
+/// let pipeline = server_pipeline(parse_service, plan_service, execute_service);
+/// ```
+pub fn server_pipeline<P, Pl, S>(
+    query_parse_service: P,
+    query_plan_service: Pl,
+    execute_service: S,
+) -> impl Service<http_server::Request, Response = http_server::Response>
+where
+    P: QueryParse + Clone + Send + 'static,
+    Pl: QueryPlanning + Clone + Send + 'static,
+    S: Service<query_execution::Request, Response = query_execution::Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<tower::BoxError>,
+{
+    // Server-side request transformation:
+    // HTTP Request → Bytes Request → JSON Request → Execution Request → ExecuteQuery Service
+    ServiceBuilder::new()
+        .http_to_bytes()
+        .bytes_to_json()
+        .prepare_query(query_parse_service, query_plan_service)
+        .service(execute_service)
+}
+
+/// Builds a complete client-side fetch pipeline from fetch requests to JSON client operations
+/// 
+/// Example usage:
+/// ```no_run
+/// use apollo_router_core::{client_pipeline, services::{fetch, json_client}};
+/// use tower::{Service, service_fn};
+/// 
+/// let json_service = service_fn(|req: json_client::Request| async move {
+///     // Your JSON client logic here
+///     Ok::<_, std::convert::Infallible>(json_client::Response {
+///         extensions: req.extensions,
+///         responses: Box::pin(futures::stream::empty())
+///     })
+/// });
+/// 
+/// let pipeline = client_pipeline(json_service);
+/// ```
+pub fn client_pipeline<S>(json_client_service: S) -> impl Service<fetch::Request, Response = fetch::Response>
+where
+    S: Service<json_client::Request, Response = json_client::Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<tower::BoxError>,
+{
+    // Client-side request transformation:
+    // Fetch Request → HTTP Client Request → Bytes Client Request → JSON Client Request → JsonClient Service
+    ServiceBuilder::new()
+        .fetch_to_http_client()
+        .http_client_to_bytes_client()
+        .bytes_client_to_json_client()
+        .service(json_client_service)
+}
+
+
 
 #[test]
 fn test() {

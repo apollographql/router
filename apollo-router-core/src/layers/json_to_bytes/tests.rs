@@ -16,7 +16,7 @@ async fn test_json_to_bytes_layer_success() {
     let json_value = json!({"message": "hello", "count": 42});
     let expected_bytes = serde_json::to_vec(&json_value).unwrap();
 
-    let extensions = Extensions::default();
+    let mut extensions = Extensions::default();
     extensions.insert("test_value".to_string());
 
     let json_request = JsonRequest {
@@ -206,7 +206,7 @@ async fn test_extensions_passthrough() {
         .layer(layer)
         .oneshot(json_request, |mut downstream| async move {
             downstream.allow(1);
-            let (bytes_req, send_response) =
+            let (mut bytes_req, send_response) =
                 downstream.next_request().await.expect("service not called");
 
             // Verify parent values are accessible in extended layer

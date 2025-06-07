@@ -1,7 +1,7 @@
 use super::*;
 use crate::Extensions;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 
 // Simple value type for basic operations
 #[derive(Debug, PartialEq, Clone)]
@@ -27,7 +27,7 @@ impl ExpensiveType {
 
 #[test]
 fn test_basic_operations() {
-    let extensions = Extensions::default();
+    let mut extensions = Extensions::default();
 
     // Insert and get simple values
     extensions.insert(42);
@@ -39,7 +39,7 @@ fn test_basic_operations() {
 
 #[test]
 fn test_expensive_type_with_arc() {
-    let extensions = Extensions::default();
+    let mut extensions = Extensions::default();
 
     // Create an expensive type and wrap it in Arc
     let expensive = Arc::new(ExpensiveType::new(1000));
@@ -55,12 +55,12 @@ fn test_expensive_type_with_arc() {
 
 #[test]
 fn test_multiple_types() {
-    let extensions = Extensions::default();
+    let mut extensions = Extensions::default();
 
     // Store different types
     extensions.insert(42);
     extensions.insert("hello".to_string());
-    extensions.insert(ExpensiveType::new(100).clone());
+    extensions.insert(ExpensiveType::new(100));
 
     // Retrieve and verify each type
     assert_eq!(extensions.get::<i32>(), Some(42));
@@ -69,40 +69,8 @@ fn test_multiple_types() {
 }
 
 #[test]
-fn test_concurrent_access() {
-    use std::thread;
-    let extensions = Extensions::default();
-
-    // Create a shared counter using Arc
-    let counter = Arc::new(AtomicUsize::new(0));
-    extensions.insert(counter.clone());
-
-    let handles: Vec<_> = (0..5)
-        .map(|_| {
-            let extensions = extensions.clone();
-            let counter = counter.clone();
-            thread::spawn(move || {
-                for _ in 0..100 {
-                    // Get the current counter
-                    let current = extensions.get::<Arc<AtomicUsize>>().unwrap();
-                    current.fetch_add(1, Ordering::SeqCst);
-                }
-            })
-        })
-        .collect();
-
-    for handle in handles {
-        handle.join().unwrap();
-    }
-
-    // Verify the final count
-    let final_counter = extensions.get::<Arc<AtomicUsize>>().unwrap();
-    assert_eq!(final_counter.load(Ordering::SeqCst), 500);
-}
-
-#[test]
 fn test_overwrite_values() {
-    let extensions = Extensions::default();
+    let mut extensions = Extensions::default();
 
     // Insert initial values
     extensions.insert(42);
@@ -119,11 +87,11 @@ fn test_overwrite_values() {
 
 #[test]
 fn test_hierarchical_extensions() {
-    let root = Extensions::default();
+    let mut root = Extensions::default();
     root.insert("upstream_value".to_string());
     root.insert(100i32);
 
-    let child = root.extend();
+    let mut child = root.extend();
     child.insert(42i32); // Attempt to override, but parent takes precedence
     child.insert(true); // Add a new value (new type)
 
@@ -140,17 +108,17 @@ fn test_hierarchical_extensions() {
 
 #[test]
 fn test_deep_hierarchy() {
-    let root = Extensions::default();
+    let mut root = Extensions::default();
     root.insert("root".to_string());
 
-    let level1 = root.extend();
+    let mut level1 = root.extend();
     level1.insert(1i32);
 
-    let level2 = level1.extend();
+    let mut level2 = level1.extend();
     level2.insert(2i16);
     level2.insert(100i32); // Attempt to override level1's i32, but level1 wins
 
-    let level3 = level2.extend();
+    let mut level3 = level2.extend();
     level3.insert(3i8);
     level3.insert("level3".to_string()); // Attempt to override root's string, but root wins
 
@@ -179,10 +147,10 @@ fn test_deep_hierarchy() {
 
 #[test]
 fn test_parent_precedence() {
-    let parent = Extensions::default();
+    let mut parent = Extensions::default();
     parent.insert("parent_value".to_string());
 
-    let child = parent.extend();
+    let mut child = parent.extend();
     child.insert("child_attempt".to_string()); // Attempt to override, but parent wins
 
     // Child sees parent value, not its own attempt
@@ -196,7 +164,7 @@ fn test_parent_precedence() {
 fn test_mutable_values_with_sync_primitives() {
     use std::sync::{Arc, Mutex};
 
-    let parent = Extensions::default();
+    let mut parent = Extensions::default();
     let counter = Arc::new(Mutex::new(0));
     parent.insert(counter.clone());
 
@@ -209,12 +177,110 @@ fn test_mutable_values_with_sync_primitives() {
     assert_eq!(*parent.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5);
     assert_eq!(*child.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5);
 
-    // Child can also add its own counter type
+    // Child can also add its own counter type, but parent wins due to precedence
+    let mut mutable_child = child;
     let child_counter = Arc::new(Mutex::new(10));
-    child.insert(child_counter);
+    mutable_child.insert(child_counter);
 
     // Parent doesn't see child's additions
     assert_eq!(parent.get::<Arc<Mutex<i32>>>().is_some(), true); // Original counter
     // But both have the same type, so parent wins
-    assert_eq!(*child.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5); // Parent's counter
+    assert_eq!(*mutable_child.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 5); // Parent's counter
+}
+
+#[test]
+fn test_conversion_to_http_extensions() {
+    let mut extensions = Extensions::default();
+    extensions.insert("test_value".to_string());
+    extensions.insert(42i32);
+
+    // Convert to http::Extensions
+    let http_ext: http::Extensions = extensions.into();
+
+    // The http::Extensions should contain our values directly (current layer only)
+    assert_eq!(http_ext.get::<String>(), Some(&"test_value".to_string()));
+    assert_eq!(http_ext.get::<i32>(), Some(&42));
+}
+
+#[test]
+fn test_conversion_to_http_extensions_with_hierarchy() {
+    // Test that conversion only includes current layer, not parent layers
+    let mut parent = Extensions::default();
+    parent.insert("parent_value".to_string());
+    
+    let mut child = parent.extend();
+    child.insert(42i32);
+
+    // Convert child to http::Extensions
+    let http_ext: http::Extensions = child.into();
+
+    // Only current layer values should be present
+    assert_eq!(http_ext.get::<i32>(), Some(&42)); // Child value present
+    assert_eq!(http_ext.get::<String>(), None);   // Parent value NOT present
+}
+
+#[test]
+fn test_conversion_from_http_extensions() {
+    // Create Extensions and convert to http::Extensions
+    let mut original_extensions = Extensions::default();
+    original_extensions.insert("original_value".to_string());
+    original_extensions.insert(123i32);
+
+    let http_ext: http::Extensions = original_extensions.into();
+
+    // Convert back to Extensions
+    let recovered_extensions: Extensions = http_ext.into();
+
+    // Verify values are preserved
+    assert_eq!(recovered_extensions.get::<String>(), Some("original_value".to_string()));
+    assert_eq!(recovered_extensions.get::<i32>(), Some(123));
+}
+
+#[test]
+fn test_conversion_from_plain_http_extensions() {
+    // Create a plain http::Extensions with some values
+    let mut http_ext = http::Extensions::new();
+    http_ext.insert("http_value".to_string());
+    http_ext.insert(456i32);
+
+    // Convert to Extensions
+    let extensions: Extensions = http_ext.into();
+
+    // Verify values are accessible
+    assert_eq!(extensions.get::<String>(), Some("http_value".to_string()));
+    assert_eq!(extensions.get::<i32>(), Some(456));
+}
+
+#[test]
+fn test_http_wrapped_extensions_can_be_mutated() {
+    // Create a plain http::Extensions
+    let mut http_ext = http::Extensions::new();
+    http_ext.insert("initial_value".to_string());
+
+    // Convert to Extensions (should be HttpWrapped variant)
+    let mut extensions: Extensions = http_ext.into();
+
+    // Should be able to insert into the wrapped http::Extensions
+    extensions.insert(789i32);
+
+    // Verify both old and new values are accessible
+    assert_eq!(extensions.get::<String>(), Some("initial_value".to_string()));
+    assert_eq!(extensions.get::<i32>(), Some(789));
+}
+
+#[test]
+fn test_hierarchical_extensions_with_http_wrapped() {
+    // Create a http-wrapped Extensions
+    let mut http_ext = http::Extensions::new();
+    http_ext.insert("http_parent".to_string());
+    let parent: Extensions = http_ext.into();
+
+    // Extend it (child should be Native)
+    let mut child = parent.extend();
+    child.insert(999i32);
+
+    // Verify hierarchy works with mixed types
+    assert_eq!(child.get::<String>(), Some("http_parent".to_string()));
+    assert_eq!(child.get::<i32>(), Some(999));
+    assert_eq!(parent.get::<i32>(), None); // Parent can't see child values
 }

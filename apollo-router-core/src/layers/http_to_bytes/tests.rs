@@ -51,7 +51,7 @@ async fn test_extensions_passthrough() {
     extensions.insert("test_context".to_string());
     extensions.insert(42i32);
 
-    // Create a test HTTP request with our Extensions stored in HTTP extensions
+    // Create a test HTTP request with our Extensions converted to HTTP extensions
     let mut http_req = http::Request::builder()
         .uri("http://example.com")
         .body(UnsyncBoxBody::new(
@@ -59,14 +59,15 @@ async fn test_extensions_passthrough() {
         ))
         .unwrap();
 
-    // Store our Extensions in the HTTP request extensions
-    http_req.extensions_mut().insert(extensions.clone());
+    // Convert our Extensions to http::Extensions and set it
+    let http_extensions: http::Extensions = extensions.clone().into();
+    *http_req.extensions_mut() = http_extensions;
 
     let response = TowerTest::builder()
         .layer(layer)
         .oneshot(http_req, |mut downstream| async move {
             downstream.allow(1);
-            let (request, response) = downstream
+            let (mut request, response) = downstream
                 .next_request()
                 .await
                 .expect("service must not fail");
@@ -93,7 +94,7 @@ async fn test_extensions_passthrough() {
         .expect("Test should succeed");
 
     // Verify response preserves original extensions (parent values take precedence)
-    let original_extensions = response.extensions().get::<crate::Extensions>().unwrap();
+    let original_extensions: crate::Extensions = response.extensions().clone().into();
 
     let preserved_string: Option<String> = original_extensions.get();
     assert_eq!(preserved_string, Some("test_context".to_string()));

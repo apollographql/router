@@ -1,10 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use quick_cache::sync::Cache;
-use std::any::{Any, TypeId};
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::sync::Arc;
 
 /// A trait for types that can be stored in the context.
@@ -28,10 +25,10 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// ```rust
 /// use apollo_router_core::Extensions;
 ///
-/// let root = Extensions::default();
+/// let mut root = Extensions::default();
 /// root.insert("upstream_value".to_string());
 ///
-/// let child = root.extend();
+/// let mut child = root.extend();
 /// child.insert(42i32); // New type, allowed
 /// child.insert("downstream_attempt".to_string()); // Same type as parent
 ///
@@ -45,26 +42,22 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// assert_eq!(root.get::<i32>(), None);
 /// ```
 ///
-/// # Mutable Values
+/// # Conversion to/from http::Extensions
 ///
-/// If you need values that can be modified by downstream services, use explicit
-/// synchronization primitives rather than relying on layer precedence:
+/// Extensions can be converted to and from `http::Extensions` for interoperability:
 ///
 /// ```rust
 /// use apollo_router_core::Extensions;
-/// use std::sync::{Arc, Mutex};
 ///
-/// let root = Extensions::default();
-/// let mutable_counter = Arc::new(Mutex::new(0));
-/// root.insert(mutable_counter.clone());
+/// let mut extensions = Extensions::default();
+/// extensions.insert("test".to_string());
 ///
-/// let child = root.extend();
-/// // Downstream can modify the shared value
-/// let counter = child.get::<Arc<Mutex<i32>>>().unwrap();
-/// *counter.lock().unwrap() += 1;
+/// // Convert to http::Extensions
+/// let http_extensions: http::Extensions = extensions.into();
 ///
-/// // Both layers see the updated value
-/// assert_eq!(*root.get::<Arc<Mutex<i32>>>().unwrap().lock().unwrap(), 1);
+/// // Convert back to Extensions
+/// let extensions: Extensions = http_extensions.into();
+/// assert_eq!(extensions.get::<String>(), Some("test".to_string()));
 /// ```
 ///
 /// # Performance Considerations
@@ -76,7 +69,7 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// use apollo_router_core::Extensions;
 /// use std::sync::Arc;
 ///
-/// let context = Extensions::default();
+/// let mut context = Extensions::default();
 ///
 /// // For expensive types, wrap in Arc
 /// let expensive_data = Arc::new(vec![0u8; 1000]); // Large vector
@@ -88,28 +81,39 @@ impl<T: Clone + Send + Sync + 'static> ExtensionValue for T {}
 /// ```
 #[derive(Clone)]
 pub struct Extensions {
-    inner: Arc<ExtensionsInner>,
+    inner: ExtensionsInner,
+    parent: Option<Arc<Extensions>>,
 }
 
-struct ExtensionsInner {
-    cache: Cache<TypeId, Arc<dyn Any + Send + Sync + 'static>>,
-    parent: Option<Arc<ExtensionsInner>>,
+#[derive(Clone)]
+enum ExtensionsInner {
+    /// Native http::Extensions storage
+    Native(http::Extensions),
+    /// Wrapped http::Extensions (when converted from external http::Extensions)
+    HttpWrapped(http::Extensions),
+}
+
+impl ExtensionsInner {
+    fn get<T: ExtensionValue>(&self) -> Option<T> {
+        match self {
+            ExtensionsInner::Native(ext) => ext.get::<T>().cloned(),
+            ExtensionsInner::HttpWrapped(ext) => ext.get::<T>().cloned(),
+        }
+    }
 }
 
 impl Default for Extensions {
     fn default() -> Self {
-        Self::new(100)
+        Self::new()
     }
 }
 
 impl Extensions {
-    /// Creates a new empty context.
-    pub fn new(capacity: usize) -> Self {
+    /// Creates a new empty Extensions.
+    pub fn new() -> Self {
         Self {
-            inner: Arc::new(ExtensionsInner {
-                cache: Cache::new(capacity),
-                parent: None,
-            }),
+            inner: ExtensionsInner::Native(http::Extensions::new()),
+            parent: None,
         }
     }
 
@@ -123,10 +127,10 @@ impl Extensions {
     /// ```rust
     /// use apollo_router_core::Extensions;
     ///
-    /// let parent = Extensions::default();
+    /// let mut parent = Extensions::default();
     /// parent.insert("parent_value".to_string());
     ///
-    /// let child = parent.extend();
+    /// let mut child = parent.extend();
     /// child.insert(42i32); // New type, will be accessible
     /// child.insert("child_attempt".to_string()); // Same type, parent wins
     ///
@@ -136,10 +140,8 @@ impl Extensions {
     /// ```
     pub fn extend(&self) -> Self {
         Self {
-            inner: Arc::new(ExtensionsInner {
-                cache: Cache::new(100), // Default capacity for extended layers
-                parent: Some(self.inner.clone()),
-            }),
+            inner: ExtensionsInner::Native(http::Extensions::new()),
+            parent: Some(Arc::new(self.clone())),
         }
     }
 
@@ -153,42 +155,23 @@ impl Extensions {
     /// ```rust
     /// use apollo_router_core::Extensions;
     ///
-    /// let context = Extensions::default();
+    /// let mut context = Extensions::default();
     /// context.insert(42);
     /// assert_eq!(context.get::<i32>(), Some(42));
     /// ```
     pub fn get<T: ExtensionValue>(&self) -> Option<T> {
-        let type_id = TypeId::of::<T>();
-        self.get_from_layer(&self.inner, type_id)
-    }
-
-    fn get_from_layer<T: ExtensionValue>(
-        &self,
-        layer: &ExtensionsInner,
-        type_id: TypeId,
-    ) -> Option<T> {
         // First check parent layers (upstream takes precedence)
-        if let Some(parent) = &layer.parent {
-            if let Some(value) = self.get_from_layer::<T>(parent, type_id) {
+        if let Some(parent) = &self.parent {
+            if let Some(value) = parent.get::<T>() {
                 return Some(value);
             }
         }
 
         // If not found in parents, check current layer
-        if let Some(value) = layer.cache.get(&type_id) {
-            Some(
-                value
-                    .downcast::<T>()
-                    .expect("Value is keyed by type id, qed")
-                    .deref()
-                    .clone(),
-            )
-        } else {
-            None
-        }
+        self.inner.get::<T>()
     }
 
-    /// Inserts a value into the current context layer.
+    /// Inserts a value into the current Extensions layer.
     /// If a value of the same type already exists in this layer, it will be overwritten.
     /// Parent layer values are not affected.
     ///
@@ -198,7 +181,7 @@ impl Extensions {
     /// use apollo_router_core::Extensions;
     /// use std::sync::Arc;
     ///
-    /// let context = Extensions::default();
+    /// let mut context = Extensions::default();
     ///
     /// // Simple value
     /// context.insert(42);
@@ -211,36 +194,58 @@ impl Extensions {
     /// assert_eq!(context.get::<i32>(), Some(42));
     /// assert_eq!(context.get::<Arc<Vec<u8>>>().unwrap().len(), 1000);
     /// ```
-    pub fn insert<T: ExtensionValue>(&self, value: T) {
-        let type_id = TypeId::of::<T>();
-        let value = Arc::new(value);
-        self.inner.cache.insert(type_id, value);
+    pub fn insert<T: ExtensionValue>(&mut self, value: T) {
+        match &mut self.inner {
+            ExtensionsInner::Native(ext) => {
+                ext.insert(value);
+            }
+            ExtensionsInner::HttpWrapped(ext) => {
+                ext.insert(value);
+            }
+        }
+    }
+}
+
+impl From<Extensions> for http::Extensions {
+    /// Convert Extensions to http::Extensions.
+    /// For Native variant, extract the inner http::Extensions.
+    /// For HttpWrapped variant, return the wrapped http::Extensions.
+    fn from(extensions: Extensions) -> Self {
+        match extensions.inner {
+            ExtensionsInner::Native(ext) => ext,
+            ExtensionsInner::HttpWrapped(ext) => ext,
+        }
+    }
+}
+
+impl From<http::Extensions> for Extensions {
+    /// Convert http::Extensions to Extensions.
+    /// Creates a new Extensions with HttpWrapped variant.
+    fn from(http_ext: http::Extensions) -> Self {
+        Self {
+            inner: ExtensionsInner::HttpWrapped(http_ext),
+            parent: None,
+        }
     }
 }
 
 impl Debug for Extensions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut type_names = Vec::new();
-        self.collect_type_names(&self.inner, &mut type_names);
-        type_names.sort();
-        type_names.dedup(); // Remove duplicates in case of shadowing
+        let mut debug_struct = f.debug_struct("Extensions");
 
-        f.debug_struct("Extensions")
-            .field("types", &type_names)
-            .finish()
-    }
-}
-
-impl Extensions {
-    fn collect_type_names(&self, layer: &ExtensionsInner, type_names: &mut Vec<&'static str>) {
-        // Collect types from current layer
-        for (_, value) in layer.cache.iter() {
-            type_names.push(std::any::type_name_of_val(value.as_ref()));
+        // Show current layer type info
+        match &self.inner {
+            ExtensionsInner::Native(_) => {
+                debug_struct.field("layer_type", &"Native");
+            }
+            ExtensionsInner::HttpWrapped(_) => {
+                debug_struct.field("layer_type", &"HttpWrapped");
+            }
         }
 
-        // Collect types from parent layer
-        if let Some(parent) = &layer.parent {
-            self.collect_type_names(parent, type_names);
-        }
+        // Show if there's a parent
+        debug_struct.field("has_parent", &self.parent.is_some());
+
+        debug_struct.finish()
     }
 }

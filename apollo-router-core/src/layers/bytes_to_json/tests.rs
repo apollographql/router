@@ -160,7 +160,7 @@ async fn test_extensions_passthrough() {
         .layer(layer)
         .oneshot(bytes_req, |mut downstream| async move {
             downstream.allow(1);
-            let (request, response) = downstream
+            let (mut request, response) = downstream
                 .next_request()
                 .await
                 .expect("service must not fail");

@@ -240,34 +240,64 @@ The Extensions system provides a type-safe, thread-safe context for storing and 
 
 - **Type-safe**: Values are stored and retrieved by type
 - **Thread-safe**: Can be used across multiple threads
-- **Clone-efficient**: Designed to be cloned cheaply
-- **Capacity-managed**: Uses LRU caching internally
+- **Clone-efficient**: Designed to be cloned cheaply using Arc for parent chains
+- **http::Extensions Compatible**: Built on http::Extensions internally with conversion support
+- **Mutable Access Required**: Requires `&mut self` for modifications (no internal mutability)
+
+#### Internal Architecture
+
+Extensions uses an enum-based internal architecture for optimal flexibility:
+
+```rust
+enum ExtensionsInner {
+    /// Native http::Extensions storage for new Extensions
+    Native(http::Extensions),
+    /// Wrapped http::Extensions when converted from external sources
+    HttpWrapped(http::Extensions),
+}
+```
+
+- **Native**: Created via `Extensions::new()` or `extend()`
+- **HttpWrapped**: Created when converting from external `http::Extensions`
+- **Parent Chain**: Uses `Arc<Extensions>` for efficient hierarchical sharing
+- **Conversions**: Direct extraction/wrapping without intermediate wrapper types
 
 #### Usage Pattern
 
 ```rust
 use apollo_router_core::Extensions;
 
-let extensions = Extensions::new(1000);
+let mut extensions = Extensions::new();
 
-// Store values
+// Store values (requires &mut self)
 extensions.insert(42i32);
 extensions.insert("hello".to_string());
 
 // Retrieve values
 let number: Option<i32> = extensions.get();
 let text: Option<String> = extensions.get();
+
+// Convert to/from http::Extensions for interoperability
+let http_ext: http::Extensions = extensions.into();
+let extensions: Extensions = http_ext.into();
 ```
+
+#### Conversion Behavior
+
+- **Extensions → http::Extensions**: Extracts the current layer's `http::Extensions` directly
+- **http::Extensions → Extensions**: Creates an `HttpWrapped` variant
+- **Hierarchical Data**: Only current layer data is included in conversions, not parent layers
+- **Round-trip Safe**: Converting Extensions to http::Extensions and back preserves the data
 
 #### Hierarchical Extensions System
 
 Extensions supports a hierarchical architecture through the `extend()` method:
 
 ```rust
-let parent = Extensions::default();
+let mut parent = Extensions::default();
 parent.insert("upstream_value".to_string());
 
-let child = parent.extend();
+let mut child = parent.extend();
 child.insert(42i32); // New type, allowed
 child.insert("downstream_attempt".to_string()); // Same type as parent
 
@@ -275,7 +305,7 @@ child.insert("downstream_attempt".to_string()); // Same type as parent
 assert_eq!(child.get::<String>(), Some("upstream_value".to_string()));
 assert_eq!(child.get::<i32>(), Some(42));
 
-// Parent only sees  its own values
+// Parent only sees its own values
 assert_eq!(parent.get::<i32>(), None);
 ```
 
@@ -395,7 +425,7 @@ async fn test_extensions_passthrough() {
     let parent_int: Option<i32> = request.extensions.get();
     assert_eq!(parent_int, Some(42));
     
-    // Add values to extended layer
+    // Add values to extended layer (note: requires &mut access to extended layer)
     request.extensions.insert(999i32); // Try to override
     request.extensions.insert(3.14f64); // Add new type
 
@@ -423,6 +453,7 @@ Common JSON utilities and type definitions used across services.
 
 - Each service defines its own `Error` enum
 - Errors should **never** implement `Clone`
+- Errors should **never** have a `Downstream` variant
 - Use `thiserror::Error` for error definitions
 - Errors should be descriptive and actionable
 
@@ -461,19 +492,19 @@ pub enum LayerError {
     #[error("Layer operation failed: {0}")]
     LayerSpecificError(#[from] SomeLayerError),
     
-    /// Downstream service error (always present)
-    #[error("Downstream service error: {0}")]
-    Downstream(#[from] tower::BoxError),
+    /// Other layer-specific error variants as needed
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
 }
 ```
 
 #### Benefits of This Pattern
 
-1. **Error Transparency**: Downstream errors flow through the service stack without modification
-2. **Type Safety**: Each service can define specific error variants for its operations
-3. **Debugging**: Error chains preserve the original error context
-4. **Flexibility**: Services can handle specific error types while allowing others to pass through
-5. **Interoperability**: All services work together seamlessly in Tower service stacks
+1. **Error Transparency**: Downstream errors flow through the service stack without being wrapped in generic variants
+2. **Type Safety**: Each service can define specific error variants for its operations without pollution from downstream concerns
+3. **Debugging**: Error chains preserve the original error context without unnecessary wrapping layers
+4. **Clean Separation**: Services only define errors for their own failure modes, not for propagating downstream failures
+5. **Interoperability**: All services work together seamlessly in Tower service stacks through BoxError conversion
 
 #### Service Implementation Guidelines
 
@@ -491,10 +522,10 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         // ... service logic ...
         
-        // Convert downstream errors using the Downstream variant
+        // Let downstream errors bubble up as BoxError
         let result = self.inner.call(downstream_req)
             .await
-            .map_err(|e| MyServiceError::Downstream(e.into()))?;
+            .map_err(Into::into)?; // Convert to BoxError directly
             
         // ... continue processing ...
     }
@@ -751,8 +782,9 @@ The architecture provides several extension points:
 ## Performance Considerations
 
 - **Extensions Cloning**: Values are cloned when retrieved; wrap expensive types in `Arc`
-- **Extensions Hierarchy**: The `extend()` method creates lightweight references to parent layers
-- **Extensions Memory**: Each layer adds minimal overhead; parent layers are referenced, not copied
+- **Extensions Hierarchy**: The `extend()` method creates lightweight Arc references to parent Extensions
+- **Extensions Memory**: Each layer adds minimal overhead; parent layers are shared via Arc, not copied
+- **http::Extensions Compatibility**: Built on standard http::Extensions for maximum ecosystem compatibility
 - **Service Composition**: Tower's zero-cost abstractions minimize overhead
 - **Async Efficiency**: Native async/await provides optimal performance
 - **Memory Management**: Services should be mindful of memory usage patterns

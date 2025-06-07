@@ -1,7 +1,6 @@
 use crate::services::bytes_client::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::http_client::{Request as HttpRequest, Response as HttpResponse};
 use bytes::Bytes;
-use futures::StreamExt;
 use http_body_util::{BodyExt, combinators::UnsyncBoxBody};
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -76,10 +75,10 @@ where
             // Create HTTP request
             let mut http_req = Self::create_http_request(req.body)?;
 
-            // Store the original Extensions in the HTTP request extensions
+            // Convert original Extensions directly to http::Extensions for downstream service
             let original_extensions = req.extensions;
-            let extended_extensions = original_extensions.extend();
-            http_req.extensions_mut().insert(extended_extensions);
+            let http_extensions: http::Extensions = original_extensions.clone().into();
+            *http_req.extensions_mut() = http_extensions;
 
             // Call the inner service
             let http_resp = inner.call(http_req).await.map_err(Into::into)?;

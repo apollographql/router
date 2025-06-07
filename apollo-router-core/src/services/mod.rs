@@ -8,3 +8,4 @@ pub mod json_server;
 pub mod query_execution;
 pub mod query_parse;
 pub mod query_plan;
+pub mod query_preparation;

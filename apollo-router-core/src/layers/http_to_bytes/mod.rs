@@ -67,12 +67,8 @@ where
             // Since body error type is now Infallible, collection cannot fail
             let body_bytes = body.collect().await.unwrap().to_bytes();
 
-            // Extract our Extensions from the HTTP request extensions, or create default
-            let original_extensions = parts
-                .extensions
-                .get::<crate::Extensions>()
-                .cloned()
-                .unwrap_or_default();
+            // Convert http::Extensions directly to our Extensions
+            let original_extensions: crate::Extensions = parts.extensions.into();
 
             // Create an extended layer for the inner service
             let extended_extensions = original_extensions.extend();
@@ -93,8 +89,9 @@ where
                 )))
                 .map_err(Error::HttpResponseBuilder)?;
 
-            // Store the original Extensions back into the HTTP response extensions
-            http_resp.extensions_mut().insert(original_extensions);
+            // Convert original Extensions back to http::Extensions
+            let http_extensions: http::Extensions = original_extensions.into();
+            *http_resp.extensions_mut() = http_extensions;
 
             Ok(http_resp)
         })
