@@ -157,3 +157,150 @@ impl ValidationContext {
         self.types_to_contexts.get(type_name)
     }
 }
+
+#[cfg(test)]
+mod validation_context_tests {
+    use super::*;
+
+    const TEST_SUPERGRAPH: &str = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
+{
+  query: Query
+}
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar context__ContextFieldValue
+
+interface I
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @context(name: "A__contextI")
+{
+  id: ID!
+  value: Int! @join__field(graph: A)
+}
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/scratch/validation-context-example.graphql?subgraph=A")
+  B @join__graph(name: "B", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/scratch/validation-context-example.graphql?subgraph=B")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type P
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  data: String! @join__field(graph: A, contextArguments: [{context: "A__contextI", name: "onlyInA", type: "Int", selection: " { value }"}])
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  start: I! @join__field(graph: B)
+}
+
+type T implements I
+  @join__implements(graph: A, interface: "I")
+  @join__implements(graph: B, interface: "I")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  value: Int! @join__field(graph: A)
+  onlyInA: Int! @join__field(graph: A)
+  p: P! @join__field(graph: A)
+  sharedField: Int!
+  onlyInB: Int! @join__field(graph: B)
+}
+    "#;
+
+    fn is_shareable_field(context: &ValidationContext, type_name: &str, field_name: &str) -> bool {
+        let supergraph_schema = &context.supergraph_schema;
+        let type_pos = supergraph_schema
+            .get_type(Name::new_unchecked(type_name))
+            .unwrap();
+        let type_pos = CompositeTypeDefinitionPosition::try_from(type_pos).unwrap();
+        let field_pos = type_pos.field(Name::new_unchecked(field_name)).unwrap();
+        context.is_shareable(&field_pos).unwrap()
+    }
+
+    #[test]
+    fn test_is_shareable() {
+        let supergraph = Supergraph::parse(TEST_SUPERGRAPH).unwrap();
+        let context = ValidationContext::new(&supergraph).unwrap();
+
+        assert!(is_shareable_field(&context, "P", "id"));
+        assert!(!is_shareable_field(&context, "P", "data"));
+        assert!(is_shareable_field(&context, "T", "sharedField"));
+        assert!(!is_shareable_field(&context, "T", "onlyInB"));
+    }
+
+    fn matching_contexts<'a>(
+        context: &'a ValidationContext,
+        type_name: &str,
+    ) -> Option<Vec<&'a str>> {
+        context
+            .matching_contexts(&Name::new_unchecked(type_name))
+            .map(|set| set.iter().map(|s| s.as_str()).collect())
+    }
+
+    #[test]
+    fn test_matching_contexts() {
+        let supergraph = Supergraph::parse(TEST_SUPERGRAPH).unwrap();
+        let context = ValidationContext::new(&supergraph).unwrap();
+
+        assert_eq!(matching_contexts(&context, "I"), Some(vec!["A__contextI"]),);
+        assert_eq!(matching_contexts(&context, "T"), Some(vec!["A__contextI"]),);
+        assert_eq!(matching_contexts(&context, "P"), None,);
+    }
+}
