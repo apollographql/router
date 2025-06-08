@@ -108,10 +108,16 @@ impl From<apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validatio
     fn from(diagnostic: apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validation::DiagnosticData>) -> Self {
         // Use to_string() to get the error message from Diagnostic
         let message = diagnostic.to_string();
-        // TODO: Access location information when public API is available
-        // For now, we'll use None for line/column
-        let line = None;
-        let column = None;
+        
+        // Extract location information using line_column_range()
+        let (line, column) = if let Some(range) = diagnostic.line_column_range() {
+            (
+                Some(range.start.line as u32),
+                Some(range.start.column as u32),
+            )
+        } else {
+            (None, None)
+        };
 
         // Try to categorize the error based on the message content
         if message.contains("syntax") || message.contains("expected") || message.contains("unexpected") {
