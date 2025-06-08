@@ -71,11 +71,11 @@ fn test_multiple_planning_errors() {
 fn test_federation_error_conversion() {
     use apollo_federation::error::{FederationError, SingleFederationError};
     
-    // Test single error conversion
+    // Test single error conversion using From trait
     let single_fed_error = FederationError::SingleFederationError(
         SingleFederationError::UnknownOperation
     );
-    let converted = Error::from_federation_error(single_fed_error);
+    let converted: Error = single_fed_error.into();
     assert!(matches!(converted, Error::PlanningFailed { .. }));
     
     // Test that we can create a simple multiple federation error using merge
@@ -83,7 +83,7 @@ fn test_federation_error_conversion() {
     let error2 = FederationError::SingleFederationError(SingleFederationError::OperationNameNotProvided);
     let merged_error = error1.merge(error2);
     
-    let converted = Error::from_federation_error(merged_error);
+    let converted: Error = merged_error.into();
     
     if let Error::MultiplePlanningErrors { count, errors } = converted {
         assert_eq!(count, 2);
@@ -102,37 +102,37 @@ fn test_federation_error_conversion() {
 }
 
 #[test]
-fn test_error_code_extraction() {
+fn test_planning_error_detail_error_code_extraction() {
     use apollo_federation::error::SingleFederationError;
     
     // Test various error types and their code extraction
     let unknown_op = SingleFederationError::UnknownOperation;
-    assert_eq!(Error::extract_error_code(&unknown_op), Some("UNKNOWN_OPERATION".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&unknown_op), Some("UNKNOWN_OPERATION".to_string()));
     
     let no_op_name = SingleFederationError::OperationNameNotProvided;
-    assert_eq!(Error::extract_error_code(&no_op_name), Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&no_op_name), Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
     
     let deferred_sub = SingleFederationError::DeferredSubscriptionUnsupported;
-    assert_eq!(Error::extract_error_code(&deferred_sub), Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&deferred_sub), Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()));
     
     let complexity = SingleFederationError::QueryPlanComplexityExceeded { message: "too complex".to_string() };
-    assert_eq!(Error::extract_error_code(&complexity), Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&complexity), Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()));
     
     let cancelled = SingleFederationError::PlanningCancelled;
-    assert_eq!(Error::extract_error_code(&cancelled), Some("PLANNING_CANCELLED".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&cancelled), Some("PLANNING_CANCELLED".to_string()));
     
     let no_plan = SingleFederationError::NoPlanFoundWithDisabledSubgraphs;
-    assert_eq!(Error::extract_error_code(&no_plan), Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&no_plan), Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()));
     
     let invalid_graphql = SingleFederationError::InvalidGraphQL { message: "bad syntax".to_string() };
-    assert_eq!(Error::extract_error_code(&invalid_graphql), Some("INVALID_GRAPHQL".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&invalid_graphql), Some("INVALID_GRAPHQL".to_string()));
     
     let invalid_subgraph = SingleFederationError::InvalidSubgraph { message: "bad subgraph".to_string() };
-    assert_eq!(Error::extract_error_code(&invalid_subgraph), Some("INVALID_SUBGRAPH".to_string()));
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&invalid_subgraph), Some("INVALID_SUBGRAPH".to_string()));
     
     // Test an error type that doesn't have a specific code
     let internal_error = SingleFederationError::Internal { message: "internal issue".to_string() };
-    assert_eq!(Error::extract_error_code(&internal_error), None);
+    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&internal_error), None);
 }
 
 #[test]
@@ -160,6 +160,39 @@ fn test_planning_error_detail_serialization() {
     
     assert_eq!(deserialized_no_code.message, detail_no_code.message);
     assert_eq!(deserialized_no_code.code, None);
+}
+
+#[test]
+fn test_planning_error_detail_error_trait() {
+    use apollo_router_error::Error as RouterError;
+    
+    // Test that PlanningErrorDetail implements the Error trait correctly
+    let detail = PlanningErrorDetail {
+        message: "Test error message".to_string(),
+        code: Some("TEST_ERROR_CODE".to_string()),
+    };
+    
+    // Test error code
+    assert_eq!(detail.error_code(), "APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR_DETAIL");
+    
+    // Test GraphQL extensions population
+    let mut extensions = std::collections::BTreeMap::new();
+    detail.populate_graphql_extensions(&mut extensions);
+    
+    assert_eq!(extensions.get("message"), Some(&serde_json::Value::String("Test error message".to_string())));
+    assert_eq!(extensions.get("code"), Some(&serde_json::Value::String("TEST_ERROR_CODE".to_string())));
+    
+    // Test detail without code
+    let detail_no_code = PlanningErrorDetail {
+        message: "Error without code".to_string(),
+        code: None,
+    };
+    
+    let mut extensions_no_code = std::collections::BTreeMap::new();
+    detail_no_code.populate_graphql_extensions(&mut extensions_no_code);
+    
+    assert_eq!(extensions_no_code.get("message"), Some(&serde_json::Value::String("Error without code".to_string())));
+    assert_eq!(extensions_no_code.get("code"), None);
 }
 
 #[test]
