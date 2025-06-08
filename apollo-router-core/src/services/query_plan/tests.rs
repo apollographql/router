@@ -23,19 +23,15 @@ async fn test_query_plan_service_error_types() {
 
 #[test]
 fn test_multiple_planning_errors() {
-    // Test the new MultiplePlanningErrors variant
+    // Test the new MultiplePlanningErrors variant with enum-based errors
     let errors = vec![
-        PlanningErrorDetail {
-            message: "First planning error".to_string(),
-            code: Some("ERROR_1".to_string()),
+        PlanningErrorDetail::UnknownOperation,
+        PlanningErrorDetail::OperationNameNotProvided,
+        PlanningErrorDetail::QueryPlanComplexityExceeded {
+            message: "Too complex".to_string(),
         },
-        PlanningErrorDetail {
-            message: "Second planning error".to_string(),
-            code: Some("ERROR_2".to_string()),
-        },
-        PlanningErrorDetail {
-            message: "Third planning error without code".to_string(),
-            code: None,
+        PlanningErrorDetail::Other {
+            message: "Some other error".to_string(),
         },
     ];
     
@@ -50,18 +46,16 @@ fn test_multiple_planning_errors() {
     // Test that the error displays correctly
     let error_string = format!("{}", multiple_error);
     assert!(error_string.contains("Multiple query planning errors"));
-    assert!(error_string.contains("3 errors"));
+    assert!(error_string.contains("4 errors"));
     
     // Test that the details are accessible
     if let Error::MultiplePlanningErrors { count, errors: error_details } = multiple_error {
-        assert_eq!(count, 3);
-        assert_eq!(error_details.len(), 3);
-        assert_eq!(error_details[0].message, "First planning error");
-        assert_eq!(error_details[0].code, Some("ERROR_1".to_string()));
-        assert_eq!(error_details[1].message, "Second planning error");
-        assert_eq!(error_details[1].code, Some("ERROR_2".to_string()));
-        assert_eq!(error_details[2].message, "Third planning error without code");
-        assert_eq!(error_details[2].code, None);
+        assert_eq!(count, 4);
+        assert_eq!(error_details.len(), 4);
+        assert!(matches!(error_details[0], PlanningErrorDetail::UnknownOperation));
+        assert!(matches!(error_details[1], PlanningErrorDetail::OperationNameNotProvided));
+        assert!(matches!(error_details[2], PlanningErrorDetail::QueryPlanComplexityExceeded { .. }));
+        assert!(matches!(error_details[3], PlanningErrorDetail::Other { .. }));
     } else {
         panic!("Expected MultiplePlanningErrors variant");
     }
@@ -89,110 +83,146 @@ fn test_federation_error_conversion() {
         assert_eq!(count, 2);
         assert_eq!(errors.len(), 2);
         
-        // Check that error codes are properly extracted for known error types
-        assert_eq!(errors[0].code, Some("UNKNOWN_OPERATION".to_string()));
-        assert_eq!(errors[1].code, Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
+        // Check that error variants are properly converted
+        assert!(matches!(errors[0], PlanningErrorDetail::UnknownOperation));
+        assert!(matches!(errors[1], PlanningErrorDetail::OperationNameNotProvided));
         
         // Check that error messages are properly converted
-        assert!(errors[0].message.contains("Operation name not found"));
-        assert!(errors[1].message.contains("Must provide operation name"));
+        assert!(errors[0].to_string().contains("Operation name not found"));
+        assert!(errors[1].to_string().contains("Must provide operation name"));
     } else {
         panic!("Expected MultiplePlanningErrors variant");
     }
 }
 
 #[test]
-fn test_planning_error_detail_error_code_extraction() {
+fn test_planning_error_detail_enum_variants() {
     use apollo_federation::error::SingleFederationError;
     
-    // Test various error types and their code extraction
+    // Test conversion of various federation error types to enum variants
     let unknown_op = SingleFederationError::UnknownOperation;
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&unknown_op), Some("UNKNOWN_OPERATION".to_string()));
+    let converted = PlanningErrorDetail::from_federation_error(unknown_op);
+    assert!(matches!(converted, PlanningErrorDetail::UnknownOperation));
     
     let no_op_name = SingleFederationError::OperationNameNotProvided;
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&no_op_name), Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
+    let converted = PlanningErrorDetail::from_federation_error(no_op_name);
+    assert!(matches!(converted, PlanningErrorDetail::OperationNameNotProvided));
     
     let deferred_sub = SingleFederationError::DeferredSubscriptionUnsupported;
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&deferred_sub), Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()));
+    let converted = PlanningErrorDetail::from_federation_error(deferred_sub);
+    assert!(matches!(converted, PlanningErrorDetail::DeferredSubscriptionUnsupported));
     
-    let complexity = SingleFederationError::QueryPlanComplexityExceeded { message: "too complex".to_string() };
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&complexity), Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()));
+    let complexity = SingleFederationError::QueryPlanComplexityExceeded { 
+        message: "too complex".to_string() 
+    };
+    let converted = PlanningErrorDetail::from_federation_error(complexity);
+    if let PlanningErrorDetail::QueryPlanComplexityExceeded { message } = converted {
+        assert_eq!(message, "too complex");
+    } else {
+        panic!("Expected QueryPlanComplexityExceeded variant");
+    }
     
     let cancelled = SingleFederationError::PlanningCancelled;
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&cancelled), Some("PLANNING_CANCELLED".to_string()));
+    let converted = PlanningErrorDetail::from_federation_error(cancelled);
+    assert!(matches!(converted, PlanningErrorDetail::PlanningCancelled));
     
     let no_plan = SingleFederationError::NoPlanFoundWithDisabledSubgraphs;
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&no_plan), Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()));
+    let converted = PlanningErrorDetail::from_federation_error(no_plan);
+    assert!(matches!(converted, PlanningErrorDetail::NoPlanFoundWithDisabledSubgraphs));
     
-    let invalid_graphql = SingleFederationError::InvalidGraphQL { message: "bad syntax".to_string() };
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&invalid_graphql), Some("INVALID_GRAPHQL".to_string()));
+    let invalid_graphql = SingleFederationError::InvalidGraphQL { 
+        message: "bad syntax".to_string() 
+    };
+    let converted = PlanningErrorDetail::from_federation_error(invalid_graphql);
+    if let PlanningErrorDetail::InvalidGraphQL { message } = converted {
+        assert_eq!(message, "bad syntax");
+    } else {
+        panic!("Expected InvalidGraphQL variant");
+    }
     
-    let invalid_subgraph = SingleFederationError::InvalidSubgraph { message: "bad subgraph".to_string() };
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&invalid_subgraph), Some("INVALID_SUBGRAPH".to_string()));
+    let invalid_subgraph = SingleFederationError::InvalidSubgraph { 
+        message: "bad subgraph".to_string() 
+    };
+    let converted = PlanningErrorDetail::from_federation_error(invalid_subgraph);
+    if let PlanningErrorDetail::InvalidSubgraph { message } = converted {
+        assert_eq!(message, "bad subgraph");
+    } else {
+        panic!("Expected InvalidSubgraph variant");
+    }
     
-    // Test an error type that doesn't have a specific code
-    let internal_error = SingleFederationError::Internal { message: "internal issue".to_string() };
-    assert_eq!(PlanningErrorDetail::extract_federation_error_code(&internal_error), None);
+    // Test fallback to Other variant for unmapped error types
+    let internal_error = SingleFederationError::Internal { 
+        message: "internal issue".to_string() 
+    };
+    let converted = PlanningErrorDetail::from_federation_error(internal_error);
+    if let PlanningErrorDetail::Other { message } = converted {
+        assert!(message.contains("internal issue"));
+    } else {
+        panic!("Expected Other variant");
+    }
 }
 
 #[test]
 fn test_planning_error_detail_serialization() {
-    // Test that PlanningErrorDetail can be serialized/deserialized
-    let detail = PlanningErrorDetail {
-        message: "Test error message".to_string(),
-        code: Some("TEST_ERROR_CODE".to_string()),
-    };
-    
-    let json = serde_json::to_string(&detail).expect("Should serialize");
+    // Test that PlanningErrorDetail enum variants can be serialized/deserialized
+    let unknown_op = PlanningErrorDetail::UnknownOperation;
+    let json = serde_json::to_string(&unknown_op).expect("Should serialize");
     let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
+    assert!(matches!(deserialized, PlanningErrorDetail::UnknownOperation));
     
-    assert_eq!(deserialized.message, detail.message);
-    assert_eq!(deserialized.code, detail.code);
-    
-    // Test detail without code
-    let detail_no_code = PlanningErrorDetail {
-        message: "Error without code".to_string(),
-        code: None,
+    let complexity = PlanningErrorDetail::QueryPlanComplexityExceeded {
+        message: "Test complexity message".to_string(),
     };
+    let json = serde_json::to_string(&complexity).expect("Should serialize");
+    let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
+    if let PlanningErrorDetail::QueryPlanComplexityExceeded { message } = deserialized {
+        assert_eq!(message, "Test complexity message");
+    } else {
+        panic!("Expected QueryPlanComplexityExceeded variant");
+    }
     
-    let json_no_code = serde_json::to_string(&detail_no_code).expect("Should serialize");
-    let deserialized_no_code: PlanningErrorDetail = serde_json::from_str(&json_no_code).expect("Should deserialize");
-    
-    assert_eq!(deserialized_no_code.message, detail_no_code.message);
-    assert_eq!(deserialized_no_code.code, None);
+    let other = PlanningErrorDetail::Other {
+        message: "Some other error".to_string(),
+    };
+    let json = serde_json::to_string(&other).expect("Should serialize");
+    let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
+    if let PlanningErrorDetail::Other { message } = deserialized {
+        assert_eq!(message, "Some other error");
+    } else {
+        panic!("Expected Other variant");
+    }
 }
 
 #[test]
 fn test_planning_error_detail_error_trait() {
     use apollo_router_error::Error as RouterError;
     
-    // Test that PlanningErrorDetail implements the Error trait correctly
-    let detail = PlanningErrorDetail {
-        message: "Test error message".to_string(),
-        code: Some("TEST_ERROR_CODE".to_string()),
-    };
+    // Test that PlanningErrorDetail implements the Error trait correctly with different variants
+    let unknown_op = PlanningErrorDetail::UnknownOperation;
+    assert_eq!(unknown_op.error_code(), "APOLLO_ROUTER_QUERY_PLAN_UNKNOWN_OPERATION");
     
-    // Test error code
-    assert_eq!(detail.error_code(), "APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR_DETAIL");
+    let complexity = PlanningErrorDetail::QueryPlanComplexityExceeded {
+        message: "Test message".to_string(),
+    };
+    assert_eq!(complexity.error_code(), "APOLLO_ROUTER_QUERY_PLAN_COMPLEXITY_EXCEEDED");
+    
+    let other = PlanningErrorDetail::Other {
+        message: "Test other error".to_string(),
+    };
+    assert_eq!(other.error_code(), "APOLLO_ROUTER_QUERY_PLAN_OTHER_PLANNING_ERROR");
     
     // Test GraphQL extensions population
     let mut extensions = std::collections::BTreeMap::new();
-    detail.populate_graphql_extensions(&mut extensions);
+    complexity.populate_graphql_extensions(&mut extensions);
     
-    assert_eq!(extensions.get("message"), Some(&serde_json::Value::String("Test error message".to_string())));
-    assert_eq!(extensions.get("code"), Some(&serde_json::Value::String("TEST_ERROR_CODE".to_string())));
+    // Should contain the extension field from the enum variant
+    assert!(extensions.contains_key("complexityMessage"));
     
-    // Test detail without code
-    let detail_no_code = PlanningErrorDetail {
-        message: "Error without code".to_string(),
-        code: None,
-    };
+    let mut other_extensions = std::collections::BTreeMap::new();
+    other.populate_graphql_extensions(&mut other_extensions);
     
-    let mut extensions_no_code = std::collections::BTreeMap::new();
-    detail_no_code.populate_graphql_extensions(&mut extensions_no_code);
-    
-    assert_eq!(extensions_no_code.get("message"), Some(&serde_json::Value::String("Error without code".to_string())));
-    assert_eq!(extensions_no_code.get("code"), None);
+    // Should contain the extension field from the Other variant
+    assert!(other_extensions.contains_key("errorMessage"));
 }
 
 #[test]
@@ -206,13 +236,9 @@ fn test_error_codes() {
     let multiple_error = Error::MultiplePlanningErrors {
         count: 2,
         errors: vec![
-            PlanningErrorDetail {
-                message: "error 1".to_string(),
-                code: Some("CODE_1".to_string()),
-            },
-            PlanningErrorDetail {
+            PlanningErrorDetail::UnknownOperation,
+            PlanningErrorDetail::Other {
                 message: "error 2".to_string(),
-                code: None,
             },
         ],
     };
@@ -296,13 +322,9 @@ fn test_error_display_formatting() {
     let multiple_error = Error::MultiplePlanningErrors {
         count: 2,
         errors: vec![
-            PlanningErrorDetail {
-                message: "First error".to_string(),
-                code: Some("ERROR_1".to_string()),
-            },
-            PlanningErrorDetail {
+            PlanningErrorDetail::UnknownOperation,
+            PlanningErrorDetail::Other {
                 message: "Second error".to_string(),
-                code: None,
             },
         ],
     };
@@ -331,13 +353,11 @@ fn test_graphql_extensions_population() {
     let multiple_error = Error::MultiplePlanningErrors {
         count: 2,
         errors: vec![
-            PlanningErrorDetail {
+            PlanningErrorDetail::QueryPlanComplexityExceeded {
                 message: "First error".to_string(),
-                code: Some("ERROR_1".to_string()),
             },
-            PlanningErrorDetail {
+            PlanningErrorDetail::Other {
                 message: "Second error".to_string(),
-                code: None,
             },
         ],
     };

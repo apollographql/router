@@ -27,63 +27,108 @@ pub struct Response {
 }
 
 /// Serializable error detail for individual planning errors in GraphQL extensions
-#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic)]
-#[error("Planning error: {message}")]
-#[diagnostic(
-    code(APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR_DETAIL),
-    help("Check the specific error message for details about this planning issue")
-)]
-pub struct PlanningErrorDetail {
-    /// Error message describing the planning failure
-    pub message: String,
-    /// Optional error code for categorizing the error type
-    pub code: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic, RouterError)]
+pub enum PlanningErrorDetail {
+    /// Operation name not found in the document
+    #[error("Operation name not found")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_UNKNOWN_OPERATION),
+        help("Ensure the operation name exists in your GraphQL document")
+    )]
+    UnknownOperation,
+
+    /// Must provide operation name if query contains multiple operations
+    #[error("Must provide operation name if query contains multiple operations")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_OPERATION_NAME_NOT_PROVIDED),
+        help("Specify an operation name when your document contains multiple operations")
+    )]
+    OperationNameNotProvided,
+
+    /// @defer is not supported on subscriptions
+    #[error("@defer is not supported on subscriptions")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_DEFERRED_SUBSCRIPTION_UNSUPPORTED),
+        help("Remove @defer directives from subscription operations")
+    )]
+    DeferredSubscriptionUnsupported,
+
+    /// Query plan complexity exceeded: {message}
+    #[error("Query plan complexity exceeded: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_COMPLEXITY_EXCEEDED),
+        help("Simplify your GraphQL query to reduce planning complexity")
+    )]
+    QueryPlanComplexityExceeded {
+        #[extension("complexityMessage")]
+        message: String,
+    },
+
+    /// Query planning was cancelled
+    #[error("Query planning was cancelled")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_PLANNING_CANCELLED),
+        help("Check if the planning operation timed out or was interrupted")
+    )]
+    PlanningCancelled,
+
+    /// No plan was found when subgraphs were disabled
+    #[error("No plan was found when subgraphs were disabled")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_NO_PLAN_WITH_DISABLED_SUBGRAPHS),
+        help("Enable the necessary subgraphs or modify your query to work with available subgraphs")
+    )]
+    NoPlanFoundWithDisabledSubgraphs,
+
+    /// Invalid GraphQL: {message}
+    #[error("Invalid GraphQL: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_INVALID_GRAPHQL),
+        help("Check your GraphQL syntax and ensure it's valid")
+    )]
+    InvalidGraphQL {
+        #[extension("graphqlMessage")]
+        message: String,
+    },
+
+    /// Invalid subgraph: {message}
+    #[error("Invalid subgraph: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_INVALID_SUBGRAPH),
+        help("Check your subgraph schema configuration")
+    )]
+    InvalidSubgraph {
+        #[extension("subgraphMessage")]
+        message: String,
+    },
+
+    /// Other planning error: {message}
+    #[error("Other planning error: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_OTHER_PLANNING_ERROR),
+        help("Check the error message for specific details about this planning issue")
+    )]
+    Other {
+        #[extension("errorMessage")]
+        message: String,
+    },
 }
 
 impl PlanningErrorDetail {
     /// Create a new planning error detail from a federation error
     pub fn from_federation_error(error: apollo_federation::error::SingleFederationError) -> Self {
-        Self {
-            message: error.to_string(),
-            code: Self::extract_federation_error_code(&error),
-        }
-    }
-
-    /// Extract error code from SingleFederationError for categorization
-    pub fn extract_federation_error_code(error: &apollo_federation::error::SingleFederationError) -> Option<String> {
         use apollo_federation::error::SingleFederationError;
         
         match error {
-            SingleFederationError::UnknownOperation => Some("UNKNOWN_OPERATION".to_string()),
-            SingleFederationError::OperationNameNotProvided => Some("OPERATION_NAME_NOT_PROVIDED".to_string()),
-            SingleFederationError::DeferredSubscriptionUnsupported => Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()),
-            SingleFederationError::QueryPlanComplexityExceeded { .. } => Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()),
-            SingleFederationError::PlanningCancelled => Some("PLANNING_CANCELLED".to_string()),
-            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()),
-            SingleFederationError::InvalidGraphQL { .. } => Some("INVALID_GRAPHQL".to_string()),
-            SingleFederationError::InvalidSubgraph { .. } => Some("INVALID_SUBGRAPH".to_string()),
-            _ => None, // For other error types, don't provide a specific code
-        }
-    }
-}
-
-impl apollo_router_error::Error for PlanningErrorDetail {
-    fn error_code(&self) -> &'static str {
-        "APOLLO_ROUTER_QUERY_PLAN_PLANNING_ERROR_DETAIL"
-    }
-
-    fn populate_graphql_extensions(&self, extensions_map: &mut std::collections::BTreeMap<String, serde_json::Value>) {
-        // Add the message and code fields to GraphQL extensions
-        extensions_map.insert(
-            "message".to_string(),
-            serde_json::Value::String(self.message.clone()),
-        );
-        
-        if let Some(ref code) = self.code {
-            extensions_map.insert(
-                "code".to_string(),
-                serde_json::Value::String(code.clone()),
-            );
+            SingleFederationError::UnknownOperation => Self::UnknownOperation,
+            SingleFederationError::OperationNameNotProvided => Self::OperationNameNotProvided,
+            SingleFederationError::DeferredSubscriptionUnsupported => Self::DeferredSubscriptionUnsupported,
+            SingleFederationError::QueryPlanComplexityExceeded { message } => Self::QueryPlanComplexityExceeded { message },
+            SingleFederationError::PlanningCancelled => Self::PlanningCancelled,
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => Self::NoPlanFoundWithDisabledSubgraphs,
+            SingleFederationError::InvalidGraphQL { message } => Self::InvalidGraphQL { message },
+            SingleFederationError::InvalidSubgraph { message } => Self::InvalidSubgraph { message },
+            other => Self::Other { message: other.to_string() },
         }
     }
 }
