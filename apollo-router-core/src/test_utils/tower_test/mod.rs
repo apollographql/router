@@ -72,14 +72,12 @@ enum MockCompletionState {
 /// expectations closure completed successfully. If the service is dropped
 /// without the expectations completing (due to timeout or panic), it will
 /// panic on drop to alert the test of the failure.
+#[derive(Clone)]
 pub struct MockService<Req, Resp> {
     inner: ::tower_test::mock::Mock<Req, Resp>,
-    _expectations_handle: tokio::task::JoinHandle<()>,
+    _expectations_handle: Arc<tokio::task::JoinHandle<()>>,
     completion_state: Arc<Mutex<MockCompletionState>>,
 }
-
-// Note: MockService cannot be cloned because JoinHandle is not Clone
-// This is intentional - each mock service should have a unique lifecycle
 
 impl<Req, Resp> Drop for MockService<Req, Resp> {
     fn drop(&mut self) {
@@ -258,6 +256,9 @@ impl TowerTest {
     ///         response.send_response("mock response");
     ///     });
     ///
+    /// // MockService can be cloned for use in multiple places
+    /// let cloned_service = mock_service.clone();
+    /// 
     /// // Use in constructor
     /// let my_service = MyServiceUnderTest::new(mock_service);
     /// ```
@@ -321,7 +322,7 @@ impl TowerTest {
 
         MockService {
             inner: mock_service,
-            _expectations_handle: expectations_handle,
+            _expectations_handle: Arc::new(expectations_handle),
             completion_state: completion_tracker,
         }
     }

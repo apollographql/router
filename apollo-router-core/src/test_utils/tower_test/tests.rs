@@ -217,3 +217,44 @@ async fn test_service_mock_panic_on_expectations_panic() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     // Mock service will panic on drop due to expectations panic
 }
+
+#[tokio::test]
+async fn test_service_mock_clone() {
+    use tower::ServiceExt;
+    use std::time::Duration;
+
+    // Create a mock service that expects multiple requests
+    let mock_service = TowerTest::builder()
+        .timeout(Duration::from_secs(1))
+        .service(|mut handle| async move {
+            handle.allow(3);
+            
+            // Handle requests from different clones
+            for i in 1..=3 {
+                let (request, response) = handle.next_request().await.expect("service must not fail");
+                assert_eq!(request, format!("request{}", i));
+                response.send_response(format!("response{}", i));
+            }
+        });
+
+    // Clone the mock service
+    let mut clone1 = mock_service.clone();
+    let mut clone2 = mock_service.clone();
+    let mut original = mock_service;
+
+    // Use all three services (original + 2 clones)
+    original.ready().await.expect("service should be ready");
+    let response1 = original.call("request1").await.expect("first call should succeed");
+    assert_eq!(response1, "response1");
+
+    clone1.ready().await.expect("service should be ready");
+    let response2 = clone1.call("request2").await.expect("second call should succeed");
+    assert_eq!(response2, "response2");
+
+    clone2.ready().await.expect("service should be ready");
+    let response3 = clone2.call("request3").await.expect("third call should succeed");
+    assert_eq!(response3, "response3");
+    
+    // Give expectations time to complete
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}

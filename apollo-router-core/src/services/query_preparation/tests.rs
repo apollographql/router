@@ -1,5 +1,6 @@
 use super::*;
-use apollo_compiler::{Schema, validation::Valid, ExecutableDocument};
+use crate::test_utils::TowerTest;
+use apollo_compiler::{ExecutableDocument, Schema};
 use apollo_federation::query_plan::QueryPlan;
 use serde_json::json;
 use tower::ServiceExt;
@@ -11,15 +12,13 @@ struct MockQueryParseService {
 
 impl MockQueryParseService {
     fn new(should_fail: bool) -> Self {
-        Self {
-            should_fail,
-        }
+        Self { should_fail }
     }
-    
+
     fn success() -> Self {
         Self::new(false)
     }
-    
+
     fn failure() -> Self {
         Self::new(true)
     }
@@ -30,7 +29,10 @@ impl Service<query_parse::Request> for MockQueryParseService {
     type Error = query_parse::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -38,7 +40,7 @@ impl Service<query_parse::Request> for MockQueryParseService {
         let should_fail = self.should_fail;
         let extensions = req.extensions;
         let operation_name = req.operation_name;
-        
+
         Box::pin(async move {
             if should_fail {
                 return Err(query_parse::Error::ParsingFailed {
@@ -58,7 +60,8 @@ impl Service<query_parse::Request> for MockQueryParseService {
             "#;
             let schema = Schema::parse_and_validate(schema_str, "test.graphql").unwrap();
             let doc_str = "query { user(id: \"123\") { id name } }";
-            let doc = ExecutableDocument::parse_and_validate(&schema, doc_str, "query.graphql").unwrap();
+            let doc =
+                ExecutableDocument::parse_and_validate(&schema, doc_str, "query.graphql").unwrap();
 
             Ok(query_parse::Response {
                 extensions,
@@ -76,15 +79,13 @@ struct MockQueryPlanService {
 
 impl MockQueryPlanService {
     fn new(should_fail: bool) -> Self {
-        Self {
-            should_fail,
-        }
+        Self { should_fail }
     }
-    
+
     fn success() -> Self {
         Self::new(false)
     }
-    
+
     fn failure() -> Self {
         Self::new(true)
     }
@@ -95,7 +96,10 @@ impl Service<query_plan::Request> for MockQueryPlanService {
     type Error = query_plan::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         std::task::Poll::Ready(Ok(()))
     }
 
@@ -103,7 +107,7 @@ impl Service<query_plan::Request> for MockQueryPlanService {
         let should_fail = self.should_fail;
         let extensions = req.extensions;
         let operation_name = req.operation_name;
-        
+
         Box::pin(async move {
             if should_fail {
                 return Err(query_plan::Error::PlanningFailed {
@@ -128,13 +132,13 @@ async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::E
     // Setup mock services
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request
     let mut extensions = Extensions::default();
     extensions.insert("test_context".to_string());
-    
+
     let request = Request {
         extensions: extensions.clone(),
         body: json!({
@@ -149,7 +153,7 @@ async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::E
     // Verify response
     assert_eq!(response.operation_name, Some("GetUser".to_string()));
     assert_eq!(response.query_variables.get("id"), Some(&json!("123")));
-    
+
     // Verify original extensions are preserved
     let context: Option<String> = response.extensions.get();
     assert_eq!(context, Some("test_context".to_string()));
@@ -162,9 +166,9 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
     // Setup mock services with parse service that fails
     let parse_service = MockQueryParseService::failure();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request
     let request = Request {
         extensions: Extensions::default(),
@@ -184,7 +188,7 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
         }
         _ => panic!("Expected ParsingFailed error"),
     }
-    
+
     Ok(())
 }
 
@@ -193,9 +197,19 @@ async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::err
     // Setup mock services with plan service that fails
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::failure();
-    
-    let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
+    let parse_service = TowerTest::builder().service(|mut h| async {
+        h.next_request()
+            .await
+            .unwrap()
+            .1
+            .send_error(query_plan::Error::PlanningFailed {
+                message: "failed".to_string(),
+            })
+    });
+
+    let service = QueryPreparationService::new(parse_service.boxed_clone(), plan_service);
+
     // Create test request
     let request = Request {
         extensions: Extensions::default(),
@@ -215,7 +229,7 @@ async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::err
         }
         _ => panic!("Expected PlanningFailed error"),
     }
-    
+
     Ok(())
 }
 
@@ -224,9 +238,9 @@ async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std:
     // Setup mock services
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request without query field
     let request = Request {
         extensions: Extensions::default(),
@@ -245,7 +259,7 @@ async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std:
         }
         _ => panic!("Expected JsonExtraction error"),
     }
-    
+
     Ok(())
 }
 
@@ -254,9 +268,9 @@ async fn test_query_preparation_with_variables() -> Result<(), Box<dyn std::erro
     // Setup mock services
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request with complex variables
     let request = Request {
         extensions: Extensions::default(),
@@ -273,7 +287,10 @@ async fn test_query_preparation_with_variables() -> Result<(), Box<dyn std::erro
 
     // Verify variables are correctly extracted
     assert_eq!(response.query_variables.get("id"), Some(&json!("user123")));
-    assert_eq!(response.query_variables.get("includeProfile"), Some(&json!(true)));
+    assert_eq!(
+        response.query_variables.get("includeProfile"),
+        Some(&json!(true))
+    );
 
     Ok(())
 }
@@ -283,9 +300,9 @@ async fn test_query_preparation_null_variables() -> Result<(), Box<dyn std::erro
     // Setup mock services
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request with null variables
     let request = Request {
         extensions: Extensions::default(),
@@ -308,14 +325,14 @@ async fn test_extensions_preservation() -> Result<(), Box<dyn std::error::Error>
     // Setup mock services
     let parse_service = MockQueryParseService::success();
     let plan_service = MockQueryPlanService::success();
-    
+
     let service = QueryPreparationService::new(parse_service, plan_service);
-    
+
     // Create test request with multiple extension values
     let mut extensions = Extensions::default();
     extensions.insert("upstream_value".to_string());
     extensions.insert(42i32);
-    
+
     let request = Request {
         extensions,
         body: json!({
@@ -328,7 +345,7 @@ async fn test_extensions_preservation() -> Result<(), Box<dyn std::error::Error>
     // Verify original extensions are preserved (not extended layers)
     let upstream_string: Option<String> = response.extensions.get();
     assert_eq!(upstream_string, Some("upstream_value".to_string()));
-    
+
     let upstream_int: Option<i32> = response.extensions.get();
     assert_eq!(upstream_int, Some(42));
 
@@ -344,7 +361,7 @@ async fn test_extract_graphql_request_valid() {
     });
 
     let (query, operation_name, variables) = extract_graphql_request(&body).unwrap();
-    
+
     assert_eq!(query, "{ user { name } }");
     assert_eq!(operation_name, Some("GetUser".to_string()));
     assert_eq!(variables.get("id"), Some(&json!("123")));
@@ -357,7 +374,7 @@ async fn test_extract_graphql_request_minimal() {
     });
 
     let (query, operation_name, variables) = extract_graphql_request(&body).unwrap();
-    
+
     assert_eq!(query, "{ user { name } }");
     assert_eq!(operation_name, None);
     assert!(variables.is_empty());
@@ -371,7 +388,7 @@ async fn test_extract_graphql_request_missing_query() {
 
     let result = extract_graphql_request(&body);
     assert!(result.is_err());
-    
+
     if let Err(Error::JsonExtraction { field, .. }) = result {
         assert_eq!(field, "query");
     } else {
@@ -388,11 +405,11 @@ async fn test_extract_graphql_request_invalid_variables() {
 
     let result = extract_graphql_request(&body);
     assert!(result.is_err());
-    
+
     match result {
         Err(Error::VariableExtraction { .. }) => {
             // Expected error type
         }
         _ => panic!("Expected VariableExtraction error"),
     }
-} 
+}
