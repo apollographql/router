@@ -1,9 +1,16 @@
 use crate::Extensions;
 use crate::json::JsonValue;
+use crate::services::query_parse;
+use crate::services::query_plan;
+use apollo_compiler::Name;
 use apollo_federation::query_plan::QueryPlan;
+use apollo_router_error::Error as RouterError;
 use serde_json::Value;
 use std::collections::HashMap;
-use thiserror::Error;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tower::Service;
 
 #[derive(Clone)]
 pub struct Request {
@@ -18,23 +25,225 @@ pub struct Response {
     pub query_variables: HashMap<String, Value>,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, RouterError)]
 pub enum Error {
-    /// Query planning failed: {0}
-    #[error("Query planning failed: {0}")]
-    QueryPlanning(#[from] crate::services::query_plan::Error),
+    /// Query parsing failed during preparation: {message}
+    #[error("Query parsing failed during preparation: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PREPARATION_PARSING_FAILED),
+        help("Check your GraphQL query syntax and schema compatibility")
+    )]
+    ParsingFailed {
+        #[extension("parsingMessage")]
+        message: String,
+    },
 
-    /// JSON extraction failed: {0}
-    #[error("JSON extraction failed: {0}")]
-    JsonExtraction(String),
+    /// Query planning failed during preparation: {message}
+    #[error("Query planning failed during preparation: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PREPARATION_PLANNING_FAILED),
+        help("Check your GraphQL query and schema compatibility")
+    )]
+    PlanningFailed {
+        #[extension("planningMessage")]
+        message: String,
+    },
 
-    /// Variable extraction failed: {0}
-    #[error("Variable extraction failed: {0}")]
-    VariableExtraction(String),
+    /// JSON extraction failed: {field} - {message}
+    #[error("JSON extraction failed: {field} - {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PREPARATION_JSON_EXTRACTION_FAILED),
+        help("Ensure the JSON request contains the required GraphQL fields")
+    )]
+    JsonExtraction {
+        #[extension("jsonField")]
+        field: String,
+        #[extension("jsonMessage")]
+        message: String,
+    },
+
+    /// Variable extraction failed: {message}
+    #[error("Variable extraction failed: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PREPARATION_VARIABLE_EXTRACTION_FAILED),
+        help("Check that your GraphQL variables are properly formatted JSON")
+    )]
+    VariableExtraction {
+        #[extension("variableMessage")]
+        message: String,
+    },
+}
+
+impl From<query_parse::Error> for Error {
+    fn from(error: query_parse::Error) -> Self {
+        Self::ParsingFailed {
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<query_plan::Error> for Error {
+    fn from(error: query_plan::Error) -> Self {
+        Self::PlanningFailed {
+            message: error.to_string(),
+        }
+    }
 }
 
 #[cfg_attr(test, mry::mry)]
-#[allow(async_fn_in_trait)]
 pub trait QueryPreparation {
     async fn call(&self, req: Request) -> Result<Response, Error>;
 }
+
+/// Query preparation service that combines query parsing and planning into a single operation
+/// 
+/// This composite service orchestrates the query_parse and query_plan services to transform
+/// JSON requests containing GraphQL queries into execution requests with query plans.
+#[derive(Clone)]
+pub struct QueryPreparationService<ParseService, PlanService> {
+    parse_service: ParseService,
+    plan_service: PlanService,
+}
+
+impl<ParseService, PlanService> QueryPreparationService<ParseService, PlanService> {
+    pub fn new(parse_service: ParseService, plan_service: PlanService) -> Self {
+        Self {
+            parse_service,
+            plan_service,
+        }
+    }
+}
+
+impl<ParseService, PlanService> Service<Request> for QueryPreparationService<ParseService, PlanService>
+where
+    ParseService: Service<query_parse::Request, Response = query_parse::Response, Error = query_parse::Error> + Clone + Send + 'static,
+    ParseService::Future: Send,
+    PlanService: Service<query_plan::Request, Response = query_plan::Response, Error = query_plan::Error> + Clone + Send + 'static,
+    PlanService::Future: Send,
+{
+    type Response = Response;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check that both services are ready
+        match self.parse_service.poll_ready(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+            Poll::Ready(Ok(())) => match self.plan_service.poll_ready(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+                Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            },
+        }
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let mut parse_service = self.parse_service.clone();
+        let mut plan_service = self.plan_service.clone();
+
+        Box::pin(async move {
+            // 1. Extract JSON request data
+            let (query_string, operation_name, variables) = extract_graphql_request(&req.body)?;
+
+            // 2. Create extended extensions for inner services (following hexagonal architecture)
+            let extended_extensions = req.extensions.extend();
+
+            // 3. Transform JSON to QueryParse request
+            let parse_req = query_parse::Request {
+                extensions: extended_extensions.clone(),
+                operation_name: operation_name.clone(),
+                query: query_string,
+            };
+
+            // 4. Call query_parse service - if parsing fails, don't proceed to planning
+            let parse_resp = parse_service.call(parse_req).await?;
+
+            // 5. Convert operation_name from String to Name for query planning
+            let operation_name_for_planning = operation_name
+                .as_ref()
+                .and_then(|name| Name::try_from(name.as_str()).ok());
+
+            // 6. Transform QueryParse response to QueryPlan request
+            let plan_req = query_plan::Request {
+                extensions: extended_extensions,
+                operation_name: operation_name_for_planning,
+                document: parse_resp.query,
+            };
+
+            // 7. Call query_plan service - if planning fails, don't proceed
+            let plan_resp = plan_service.call(plan_req).await?;
+
+            // 8. Transform QueryPlan response to final Response (returning original extensions)
+            Ok(Response {
+                extensions: req.extensions, // Return original extensions as per hexagonal architecture
+                operation_name,
+                query_plan: plan_resp.query_plan,
+                query_variables: variables,
+            })
+        })
+    }
+}
+
+/// Extract GraphQL request components from JSON body
+/// 
+/// Expected JSON format:
+/// ```json
+/// {
+///   "query": "query GetUser($id: ID!) { user(id: $id) { name } }",
+///   "operationName": "GetUser",
+///   "variables": { "id": "123" }
+/// }
+/// ```
+fn extract_graphql_request(
+    body: &JsonValue,
+) -> Result<(String, Option<String>, HashMap<String, Value>), Error> {
+    // Extract query string (required)
+    let query = body
+        .get("query")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| Error::JsonExtraction {
+            field: "query".to_string(),
+            message: "Missing or invalid 'query' field in JSON body".to_string(),
+        })?;
+
+    // Extract operation name (optional)
+    let operation_name = body
+        .get("operationName")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Extract variables (optional, defaults to empty map)
+    let variables = match body.get("variables") {
+        Some(vars) => {
+            if vars.is_null() {
+                HashMap::new()
+            } else {
+                vars.as_object()
+                    .map(|obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect()
+                    })
+                    .ok_or_else(|| Error::VariableExtraction {
+                        message: "Variables must be a JSON object".to_string(),
+                    })?
+            }
+        }
+        None => HashMap::new(),
+    };
+
+    Ok((query, operation_name, variables))
+}
+
+impl QueryPreparation for QueryPreparationService<query_parse::QueryParseService, query_plan::QueryPlanService> {
+    async fn call(&self, req: Request) -> Result<Response, Error> {
+        use tower::ServiceExt;
+        let service = self.clone();
+        service.oneshot(req).await
+    }
+}
+
+#[cfg(test)]
+mod tests;
