@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::Service;
+use tower::{BoxError, Service};
 
 #[derive(Clone)]
 pub struct Request {
@@ -18,6 +18,7 @@ pub struct Request {
     pub body: JsonValue,
 }
 
+#[derive(Debug)]
 pub struct Response {
     pub extensions: Extensions,
     pub operation_name: Option<String>,
@@ -116,23 +117,27 @@ impl<ParseService, PlanService> QueryPreparationService<ParseService, PlanServic
 
 impl<ParseService, PlanService> Service<Request> for QueryPreparationService<ParseService, PlanService>
 where
-    ParseService: Service<query_parse::Request, Response = query_parse::Response, Error = query_parse::Error> + Clone + Send + 'static,
+    ParseService: Service<query_parse::Request, Response = query_parse::Response, Error = BoxError> + Clone + Send + 'static,
     ParseService::Future: Send,
-    PlanService: Service<query_plan::Request, Response = query_plan::Response, Error = query_plan::Error> + Clone + Send + 'static,
+    PlanService: Service<query_plan::Request, Response = query_plan::Response, Error = BoxError> + Clone + Send + 'static,
     PlanService::Future: Send,
 {
     type Response = Response;
-    type Error = Error;
+    type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check that both services are ready
         match self.parse_service.poll_ready(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(Error::ParsingFailed { 
+                message: e.to_string() 
+            }) as BoxError)),
             Poll::Ready(Ok(())) => match self.plan_service.poll_ready(cx) {
                 Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(Error::PlanningFailed { 
+                    message: e.to_string() 
+                }) as BoxError)),
                 Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             },
         }
@@ -144,7 +149,8 @@ where
 
         Box::pin(async move {
             // 1. Extract JSON request data
-            let (query_string, operation_name, variables) = extract_graphql_request(&req.body)?;
+            let (query_string, operation_name, variables) = extract_graphql_request(&req.body)
+                .map_err(|e| Box::new(e) as BoxError)?;
 
             // 2. Create extended extensions for inner services (following hexagonal architecture)
             let extended_extensions = req.extensions.extend();
@@ -157,7 +163,8 @@ where
             };
 
             // 4. Call query_parse service - if parsing fails, don't proceed to planning
-            let parse_resp = parse_service.call(parse_req).await?;
+            let parse_resp = parse_service.call(parse_req).await
+                .map_err(|e| Box::new(Error::ParsingFailed { message: e.to_string() }) as BoxError)?;
 
             // 5. Convert operation_name from String to Name for query planning
             let operation_name_for_planning = operation_name
@@ -172,7 +179,8 @@ where
             };
 
             // 7. Call query_plan service - if planning fails, don't proceed
-            let plan_resp = plan_service.call(plan_req).await?;
+            let plan_resp = plan_service.call(plan_req).await
+                .map_err(|e| Box::new(Error::PlanningFailed { message: e.to_string() }) as BoxError)?;
 
             // 8. Transform QueryPlan response to final Response (returning original extensions)
             Ok(Response {
@@ -242,6 +250,18 @@ impl QueryPreparation for QueryPreparationService<query_parse::QueryParseService
         use tower::ServiceExt;
         let service = self.clone();
         service.oneshot(req).await
+            .map_err(|boxed_error| {
+                // Try to downcast the BoxError back to our specific Error type
+                match boxed_error.downcast::<Error>() {
+                    Ok(specific_error) => *specific_error,
+                    Err(other_error) => {
+                        // If it's not our specific error type, create a generic error
+                        Error::ParsingFailed {
+                            message: other_error.to_string(),
+                        }
+                    }
+                }
+            })
     }
 }
 

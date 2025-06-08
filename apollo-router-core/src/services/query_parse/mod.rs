@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::Service;
+use tower::{BoxError, Service};
 
 #[derive(Clone)]
 pub struct Request {
@@ -278,7 +278,7 @@ impl QueryParseService {
 
 impl Service<Request> for QueryParseService {
     type Response = Response;
-    type Error = Error;
+    type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -293,7 +293,8 @@ impl Service<Request> for QueryParseService {
 
         Box::pin(async move {
             // Parse the query, returning Valid<ExecutableDocument> or Error
-            let parsed_query = service.parse_query(query_string.as_str())?;
+            let parsed_query = service.parse_query(query_string.as_str())
+                .map_err(|e| Box::new(e) as BoxError)?;
 
             Ok(Response {
                 extensions,
