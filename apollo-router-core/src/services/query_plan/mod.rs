@@ -114,9 +114,8 @@ pub enum PlanningErrorDetail {
     },
 }
 
-impl PlanningErrorDetail {
-    /// Create a new planning error detail from a federation error
-    pub fn from_federation_error(error: apollo_federation::error::SingleFederationError) -> Self {
+impl From<apollo_federation::error::SingleFederationError> for PlanningErrorDetail {
+    fn from(error: apollo_federation::error::SingleFederationError) -> Self {
         use apollo_federation::error::SingleFederationError;
         
         match error {
@@ -197,7 +196,7 @@ impl From<apollo_federation::error::FederationError> for Error {
             // Multiple errors case
             let errors: Vec<PlanningErrorDetail> = all_errors
                 .into_iter()
-                .map(PlanningErrorDetail::from_federation_error)
+                .map(Into::into)
                 .collect();
             
             Self::MultiplePlanningErrors {

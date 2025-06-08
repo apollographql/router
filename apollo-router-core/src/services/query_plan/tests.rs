@@ -99,23 +99,23 @@ fn test_federation_error_conversion() {
 fn test_planning_error_detail_enum_variants() {
     use apollo_federation::error::SingleFederationError;
     
-    // Test conversion of various federation error types to enum variants
+    // Test conversion of various federation error types to enum variants using From trait
     let unknown_op = SingleFederationError::UnknownOperation;
-    let converted = PlanningErrorDetail::from_federation_error(unknown_op);
+    let converted: PlanningErrorDetail = unknown_op.into();
     assert!(matches!(converted, PlanningErrorDetail::UnknownOperation));
     
     let no_op_name = SingleFederationError::OperationNameNotProvided;
-    let converted = PlanningErrorDetail::from_federation_error(no_op_name);
+    let converted: PlanningErrorDetail = no_op_name.into();
     assert!(matches!(converted, PlanningErrorDetail::OperationNameNotProvided));
     
     let deferred_sub = SingleFederationError::DeferredSubscriptionUnsupported;
-    let converted = PlanningErrorDetail::from_federation_error(deferred_sub);
+    let converted: PlanningErrorDetail = deferred_sub.into();
     assert!(matches!(converted, PlanningErrorDetail::DeferredSubscriptionUnsupported));
     
     let complexity = SingleFederationError::QueryPlanComplexityExceeded { 
         message: "too complex".to_string() 
     };
-    let converted = PlanningErrorDetail::from_federation_error(complexity);
+    let converted: PlanningErrorDetail = complexity.into();
     if let PlanningErrorDetail::QueryPlanComplexityExceeded { message } = converted {
         assert_eq!(message, "too complex");
     } else {
@@ -123,17 +123,17 @@ fn test_planning_error_detail_enum_variants() {
     }
     
     let cancelled = SingleFederationError::PlanningCancelled;
-    let converted = PlanningErrorDetail::from_federation_error(cancelled);
+    let converted: PlanningErrorDetail = cancelled.into();
     assert!(matches!(converted, PlanningErrorDetail::PlanningCancelled));
     
     let no_plan = SingleFederationError::NoPlanFoundWithDisabledSubgraphs;
-    let converted = PlanningErrorDetail::from_federation_error(no_plan);
+    let converted: PlanningErrorDetail = no_plan.into();
     assert!(matches!(converted, PlanningErrorDetail::NoPlanFoundWithDisabledSubgraphs));
     
     let invalid_graphql = SingleFederationError::InvalidGraphQL { 
         message: "bad syntax".to_string() 
     };
-    let converted = PlanningErrorDetail::from_federation_error(invalid_graphql);
+    let converted: PlanningErrorDetail = invalid_graphql.into();
     if let PlanningErrorDetail::InvalidGraphQL { message } = converted {
         assert_eq!(message, "bad syntax");
     } else {
@@ -143,7 +143,7 @@ fn test_planning_error_detail_enum_variants() {
     let invalid_subgraph = SingleFederationError::InvalidSubgraph { 
         message: "bad subgraph".to_string() 
     };
-    let converted = PlanningErrorDetail::from_federation_error(invalid_subgraph);
+    let converted: PlanningErrorDetail = invalid_subgraph.into();
     if let PlanningErrorDetail::InvalidSubgraph { message } = converted {
         assert_eq!(message, "bad subgraph");
     } else {
@@ -154,7 +154,7 @@ fn test_planning_error_detail_enum_variants() {
     let internal_error = SingleFederationError::Internal { 
         message: "internal issue".to_string() 
     };
-    let converted = PlanningErrorDetail::from_federation_error(internal_error);
+    let converted: PlanningErrorDetail = internal_error.into();
     if let PlanningErrorDetail::Other { message } = converted {
         assert!(message.contains("internal issue"));
     } else {
