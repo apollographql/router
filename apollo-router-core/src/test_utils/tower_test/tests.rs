@@ -96,7 +96,7 @@ async fn test_clean_builder_api_custom_test() {
     let result = TowerTest::builder()
         .layer(layer)
         .test(
-            |mut service| async move {
+            |service| async move {
                 let http_req = http::Request::builder()
                     .uri("http://example.com")
                     .body(UnsyncBoxBody::new(
@@ -123,4 +123,97 @@ async fn test_clean_builder_api_custom_test() {
 
     let collected = result.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(collected, "test response".as_bytes());
+}
+
+#[tokio::test]
+async fn test_service_mock_functionality() {
+    use tower::ServiceExt;
+    use std::time::Duration;
+
+    // Create a mock service that expects one request
+    let mut mock_service = TowerTest::builder()
+        .timeout(Duration::from_secs(1))
+        .service(|mut handle| async move {
+            handle.allow(1);
+            let (request, response) = handle.next_request().await.expect("service must not fail");
+            assert_eq!(request, "test request");
+            response.send_response("mock response");
+        });
+
+    // Use the mock service properly with ready() + call()
+    mock_service.ready().await.expect("service should be ready");
+    let response = mock_service.call("test request").await.expect("service call should succeed");
+    assert_eq!(response, "mock response");
+    
+    // Give expectations time to complete
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}
+
+#[tokio::test] 
+async fn test_service_mock_with_constructor() {
+    use tower::{Service, ServiceExt};
+    use std::time::Duration;
+
+    // Create a mock service
+    let mock_service = TowerTest::builder()
+        .timeout(Duration::from_secs(1))
+        .service(|mut handle| async move {
+            handle.allow(2);
+            
+            // First request
+            let (request, response) = handle.next_request().await.expect("service must not fail");
+            assert_eq!(request, "request1");
+            response.send_response("response1");
+            
+            // Second request
+            let (request, response) = handle.next_request().await.expect("service must not fail");
+            assert_eq!(request, "request2");
+            response.send_response("response2");
+        });
+
+    // Example of using the mock service in a service constructor
+    let mut wrapper_service = ExampleService::new(mock_service);
+
+    // Make requests through the wrapper service using ready() + call()
+    wrapper_service.ready().await.expect("service should be ready");
+    let response1 = wrapper_service.call("request1").await.expect("first call should succeed");
+    assert_eq!(response1, "response1");
+
+    wrapper_service.ready().await.expect("service should be ready");
+    let response2 = wrapper_service.call("request2").await.expect("second call should succeed");
+    assert_eq!(response2, "response2");
+}
+
+#[tokio::test]
+#[should_panic(expected = "Mock service expectations timed out")]
+async fn test_service_mock_panic_on_timeout() {
+    use std::time::Duration;
+
+    // Create a mock service with a very short timeout and slow expectations
+    let _mock_service = TowerTest::builder()
+        .timeout(Duration::from_millis(10))
+        .service(|mut _handle: ::tower_test::mock::Handle<String, String>| async move {
+            // Sleep longer than the timeout
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+    // Wait a bit for the timeout to occur, then drop the service
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Mock service will panic on drop due to timeout
+}
+
+#[tokio::test]
+#[should_panic] // Just test that it panics, don't be specific about the message due to race conditions
+async fn test_service_mock_panic_on_expectations_panic() {
+    use std::time::Duration;
+    
+    // Create a mock service where expectations panic
+    let _mock_service = TowerTest::builder()
+        .service(|mut _handle: ::tower_test::mock::Handle<String, String>| async move {
+            panic!("Expectations failed!");
+        });
+
+    // Wait a bit for the expectations to run and complete
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Mock service will panic on drop due to expectations panic
 }

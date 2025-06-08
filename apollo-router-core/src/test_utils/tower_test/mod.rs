@@ -1,7 +1,11 @@
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use tower::{Layer, Service, ServiceExt};
+
+#[cfg(test)]
+mod tests;
 
 /// Example service for documentation and testing purposes
 ///
@@ -53,6 +57,72 @@ impl<S> Layer<S> for ExampleLayer {
     }
 }
 
+/// State tracking for mock service completion
+#[derive(Debug)]
+enum MockCompletionState {
+    Running,
+    Completed,
+    Panicked(String),
+    TimedOut,
+}
+
+/// Mock service wrapper that panics on drop if expectations weren't completed
+///
+/// This service wraps a tower-test mock service and tracks whether the
+/// expectations closure completed successfully. If the service is dropped
+/// without the expectations completing (due to timeout or panic), it will
+/// panic on drop to alert the test of the failure.
+pub struct MockService<Req, Resp> {
+    inner: ::tower_test::mock::Mock<Req, Resp>,
+    _expectations_handle: tokio::task::JoinHandle<()>,
+    completion_state: Arc<Mutex<MockCompletionState>>,
+}
+
+// Note: MockService cannot be cloned because JoinHandle is not Clone
+// This is intentional - each mock service should have a unique lifecycle
+
+impl<Req, Resp> Drop for MockService<Req, Resp> {
+    fn drop(&mut self) {
+        if let Ok(state) = self.completion_state.lock() {
+            match &*state {
+                MockCompletionState::Running => {
+                    panic!("Mock service dropped while expectations were still running - this indicates a test failure or timeout");
+                }
+                MockCompletionState::Panicked(msg) => {
+                    panic!("Mock service expectations panicked: {}", msg);
+                }
+                MockCompletionState::TimedOut => {
+                    panic!("Mock service expectations timed out - this usually means unexpected requests or deadlock");
+                }
+                MockCompletionState::Completed => {
+                    // All good, expectations completed successfully
+                }
+            }
+        }
+    }
+}
+
+impl<Req, Resp> Service<Req> for MockService<Req, Resp>
+where
+    Req: Send + 'static,
+    Resp: Send + 'static,
+{
+    type Response = <::tower_test::mock::Mock<Req, Resp> as Service<Req>>::Response;
+    type Error = <::tower_test::mock::Mock<Req, Resp> as Service<Req>>::Error;
+    type Future = <::tower_test::mock::Mock<Req, Resp> as Service<Req>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        self.inner.call(req)
+    }
+}
+
 /// Builder for testing tower layers with better error handling and panic detection
 ///
 /// This builder provides a fluent API for configuring and running layer tests.
@@ -61,8 +131,9 @@ impl<S> Layer<S> for ExampleLayer {
 /// - Panic detection in expectation handlers
 /// - Clean separation of configuration and terminal methods
 /// - No type annotation required for expectations!
+/// - Service mocking for dependency injection testing
 ///
-/// # Example
+/// # Layer Testing Example
 ///
 /// ```rust,no_run
 /// # use apollo_router_core::test_utils::tower_test::{TowerTest, ExampleLayer};
@@ -95,6 +166,52 @@ impl<S> Layer<S> for ExampleLayer {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Service Testing Example
+///
+/// ```rust,no_run
+/// # use apollo_router_core::test_utils::tower_test::TowerTest;
+/// # use tower::{Service, ServiceExt};
+/// # use std::time::Duration;
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Create a mock service for dependency injection
+/// let mut mock_service = TowerTest::builder()
+///     .timeout(Duration::from_secs(2))
+///     .service(|mut handle| async move {
+///         handle.allow(2);
+///         
+///         // Handle first request
+///         let (request, response) = handle.next_request().await.expect("service must not fail");
+///         assert_eq!(request, "get_user:123");
+///         response.send_response("User{id: 123, name: 'Alice'}");
+///         
+///         // Handle second request  
+///         let (request, response) = handle.next_request().await.expect("service must not fail");
+///         assert_eq!(request, "get_orders:123");
+///         response.send_response("Orders[Order{id: 1}, Order{id: 2}]");
+///     });
+///
+/// // Use the mock service in your service constructor
+/// struct UserOrderService<S> {
+///     user_service: S,
+/// }
+/// 
+/// impl<S> UserOrderService<S> {
+///     fn new(user_service: S) -> Self {
+///         Self { user_service }
+///     }
+/// }
+/// 
+/// let service = UserOrderService::new(mock_service);
+/// // ... test your service logic
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The mock service will automatically panic on drop if:
+/// - The timeout is exceeded
+/// - The expectations closure panics
+/// - The expectations don't complete before the service is dropped
 pub struct TowerTest {
     timeout_duration: Duration,
 }
@@ -118,6 +235,94 @@ impl TowerTest {
         LayerTestBuilderWithLayer {
             layer,
             timeout_duration: self.timeout_duration,
+        }
+    }
+
+    /// Create a mock service for dependency injection testing
+    ///
+    /// This creates a mock service that can be passed to service constructors.
+    /// The expectations closure receives a mock handle where you can set up
+    /// the expected behavior. The mock service will panic on drop if the
+    /// expectations are not completed or if a timeout occurs.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use apollo_router_core::test_utils::tower_test::TowerTest;
+    /// # use std::time::Duration;
+    /// let mock_service = TowerTest::builder()
+    ///     .timeout(Duration::from_secs(2))
+    ///     .service(|mut handle| async move {
+    ///         handle.allow(1);
+    ///         let (request, response) = handle.next_request().await.expect("service must not fail");
+    ///         response.send_response("mock response");
+    ///     });
+    ///
+    /// // Use in constructor
+    /// let my_service = MyServiceUnderTest::new(mock_service);
+    /// ```
+    pub fn service<Req, Resp, F, Fut>(
+        self,
+        expectations: F,
+    ) -> MockService<Req, Resp>
+    where
+        Req: Send + 'static,
+        Resp: Send + 'static,
+        F: FnOnce(::tower_test::mock::Handle<Req, Resp>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let (mock_service, handle) = ::tower_test::mock::pair::<Req, Resp>();
+        
+        let completion_tracker = Arc::new(Mutex::new(MockCompletionState::Running));
+        let completion_tracker_clone = completion_tracker.clone();
+        
+        // Spawn the expectations handler
+        let expectations_handle = tokio::spawn(async move {
+            let result = catch_unwind(AssertUnwindSafe(|| expectations(handle)));
+
+            match result {
+                Ok(future) => {
+                    // Run the expectations
+                    future.await;
+                    
+                    // Mark as completed successfully
+                    if let Ok(mut state) = completion_tracker_clone.lock() {
+                        *state = MockCompletionState::Completed;
+                    }
+                }
+                Err(panic_info) => {
+                    // Mark as panicked
+                    if let Ok(mut state) = completion_tracker_clone.lock() {
+                        let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                            s.clone()
+                        } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else {
+                            "Unknown panic in expectations".to_string()
+                        };
+                        *state = MockCompletionState::Panicked(msg);
+                    }
+                }
+            }
+        });
+
+        // Set up timeout handling
+        let timeout_tracker = completion_tracker.clone();
+        let timeout_duration = self.timeout_duration;
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout_duration).await;
+            
+            if let Ok(mut state) = timeout_tracker.lock() {
+                if matches!(*state, MockCompletionState::Running) {
+                    *state = MockCompletionState::TimedOut;
+                }
+            }
+        });
+
+        MockService {
+            inner: mock_service,
+            _expectations_handle: expectations_handle,
+            completion_state: completion_tracker,
         }
     }
 }
