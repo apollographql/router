@@ -15,7 +15,7 @@ use crate::services::http_server;
 use crate::services::json_client;
 use crate::services::query_execution;
 use crate::services::query_parse;
-use crate::services::query_plan::QueryPlanning;
+
 use tower::{Service, ServiceBuilder};
 
 pub use extensions::Extensions;
@@ -23,11 +23,13 @@ pub use extensions::Extensions;
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
 ///
 /// Example usage:
-/// ```no_run
+/// ```
 /// use apollo_router_core::{server_pipeline, services::{query_execution, query_parse}};
+/// use apollo_compiler::{Schema, validation::Valid};
 /// use tower::{Service, service_fn};
 ///
-/// let parse_service = query_parse::QueryParseService::new();
+/// let schema = Schema::parse_and_validate("type Query { hello: String }", "test.graphql").unwrap();
+/// let parse_service = query_parse::QueryParseService::new(schema);
 ///
 /// let execute_service = service_fn(|req: query_execution::Request| async move {
 ///     // Your query execution logic here
@@ -49,7 +51,14 @@ where
     P: Service<query_parse::Request, Response = query_parse::Response> + Clone + Send + 'static,
     P::Future: Send + 'static,
     P::Error: Into<tower::BoxError>,
-    Pl: QueryPlanning + Clone + Send + 'static,
+    Pl: Service<
+            crate::services::query_plan::Request,
+            Response = crate::services::query_plan::Response,
+        > + Clone
+        + Send
+        + 'static,
+    Pl::Future: Send + 'static,
+    Pl::Error: Into<tower::BoxError>,
     S: Service<query_execution::Request, Response = query_execution::Response>
         + Clone
         + Send

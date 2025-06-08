@@ -1,7 +1,7 @@
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
 use crate::services::query_execution::{Request as ExecutionRequest, Response as ExecutionResponse};
 use crate::services::query_parse;
-use crate::services::query_plan::{self, QueryPlanning};
+use crate::services::query_plan;
 use std::pin::Pin;
 use tower::BoxError;
 use tower::{Layer, Service};
@@ -94,7 +94,9 @@ where
     P: Service<query_parse::Request, Response = query_parse::Response> + Clone + Send + 'static,
     P::Future: Send + 'static,
     P::Error: Into<BoxError>,
-    Pl: QueryPlanning + Clone + Send + 'static,
+    Pl: Service<query_plan::Request, Response = query_plan::Response> + Clone + Send + 'static,
+    Pl::Future: Send + 'static,
+    Pl::Error: Into<BoxError>,
 {
     type Response = JsonResponse;
     type Error = BoxError;
