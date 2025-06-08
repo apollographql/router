@@ -523,57 +523,29 @@ async fn test_error_location_information() {
     assert!(result.is_err());
     
     let error = result.unwrap_err();
-    match error {
-        Error::ParsingFailed { .. } => {
-            // Single error case - hard to test location extraction
-            println!("Single parsing error occurred");
-        }
-        Error::MultipleParsingErrors { errors, .. } => {
-            // Check if any errors have location information
-            let errors_with_location: Vec<_> = errors.iter().filter_map(|e| match e {
-                ParseErrorDetail::SyntaxError { line, column, message, .. } => {
-                    if line.is_some() || column.is_some() {
-                        Some(format!("SyntaxError at line {:?}, column {:?}: {}", line, column, message))
-                    } else { None }
-                }
-                ParseErrorDetail::ValidationError { line, column, message, .. } => {
-                    if line.is_some() || column.is_some() {
-                        Some(format!("ValidationError at line {:?}, column {:?}: {}", line, column, message))
-                    } else { None }
-                }
-                ParseErrorDetail::UnknownField { line, column, field_name, type_name, .. } => {
-                    if line.is_some() || column.is_some() {
-                        Some(format!("UnknownField '{}' on '{}' at line {:?}, column {:?}", field_name, type_name, line, column))
-                    } else { None }
-                }
-                ParseErrorDetail::TypeMismatch { line, column, message, .. } => {
-                    if line.is_some() || column.is_some() {
-                        Some(format!("TypeMismatch at line {:?}, column {:?}: {}", line, column, message))
-                    } else { None }
-                }
-                ParseErrorDetail::Other { line, column, message, .. } => {
-                    if line.is_some() || column.is_some() {
-                        Some(format!("Other error at line {:?}, column {:?}: {}", line, column, message))
-                    } else { None }
-                }
-            }).collect();
-            
-            println!("Total errors: {}", errors.len());
-            println!("Errors with location info: {}", errors_with_location.len());
-            for error_with_location in &errors_with_location {
-                println!("  {}", error_with_location);
-            }
-            
-            // apollo_compiler should provide location information for validation errors
-            // At minimum, we should have location information for at least some errors
-            if !errors_with_location.is_empty() {
-                println!("✓ Successfully extracted location information from apollo_compiler diagnostics");
-            } else {
-                println!("ℹ No location information available (this may be normal for some error types)");
-            }
-        }
-        _ => panic!("Expected parsing error, got: {:?}", error),
-    }
+    
+    // Use insta snapshot to verify error structure and location information
+    insta::assert_yaml_snapshot!(error, @r###"
+    MultipleParsingErrors:
+      count: 4
+      errors:
+        - ValidationError:
+            message: "Error: type `User` does not have a field `nonExistentField1`\n   ╭─[ query.graphql:5:21 ]\n   │\n 5 │                     nonExistentField1\n   │                     ────────┬────────  \n   │                             ╰────────── field `nonExistentField1` selected here\n   │\n   ├─[ test-schema.graphql:8:14 ]\n   │\n 8 │         type User {\n   │              ──┬─  \n   │                ╰─── type `User` defined here\n   │ \n   │ Note: path to the field: `query → user → nonExistentField1`\n───╯\n"
+            line: 5
+            column: 21
+        - ValidationError:
+            message: "Error: type `User` does not have a field `nonExistentField2`\n   ╭─[ query.graphql:6:21 ]\n   │\n 6 │                     nonExistentField2\n   │                     ────────┬────────  \n   │                             ╰────────── field `nonExistentField2` selected here\n   │\n   ├─[ test-schema.graphql:8:14 ]\n   │\n 8 │         type User {\n   │              ──┬─  \n   │                ╰─── type `User` defined here\n   │ \n   │ Note: path to the field: `query → user → nonExistentField2`\n───╯\n"
+            line: 6
+            column: 21
+        - ValidationError:
+            message: "Error: type `User` does not have a field `anotherBadField`\n   ╭─[ query.graphql:7:21 ]\n   │\n 7 │                     anotherBadField\n   │                     ───────┬───────  \n   │                            ╰───────── field `anotherBadField` selected here\n   │\n   ├─[ test-schema.graphql:8:14 ]\n   │\n 8 │         type User {\n   │              ──┬─  \n   │                ╰─── type `User` defined here\n   │ \n   │ Note: path to the field: `query → user → anotherBadField`\n───╯\n"
+            line: 7
+            column: 21
+        - ValidationError:
+            message: "Error: type `Query` does not have a field `nonExistentRootField`\n   ╭─[ query.graphql:9:17 ]\n   │\n 9 │                 nonExistentRootField\n   │                 ──────────┬─────────  \n   │                           ╰─────────── field `nonExistentRootField` selected here\n   │\n   ├─[ test-schema.graphql:2:14 ]\n   │\n 2 │         type Query {\n   │              ──┬──  \n   │                ╰──── type `Query` defined here\n   │ \n   │ Note: path to the field: `query → nonExistentRootField`\n───╯\n"
+            line: 9
+            column: 17
+    "###);
 }
 
 #[cfg(test)]

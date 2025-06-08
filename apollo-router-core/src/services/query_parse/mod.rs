@@ -24,7 +24,9 @@ pub struct Response {
 }
 
 /// Serializable error detail for individual parsing errors in GraphQL extensions
-#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic, RouterError)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic, RouterError,
+)]
 pub enum ParseErrorDetail {
     /// Syntax error in GraphQL query: {message}
     #[error("Syntax error in GraphQL query: {message}")]
@@ -104,11 +106,19 @@ pub enum ParseErrorDetail {
     },
 }
 
-impl From<apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validation::DiagnosticData>> for ParseErrorDetail {
-    fn from(diagnostic: apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validation::DiagnosticData>) -> Self {
+impl From<apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validation::DiagnosticData>>
+    for ParseErrorDetail
+{
+    fn from(
+        diagnostic: apollo_compiler::diagnostic::Diagnostic<
+            '_,
+            apollo_compiler::validation::DiagnosticData,
+        >,
+    ) -> Self {
+        // TODO Get diagnostic data into public apollo-rs api so that we don't have to do string manipulation.
         // Use to_string() to get the error message from Diagnostic
         let message = diagnostic.to_string();
-        
+
         // Extract location information using line_column_range()
         let (line, column) = if let Some(range) = diagnostic.line_column_range() {
             (
@@ -120,19 +130,43 @@ impl From<apollo_compiler::diagnostic::Diagnostic<'_, apollo_compiler::validatio
         };
 
         // Try to categorize the error based on the message content
-        if message.contains("syntax") || message.contains("expected") || message.contains("unexpected") {
-            Self::SyntaxError { message, line, column }
+        if message.contains("syntax")
+            || message.contains("expected")
+            || message.contains("unexpected")
+        {
+            Self::SyntaxError {
+                message,
+                line,
+                column,
+            }
         } else if message.contains("Unknown field") {
             // Try to extract field and type names from error message
             // Format is typically "Unknown field 'fieldName' on type 'TypeName'"
-            let field_name = extract_quoted_text(&message, 0).unwrap_or_else(|| "unknown".to_string());
-            let type_name = extract_quoted_text(&message, 1).unwrap_or_else(|| "unknown".to_string());
-            Self::UnknownField { field_name, type_name, line, column }
-        } else if message.contains("type") && (message.contains("mismatch") || message.contains("expected")) {
-            Self::TypeMismatch { message, line, column }
+            let field_name =
+                extract_quoted_text(&message, 0).unwrap_or_else(|| "unknown".to_string());
+            let type_name =
+                extract_quoted_text(&message, 1).unwrap_or_else(|| "unknown".to_string());
+            Self::UnknownField {
+                field_name,
+                type_name,
+                line,
+                column,
+            }
+        } else if message.contains("type")
+            && (message.contains("mismatch") || message.contains("expected"))
+        {
+            Self::TypeMismatch {
+                message,
+                line,
+                column,
+            }
         } else {
             // Default to validation error for most apollo_compiler diagnostics
-            Self::ValidationError { message, line, column }
+            Self::ValidationError {
+                message,
+                line,
+                column,
+            }
         }
     }
 }
@@ -142,7 +176,7 @@ fn extract_quoted_text(text: &str, occurrence: usize) -> Option<String> {
     let mut count = 0;
     let mut start = None;
     let mut chars = text.char_indices();
-    
+
     while let Some((i, ch)) = chars.next() {
         if ch == '\'' {
             if start.is_none() {
@@ -199,7 +233,8 @@ pub enum Error {
 
 impl From<WithErrors<ExecutableDocument>> for Error {
     fn from(with_errors: WithErrors<ExecutableDocument>) -> Self {
-        let errors: Vec<ParseErrorDetail> = with_errors.errors
+        let errors: Vec<ParseErrorDetail> = with_errors
+            .errors
             .iter()
             .map(|diagnostic| ParseErrorDetail::from(diagnostic))
             .collect();
@@ -231,7 +266,7 @@ impl QueryParseService {
     }
 
     /// Parse a GraphQL query string into a Valid<ExecutableDocument>
-    /// 
+    ///
     /// This method uses apollo_compiler's parse_and_validate and converts any validation
     /// errors into our structured error types.
     fn parse_query(&self, query_string: &str) -> Result<Valid<ExecutableDocument>, Error> {
