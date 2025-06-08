@@ -6,6 +6,7 @@ use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::query_planner::{QueryPlanner, QueryPlannerConfig, QueryPlanOptions};
 use apollo_federation::Supergraph;
 use apollo_router_error::Error as RouterError;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -25,6 +26,15 @@ pub struct Response {
     pub query_plan: QueryPlan,
 }
 
+/// Serializable error detail for individual planning errors in GraphQL extensions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningErrorDetail {
+    /// Error message describing the planning failure
+    pub message: String,
+    /// Optional error code for categorizing the error type
+    pub code: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error, miette::Diagnostic, RouterError)]
 pub enum Error {
     /// Query planning failed: {message}
@@ -36,6 +46,19 @@ pub enum Error {
     PlanningFailed {
         #[extension("planningMessage")]
         message: String,
+    },
+
+    /// Multiple query planning errors occurred
+    #[error("Multiple query planning errors occurred: {count} errors")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_PLAN_MULTIPLE_PLANNING_ERRORS),
+        help("Review all planning errors and fix the underlying issues")
+    )]
+    MultiplePlanningErrors {
+        #[extension("errorCount")]
+        count: usize,
+        #[extension("planningErrors")]
+        errors: Vec<PlanningErrorDetail>,
     },
 
     /// Federation error occurred: {message}
@@ -59,6 +82,53 @@ pub enum Error {
         #[extension("configReason")]
         reason: String,
     },
+}
+
+impl Error {
+    /// Convert apollo-federation errors into service errors, handling multiple errors
+    fn from_federation_error(federation_error: apollo_federation::error::FederationError) -> Self {
+        // Extract all errors using the public method
+        let all_errors = federation_error.into_errors();
+        
+        if all_errors.len() == 1 {
+            // Single error case
+            let single_error = &all_errors[0];
+            Self::PlanningFailed {
+                message: single_error.to_string(),
+            }
+        } else {
+            // Multiple errors case
+            let errors: Vec<PlanningErrorDetail> = all_errors
+                .into_iter()
+                .map(|err| PlanningErrorDetail {
+                    message: err.to_string(),
+                    code: Self::extract_error_code(&err),
+                })
+                .collect();
+            
+            Self::MultiplePlanningErrors {
+                count: errors.len(),
+                errors,
+            }
+        }
+    }
+
+    /// Extract error code from SingleFederationError for categorization
+    fn extract_error_code(error: &apollo_federation::error::SingleFederationError) -> Option<String> {
+        use apollo_federation::error::SingleFederationError;
+        
+        match error {
+            SingleFederationError::UnknownOperation => Some("UNKNOWN_OPERATION".to_string()),
+            SingleFederationError::OperationNameNotProvided => Some("OPERATION_NAME_NOT_PROVIDED".to_string()),
+            SingleFederationError::DeferredSubscriptionUnsupported => Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()),
+            SingleFederationError::QueryPlanComplexityExceeded { .. } => Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()),
+            SingleFederationError::PlanningCancelled => Some("PLANNING_CANCELLED".to_string()),
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()),
+            SingleFederationError::InvalidGraphQL { .. } => Some("INVALID_GRAPHQL".to_string()),
+            SingleFederationError::InvalidSubgraph { .. } => Some("INVALID_SUBGRAPH".to_string()),
+            _ => None, // For other error types, don't provide a specific code
+        }
+    }
 }
 
 /// Query planning service that transforms validated ExecutableDocuments into QueryPlans
@@ -98,9 +168,7 @@ impl QueryPlanService {
         
         self.query_planner
             .build_query_plan(document, operation_name, options)
-            .map_err(|e| Error::PlanningFailed {
-                message: e.to_string(),
-            })
+            .map_err(Error::from_federation_error)
     }
 }
 

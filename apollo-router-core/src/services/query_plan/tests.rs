@@ -22,11 +22,166 @@ async fn test_query_plan_service_error_types() {
 }
 
 #[test]
+fn test_multiple_planning_errors() {
+    // Test the new MultiplePlanningErrors variant
+    let errors = vec![
+        PlanningErrorDetail {
+            message: "First planning error".to_string(),
+            code: Some("ERROR_1".to_string()),
+        },
+        PlanningErrorDetail {
+            message: "Second planning error".to_string(),
+            code: Some("ERROR_2".to_string()),
+        },
+        PlanningErrorDetail {
+            message: "Third planning error without code".to_string(),
+            code: None,
+        },
+    ];
+    
+    let multiple_error = Error::MultiplePlanningErrors {
+        count: errors.len(),
+        errors: errors.clone(),
+    };
+    
+    // Test that we can create the multiple error variant
+    assert!(matches!(multiple_error, Error::MultiplePlanningErrors { .. }));
+    
+    // Test that the error displays correctly
+    let error_string = format!("{}", multiple_error);
+    assert!(error_string.contains("Multiple query planning errors"));
+    assert!(error_string.contains("3 errors"));
+    
+    // Test that the details are accessible
+    if let Error::MultiplePlanningErrors { count, errors: error_details } = multiple_error {
+        assert_eq!(count, 3);
+        assert_eq!(error_details.len(), 3);
+        assert_eq!(error_details[0].message, "First planning error");
+        assert_eq!(error_details[0].code, Some("ERROR_1".to_string()));
+        assert_eq!(error_details[1].message, "Second planning error");
+        assert_eq!(error_details[1].code, Some("ERROR_2".to_string()));
+        assert_eq!(error_details[2].message, "Third planning error without code");
+        assert_eq!(error_details[2].code, None);
+    } else {
+        panic!("Expected MultiplePlanningErrors variant");
+    }
+}
+
+#[test]
+fn test_federation_error_conversion() {
+    use apollo_federation::error::{FederationError, SingleFederationError};
+    
+    // Test single error conversion
+    let single_fed_error = FederationError::SingleFederationError(
+        SingleFederationError::UnknownOperation
+    );
+    let converted = Error::from_federation_error(single_fed_error);
+    assert!(matches!(converted, Error::PlanningFailed { .. }));
+    
+    // Test that we can create a simple multiple federation error using merge
+    let error1 = FederationError::SingleFederationError(SingleFederationError::UnknownOperation);
+    let error2 = FederationError::SingleFederationError(SingleFederationError::OperationNameNotProvided);
+    let merged_error = error1.merge(error2);
+    
+    let converted = Error::from_federation_error(merged_error);
+    
+    if let Error::MultiplePlanningErrors { count, errors } = converted {
+        assert_eq!(count, 2);
+        assert_eq!(errors.len(), 2);
+        
+        // Check that error codes are properly extracted for known error types
+        assert_eq!(errors[0].code, Some("UNKNOWN_OPERATION".to_string()));
+        assert_eq!(errors[1].code, Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
+        
+        // Check that error messages are properly converted
+        assert!(errors[0].message.contains("Operation name not found"));
+        assert!(errors[1].message.contains("Must provide operation name"));
+    } else {
+        panic!("Expected MultiplePlanningErrors variant");
+    }
+}
+
+#[test]
+fn test_error_code_extraction() {
+    use apollo_federation::error::SingleFederationError;
+    
+    // Test various error types and their code extraction
+    let unknown_op = SingleFederationError::UnknownOperation;
+    assert_eq!(Error::extract_error_code(&unknown_op), Some("UNKNOWN_OPERATION".to_string()));
+    
+    let no_op_name = SingleFederationError::OperationNameNotProvided;
+    assert_eq!(Error::extract_error_code(&no_op_name), Some("OPERATION_NAME_NOT_PROVIDED".to_string()));
+    
+    let deferred_sub = SingleFederationError::DeferredSubscriptionUnsupported;
+    assert_eq!(Error::extract_error_code(&deferred_sub), Some("DEFERRED_SUBSCRIPTION_UNSUPPORTED".to_string()));
+    
+    let complexity = SingleFederationError::QueryPlanComplexityExceeded { message: "too complex".to_string() };
+    assert_eq!(Error::extract_error_code(&complexity), Some("QUERY_PLAN_COMPLEXITY_EXCEEDED".to_string()));
+    
+    let cancelled = SingleFederationError::PlanningCancelled;
+    assert_eq!(Error::extract_error_code(&cancelled), Some("PLANNING_CANCELLED".to_string()));
+    
+    let no_plan = SingleFederationError::NoPlanFoundWithDisabledSubgraphs;
+    assert_eq!(Error::extract_error_code(&no_plan), Some("NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_string()));
+    
+    let invalid_graphql = SingleFederationError::InvalidGraphQL { message: "bad syntax".to_string() };
+    assert_eq!(Error::extract_error_code(&invalid_graphql), Some("INVALID_GRAPHQL".to_string()));
+    
+    let invalid_subgraph = SingleFederationError::InvalidSubgraph { message: "bad subgraph".to_string() };
+    assert_eq!(Error::extract_error_code(&invalid_subgraph), Some("INVALID_SUBGRAPH".to_string()));
+    
+    // Test an error type that doesn't have a specific code
+    let internal_error = SingleFederationError::Internal { message: "internal issue".to_string() };
+    assert_eq!(Error::extract_error_code(&internal_error), None);
+}
+
+#[test]
+fn test_planning_error_detail_serialization() {
+    // Test that PlanningErrorDetail can be serialized/deserialized
+    let detail = PlanningErrorDetail {
+        message: "Test error message".to_string(),
+        code: Some("TEST_ERROR_CODE".to_string()),
+    };
+    
+    let json = serde_json::to_string(&detail).expect("Should serialize");
+    let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
+    
+    assert_eq!(deserialized.message, detail.message);
+    assert_eq!(deserialized.code, detail.code);
+    
+    // Test detail without code
+    let detail_no_code = PlanningErrorDetail {
+        message: "Error without code".to_string(),
+        code: None,
+    };
+    
+    let json_no_code = serde_json::to_string(&detail_no_code).expect("Should serialize");
+    let deserialized_no_code: PlanningErrorDetail = serde_json::from_str(&json_no_code).expect("Should deserialize");
+    
+    assert_eq!(deserialized_no_code.message, detail_no_code.message);
+    assert_eq!(deserialized_no_code.code, None);
+}
+
+#[test]
 fn test_error_codes() {
     use apollo_router_error::Error as RouterError;
     
     let planning_error = Error::PlanningFailed {
         message: "test".to_string(),
+    };
+    
+    let multiple_error = Error::MultiplePlanningErrors {
+        count: 2,
+        errors: vec![
+            PlanningErrorDetail {
+                message: "error 1".to_string(),
+                code: Some("CODE_1".to_string()),
+            },
+            PlanningErrorDetail {
+                message: "error 2".to_string(),
+                code: None,
+            },
+        ],
     };
     
     let federation_error = Error::FederationError {
@@ -39,6 +194,7 @@ fn test_error_codes() {
 
     // Test that error codes are correctly implemented
     assert_eq!(planning_error.error_code(), "APOLLO_ROUTER_QUERY_PLAN_PLANNING_FAILED");
+    assert_eq!(multiple_error.error_code(), "APOLLO_ROUTER_QUERY_PLAN_MULTIPLE_PLANNING_ERRORS");
     assert_eq!(federation_error.error_code(), "APOLLO_ROUTER_QUERY_PLAN_FEDERATION_ERROR");
     assert_eq!(invalid_supergraph.error_code(), "APOLLO_ROUTER_QUERY_PLAN_INVALID_SUPERGRAPH");
 }
@@ -102,6 +258,25 @@ fn test_error_display_formatting() {
     let error_string = format!("{}", planning_error);
     assert!(error_string.contains("Query planning failed"));
     assert!(error_string.contains("Something went wrong"));
+    
+    // Test multiple errors display
+    let multiple_error = Error::MultiplePlanningErrors {
+        count: 2,
+        errors: vec![
+            PlanningErrorDetail {
+                message: "First error".to_string(),
+                code: Some("ERROR_1".to_string()),
+            },
+            PlanningErrorDetail {
+                message: "Second error".to_string(),
+                code: None,
+            },
+        ],
+    };
+    
+    let multiple_error_string = format!("{}", multiple_error);
+    assert!(multiple_error_string.contains("Multiple query planning errors"));
+    assert!(multiple_error_string.contains("2 errors"));
 }
 
 #[test]
@@ -118,6 +293,31 @@ fn test_graphql_extensions_population() {
     
     // Verify that the error populates GraphQL extensions correctly
     assert!(!extensions.is_empty(), "Extensions should be populated");
+    
+    // Test multiple errors extension population
+    let multiple_error = Error::MultiplePlanningErrors {
+        count: 2,
+        errors: vec![
+            PlanningErrorDetail {
+                message: "First error".to_string(),
+                code: Some("ERROR_1".to_string()),
+            },
+            PlanningErrorDetail {
+                message: "Second error".to_string(),
+                code: None,
+            },
+        ],
+    };
+    
+    let mut multiple_extensions = BTreeMap::new();
+    multiple_error.populate_graphql_extensions(&mut multiple_extensions);
+    
+    // Verify that multiple errors populate extensions correctly
+    assert!(!multiple_extensions.is_empty(), "Extensions should be populated for multiple errors");
+    
+    // Verify that both errorCount and planningErrors are present
+    assert!(multiple_extensions.contains_key("errorCount"), "Should contain errorCount");
+    assert!(multiple_extensions.contains_key("planningErrors"), "Should contain planningErrors");
 }
 
 // Note: More comprehensive integration tests would require setting up valid
