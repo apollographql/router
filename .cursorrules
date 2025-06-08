@@ -30,5 +30,5 @@ Remember to use the request and response types from the services mod when creati
 Tower services should always have an error type, but they will always use an associated type of BoxError so that upstream errors can be propagated.
 Always make sure linter errors pass before moving onto the next task.
 Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps making sure that you do a git commit between each step. Make sure to use conventional commit names. Git messages should include why the change was made and the rationale.
-
+Before committing all tests and doctests must pass, run cargo to ensure this is the case.
 

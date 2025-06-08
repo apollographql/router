@@ -8,7 +8,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```rust
 //! use apollo_router_error_derive::Error;
 //!
 //! #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
