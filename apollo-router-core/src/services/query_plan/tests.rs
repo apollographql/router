@@ -1,4 +1,5 @@
 use super::*;
+use crate::assert_error;
 
 #[tokio::test]
 async fn test_query_plan_service_error_types() {
@@ -48,17 +49,16 @@ fn test_multiple_planning_errors() {
     assert!(error_string.contains("Multiple query planning errors"));
     assert!(error_string.contains("4 errors"));
     
-    // Test that the details are accessible
-    if let Error::MultiplePlanningErrors { count, errors: error_details } = multiple_error {
-        assert_eq!(count, 4);
+    // Test that the details are accessible using assert_error! for better error reporting
+    let result: Result<(), Error> = Err(multiple_error);
+    assert_error!(result, Error::MultiplePlanningErrors { count, errors: error_details } => {
+        assert_eq!(*count, 4);
         assert_eq!(error_details.len(), 4);
         assert!(matches!(error_details[0], PlanningErrorDetail::UnknownOperation));
         assert!(matches!(error_details[1], PlanningErrorDetail::OperationNameNotProvided));
         assert!(matches!(error_details[2], PlanningErrorDetail::QueryPlanComplexityExceeded { .. }));
         assert!(matches!(error_details[3], PlanningErrorDetail::Other { .. }));
-    } else {
-        panic!("Expected MultiplePlanningErrors variant");
-    }
+    });
 }
 
 #[test]
@@ -78,9 +78,11 @@ fn test_federation_error_conversion() {
     let merged_error = error1.merge(error2);
     
     let converted: Error = merged_error.into();
+    let result: Result<(), Error> = Err(converted);
     
-    if let Error::MultiplePlanningErrors { count, errors } = converted {
-        assert_eq!(count, 2);
+    // Use assert_error! for better error reporting
+    assert_error!(result, Error::MultiplePlanningErrors { count, errors } => {
+        assert_eq!(*count, 2);
         assert_eq!(errors.len(), 2);
         
         // Check that error variants are properly converted
@@ -90,9 +92,7 @@ fn test_federation_error_conversion() {
         // Check that error messages are properly converted
         assert!(errors[0].to_string().contains("Operation name not found"));
         assert!(errors[1].to_string().contains("Must provide operation name"));
-    } else {
-        panic!("Expected MultiplePlanningErrors variant");
-    }
+    });
 }
 
 #[test]
@@ -116,11 +116,10 @@ fn test_planning_error_detail_enum_variants() {
         message: "too complex".to_string() 
     };
     let converted: PlanningErrorDetail = complexity.into();
-    if let PlanningErrorDetail::QueryPlanComplexityExceeded { message } = converted {
+    let result: Result<(), PlanningErrorDetail> = Err(converted);
+    assert_error!(result, PlanningErrorDetail::QueryPlanComplexityExceeded { message } => {
         assert_eq!(message, "too complex");
-    } else {
-        panic!("Expected QueryPlanComplexityExceeded variant");
-    }
+    });
     
     let cancelled = SingleFederationError::PlanningCancelled;
     let converted: PlanningErrorDetail = cancelled.into();
@@ -134,32 +133,29 @@ fn test_planning_error_detail_enum_variants() {
         message: "bad syntax".to_string() 
     };
     let converted: PlanningErrorDetail = invalid_graphql.into();
-    if let PlanningErrorDetail::InvalidGraphQL { message } = converted {
+    let result: Result<(), PlanningErrorDetail> = Err(converted);
+    assert_error!(result, PlanningErrorDetail::InvalidGraphQL { message } => {
         assert_eq!(message, "bad syntax");
-    } else {
-        panic!("Expected InvalidGraphQL variant");
-    }
+    });
     
     let invalid_subgraph = SingleFederationError::InvalidSubgraph { 
         message: "bad subgraph".to_string() 
     };
     let converted: PlanningErrorDetail = invalid_subgraph.into();
-    if let PlanningErrorDetail::InvalidSubgraph { message } = converted {
+    let result: Result<(), PlanningErrorDetail> = Err(converted);
+    assert_error!(result, PlanningErrorDetail::InvalidSubgraph { message } => {
         assert_eq!(message, "bad subgraph");
-    } else {
-        panic!("Expected InvalidSubgraph variant");
-    }
+    });
     
     // Test fallback to Other variant for unmapped error types
     let internal_error = SingleFederationError::Internal { 
         message: "internal issue".to_string() 
     };
     let converted: PlanningErrorDetail = internal_error.into();
-    if let PlanningErrorDetail::Other { message } = converted {
+    let result: Result<(), PlanningErrorDetail> = Err(converted);
+    assert_error!(result, PlanningErrorDetail::Other { message } => {
         assert!(message.contains("internal issue"));
-    } else {
-        panic!("Expected Other variant");
-    }
+    });
 }
 
 #[test]
@@ -175,22 +171,20 @@ fn test_planning_error_detail_serialization() {
     };
     let json = serde_json::to_string(&complexity).expect("Should serialize");
     let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
-    if let PlanningErrorDetail::QueryPlanComplexityExceeded { message } = deserialized {
+    let result: Result<(), PlanningErrorDetail> = Err(deserialized);
+    assert_error!(result, PlanningErrorDetail::QueryPlanComplexityExceeded { message } => {
         assert_eq!(message, "Test complexity message");
-    } else {
-        panic!("Expected QueryPlanComplexityExceeded variant");
-    }
+    });
     
     let other = PlanningErrorDetail::Other {
         message: "Some other error".to_string(),
     };
     let json = serde_json::to_string(&other).expect("Should serialize");
     let deserialized: PlanningErrorDetail = serde_json::from_str(&json).expect("Should deserialize");
-    if let PlanningErrorDetail::Other { message } = deserialized {
+    let result: Result<(), PlanningErrorDetail> = Err(deserialized);
+    assert_error!(result, PlanningErrorDetail::Other { message } => {
         assert_eq!(message, "Some other error");
-    } else {
-        panic!("Expected Other variant");
-    }
+    });
 }
 
 #[test]
@@ -298,7 +292,7 @@ async fn test_tower_service_trait_implementation() {
     
     fn _assert_service_trait<T>()
     where
-        T: Service<Request, Response = Response, Error = Error> + Clone,
+        T: Service<Request, Response = Response, Error = BoxError> + Clone,
     {
         // This function exists only to verify trait bounds at compile time
     }

@@ -60,9 +60,11 @@ async fn test_clean_builder_api_with_timeout() {
         .await;
 
     assert!(result.is_err());
-    let error_msg = result.unwrap_err().to_string();
-    // Test can timeout or service can close due to mock not responding
-    assert!(error_msg.contains("timed out") || error_msg.contains("service closed"));
+    if let Err(error) = result {
+        let error_msg = error.to_string();
+        // Test can timeout or service can close due to mock not responding
+        assert!(error_msg.contains("timed out") || error_msg.contains("service closed"));
+    }
 }
 
 #[tokio::test]
@@ -85,8 +87,10 @@ async fn test_clean_builder_api_panic_detection() {
         .await;
 
     assert!(result.is_err());
-    let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("panicked"));
+    if let Err(error) = result {
+        let error_msg = error.to_string();
+        assert!(error_msg.contains("panicked"));
+    }
 }
 
 #[tokio::test]

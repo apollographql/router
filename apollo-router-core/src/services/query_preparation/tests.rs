@@ -231,7 +231,9 @@ async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std:
     let result = service.oneshot(request).await;
 
     // Should fail with JSON extraction error for missing query field
-    assert_error!(result, Error, Error::JsonExtraction { .. });
+    assert_error!(result, Error, Error::JsonExtraction { field, .. } => {
+        assert_eq!(field, "query");
+    });
 
     Ok(())
 }
@@ -363,15 +365,11 @@ async fn test_extract_graphql_request_missing_query() {
     });
 
     let result = extract_graphql_request(&body);
-    assert!(result.is_err());
     
-    // Check that it's specifically a JSON extraction error for the query field
-    match result.unwrap_err() {
-        Error::JsonExtraction { field, .. } => {
-            assert_eq!(field, "query");
-        }
-        other => panic!("Expected JsonExtraction error, got: {:?}", other),
-    }
+    // Should fail with JSON extraction error for missing query field
+    assert_error!(result, Error::JsonExtraction { field, .. } => {
+        assert_eq!(field, "query");
+    });
 }
 
 #[tokio::test]
@@ -382,13 +380,7 @@ async fn test_extract_graphql_request_invalid_variables() {
     });
 
     let result = extract_graphql_request(&body);
-    assert!(result.is_err());
     
-    // Check that it's specifically a variable extraction error
-    match result.unwrap_err() {
-        Error::VariableExtraction { .. } => {
-            // Expected error type
-        }
-        other => panic!("Expected VariableExtraction error, got: {:?}", other),
-    }
+    // Should fail with variable extraction error
+    assert_error!(result, Error::VariableExtraction { .. });
 }
