@@ -1,4 +1,5 @@
 use super::*;
+use crate::assert_error;
 use apollo_compiler::{ExecutableDocument, Schema};
 use apollo_federation::query_plan::QueryPlan;
 use serde_json::json;
@@ -181,10 +182,7 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
     let result = service.oneshot(request).await;
 
     // Should fail with parsing error
-    assert!(result.is_err());
-    let error_message = result.unwrap_err().to_string();
-    assert!(error_message.contains("Mock parsing error") || error_message.contains("parsing"), 
-            "Expected parsing error, got: {}", error_message);
+    assert_error!(result, Error, Error::ParsingFailed { .. });
 
     Ok(())
 }
@@ -209,10 +207,7 @@ async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::err
     let result = service.oneshot(request).await;
 
     // Should fail with planning error
-    assert!(result.is_err());
-    let error_message = result.unwrap_err().to_string();
-    assert!(error_message.contains("Mock planning error") || error_message.contains("planning") || error_message.contains("failed"), 
-            "Expected planning error, got: {}", error_message);
+    assert_error!(result, Error, Error::PlanningFailed { .. });
 
     Ok(())
 }
@@ -235,11 +230,8 @@ async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std:
 
     let result = service.oneshot(request).await;
 
-    // Should fail with JSON extraction error
-    assert!(result.is_err());
-    let error_message = result.unwrap_err().to_string();
-    assert!(error_message.contains("query") && error_message.contains("JSON"), 
-            "Expected JSON extraction error about query field, got: {}", error_message);
+    // Should fail with JSON extraction error for missing query field
+    assert_error!(result, Error, Error::JsonExtraction { .. });
 
     Ok(())
 }
@@ -372,9 +364,14 @@ async fn test_extract_graphql_request_missing_query() {
 
     let result = extract_graphql_request(&body);
     assert!(result.is_err());
-    let error_message = result.unwrap_err().to_string();
-    assert!(error_message.contains("query") && error_message.contains("JSON"), 
-            "Expected JSON extraction error about query field, got: {}", error_message);
+    
+    // Check that it's specifically a JSON extraction error for the query field
+    match result.unwrap_err() {
+        Error::JsonExtraction { field, .. } => {
+            assert_eq!(field, "query");
+        }
+        other => panic!("Expected JsonExtraction error, got: {:?}", other),
+    }
 }
 
 #[tokio::test]
@@ -386,7 +383,12 @@ async fn test_extract_graphql_request_invalid_variables() {
 
     let result = extract_graphql_request(&body);
     assert!(result.is_err());
-    let error_message = result.unwrap_err().to_string();
-    assert!(error_message.contains("Variable") && error_message.contains("object"), 
-            "Expected variable extraction error, got: {}", error_message);
+    
+    // Check that it's specifically a variable extraction error
+    match result.unwrap_err() {
+        Error::VariableExtraction { .. } => {
+            // Expected error type
+        }
+        other => panic!("Expected VariableExtraction error, got: {:?}", other),
+    }
 }
