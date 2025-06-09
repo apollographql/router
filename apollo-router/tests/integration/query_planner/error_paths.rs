@@ -15,6 +15,17 @@ include_subgraph_errors:
   all: true
 "#;
 
+enum ResponseType {
+    Ok,
+    Error(ErrorType),
+}
+
+enum ErrorType {
+    Malformed,
+    EmptyPath,
+    Valid,
+}
+
 fn query() -> Query {
     let query_str =
         r#"query Q { topProducts { name inStock reviews { id author { username name } } } }"#;
@@ -25,49 +36,101 @@ fn query() -> Query {
         .build()
 }
 
-fn products_response(errors: bool) -> Value {
-    if errors {
-        json!({"errors": [{ "message": "products error", "path": [] }]})
-    } else {
-        json!({
+fn products_response(response_type: ResponseType) -> Value {
+    match response_type {
+        ResponseType::Ok => json!({
             "data": {
                 "topProducts": [
                     { "__typename": "Product", "name": "Table", "upc": "1" },
                     { "__typename": "Product", "name": "Chair", "upc": "2" },
                 ]
             },
-        })
+        }),
+        ResponseType::Error(ErrorType::Valid) => json!({
+            "data": {
+                "topProducts": [
+                    { "__typename": "Product", "name": "Table", "upc": "1" },
+                    null,
+                ]
+            },
+            "errors": [{ "message": "products error", "path": ["topProducts", 1] }]
+        }),
+        ResponseType::Error(ErrorType::EmptyPath) => json!({
+            "data": {
+                "topProducts": [
+                    { "__typename": "Product", "name": "Table", "upc": "1" },
+                    null,
+                ]
+            },
+            "errors": [{ "message": "products error", "path": [] }]
+        }),
+        ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
     }
 }
 
-fn inventory_response(errors: bool) -> Value {
-    if errors {
-        json!({"errors": [{ "message": "inventory error", "path": [] }]})
-    } else {
-        json!({"data": {"_entities": [{"inStock": true}, {"inStock": false}]}})
+fn inventory_response(response_type: ResponseType) -> Value {
+    match response_type {
+        ResponseType::Ok => json!({
+            "data": {"_entities": [{"inStock": true}, {"inStock": false}]},
+        }),
+        ResponseType::Error(ErrorType::Valid) => json!({
+            "data": {"_entities": [null, {"inStock": false}]},
+            "errors": [{ "message": "inventory error", "path": ["_entities", 0] }]
+        }),
+        ResponseType::Error(ErrorType::EmptyPath) => json!({
+            "data": {"_entities": [null, {"inStock": false}]},
+            "errors": [{ "message": "inventory error", "path": [] }]
+        }),
+        ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
     }
 }
 
-fn reviews_response(errors: bool) -> Value {
-    if errors {
-        json!({"errors": [{ "message": "reviews error", "path": [] }]})
-    } else {
-        json!({
+fn reviews_response(response_type: ResponseType) -> Value {
+    match response_type {
+        ResponseType::Ok => json!({
             "data": {
                 "_entities": [
                     {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                     {"reviews": [{"id": "3", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                 ]
             }
-        })
+        }),
+        ResponseType::Error(ErrorType::Valid) => json!({
+            "data": {
+                "_entities": [
+                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    null,
+                ]
+            },
+            "errors": [{ "message": "inventory error", "path": ["_entities", 1] }]
+        }),
+        ResponseType::Error(ErrorType::EmptyPath) => json!({
+            "data": {
+                "_entities": [
+                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    null,
+                ]
+            },
+            "errors": [{ "message": "inventory error", "path": [] }]
+        }),
+        ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
     }
 }
 
-fn accounts_response(errors: bool) -> Value {
-    if errors {
-        json!({"malformed": true})
-    } else {
-        json!({"data": {"_entities": [{"name": "Ada"}, {"name": "Alan"}]}})
+fn accounts_response(response_type: ResponseType) -> Value {
+    match response_type {
+        ResponseType::Ok => json!({
+            "data": {"_entities": [{"name": "Ada"}, {"name": "Alan"}]}
+        }),
+        ResponseType::Error(ErrorType::Valid) => json!({
+            "data": {"_entities": [{"name": "Ada"}, null]},
+            "errors": [{ "message": "inventory error", "path": ["_entities", 1] }]
+        }),
+        ResponseType::Error(ErrorType::EmptyPath) => json!({
+            "data": {"_entities": [{"name": "Ada"}, null]},
+            "errors": [{ "message": "inventory error", "path": [] }]
+        }),
+        ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
     }
 }
 
@@ -147,10 +210,10 @@ async fn test_all_successful() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(false)),
-        response_template(inventory_response(false)),
-        response_template(reviews_response(false)),
-        response_template(accounts_response(false)),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
     )
     .await?;
     assert!(response.get("errors").is_none());
@@ -159,17 +222,17 @@ async fn test_all_successful() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_first_response_failure() -> Result<(), BoxError> {
+async fn test_top_level_response_failure() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(true)),
-        response_template(inventory_response(false)),
-        response_template(reviews_response(false)),
-        response_template(accounts_response(false)),
+        response_template(products_response(ResponseType::Error(ErrorType::Valid))),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
@@ -179,20 +242,87 @@ async fn test_first_response_failure() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_second_response_failure() -> Result<(), BoxError> {
+async fn test_top_level_response_failure_malformed() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(false)),
-        response_template(inventory_response(true)),
-        response_template(reviews_response(false)),
-        response_template(accounts_response(false)),
+        response_template(products_response(ResponseType::Error(ErrorType::Malformed))),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
+    assert_no_at_in_path(errors); // PASSES, but path = []
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_second_level_response_failure() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let response = send_query_to_router(
+        query(),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Error(ErrorType::Valid))),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
+    )
+    .await?;
+    let errors = response.get("errors").expect("errors should be present");
+    eprintln!("{response:?}");
+    assert_no_at_in_path(errors);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_second_level_response_failure_malformed() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let response = send_query_to_router(
+        query(),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Error(
+            ErrorType::Malformed,
+        ))),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
+    )
+    .await?;
+    let errors = response.get("errors").expect("errors should be present");
+    eprintln!("{response:?}");
+    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@")]
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_second_level_response_failure_empty_path() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let response = send_query_to_router(
+        query(),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Error(
+            ErrorType::EmptyPath,
+        ))),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Ok)),
+    )
+    .await?;
+    let errors = response.get("errors").expect("errors should be present");
+    eprintln!("{response:?}");
     assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@")]
 
     Ok(())
@@ -206,34 +336,57 @@ async fn test_nested_response_failure() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(false)),
-        response_template(inventory_response(false)),
-        response_template(reviews_response(false)),
-        response_template(accounts_response(true)),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Error(ErrorType::Valid))),
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
+    eprintln!("{response:?}");
     assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_second_and_nested_response_failures() -> Result<(), BoxError> {
+async fn test_nested_response_failure_malformed() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(false)),
-        response_template(inventory_response(true)),
-        response_template(reviews_response(false)),
-        response_template(accounts_response(true)),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        response_template(accounts_response(ResponseType::Error(ErrorType::Malformed))),
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@")]
+    eprintln!("{response:?}");
+    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_nested_response_failure_404() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let response = send_query_to_router(
+        query(),
+        response_template(products_response(ResponseType::Ok)),
+        response_template(inventory_response(ResponseType::Ok)),
+        response_template(reviews_response(ResponseType::Ok)),
+        ResponseTemplate::new(404),
+    )
+    .await?;
+    let errors = response.get("errors").expect("errors should be present");
+    eprintln!("{response:?}");
+    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
 
     Ok(())
 }
