@@ -164,11 +164,11 @@ fn split_subgraph(
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map
         .into_iter()
-        .map(|(id, connector)| {
+        .map(|connector| {
             // Build a subgraph using only the necessary fields from the directive
             let schema = expander.expand(&connector)?;
             let subgraph = Subgraph::new(
-                id.synthetic_name().as_str(),
+                connector.id.synthetic_name().as_str(),
                 &subgraph.url,
                 &schema.schema().serialize().to_string(),
             )?;
