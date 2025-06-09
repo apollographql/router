@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::{BoxError, Service};
+use tower::{BoxError, Service, ServiceExt};
 
 #[derive(Clone)]
 pub struct Request {
@@ -97,7 +97,7 @@ pub trait QueryPreparation {
 }
 
 /// Query preparation service that combines query parsing and planning into a single operation
-/// 
+///
 /// This composite service orchestrates the query_parse and query_plan services to transform
 /// JSON requests containing GraphQL queries into execution requests with query plans.
 #[derive(Clone)]
@@ -106,7 +106,17 @@ pub struct QueryPreparationService<ParseService, PlanService> {
     plan_service: PlanService,
 }
 
-impl<ParseService, PlanService> QueryPreparationService<ParseService, PlanService> {
+impl<ParseService, PlanService> QueryPreparationService<ParseService, PlanService>
+where
+    ParseService:
+        Service<query_parse::Request, Response = query_parse::Response> + Clone + Send + 'static,
+    ParseService::Error: Into<BoxError>,
+    ParseService::Future: Send,
+    PlanService:
+        Service<query_plan::Request, Response = query_plan::Response> + Clone + Send + 'static,
+    PlanService::Error: Into<BoxError>,
+    PlanService::Future: Send,
+{
     pub fn new(parse_service: ParseService, plan_service: PlanService) -> Self {
         Self {
             parse_service,
@@ -115,11 +125,16 @@ impl<ParseService, PlanService> QueryPreparationService<ParseService, PlanServic
     }
 }
 
-impl<ParseService, PlanService> Service<Request> for QueryPreparationService<ParseService, PlanService>
+impl<ParseService, PlanService> Service<Request>
+    for QueryPreparationService<ParseService, PlanService>
 where
-    ParseService: Service<query_parse::Request, Response = query_parse::Response, Error = BoxError> + Clone + Send + 'static,
+    ParseService:
+        Service<query_parse::Request, Response = query_parse::Response> + Clone + Send + 'static,
+    ParseService::Error: Into<BoxError>,
     ParseService::Future: Send,
-    PlanService: Service<query_plan::Request, Response = query_plan::Response, Error = BoxError> + Clone + Send + 'static,
+    PlanService:
+        Service<query_plan::Request, Response = query_plan::Response> + Clone + Send + 'static,
+    PlanService::Error: Into<BoxError>,
     PlanService::Future: Send,
 {
     type Response = Response;
@@ -130,14 +145,10 @@ where
         // Check that both services are ready
         match self.parse_service.poll_ready(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(Error::ParsingFailed { 
-                message: e.to_string() 
-            }) as BoxError)),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
             Poll::Ready(Ok(())) => match self.plan_service.poll_ready(cx) {
                 Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(Error::PlanningFailed { 
-                    message: e.to_string() 
-                }) as BoxError)),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
                 Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             },
         }
@@ -149,8 +160,8 @@ where
 
         Box::pin(async move {
             // 1. Extract JSON request data
-            let (query_string, operation_name, variables) = extract_graphql_request(&req.body)
-                .map_err(|e| Box::new(e) as BoxError)?;
+            let (query_string, operation_name, variables) =
+                extract_graphql_request(&req.body).map_err(|e| Box::new(e) as BoxError)?;
 
             // 2. Create extended extensions for inner services (following hexagonal architecture)
             let extended_extensions = req.extensions.extend();
@@ -163,8 +174,13 @@ where
             };
 
             // 4. Call query_parse service - if parsing fails, don't proceed to planning
-            let parse_resp = parse_service.call(parse_req).await
-                .map_err(|e| Box::new(Error::ParsingFailed { message: e.to_string() }) as BoxError)?;
+            let parse_resp = parse_service
+                .ready()
+                .await
+                .map_err(Into::into)?
+                .call(parse_req)
+                .await
+                .map_err(Into::into)?;
 
             // 5. Convert operation_name from String to Name for query planning
             let operation_name_for_planning = operation_name
@@ -179,8 +195,13 @@ where
             };
 
             // 7. Call query_plan service - if planning fails, don't proceed
-            let plan_resp = plan_service.call(plan_req).await
-                .map_err(|e| Box::new(Error::PlanningFailed { message: e.to_string() }) as BoxError)?;
+            let plan_resp = plan_service
+                .ready()
+                .await
+                .map_err(Into::into)?
+                .call(plan_req)
+                .await
+                .map_err(Into::into)?;
 
             // 8. Transform QueryPlan response to final Response (returning original extensions)
             Ok(Response {
@@ -194,7 +215,7 @@ where
 }
 
 /// Extract GraphQL request components from JSON body
-/// 
+///
 /// Expected JSON format:
 /// ```json
 /// {
@@ -229,11 +250,7 @@ fn extract_graphql_request(
                 HashMap::new()
             } else {
                 vars.as_object()
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect()
-                    })
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                     .ok_or_else(|| Error::VariableExtraction {
                         message: "Variables must be a JSON object".to_string(),
                     })?
@@ -245,23 +262,24 @@ fn extract_graphql_request(
     Ok((query, operation_name, variables))
 }
 
-impl QueryPreparation for QueryPreparationService<query_parse::QueryParseService, query_plan::QueryPlanService> {
+impl QueryPreparation
+    for QueryPreparationService<query_parse::QueryParseService, query_plan::QueryPlanService>
+{
     async fn call(&self, req: Request) -> Result<Response, Error> {
         use tower::ServiceExt;
         let service = self.clone();
-        service.oneshot(req).await
-            .map_err(|boxed_error| {
-                // Try to downcast the BoxError back to our specific Error type
-                match boxed_error.downcast::<Error>() {
-                    Ok(specific_error) => *specific_error,
-                    Err(other_error) => {
-                        // If it's not our specific error type, create a generic error
-                        Error::ParsingFailed {
-                            message: other_error.to_string(),
-                        }
+        service.oneshot(req).await.map_err(|boxed_error| {
+            // Try to downcast the BoxError back to our specific Error type
+            match boxed_error.downcast::<Error>() {
+                Ok(specific_error) => *specific_error,
+                Err(other_error) => {
+                    // If it's not our specific error type, create a generic error
+                    Error::ParsingFailed {
+                        message: other_error.to_string(),
                     }
                 }
-            })
+            }
+        })
     }
 }
 

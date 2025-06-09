@@ -1,137 +1,74 @@
 use super::*;
 use crate::assert_error;
+use crate::services::{query_parse, query_plan};
+use crate::test_utils::tower_test::{MockService, TowerTest};
 use apollo_compiler::{ExecutableDocument, Schema};
 use apollo_federation::query_plan::QueryPlan;
 use serde_json::json;
-use tower::{ServiceExt, BoxError};
+use tower::ServiceExt;
 
-#[derive(Clone)]
-struct MockQueryParseService {
-    should_fail: bool,
-}
+// Helper function to create mock services using TowerTest
+fn create_successful_parse_service() -> MockService<query_parse::Request, query_parse::Response> {
+    TowerTest::builder()
+        .service(|mut handle: tower_test::mock::Handle<query_parse::Request, query_parse::Response>| async move {
+            handle.allow(1);
+            let (req, resp) = handle.next_request().await.expect("should receive parse request");
 
-impl MockQueryParseService {
-    fn new(should_fail: bool) -> Self {
-        Self { should_fail }
-    }
-
-    fn success() -> Self {
-        Self::new(false)
-    }
-
-    fn failure() -> Self {
-        Self::new(true)
-    }
-}
-
-impl Service<query_parse::Request> for MockQueryParseService {
-    type Response = query_parse::Response;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: query_parse::Request) -> Self::Future {
-        let should_fail = self.should_fail;
-        let extensions = req.extensions;
-        let operation_name = req.operation_name;
-
-        Box::pin(async move {
-            if should_fail {
-                return Err(Box::new(query_parse::Error::ParsingFailed {
-                    message: "Mock parsing error".to_string(),
-                }) as BoxError);
-            }
-
-            // Create a minimal valid schema and document for testing
-            let schema_str = r#"
-                type Query {
-                    user(id: ID!): User
-                }
-                type User {
-                    id: ID!
-                    name: String!
-                }
-            "#;
-            let schema = Schema::parse_and_validate(schema_str, "test.graphql").unwrap();
-            let doc_str = "query { user(id: \"123\") { id name } }";
-            let doc =
-                ExecutableDocument::parse_and_validate(&schema, doc_str, "query.graphql").unwrap();
-
-            Ok(query_parse::Response {
-                extensions,
-                operation_name,
-                query: doc,
-            })
+            // Send successful parse response
+            resp.send_response(query_parse::Response {
+                extensions: req.extensions,
+                operation_name: req.operation_name,
+                query: create_test_document(),
+            });
         })
-    }
 }
 
-#[derive(Clone)]
-struct MockQueryPlanService {
-    should_fail: bool,
-}
+fn create_failing_parse_service() -> MockService<query_parse::Request, query_parse::Response> {
+    TowerTest::builder()
+        .service(|mut handle: tower_test::mock::Handle<query_parse::Request, query_parse::Response>| async move {
+            handle.allow(1);
+            let (_req, resp) = handle.next_request().await.expect("should receive parse request");
 
-impl MockQueryPlanService {
-    fn new(should_fail: bool) -> Self {
-        Self { should_fail }
-    }
-
-    fn success() -> Self {
-        Self::new(false)
-    }
-
-    fn failure() -> Self {
-        Self::new(true)
-    }
-}
-
-impl Service<query_plan::Request> for MockQueryPlanService {
-    type Response = query_plan::Response;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: query_plan::Request) -> Self::Future {
-        let should_fail = self.should_fail;
-        let extensions = req.extensions;
-        let operation_name = req.operation_name;
-
-        Box::pin(async move {
-            if should_fail {
-                return Err(Box::new(query_plan::Error::PlanningFailed {
-                    message: "Mock planning error".to_string(),
-                }) as BoxError);
-            }
-
-            // Create a minimal mock query plan
-            let query_plan = QueryPlan::default();
-
-            Ok(query_plan::Response {
-                extensions,
-                operation_name,
-                query_plan,
-            })
+            // Send error response
+            resp.send_error(query_parse::Error::ParsingFailed {
+                message: "Mock parsing error".to_string(),
+            });
         })
-    }
+}
+
+fn create_successful_plan_service() -> MockService<query_plan::Request, query_plan::Response> {
+    TowerTest::builder()
+        .service(|mut handle: tower_test::mock::Handle<query_plan::Request, query_plan::Response>| async move {
+            handle.allow(1);
+            let (req, resp) = handle.next_request().await.expect("should receive plan request");
+
+            // Send successful plan response
+            resp.send_response(query_plan::Response {
+                extensions: req.extensions,
+                operation_name: req.operation_name,
+                query_plan: QueryPlan::default(),
+            });
+        })
+}
+
+fn create_failing_plan_service() -> MockService<query_plan::Request, query_plan::Response> {
+    TowerTest::builder()
+        .service(|mut handle: tower_test::mock::Handle<query_plan::Request, query_plan::Response>| async move {
+            handle.allow(1);
+            let (_req, resp) = handle.next_request().await.expect("should receive plan request");
+
+            // Send error response
+            resp.send_error(query_plan::Error::PlanningFailed {
+                message: "Mock planning error".to_string(),
+            });
+        })
 }
 
 #[tokio::test]
 async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup mock services
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::success();
+    // Setup mock services using TowerTest
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_successful_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -148,7 +85,9 @@ async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::E
         }),
     };
 
-    let response = service.oneshot(request).await
+    let response = service
+        .oneshot(request)
+        .await
         .map_err(|e| format!("Service call failed: {}", e))?;
 
     // Verify response
@@ -165,8 +104,8 @@ async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::E
 #[tokio::test]
 async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services with parse service that fails
-    let parse_service = MockQueryParseService::failure();
-    let plan_service = MockQueryPlanService::success();
+    let parse_service = create_failing_parse_service();
+    let plan_service = create_successful_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -181,8 +120,12 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
 
     let result = service.oneshot(request).await;
 
-    // Should fail with parsing error
-    assert_error!(result, Error, Error::ParsingFailed { .. });
+    // Should fail with parsing error - now passes through the original query_parse::Error
+    assert_error!(
+        result,
+        query_parse::Error,
+        query_parse::Error::ParsingFailed { .. }
+    );
 
     Ok(())
 }
@@ -190,8 +133,8 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
 #[tokio::test]
 async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services with plan service that fails
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::failure();
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_failing_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -206,8 +149,12 @@ async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::err
 
     let result = service.oneshot(request).await;
 
-    // Should fail with planning error
-    assert_error!(result, Error, Error::PlanningFailed { .. });
+    // Should fail with planning error - now passes through the original query_plan::Error
+    assert_error!(
+        result,
+        query_plan::Error,
+        query_plan::Error::PlanningFailed { .. }
+    );
 
     Ok(())
 }
@@ -215,8 +162,8 @@ async fn test_query_preparation_with_plan_error() -> Result<(), Box<dyn std::err
 #[tokio::test]
 async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::success();
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_successful_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -241,8 +188,8 @@ async fn test_query_preparation_missing_query_field() -> Result<(), Box<dyn std:
 #[tokio::test]
 async fn test_query_preparation_with_variables() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::success();
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_successful_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -258,7 +205,9 @@ async fn test_query_preparation_with_variables() -> Result<(), Box<dyn std::erro
         }),
     };
 
-    let response = service.oneshot(request).await
+    let response = service
+        .oneshot(request)
+        .await
         .map_err(|e| format!("Service call failed: {}", e))?;
 
     // Verify variables are correctly extracted
@@ -274,8 +223,8 @@ async fn test_query_preparation_with_variables() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 async fn test_query_preparation_null_variables() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::success();
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_successful_plan_service();
 
     let service = QueryPreparationService::new(parse_service, plan_service);
 
@@ -288,7 +237,9 @@ async fn test_query_preparation_null_variables() -> Result<(), Box<dyn std::erro
         }),
     };
 
-    let response = service.oneshot(request).await
+    let response = service
+        .oneshot(request)
+        .await
         .map_err(|e| format!("Service call failed: {}", e))?;
 
     // Verify null variables result in empty map
@@ -300,9 +251,8 @@ async fn test_query_preparation_null_variables() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 async fn test_extensions_preservation() -> Result<(), Box<dyn std::error::Error>> {
     // Setup mock services
-    let parse_service = MockQueryParseService::success();
-    let plan_service = MockQueryPlanService::success();
-
+    let parse_service = create_successful_parse_service();
+    let plan_service = create_successful_plan_service();
     let service = QueryPreparationService::new(parse_service, plan_service);
 
     // Create test request with multiple extension values
@@ -317,7 +267,9 @@ async fn test_extensions_preservation() -> Result<(), Box<dyn std::error::Error>
         }),
     };
 
-    let response = service.oneshot(request).await
+    let response = service
+        .oneshot(request)
+        .await
         .map_err(|e| format!("Service call failed: {}", e))?;
 
     // Verify original extensions are preserved (not extended layers)
@@ -365,7 +317,7 @@ async fn test_extract_graphql_request_missing_query() {
     });
 
     let result = extract_graphql_request(&body);
-    
+
     // Should fail with JSON extraction error for missing query field
     assert_error!(result, Error::JsonExtraction { field, .. } => {
         assert_eq!(field, "query");
@@ -380,7 +332,22 @@ async fn test_extract_graphql_request_invalid_variables() {
     });
 
     let result = extract_graphql_request(&body);
-    
+
     // Should fail with variable extraction error
     assert_error!(result, Error::VariableExtraction { .. });
+}
+
+fn create_test_document() -> apollo_compiler::validation::Valid<ExecutableDocument> {
+    let schema_str = r#"
+        type Query {
+            user(id: ID!): User
+        }
+        type User {
+            id: ID!
+            name: String!
+        }
+    "#;
+    let schema = Schema::parse_and_validate(schema_str, "test.graphql").unwrap();
+    let doc_str = "query { user(id: \"123\") { id name } }";
+    ExecutableDocument::parse_and_validate(&schema, doc_str, "query.graphql").unwrap()
 }

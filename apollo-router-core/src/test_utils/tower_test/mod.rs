@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::Duration;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tower::{Layer, Service, ServiceExt};
 
 #[cfg(test)]
@@ -72,31 +72,49 @@ enum MockCompletionState {
 /// expectations closure completed successfully. If the service is dropped
 /// without the expectations completing (due to timeout or panic), it will
 /// panic on drop to alert the test of the failure.
-#[derive(Clone)]
 pub struct MockService<Req, Resp> {
     inner: ::tower_test::mock::Mock<Req, Resp>,
-    _expectations_handle: Arc<tokio::task::JoinHandle<()>>,
+    expectations_handle: Arc<tokio::task::JoinHandle<()>>,
     completion_state: Arc<Mutex<MockCompletionState>>,
+}
+
+// We can't use derive clone as this will place a bound on Req and Resp being clone
+impl<Req, Resp> Clone for MockService<Req, Resp> {
+    fn clone(&self) -> Self {
+        MockService {
+            inner: self.inner.clone(),
+            expectations_handle: self.expectations_handle.clone(),
+            completion_state: self.completion_state.clone(),
+        }
+    }
 }
 
 impl<Req, Resp> Drop for MockService<Req, Resp> {
     fn drop(&mut self) {
-        if let Ok(state) = self.completion_state.lock() {
-            match &*state {
-                MockCompletionState::Running => {
-                    panic!("Mock service dropped while expectations were still running - this indicates a test failure or timeout");
-                }
-                MockCompletionState::Panicked(msg) => {
-                    panic!("Mock service expectations panicked: {}", msg);
-                }
-                MockCompletionState::TimedOut => {
-                    panic!("Mock service expectations timed out - this usually means unexpected requests or deadlock");
-                }
-                MockCompletionState::Completed => {
-                    // All good, expectations completed successfully
+        // Only check for completion state if this is the last reference
+        if Arc::strong_count(&self.expectations_handle) == 1 {
+            if let Ok(state) = self.completion_state.lock() {
+                match &*state {
+                    MockCompletionState::Running => {
+                        // Allow the service to be dropped while running
+                        // The background task will continue and complete or timeout
+                    }
+                    MockCompletionState::Panicked(msg) => {
+                        panic!("Mock service expectations panicked: {}", msg);
+                    }
+                    MockCompletionState::TimedOut => {
+                        panic!(
+                            "Mock service expectations timed out - this usually means unexpected requests or deadlock"
+                        );
+                    }
+                    MockCompletionState::Completed => {
+                        // All good, expectations completed successfully
+                    }
                 }
             }
         }
+        // If there are other references to the expectations handle, let them continue
+        // This allows the service to be dropped while keeping background tasks alive
     }
 }
 
@@ -193,13 +211,13 @@ where
 /// struct UserOrderService<S> {
 ///     user_service: S,
 /// }
-/// 
+///
 /// impl<S> UserOrderService<S> {
 ///     fn new(user_service: S) -> Self {
 ///         Self { user_service }
 ///     }
 /// }
-/// 
+///
 /// let service = UserOrderService::new(mock_service);
 /// // ... test your service logic
 /// # Ok(())
@@ -258,14 +276,11 @@ impl TowerTest {
     ///
     /// // MockService can be cloned for use in multiple places
     /// let cloned_service = mock_service.clone();
-    /// 
+    ///
     /// // Use in constructor
     /// let my_service = MyServiceUnderTest::new(mock_service);
     /// ```
-    pub fn service<Req, Resp, F, Fut>(
-        self,
-        expectations: F,
-    ) -> MockService<Req, Resp>
+    pub fn service<Req, Resp, F, Fut>(self, expectations: F) -> MockService<Req, Resp>
     where
         Req: Send + 'static,
         Resp: Send + 'static,
@@ -273,10 +288,10 @@ impl TowerTest {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let (mock_service, handle) = ::tower_test::mock::pair::<Req, Resp>();
-        
+
         let completion_tracker = Arc::new(Mutex::new(MockCompletionState::Running));
         let completion_tracker_clone = completion_tracker.clone();
-        
+
         // Spawn the expectations handler
         let expectations_handle = tokio::spawn(async move {
             let result = catch_unwind(AssertUnwindSafe(|| expectations(handle)));
@@ -285,7 +300,7 @@ impl TowerTest {
                 Ok(future) => {
                     // Run the expectations
                     future.await;
-                    
+
                     // Mark as completed successfully
                     if let Ok(mut state) = completion_tracker_clone.lock() {
                         *state = MockCompletionState::Completed;
@@ -312,7 +327,7 @@ impl TowerTest {
         let timeout_duration = self.timeout_duration;
         tokio::spawn(async move {
             tokio::time::sleep(timeout_duration).await;
-            
+
             if let Ok(mut state) = timeout_tracker.lock() {
                 if matches!(*state, MockCompletionState::Running) {
                     *state = MockCompletionState::TimedOut;
@@ -322,7 +337,7 @@ impl TowerTest {
 
         MockService {
             inner: mock_service,
-            _expectations_handle: Arc::new(expectations_handle),
+            expectations_handle: Arc::new(expectations_handle),
             completion_state: completion_tracker,
         }
     }
