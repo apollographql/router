@@ -634,12 +634,12 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
-            PathList::Question(continuation) => {
+            PathList::Question(tail) => {
                 // Universal null check for any operation after ?
                 if data.is_null() {
                     (Some(JSON::Null), vec![])
                 } else {
-                    continuation.apply_to_path(data, vars, input_path)
+                    tail.apply_to_path(data, vars, input_path)
                 }
             }
             PathList::Empty => {
@@ -757,9 +757,9 @@ impl ApplyToInternal for WithRange<PathList> {
                 source_id,
             ),
 
-            PathList::Question(continuation) => {
+            PathList::Question(tail) => {
                 // Optional operation always produces nullable output
-                let result_shape = continuation.compute_output_shape(
+                let result_shape = tail.compute_output_shape(
                     input_shape,
                     dollar_shape,
                     named_var_shapes,

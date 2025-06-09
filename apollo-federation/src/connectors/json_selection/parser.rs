@@ -707,6 +707,14 @@ impl PathList {
             ));
         }
 
+        // Universal optional operator: ? (note: we parse this before other operators to avoid conflicts)
+        if let Ok((suffix, question)) = ranged_span("?")(input) {
+            // Parse whatever comes after the ? normally
+            let (remainder, tail) = Self::parse_with_depth(suffix, depth)?;
+            let full_range = merge_ranges(question.range(), tail.range());
+            return Ok((remainder, WithRange::new(Self::Question(tail), full_range)));
+        }
+
         // In previous versions of this code, a .key could appear at depth 0 (at
         // the beginning of a path), which was useful to disambiguate a KeyPath
         // consisting of a single key from a field selection.
@@ -720,18 +728,6 @@ impl PathList {
         // be written as a subproperty of the $ variable, e.g. $.key, which is
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
-
-        // Universal optional operator: ? (note: we parse this before other operators to avoid conflicts)
-        if let Ok((suffix, question)) = ranged_span("?")(input) {
-            // Parse whatever comes after the ? normally
-            let (remainder, continuation) = Self::parse_with_depth(suffix, depth)?;
-            let full_range = merge_ranges(question.range(), continuation.range());
-            return Ok((
-                remainder,
-                WithRange::new(Self::Question(continuation), full_range),
-            ));
-        }
-
         if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input) {
             let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());

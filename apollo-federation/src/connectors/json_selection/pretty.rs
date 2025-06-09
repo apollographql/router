@@ -150,9 +150,9 @@ impl PrettyPrintable for PathList {
                         .as_str(),
                 );
             }
-            Self::Question(continuation) => {
+            Self::Question(tail) => {
                 result.push('?');
-                let rest = continuation.pretty_print_with_indentation(true, indentation);
+                let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(rest.as_str());
             }
             Self::Selection(sub) => {
