@@ -582,6 +582,7 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
     use bytes::Bytes;
     use http::HeaderMap;
     use http::Uri;
@@ -769,7 +770,7 @@ mod test {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "test_subgraph".into(),
-                Some("test_sourcename".into()),
+                Some(SourceName::cast("test_sourcename")),
                 name!(Query),
                 name!(hello),
                 0,

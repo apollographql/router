@@ -41,11 +41,9 @@ authorization:
     enabled: false
 ```
 
-<MinVersion version="1.29.1">
-
 ### `@requiresScopes`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.29.1" />
 
 The `@requiresScopes` directive marks fields and types as restricted based on required scopes.
 The directive includes a `scopes` argument with an array of the required scopes to declare which scopes are required:
@@ -239,11 +237,9 @@ The router returns `null` for unauthorized fields and applies the [standard Grap
 }
 ```
 
-<MinVersion version="1.29.1">
-
 ### `@authenticated`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.29.1" />
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
 It works by checking for the `apollo::authentication::jwt_claims` key in a request's context, that is added either by the JWT authentication plugin, when the request contains a valid JWT, or by an authentication coprocessor.
@@ -370,11 +366,9 @@ The response retains the initial request's shape but returns `null` for unauthor
 
 If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
 
-<MinVersion version="1.35.0">
-
 ### `@policy`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.35.0" />
 
 The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
 

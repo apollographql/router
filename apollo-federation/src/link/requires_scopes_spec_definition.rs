@@ -68,7 +68,7 @@ impl RequiresScopesSpecDefinition {
                 DirectiveLocation::Enum,
             ],
             true, // composes
-            Some(&|v| REQUIRES_SCOPES_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| REQUIRES_SCOPES_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

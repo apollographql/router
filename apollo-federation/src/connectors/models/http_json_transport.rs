@@ -56,7 +56,7 @@ pub struct HttpJsonTransport {
 
 impl HttpJsonTransport {
     pub fn from_directive(
-        http: &ConnectHTTPArguments,
+        http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
@@ -106,11 +106,11 @@ impl HttpJsonTransport {
             })?,
             method,
             headers,
-            body: http.body.clone(),
+            body: http.body,
             source_path: source.and_then(|s| s.path.clone()),
             source_query_params: source.and_then(|s| s.query_params.clone()),
-            connect_path: http.path.clone(),
-            connect_query_params: http.query_params.clone(),
+            connect_path: http.path,
+            connect_query_params: http.query_params,
         })
     }
 

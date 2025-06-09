@@ -2450,6 +2450,7 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderName;
@@ -3072,7 +3073,7 @@ mod tests {
                                     let connector = Connector {
                                         id: ConnectId::new(
                                             subgraph_name,
-                                            Some(source_name),
+                                            Some(SourceName::cast(&source_name)),
                                             name!(Query),
                                             name!(field),
                                             0,
@@ -3137,7 +3138,7 @@ mod tests {
                                     let connector = Connector {
                                         id: ConnectId::new(
                                             subgraph_name,
-                                            Some(source_name),
+                                            Some(SourceName::cast(&source_name)),
                                             name!(Query),
                                             name!(field),
                                             0,

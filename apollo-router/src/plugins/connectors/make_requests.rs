@@ -708,10 +708,10 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
+    use apollo_federation::connectors::ConnectBatchArguments;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
-    use apollo_federation::connectors::ConnectorBatchSettings;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use http::Uri;
@@ -2001,7 +2001,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),
@@ -2121,7 +2121,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),

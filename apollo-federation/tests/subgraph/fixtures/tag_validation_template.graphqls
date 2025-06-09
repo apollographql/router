@@ -1,0 +1,37 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@tag"])
+  @tag(name: "test{symbol}")
+
+directive @custom(arg: String @tag(name: "test{symbol}")) on FIELD_DEFINITION
+
+type Query {
+  foo: Foo @tag(name: "{symbol}test")
+  bar: Bar @tag(name: "test{symbol}")
+  baz: Baz @tag(name: "test{symbol}test") @custom(arg: "something")
+}
+interface Foo @tag(name: "test{symbol}") {
+  name: String
+  foo1: String @tag(name: "test{symbol}")
+  foo2(arg: String @tag(name: "test{symbol}")): String
+}
+type Bar implements Foo @tag(name: "test{symbol}") {
+  name: String
+  foo1: String
+  foo2(arg: String): String
+  bar1: String @tag(name: "test{symbol}")
+  bar2(arg: String @tag(name: "test{symbol}")): String
+}
+union Baz @tag(name: "test{symbol}") = Bar
+
+enum TestEnum @tag(name: "test{symbol}") {
+  VALUE1 @tag(name: "test{symbol}")
+  VALUE2
+}
+
+input TestInput @tag(name: "test{symbol}") {
+  inputField1: String @tag(name: "test{symbol}")
+  inputField2: Int
+  inputField3: Boolean @tag(name: "{symbol}test")
+}
+
+scalar CustomScalar @tag(name: "test{symbol}")

@@ -26,8 +26,8 @@ fn eq_method(
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
-        if args.len() == 1 {
-            let (value_opt, arg_errors) = args[0].apply_to_path(data, vars, input_path);
+        if let [arg] = args.as_slice() {
+            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
             let matches = value_opt.is_some_and(|value| &value == data);
 
             return (Some(JSON::Bool(matches)), arg_errors);
