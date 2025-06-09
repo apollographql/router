@@ -123,6 +123,10 @@ pub enum CompositionError {
         error: FederationError,
     },
     #[error("{message}")]
+    EmptyMergedEnumType { message: String },
+    #[error("{message}")]
+    EnumValueMismatch { message: String },
+    #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error(transparent)]
     InvalidGraphQLName(InvalidNameError),
@@ -138,6 +142,23 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+}
+
+impl CompositionError {
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::SubgraphError { .. } => todo!(),
+            Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
+            Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            Self::InvalidGraphQLName(..) => ErrorCode::InvalidGraphQL,
+            Self::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
+            Self::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
+            Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
+            Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+        }
+    }
 }
 
 impl From<SubgraphError> for CompositionError {
@@ -461,6 +482,8 @@ pub enum SingleFederationError {
     ListSizeInvalidSlicingArgument { message: String },
     #[error("{message}")]
     ListSizeInvalidSizedField { message: String },
+    #[error("{message}")]
+    InvalidTagName { message: String },
 }
 
 impl SingleFederationError {
@@ -683,6 +706,7 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
     }
 
@@ -1918,7 +1942,18 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
-#[derive(Debug, strum_macros::EnumIter)]
+static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INVALID_TAG_NAME".to_owned(),
+        "Invalid value for argument \"name\" in application of @tag.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
+#[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
     InvalidGraphQL,
@@ -2012,6 +2047,7 @@ pub enum ErrorCode {
     NoContextReferenced,
     NoSelectionForContext,
     ContextNoResolvableKey,
+    InvalidTagName,
 }
 
 impl ErrorCode {
@@ -2124,6 +2160,7 @@ impl ErrorCode {
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
+            ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
         }
     }
 }

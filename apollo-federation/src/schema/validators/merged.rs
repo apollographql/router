@@ -40,8 +40,7 @@ pub(crate) fn validate_merged_schema(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     for type_pos in supergraph_schema.get_types() {
-        let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-        else {
+        let Ok(type_pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos) else {
             continue;
         };
         let interface_names = match &type_pos {
@@ -334,8 +333,8 @@ fn add_requires_error(
             else {
                 return Ok(None);
             };
-            let Ok(type_pos_in_other_subgraph): Result<ObjectOrInterfaceTypeDefinitionPosition, _> =
-                type_pos_in_other_subgraph.try_into()
+            let Ok(type_pos_in_other_subgraph) =
+                ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos_in_other_subgraph)
             else {
                 return Ok(None);
             };

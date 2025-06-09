@@ -136,7 +136,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         supergraph_service
     });
 
-    let (_, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| supergraph_service.clone().boxed())
         .build_common()
@@ -186,7 +186,7 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
-    let (_, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
         .supergraph_hook(move |_| supergraph_service.clone().boxed())
         .build_common()

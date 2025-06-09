@@ -2,8 +2,8 @@ use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
-use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::JSONSelection;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::JSONSelection;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -756,13 +756,13 @@ mod tests {
 
     use apollo_compiler::Schema;
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::EntityResolver;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::EntityResolver;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;

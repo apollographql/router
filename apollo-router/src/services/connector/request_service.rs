@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;

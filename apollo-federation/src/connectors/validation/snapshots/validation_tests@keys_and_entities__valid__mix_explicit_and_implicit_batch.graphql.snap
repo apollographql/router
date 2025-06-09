@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/valid/mix_explicit_and_implicit_batch.graphql
+---
+[]

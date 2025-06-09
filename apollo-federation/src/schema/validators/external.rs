@@ -51,8 +51,7 @@ fn validate_all_external_fields_used(
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     for type_pos in schema.get_types() {
-        let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-        else {
+        let Ok(type_pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos) else {
             continue;
         };
         type_pos.fields(schema.schema())?

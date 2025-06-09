@@ -201,7 +201,6 @@ async fn service_call(
         planning,
         body.operation_name.clone(),
         context.clone(),
-        schema.clone(),
         // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
         // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
         // places the results in context. Therefore plugins that have modified the query won't actually take effect.
@@ -783,31 +782,8 @@ async fn plan_query(
     mut planning: CachingQueryPlanner<QueryPlannerService>,
     operation_name: Option<String>,
     context: Context,
-    schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
-    // none of those tests create an executable document to put it in the context, and the document cannot be created
-    // from inside the supergraph request fake builder, because it needs a schema matching the query.
-    // So while we are updating the tests to create a document manually, this here will make sure current
-    // tests will pass.
-    // During a regular request, `ParsedDocument` is already populated during query analysis.
-    // Some tests do populate the document, so we only do it if it's not already there.
-    if !context.extensions().with_lock(|lock| {
-        lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
-    }) {
-        let doc = crate::spec::Query::parse_document(
-            &query_str,
-            operation_name.as_deref(),
-            &schema,
-            &Configuration::default(),
-        )
-        .map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().with_lock(|lock| {
-            lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
-        });
-    }
-
     let qpr = planning
         .call(
             query_planner::CachingRequest::builder()

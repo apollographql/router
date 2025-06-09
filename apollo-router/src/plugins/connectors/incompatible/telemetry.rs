@@ -55,7 +55,7 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
     fn inform_incompatibilities(
         &self,
         subgraphs: std::collections::HashSet<&String>,
-        _connectors: &apollo_federation::sources::connect::expand::Connectors,
+        _connectors: &apollo_federation::connectors::expand::Connectors,
     ) {
         for subgraph in subgraphs {
             if self.config.subgraph.subgraphs.contains_key(subgraph) {
