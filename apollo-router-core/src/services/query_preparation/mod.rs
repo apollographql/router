@@ -93,7 +93,21 @@ impl From<query_plan::Error> for Error {
 
 #[cfg_attr(test, mry::mry)]
 pub trait QueryPreparation {
-    async fn call(&self, req: Request) -> Result<Response, Error>;
+    /// Transforms a JSON request containing a GraphQL query into an execution request
+    /// containing a fully prepared query plan ready for execution.
+    ///
+    /// This service handles the complete query preparation pipeline:
+    /// 1. Extract GraphQL query string from JSON request
+    /// 2. Parse and validate the query against the schema  
+    /// 3. Generate an optimized query plan
+    /// 4. Transform the result into an execution request
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::ParsingFailed` if the GraphQL query cannot be parsed or validated.
+    /// Returns `Error::PlanningFailed` if query planning fails.
+    /// Returns `Error::JsonExtraction` if required fields cannot be extracted from the JSON request.
+    fn call(&self, req: Request) -> impl std::future::Future<Output = Result<Response, Error>> + Send;
 }
 
 /// Query preparation service that combines query parsing and planning into a single operation
@@ -265,21 +279,23 @@ fn extract_graphql_request(
 impl QueryPreparation
     for QueryPreparationService<query_parse::QueryParseService, query_plan::QueryPlanService>
 {
-    async fn call(&self, req: Request) -> Result<Response, Error> {
+    fn call(&self, req: Request) -> impl std::future::Future<Output = Result<Response, Error>> + Send {
         use tower::ServiceExt;
         let service = self.clone();
-        service.oneshot(req).await.map_err(|boxed_error| {
-            // Try to downcast the BoxError back to our specific Error type
-            match boxed_error.downcast::<Error>() {
-                Ok(specific_error) => *specific_error,
-                Err(other_error) => {
-                    // If it's not our specific error type, create a generic error
-                    Error::ParsingFailed {
-                        message: other_error.to_string(),
+        async move {
+            service.oneshot(req).await.map_err(|boxed_error| {
+                // Try to downcast the BoxError back to our specific Error type
+                match boxed_error.downcast::<Error>() {
+                    Ok(specific_error) => *specific_error,
+                    Err(other_error) => {
+                        // If it's not our specific error type, create a generic error
+                        Error::ParsingFailed {
+                            message: other_error.to_string(),
+                        }
                     }
                 }
-            }
-        })
+            })
+        }
     }
 }
 

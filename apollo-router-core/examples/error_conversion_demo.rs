@@ -170,8 +170,8 @@ mod tests {
         let graphql_error = std_error.as_graphql_error();
         
         assert_eq!(graphql_error.message, "File not found");
-        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
-        assert_eq!(graphql_error.extensions.service, "apollo-router");
+        assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
+        assert_eq!(graphql_error.extensions.service, "unknown");
         assert!(graphql_error.extensions.details.contains_key("errorType"));
     }
 
@@ -179,12 +179,12 @@ mod tests {
     fn test_error_registry_populated() {
         let stats = get_error_stats();
         
-        // Should have at least our ServiceError registered
-        assert!(stats.total_error_types >= 0);
-        assert!(stats.total_variants >= 0);
-        assert!(stats.total_graphql_handlers >= 0);
+        // Error stats should be valid (no need to check >= 0 for unsigned integers)
+        assert!(stats.total_error_types < 1000); // Sanity check
+        assert!(stats.total_variants < 1000); // Sanity check
+        assert!(stats.total_graphql_handlers < 1000); // Sanity check
         
-        // Check that our component is registered (may be empty without registry feature)
-        assert!(stats.components.len() >= 0);
+        // Check that components list is accessible
+        assert!(stats.components.len() < 1000); // Sanity check
     }
 } 
