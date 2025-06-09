@@ -1,3 +1,17 @@
+// No panics allowed from connectors code.
+// Crashing the language server is a bad user experience, and panicking in the router is even worse.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::exit,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
 #![deny(nonstandard_style)]
 #![deny(clippy::redundant_clone)]
 #![deny(clippy::manual_while_let_some)]
@@ -17,7 +31,6 @@ mod header;
 mod id;
 mod json_selection;
 mod models;
-pub use models::ConnectorBatchSettings;
 pub(crate) mod spec;
 mod string_template;
 pub mod validation;
@@ -44,6 +57,7 @@ pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
 pub use self::models::MakeUriError;
+pub use self::spec::schema::ConnectBatchArguments;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
