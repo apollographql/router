@@ -1,10 +1,10 @@
 use apollo_router_error::{
-    GraphQLErrorContext, ToGraphQLError, arc_to_graphql_error, box_to_graphql_error,
+    BoxedErrorToGraphQL, GraphQLErrorContext, ToGraphQLError, arc_to_graphql_error, box_to_graphql_error,
     export_error_registry_json, get_error_stats, get_registered_errors,
 };
 use std::sync::Arc;
 
-#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
+#[derive(Debug, Clone, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum GraphQLError {
     #[error("Configuration error: {message}")]
     #[diagnostic(
@@ -276,4 +276,41 @@ fn test_tower_box_arc_error() {
             .contains_key("configMessage")
     );
     assert!(graphql_error.extensions.details.contains_key("configPath"));
+}
+
+#[test]
+fn test_consistent_api_box_arc() {
+    // Test that we can call .to_graphql_error() directly on Box and Arc types
+    // This demonstrates the consistent API without needing special functions
+    
+    let original_error = GraphQLError::TestError {
+        message: "direct api test".to_string(),
+        config_path: "test/path".to_string(),
+    };
+
+    // Test Box<dyn Error + Send + Sync> using the BoxedErrorToGraphQL trait method directly
+    let box_error: Box<dyn std::error::Error + Send + Sync> = Box::new(original_error.clone());
+    let graphql_error_from_box = BoxedErrorToGraphQL::to_graphql_error(&box_error); // Direct trait method call
+
+    assert_eq!(graphql_error_from_box.message, "Configuration error: direct api test");
+    assert_eq!(
+        graphql_error_from_box.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
+    assert_eq!(graphql_error_from_box.extensions.service, "apollo-router");
+
+    // Test Arc<dyn Error + Send + Sync> using the BoxedErrorToGraphQL trait method directly
+    let arc_error: Arc<dyn std::error::Error + Send + Sync> = Arc::new(original_error);
+    let graphql_error_from_arc = BoxedErrorToGraphQL::to_graphql_error(&arc_error); // Direct trait method call
+
+    assert_eq!(graphql_error_from_arc.message, "Configuration error: direct api test");
+    assert_eq!(
+        graphql_error_from_arc.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
+    assert_eq!(graphql_error_from_arc.extensions.service, "apollo-router");
+
+    // Verify both results are equivalent
+    assert_eq!(graphql_error_from_box.message, graphql_error_from_arc.message);
+    assert_eq!(graphql_error_from_box.extensions.code, graphql_error_from_arc.extensions.code);
 }
