@@ -28,7 +28,7 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(ConnectOrSource::Connect(connector), schema, http_arg)
+        Self::parse(&ConnectOrSource::Connect(connector), schema, http_arg)
     }
 
     pub(in crate::connectors::validation) fn parse_for_source(
@@ -36,11 +36,15 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(ConnectOrSource::Source(source_coordinate), schema, http_arg)
+        Self::parse(
+            &ConnectOrSource::Source(source_coordinate),
+            schema,
+            http_arg,
+        )
     }
 
     fn parse(
-        directive: ConnectOrSource<'schema>,
+        directive: &ConnectOrSource<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
@@ -53,7 +57,7 @@ impl<'schema> UrlProperties<'schema> {
             })
             .map(|(property, value)| {
                 let coordinate = Coordinate {
-                    directive,
+                    directive: directive.clone(),
                     property,
                 };
                 let mapping =
