@@ -19,7 +19,7 @@ registry = []
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-Inflector = "0.11.4"
+inflector = "0.11.4"
 
 [dev-dependencies]
 thiserror = "2.0"
