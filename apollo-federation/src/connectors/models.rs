@@ -221,7 +221,7 @@ impl Connector {
                 subgraph_name,
                 source_name.as_ref(),
                 &transport,
-                &entity_resolver,
+                entity_resolver.as_ref(),
             ),
             subgraph_name: subgraph_name.to_string(),
             source_name,
@@ -308,8 +308,8 @@ impl Connector {
     }
 
     /// Create an identifier for this connector that can be used for configuration and service identification
-    /// source_name will be "none" here when we are using a "sourceless" connector. In this situation, we'll use
-    /// the synthetic_name instead so that we have some kind of a unique identifier for this source.
+    /// `source_name` will be `None` here when we are using a "sourceless" connector. In this situation, we'll use
+    /// the `synthetic_name` instead so that we have some kind of a unique identifier for this source.
     pub fn source_config_key(&self) -> String {
         if let Some(source_name) = &self.id.source_name {
             format!("{}.{}", self.id.subgraph_name, source_name)
@@ -333,9 +333,9 @@ fn make_label(
     subgraph_name: &str,
     source: Option<&SourceName>,
     transport: &HttpJsonTransport,
-    entity_resolver: &Option<EntityResolver>,
+    entity_resolver: Option<&EntityResolver>,
 ) -> String {
-    let source = source.map(|name| name.as_str()).unwrap_or_default();
+    let source = source.map(SourceName::as_str).unwrap_or_default();
     let batch = match entity_resolver {
         Some(EntityResolver::TypeBatch) => "[BATCH] ",
         _ => "",

@@ -53,7 +53,7 @@ impl<'schema> UrlProperties<'schema> {
             })
             .map(|(property, value)| {
                 let coordinate = Coordinate {
-                    directive: directive.clone(),
+                    directive,
                     property,
                 };
                 let mapping =

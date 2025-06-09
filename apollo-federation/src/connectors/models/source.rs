@@ -43,6 +43,7 @@ impl SourceName {
     }
 
     /// Cast a string into a `SourceName` for when they don't come from directives
+    #[must_use]
     pub fn cast(name: &str) -> Self {
         Self {
             value: Arc::from(name),
@@ -149,6 +150,7 @@ impl SourceName {
         (Some(name), message)
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.value
     }

@@ -49,7 +49,7 @@ impl<'schema> SourceDirective<'schema> {
             valid_source_names
                 .entry(directive.name.as_str())
                 .or_insert_with(Vec::new)
-                .extend(directive.directive.node.line_column_range(&schema.sources))
+                .extend(directive.directive.node.line_column_range(&schema.sources));
         }
         for (name, locations) in valid_source_names {
             if locations.len() > 1 {

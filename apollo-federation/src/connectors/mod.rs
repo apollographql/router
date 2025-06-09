@@ -86,7 +86,7 @@ impl ConnectId {
             .source_name
             .as_ref()
             .map(SourceName::as_str)
-            .unwrap_or("");
+            .unwrap_or_default();
         format!("{}.{}", self.subgraph_name, source)
     }
 

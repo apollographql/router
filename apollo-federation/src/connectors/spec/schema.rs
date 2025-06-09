@@ -44,8 +44,6 @@ pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
 pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLTemplate");
 
 /// Arguments to the `@source` directive
-///
-/// Refer to [SourceSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceDirectiveArguments {
     /// The friendly name of this source for use in `@connect` directives
@@ -151,6 +149,6 @@ pub struct ConnectHTTPArguments {
 pub struct ConnectBatchArguments {
     /// Set a maximum number of requests to be batched together.
     ///
-    /// Over this maximum, will be split into multiple batch requests of max_size.
+    /// Over this maximum, will be split into multiple batch requests of `max_size`.
     pub max_size: Option<usize>,
 }

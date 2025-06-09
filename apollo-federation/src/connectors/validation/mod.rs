@@ -87,7 +87,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         .collect_vec();
 
     for source in source_directives {
-        messages.extend(source.type_check())
+        messages.extend(source.type_check());
     }
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {
