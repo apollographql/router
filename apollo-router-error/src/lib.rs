@@ -15,7 +15,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use apollo_router_error::{get_registered_errors, Error, ToGraphQLError, BoxedErrorToGraphQL};
+//! use apollo_router_error::{get_registered_errors, Error, ToGraphQLError, HeapErrorToGraphQL};
 //!
 //! // Define errors using the re-exported derive macro
 //! #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
@@ -40,7 +40,7 @@
 //!
 //! // Convert boxed/arc errors using consistent API
 //! let box_error: Box<dyn std::error::Error + Send + Sync> = Box::new(std_error);
-//! let graphql_error = BoxedErrorToGraphQL::to_graphql_error(&box_error);
+//! let graphql_error = HeapErrorToGraphQL::to_graphql_error(&box_error);
 //!
 //! // Alternative: use standalone functions
 //! let graphql_error = apollo_router_error::box_to_graphql_error(&box_error);
@@ -289,11 +289,11 @@ pub fn arc_to_graphql_error_with_context(
     create_generic_graphql_error(error_ref, context)
 }
 
-/// Extension trait providing consistent GraphQL error conversion for Box and Arc wrapper types
+/// Extension trait providing consistent GraphQL error conversion for heap-allocated wrapper types
 /// 
-/// This trait provides a consistent API for converting boxed and arc-wrapped errors
+/// This trait provides a consistent API for converting heap-allocated errors (Box and Arc)
 /// to GraphQL format, using the same method names as the ToGraphQLError trait.
-pub trait BoxedErrorToGraphQL {
+pub trait HeapErrorToGraphQL {
     /// Converts this boxed/arc error to a GraphQL error format
     fn to_graphql_error(&self) -> GraphQLError {
         self.to_graphql_error_with_context(GraphQLErrorContext::default())
@@ -304,14 +304,14 @@ pub trait BoxedErrorToGraphQL {
 }
 
 /// Implementation for Box<dyn Error + Send + Sync>
-impl BoxedErrorToGraphQL for Box<dyn std::error::Error + Send + Sync> {
+impl HeapErrorToGraphQL for Box<dyn std::error::Error + Send + Sync> {
     fn to_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError {
         box_to_graphql_error_with_context(self, context)
     }
 }
 
 /// Implementation for Arc<dyn Error + Send + Sync>  
-impl BoxedErrorToGraphQL for Arc<dyn std::error::Error + Send + Sync> {
+impl HeapErrorToGraphQL for Arc<dyn std::error::Error + Send + Sync> {
     fn to_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError {
         arc_to_graphql_error_with_context(self, context)
     }

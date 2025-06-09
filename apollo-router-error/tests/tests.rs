@@ -287,7 +287,7 @@ fn test_tower_box_arc_error() {
 
 #[test]
 fn test_consistent_api_box_arc() {
-    use apollo_router_error::BoxedErrorToGraphQL;
+    use apollo_router_error::HeapErrorToGraphQL;
     // Test that we can call .to_graphql_error() directly on Box and Arc types
     // This demonstrates the consistent API without needing special functions
 
