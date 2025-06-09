@@ -7,7 +7,7 @@ description: Deploy the Apollo GraphOS Router or Apollo Router Core in Kubernete
 import HelmShowOutput from '../../../../../shared/helm-show-router-output.mdx';
 import CoprocTypicalConfig from '../../../../../shared/coproc-typical-config.mdx';
 
-The following guide provide the steps to:
+The following guide will allow you to:
 
 * Get the router Helm chart from the Apollo container repository.
 * Deploy a router with a basic Helm chart.
@@ -40,16 +40,16 @@ If you don't have a Kubernetes cluster, you can set one up using [kind](https://
 
 ## Quickstart
 
-To deploy the router, run the `helm install` command with an argument for the OCI image in the container repository. Optionally, you can add arguments for the `values.yaml` configuration file and/or additional arguments to override specific configuration values.
+To deploy the router, run the `helm install` command with an argument for the router's OCI image URL. Optionally, you can add arguments for the `values.yaml` configuration file and/or additional arguments to override specific configuration values.
 
 ```bash
-helm install --namespace apollo-router --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router
+helm install <name_for_install> --namespace apollo-router --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router
 ```
 
 The necessary arguments for specific configuration values:
 
-* `--set managedFederation.graphRef="<graph-ref>"`. The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](/router/configuration/overview/#apollo_graph_ref).
-* `--set managedFederation.apiKey="<graph-api-key>"`. The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](/router/configuration/overview/#apollo_key).
+* `--set managedFederation.graphRef="<graph-ref>"`: The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](/router/configuration/overview/#apollo_graph_ref).
+* `--set managedFederation.apiKey="<graph-api-key>"`: The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](/router/configuration/overview/#apollo_key).
 
 Some optional but recommended arguments:
 
@@ -65,7 +65,7 @@ helm list --namespace <router-namespace>
 ```
 ## Deployed architecture
 
-The default deployed architecture will be (when using a coprocessor):
+The default deployed architecture will be:
 
 ```mermaid
 flowchart LR;
@@ -73,11 +73,7 @@ flowchart LR;
   subgraph "Kubernetes cluster";
   lb(["<b>Load Balancer</b>"])
   router_a(["<b>Router</b>"]);
-  coproc_a(["<b>Coprocessor</b>"]);
   router_b(["<b>Router</b>"]);
-  coproc_b(["<b>Coprocessor</b>"]);
-  router_a <-.-> coproc_a;
-  router_b <-.-> coproc_b;
   end;
   clients -.->|Query| lb;
   lb -.-> router_a & router_b;
@@ -90,7 +86,7 @@ flowchart LR;
 
 <Note>
 
-The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router` and tagged with the applicable router release version. For example, router version `v.2.2.1`'s Helm chart would be `oci://ghcr.io/apollographql/helm-charts/router:2.2.1`.
+The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router` and tagged with the applicable router release version. For example, router version `v2.3.0`'s Helm chart would be `oci://ghcr.io/apollographql/helm-charts/router:2.3.0`.
 
 </Note>
 
@@ -102,9 +98,9 @@ Each router chart has a defult `values.yaml` file with router and deployment set
 * A command-line argument to enable [hot reloading of the router](/router/configuration/overview/#--hr----hot-reload).
 * A single replica.
 
-<ExpansionPanel title="Click to expand values.yaml for router v2.2.1">
+<ExpansionPanel title="Click to expand values.yaml for router v2.3.0">
 
-The values of the Helm chart for Apollo Router Core v2.2.1 in the GitHub container repository, as output by the `helm show` command:
+The values of the Helm chart for Apollo Router Core v2.3.0 in the GitHub container repository, as output by the `helm show` command:
 
 ```bash
 helm show values oci://ghcr.io/apollographql/helm-charts/router
@@ -126,5 +122,5 @@ The `helm install` command applies each `--values <values-file>` option in the o
 For example, this command deploys with a `common_values.yaml` file applied first and then a `prod_values.yaml` file:
 
 ```bash
-helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
+helm install <name_for_install> --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
