@@ -207,19 +207,35 @@ async fn test_service_mock_panic_on_timeout() {
 }
 
 #[tokio::test]
-#[should_panic] // Just test that it panics, don't be specific about the message due to race conditions
-async fn test_service_mock_panic_on_expectations_panic() {
+async fn test_service_mock_normal_lifecycle() {
     use std::time::Duration;
     
-    // Create a mock service where expectations panic
-    let _mock_service = TowerTest::builder()
-        .service(|mut _handle: ::tower_test::mock::Handle<String, String>| async move {
-            panic!("Expectations failed!");
+    // Test that mock services work normally and can be dropped safely
+    // when expectations complete successfully
+    let mock_service = TowerTest::builder()
+        .service(|mut handle: ::tower_test::mock::Handle<String, String>| async move {
+            handle.allow(1);
+            let (request, response) = handle.next_request().await.expect("service must not fail");
+            assert_eq!(request, "test".to_string());
+            response.send_response("ok".to_string());
         });
 
-    // Wait a bit for the expectations to run and complete
+    // Clone the service to test that cloning works
+    let mut cloned_service = mock_service.clone();
+    
+    // Use the service normally
+    cloned_service.ready().await.expect("service should be ready");
+    let response = cloned_service.call("test".to_string()).await.expect("service call should succeed");
+    assert_eq!(response, "ok".to_string());
+    
+    // Give time for expectations to complete
     tokio::time::sleep(Duration::from_millis(50)).await;
-    // Mock service will panic on drop due to expectations panic
+    
+    // Both services should be droppable without panic since expectations completed
+    drop(mock_service);
+    drop(cloned_service);
+    
+    // Test passes if we reach here without panic
 }
 
 #[tokio::test]

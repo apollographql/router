@@ -59,7 +59,8 @@ impl<S> Layer<S> for ExampleLayer {
 
 /// State tracking for mock service completion
 #[derive(Debug)]
-enum MockCompletionState {
+#[cfg_attr(test, derive(PartialEq))]
+pub(crate) enum MockCompletionState {
     Running,
     Completed,
     Panicked(String),
@@ -75,6 +76,9 @@ enum MockCompletionState {
 pub struct MockService<Req, Resp> {
     inner: ::tower_test::mock::Mock<Req, Resp>,
     expectations_handle: Arc<tokio::task::JoinHandle<()>>,
+    #[cfg(test)]
+    pub(crate) completion_state: Arc<Mutex<MockCompletionState>>,
+    #[cfg(not(test))]
     completion_state: Arc<Mutex<MockCompletionState>>,
 }
 
@@ -91,30 +95,27 @@ impl<Req, Resp> Clone for MockService<Req, Resp> {
 
 impl<Req, Resp> Drop for MockService<Req, Resp> {
     fn drop(&mut self) {
-        // Only check for completion state if this is the last reference
-        if Arc::strong_count(&self.expectations_handle) == 1 {
-            if let Ok(state) = self.completion_state.lock() {
-                match &*state {
-                    MockCompletionState::Running => {
-                        // Allow the service to be dropped while running
-                        // The background task will continue and complete or timeout
-                    }
-                    MockCompletionState::Panicked(msg) => {
-                        panic!("Mock service expectations panicked: {}", msg);
-                    }
-                    MockCompletionState::TimedOut => {
-                        panic!(
-                            "Mock service expectations timed out - this usually means unexpected requests or deadlock"
-                        );
-                    }
-                    MockCompletionState::Completed => {
-                        // All good, expectations completed successfully
-                    }
+        // Always check for failure states regardless of reference count
+        // Only ignore Running state to allow services to be dropped while still active
+        if let Ok(state) = self.completion_state.lock() {
+            match &*state {
+                MockCompletionState::Running => {
+                    // Allow the service to be dropped while running
+                    // The background task will continue and complete or timeout
+                }
+                MockCompletionState::Panicked(msg) => {
+                    panic!("Mock service expectations panicked: {}", msg);
+                }
+                MockCompletionState::TimedOut => {
+                    panic!(
+                        "Mock service expectations timed out - this usually means unexpected requests or deadlock"
+                    );
+                }
+                MockCompletionState::Completed => {
+                    // All good, expectations completed successfully
                 }
             }
         }
-        // If there are other references to the expectations handle, let them continue
-        // This allows the service to be dropped while keeping background tasks alive
     }
 }
 
