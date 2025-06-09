@@ -242,7 +242,7 @@ fn has_selection_with_predicate(
             }
         }
     }
-    return false;
+    false
 }
 
 fn selection_set_has_directives(selection_set: &SelectionSet) -> bool {
@@ -468,7 +468,7 @@ fn validate_field_value(
                 )?;
 
                 if let Some(resolved_type) = resolved_type {
-                    if !is_valid_implementation_field_type_by_name(&resolved_type, &expected_type) {
+                    if !is_valid_implementation_field_type_by_name(&resolved_type, expected_type) {
                         errors.push(
                             SingleFederationError::ContextSelectionInvalid {
                                 message: format!(
@@ -527,7 +527,7 @@ fn validate_field_value(
                                 // This matches the TypeScript behavior
                                 if !is_valid_implementation_field_type_by_name(
                                     &resolved_type,
-                                    &expected_type,
+                                    expected_type,
                                 ) {
                                     errors.push(
                                         SingleFederationError::ContextSelectionInvalid {
@@ -1886,8 +1886,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("userContext".to_string());
-        let selection = Some("name".to_string());
+        let context = "userContext".to_string();
+        let selection = "name".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -1897,8 +1897,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -1937,8 +1937,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("userContext".to_string());
-        let selection = Some("nonExistentField".to_string());
+        let context = "userContext".to_string();
+        let selection = "nonExistentField".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -1948,8 +1948,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -1996,8 +1996,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("userContext".to_string());
-        let selection = Some("name".to_string()); // String field but expecting ID
+        let context = "userContext".to_string();
+        let selection = "name".to_string(); // String field but expecting ID
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2007,8 +2007,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2055,8 +2055,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("userContext".to_string());
-        let selection = Some("... on Parent { name }".to_string());
+        let context = "userContext".to_string();
+        let selection = "... on Parent { name }".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2066,8 +2066,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2109,8 +2109,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("prop".to_string());
+        let context = "context".to_string();
+        let selection = "prop".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2120,8 +2120,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Foo"), Name::new_unchecked("Bar")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2216,8 +2216,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("{ id prop }".to_string());
+        let context = "context".to_string();
+        let selection = "{ id prop }".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2227,8 +2227,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2277,8 +2277,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("{ prop @testDirective }".to_string());
+        let context = "context".to_string();
+        let selection = "{ prop @testDirective }".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2288,8 +2288,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2336,8 +2336,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("{ alias: prop }".to_string());
+        let context = "context".to_string();
+        let selection = "{ alias: prop }".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2347,8 +2347,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2400,8 +2400,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("... on Foo { prop }".to_string());
+        let context = "context".to_string();
+        let selection = "... on Foo { prop }".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2411,8 +2411,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("Bar")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
@@ -2554,8 +2554,8 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = Some("context".to_string());
-        let selection = Some("prop".to_string());
+        let context = "context".to_string();
+        let selection = "prop".to_string();
         let target =
             FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
                 type_name: Name::new_unchecked("Target"),
@@ -2565,8 +2565,8 @@ mod tests {
         let set_context_locations = vec![Name::new_unchecked("T")];
 
         let result = validate_field_value(
-            &context.unwrap(),
-            &selection.unwrap(),
+            &context,
+            &selection,
             &target,
             &set_context_locations,
             subgraph.schema(),
