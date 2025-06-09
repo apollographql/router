@@ -561,35 +561,30 @@ impl ApplyToInternal for WithRange<PathList> {
                             tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
                         })
                 } else {
+                    let not_found = (
+                        None,
+                        vec![ApplyToError::new(
+                            format!(
+                                "Property {} not found in {}",
+                                key.dotted(),
+                                json_type_name(data),
+                            ),
+                            input_path_with_key.to_vec(),
+                            key.range(),
+                        )],
+                    );
+
                     if !matches!(data, JSON::Object(_)) {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
+                        return not_found;
                     }
-                    let Some(child) = data.get(key.as_str()) else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                            )],
-                        );
-                    };
-                    tail.apply_to_path(child, vars, &input_path_with_key)
+
+                    if let Some(child) = data.get(key.as_str()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key)
+                    } else if tail.is_question() {
+                        (None, vec![])
+                    } else {
+                        not_found
+                    }
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -3279,8 +3274,7 @@ mod tests {
             .unwrap()
             .apply_to(&data);
         assert_eq!(result, None);
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].message().contains("Property .user not found"));
+        assert_eq!(errors.len(), 0);
     }
 
     #[test]
@@ -3381,8 +3375,7 @@ mod tests {
             .unwrap()
             .apply_to(&data_no_user);
         assert_eq!(result, None);
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].message().contains("Property .user not found"));
+        assert_eq!(errors.len(), 0);
     }
 
     #[test]

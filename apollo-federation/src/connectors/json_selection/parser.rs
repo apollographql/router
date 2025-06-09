@@ -789,6 +789,10 @@ impl PathList {
         }
     }
 
+    pub(super) fn is_question(&self) -> bool {
+        matches!(self, Self::Question(_))
+    }
+
     #[allow(unused)]
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
