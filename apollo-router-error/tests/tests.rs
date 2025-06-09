@@ -1,6 +1,6 @@
 use apollo_router_error::{
-    BoxedErrorToGraphQL, GraphQLErrorContext, ToGraphQLError, arc_to_graphql_error, box_to_graphql_error,
-    export_error_registry_json, get_error_stats, get_registered_errors,
+    GraphQLErrorContext, arc_to_graphql_error, box_to_graphql_error, export_error_registry_json,
+    get_error_stats, get_registered_errors,
 };
 use std::sync::Arc;
 
@@ -48,6 +48,7 @@ fn test_json_export() {
 
 #[test]
 fn test_as_graphql_error_for_std_error() {
+    use apollo_router_error::ToGraphQLError;
     let std_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
     let graphql_error = std_error.to_graphql_error();
 
@@ -61,6 +62,7 @@ fn test_as_graphql_error_for_std_error() {
 
 #[test]
 fn test_as_graphql_error_with_context() {
+    use apollo_router_error::ToGraphQLError;
     let std_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Access denied");
     let context = GraphQLErrorContext::builder()
         .service_name("test-service")
@@ -88,6 +90,7 @@ fn test_as_graphql_error_with_context() {
 
 #[test]
 fn test_generic_graphql_error_with_error_chain() {
+    use apollo_router_error::ToGraphQLError;
     // Create a nested error chain
     let root_cause = std::io::Error::new(std::io::ErrorKind::NotFound, "Root cause");
     let _wrapper_error = std::io::Error::new(std::io::ErrorKind::Other, "Wrapper error");
@@ -101,6 +104,7 @@ fn test_generic_graphql_error_with_error_chain() {
 
 #[test]
 fn test_graphql_error() {
+    use apollo_router_error::ToGraphQLError;
     let error = GraphQLError::TestError {
         message: "hello".to_string(),
         config_path: "world".to_string(),
@@ -125,6 +129,7 @@ fn test_graphql_error() {
 
 #[test]
 fn test_box_error() {
+    use apollo_router_error::ToGraphQLError;
     // Test with concrete Box<GraphQLError> instead of Box<dyn Error + Send + Sync>
     let error = Box::new(GraphQLError::TestError {
         message: "hello".to_string(),
@@ -150,6 +155,7 @@ fn test_box_error() {
 
 #[test]
 fn test_arc_error() {
+    use apollo_router_error::ToGraphQLError;
     // Test with concrete Arc<GraphQLError> instead of Arc<dyn Error + Send + Sync>
     let error = Arc::new(GraphQLError::TestError {
         message: "hello".to_string(),
@@ -175,6 +181,7 @@ fn test_arc_error() {
 
 #[test]
 fn test_box_arc_error() {
+    use apollo_router_error::ToGraphQLError;
     // Test with concrete Box<Arc<GraphQLError>> instead of Box<Arc<dyn Error + Send + Sync>>
     let error = Box::new(Arc::new(GraphQLError::TestError {
         message: "hello".to_string(),
@@ -280,30 +287,37 @@ fn test_tower_box_arc_error() {
 
 #[test]
 fn test_consistent_api_box_arc() {
+    use apollo_router_error::BoxedErrorToGraphQL;
     // Test that we can call .to_graphql_error() directly on Box and Arc types
     // This demonstrates the consistent API without needing special functions
-    
+
     let original_error = GraphQLError::TestError {
         message: "direct api test".to_string(),
         config_path: "test/path".to_string(),
     };
 
-    // Test Box<dyn Error + Send + Sync> using the BoxedErrorToGraphQL trait method directly
+    // Test Box<dyn Error + Send + Sync> using the trait method directly
     let box_error: Box<dyn std::error::Error + Send + Sync> = Box::new(original_error.clone());
-    let graphql_error_from_box = BoxedErrorToGraphQL::to_graphql_error(&box_error); // Direct trait method call
+    let graphql_error_from_box = box_error.to_graphql_error(); // Direct trait method call
 
-    assert_eq!(graphql_error_from_box.message, "Configuration error: direct api test");
+    assert_eq!(
+        graphql_error_from_box.message,
+        "Configuration error: direct api test"
+    );
     assert_eq!(
         graphql_error_from_box.extensions.code,
         "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
     );
     assert_eq!(graphql_error_from_box.extensions.service, "apollo-router");
 
-    // Test Arc<dyn Error + Send + Sync> using the BoxedErrorToGraphQL trait method directly
+    // Test Arc<dyn Error + Send + Sync> using the trait method directly
     let arc_error: Arc<dyn std::error::Error + Send + Sync> = Arc::new(original_error);
-    let graphql_error_from_arc = BoxedErrorToGraphQL::to_graphql_error(&arc_error); // Direct trait method call
+    let graphql_error_from_arc = arc_error.to_graphql_error(); // Direct trait method call
 
-    assert_eq!(graphql_error_from_arc.message, "Configuration error: direct api test");
+    assert_eq!(
+        graphql_error_from_arc.message,
+        "Configuration error: direct api test"
+    );
     assert_eq!(
         graphql_error_from_arc.extensions.code,
         "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
@@ -311,6 +325,12 @@ fn test_consistent_api_box_arc() {
     assert_eq!(graphql_error_from_arc.extensions.service, "apollo-router");
 
     // Verify both results are equivalent
-    assert_eq!(graphql_error_from_box.message, graphql_error_from_arc.message);
-    assert_eq!(graphql_error_from_box.extensions.code, graphql_error_from_arc.extensions.code);
+    assert_eq!(
+        graphql_error_from_box.message,
+        graphql_error_from_arc.message
+    );
+    assert_eq!(
+        graphql_error_from_box.extensions.code,
+        graphql_error_from_arc.extensions.code
+    );
 }
