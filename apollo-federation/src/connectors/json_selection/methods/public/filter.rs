@@ -8,7 +8,6 @@ use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::VarsWithPathsMap;
-
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
