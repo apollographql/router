@@ -1,0 +1,10 @@
+type Empty {
+}
+
+type CustomEmpty {
+}
+
+type Query {
+  check
+}
+

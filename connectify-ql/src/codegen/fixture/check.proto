@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package com.example.check;
+
+service CheckService {
+  rpc Check(google.protobuf.Empty) returns (CustomEmpty) {}
+}
+
+message CustomEmpty {
+
+}

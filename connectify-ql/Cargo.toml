@@ -21,3 +21,15 @@ serde_json = "1.0"
 
 [build-dependencies]
 lelwel = "0.8"
+
+[lints.rust]
+nonstandard_style = "deny"
+
+[lints.clippy]
+all = "deny"
+redundant_clone = "deny"
+manual_while_let_some = "deny"
+needless_borrow = "deny"
+manual_ok_or = "deny"
+needless_collect = "deny"
+or_fun_call = "deny"

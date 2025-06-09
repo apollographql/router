@@ -136,7 +136,7 @@ impl TryFrom<GrpcType> for GraphqlType {
                     GraphqlType::Int,
                 ));
             }
-            GrpcType::Sint32 | GrpcType::Sfixed32 | GrpcType::Int32=> GraphqlType::Int,
+            GrpcType::Sint32 | GrpcType::Sfixed32 | GrpcType::Int32 => GraphqlType::Int,
             GrpcType::Sint64 => {
                 return Err(GrpcCodegenError::TypeNotSupported(
                     GrpcType::Sint64,
@@ -147,6 +147,12 @@ impl TryFrom<GrpcType> for GraphqlType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AvailableType {
+    name: String,
+    is_empty: bool,
+}
+
 fn proto_ast(grpc: &Grpc) -> Result<FileDescriptorSet, GrpcCodegenError> {
     Ok(protox::compile([&grpc.file], ["."])?)
 }
@@ -155,8 +161,9 @@ fn process_enum_types(
     content: &mut String,
     enum_types: &[EnumDescriptorProto],
     service: &str,
-) -> Result<(), GrpcCodegenError> {
+) -> Result<Vec<AvailableType>, GrpcCodegenError> {
     let default_naming = service.split('.').last().unwrap_or("GrpcService");
+    let mut available_types = Vec::new();
 
     for (index, enum_type) in enum_types.iter().enumerate() {
         let name = enum_type
@@ -176,21 +183,27 @@ fn process_enum_types(
                     .to_case(Case::Constant)
             })
             .collect::<Vec<_>>();
+        available_types.push(AvailableType {
+            name: name.clone(),
+            is_empty: values.is_empty(),
+        });
+
         writeln!(content, "enum {} {{", name)?;
         for value in values {
             writeln!(content, "  {}", value)?;
         }
         writeln!(content, "}}\n",)?;
     }
-    Ok(())
+    Ok(available_types)
 }
 
 fn process_message_types(
     content: &mut String,
     message_types: &[DescriptorProto],
     service: &str,
-) -> Result<(), GrpcCodegenError> {
+) -> Result<Vec<AvailableType>, GrpcCodegenError> {
     let default_naming = service.split('.').last().unwrap_or("GrpcService");
+    let mut available_types = Vec::new();
 
     for (index, message_type) in message_types.iter().enumerate() {
         let name = message_type
@@ -212,6 +225,12 @@ fn process_message_types(
                 )
             })
             .collect::<Vec<_>>();
+
+        available_types.push(AvailableType {
+            name: name.clone(),
+            is_empty: values.is_empty(),
+        });
+
         writeln!(content, "type {} {{", name)?;
         for (idx, attribute_name, mut attribute_type_name, attribute_type, is_optional) in values {
             write!(
@@ -247,16 +266,16 @@ fn process_message_types(
         }
         writeln!(content, "}}\n",)?;
     }
-    Ok(())
+    Ok(available_types)
 }
 
 fn process_service(
     content: &mut String,
     services: &[ServiceDescriptorProto],
     grpc: &Grpc,
+    available_types: &[AvailableType],
 ) -> Result<(), GrpcCodegenError> {
     let default_naming = grpc.service.split('.').last().unwrap_or("GrpcService");
-    println!("{grpc:?}");
     let registered_mutations = grpc.mutations.as_slice();
 
     struct Method<'d> {
@@ -268,76 +287,89 @@ fn process_service(
     let mut queries: Vec<Method> = Vec::new();
     let mut mutations: Vec<Method> = Vec::new();
 
-    let Some(service) = services
+    if let Some(service) = services
         .iter()
         .find(|service| service.name() == default_naming)
-    else {
-        return Err(GrpcCodegenError::ServiceNotFound(
-            default_naming.to_string(),
-            services
-                .iter()
-                .map(|serv| serv.name())
-                .filter(|name| !name.is_empty())
-                .collect::<Vec<_>>()
-                .join(", "),
-        ));
+    {
+        for (index, method) in service.method.iter().enumerate() {
+            let method_name = method
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("Method{index}"));
+            let input = method
+                .input_type
+                .as_ref()
+                .and_then(|name| name.split('.').last());
+            let output = method
+                .output_type
+                .as_ref()
+                .and_then(|name| name.split('.').last());
+
+            if registered_mutations.contains(&method_name) {
+                mutations.push(Method {
+                    name: method_name,
+                    input,
+                    output,
+                });
+            } else {
+                queries.push(Method {
+                    name: method_name,
+                    input,
+                    output,
+                });
+            }
+        }
+
+        if !queries.is_empty() {
+            writeln!(content, "type Query {{")?;
+            for query in queries {
+                write!(content, "  {}", query.name.to_case(Case::Camel))?;
+                if let Some(input) = query
+                    .input
+                    .and_then(|input| available_types.iter().find(|ty| ty.name == input))
+                {
+                    if !input.is_empty {
+                        write!(content, "(input: {}!)", input.name)?;
+                    }
+                }
+                if let Some(output) = query
+                    .output
+                    .and_then(|output| available_types.iter().find(|ty| ty.name == output))
+                {
+                    if !output.is_empty {
+                        write!(content, ": {}!", output.name)?;
+                    }
+                }
+                writeln!(content)?;
+            }
+            writeln!(content, "}}\n",)?;
+        }
+
+        if !mutations.is_empty() {
+            writeln!(content, "type Mutation {{")?;
+            for mutation in mutations {
+                write!(content, "  {}", mutation.name.to_case(Case::Camel))?;
+                if let Some(input) = mutation
+                    .input
+                    .and_then(|input| available_types.iter().find(|ty| ty.name == input))
+                {
+                    if !input.is_empty {
+                        write!(content, "(input: {}!)", input.name)?;
+                    }
+                }
+                if let Some(output) = mutation
+                    .output
+                    .and_then(|output| available_types.iter().find(|ty| ty.name == output))
+                {
+                    if !output.is_empty {
+                        write!(content, ": {}!", output.name)?;
+                    }
+                }
+                writeln!(content)?;
+            }
+            writeln!(content, "}}\n",)?;
+        }
     };
-
-    for (index, method) in service.method.iter().enumerate() {
-        let method_name = method
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("Method{index}"));
-        let input = method
-            .input_type
-            .as_ref()
-            .and_then(|name| name.split('.').last());
-        let output = method
-            .output_type
-            .as_ref()
-            .and_then(|name| name.split('.').last());
-
-        println!("{method_name}\n{registered_mutations:?}");
-        if registered_mutations.contains(&method_name) {
-            mutations.push(Method {
-                name: method_name,
-                input,
-                output,
-            });
-        } else {
-            queries.push(Method {
-                name: method_name,
-                input,
-                output,
-            });
-        }
-    }
-
-    writeln!(content, "type Query {{")?;
-    for query in queries {
-        write!(content, "  {}", query.name.to_case(Case::Camel))?;
-        if let Some(input) = query.input {
-            write!(content, "(input: {}!)", input)?;
-        }
-        if let Some(output) = query.output {
-            write!(content, ": {}!", output)?;
-        }
-        writeln!(content)?;
-    }
-    writeln!(content, "}}\n",)?;
-
-    writeln!(content, "type Mutation {{")?;
-    for mutation in mutations {
-        write!(content, "  {}", mutation.name.to_case(Case::Camel))?;
-        if let Some(input) = mutation.input {
-            write!(content, "(input: {}!)", input)?;
-        }
-        if let Some(output) = mutation.output {
-            write!(content, ": {}!", output)?;
-        }
-        writeln!(content)?;
-    }
-    writeln!(content, "}}\n",)?;
 
     Ok(())
 }
@@ -346,11 +378,50 @@ pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
     let proto_ast = proto_ast(grpc)?;
     let graphql_file = grpc.file.replace(".proto", ".graphql");
     let mut graphql_content = String::new();
+    let default_service = grpc.service.split('.').last().unwrap_or("GrpcService");
+    if !proto_ast
+        .file
+        .iter()
+        .flat_map(|file| &file.service)
+        .any(|service| service.name() == default_service)
+    {
+        return Err(GrpcCodegenError::ServiceNotFound(
+            default_service.to_string(),
+            proto_ast
+                .file
+                .iter()
+                .flat_map(|file| &file.service)
+                .map(|service| service.name())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
+    }
 
-    for file in proto_ast.file {
-        process_enum_types(&mut graphql_content, &file.enum_type, &grpc.service)?;
-        process_message_types(&mut graphql_content, &file.message_type, &grpc.service)?;
-        process_service(&mut graphql_content, &file.service, grpc)?;
+    // process all types first
+    // for file in &proto_ast.file {
+    //     process_enum_types(&mut graphql_content, &file.enum_type, &grpc.service)?;
+    //     process_message_types(&mut graphql_content, &file.message_type, &grpc.service)?;
+    // }
+    let available_types: Result<Vec<AvailableType>, GrpcCodegenError> = proto_ast
+        .file
+        .iter()
+        .map(|file| {
+            Ok((
+                process_enum_types(&mut graphql_content, &file.enum_type, &grpc.service)?,
+                process_message_types(&mut graphql_content, &file.message_type, &grpc.service)?,
+            ))
+        })
+        .try_fold(Vec::new(), |mut acc, types: Result<_, GrpcCodegenError>| {
+            let (mut enums, mut messages) = types?;
+            acc.append(&mut enums);
+            acc.append(&mut messages);
+            Ok(acc)
+        });
+    let available_types = available_types?;
+
+    // process all services
+    for file in &proto_ast.file {
+        process_service(&mut graphql_content, &file.service, grpc, &available_types)?;
     }
 
     let mut file = File::create(&graphql_file)?;
@@ -616,9 +687,65 @@ mod tests {
                 endpoint: "localhost:8080".to_string(),
             };
             let mut s = String::new();
-            process_service(&mut s, &grpc_service, &grpc).unwrap();
+            let types = vec![
+                AvailableType {
+                    name: "GetUserRequest".to_string(),
+                    is_empty: false,
+                },
+                AvailableType {
+                    name: "GetUserResponse".to_string(),
+                    is_empty: false,
+                },
+                AvailableType {
+                    name: "CreatedUserResponse".to_string(),
+                    is_empty: false,
+                },
+                AvailableType {
+                    name: "User".to_string(),
+                    is_empty: false,
+                },
+            ];
+            process_service(&mut s, &grpc_service, &grpc, &types).unwrap();
 
             assert_snapshot!(s);
+        }
+
+        #[test]
+        fn should_create_gql_queries_from_empty_grpc_service() {
+            let grpc_service = empty_grpc_service();
+            let grpc = Grpc {
+                file: "check.proto".to_string(),
+                service: "com.example.check.CheckService".to_string(),
+                mutations: Vec::new(),
+                endpoint: "localhost:8080".to_string(),
+            };
+            let mut s = String::new();
+            let types = vec![
+                AvailableType {
+                    name: "Empty".to_string(),
+                    is_empty: true,
+                },
+                AvailableType {
+                    name: "CustomEmpty".to_string(),
+                    is_empty: true,
+                },
+            ];
+            process_service(&mut s, &grpc_service, &grpc, &types).unwrap();
+
+            assert_snapshot!(s);
+        }
+
+        fn empty_grpc_service() -> Vec<ServiceDescriptorProto> {
+            vec![ServiceDescriptorProto {
+                name: Some("CheckService".to_string()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Check".to_string()),
+                    input_type: Some(".google.protobuf.Empty".to_string()),
+                    output_type: Some(".com.example.users.CustomEmpty".to_string()),
+                    ..Default::default()
+                }],
+                options: None,
+            }]
         }
 
         fn grpc_service() -> Vec<ServiceDescriptorProto> {
@@ -640,6 +767,34 @@ mod tests {
                 ],
                 options: None,
             }]
+        }
+    }
+
+    mod import_files {
+        use super::*;
+
+        #[test]
+        fn should_generate_file_descriptor_when_correct_grpc() {
+            let grpc = null_grpc();
+            let proto = format!("{:#?}", proto_ast(&grpc).unwrap());
+            assert_snapshot!(proto);
+        }
+
+        #[test]
+        fn should_generate_graphql_from_empty_grpc() {
+            let grpc = null_grpc();
+            let path = generate(&grpc).unwrap();
+            let graphql: String = std::fs::read_to_string(path).unwrap();
+            assert_snapshot!(graphql);
+        }
+
+        fn null_grpc() -> Grpc {
+            Grpc {
+                file: "src/codegen/fixture/check.proto".to_string(),
+                service: "com.example.check.CheckService".to_string(),
+                endpoint: "localhost:8080".to_string(),
+                mutations: vec![],
+            }
         }
     }
 }

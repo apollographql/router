@@ -1,0 +1,13 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: graphql
+---
+type Empty {
+}
+
+type CustomEmpty {
+}
+
+type Query {
+  check
+}

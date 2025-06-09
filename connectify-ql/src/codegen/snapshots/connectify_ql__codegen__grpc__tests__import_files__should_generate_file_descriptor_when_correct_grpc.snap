@@ -1,0 +1,590 @@
+---
+source: connectify-ql/src/codegen/grpc.rs
+expression: proto
+---
+FileDescriptorSet {
+    file: [
+        FileDescriptorProto {
+            name: Some(
+                "google/protobuf/empty.proto",
+            ),
+            package: Some(
+                "google.protobuf",
+            ),
+            dependency: [],
+            public_dependency: [],
+            weak_dependency: [],
+            message_type: [
+                DescriptorProto {
+                    name: Some(
+                        "Empty",
+                    ),
+                    field: [],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+            ],
+            enum_type: [],
+            service: [],
+            extension: [],
+            options: Some(
+                FileOptions {
+                    java_package: Some(
+                        "com.google.protobuf",
+                    ),
+                    java_outer_classname: Some(
+                        "EmptyProto",
+                    ),
+                    java_multiple_files: Some(
+                        true,
+                    ),
+                    java_generate_equals_and_hash: None,
+                    java_string_check_utf8: None,
+                    optimize_for: None,
+                    go_package: Some(
+                        "google.golang.org/protobuf/types/known/emptypb",
+                    ),
+                    cc_generic_services: None,
+                    java_generic_services: None,
+                    py_generic_services: None,
+                    php_generic_services: None,
+                    deprecated: None,
+                    cc_enable_arenas: Some(
+                        true,
+                    ),
+                    objc_class_prefix: Some(
+                        "GPB",
+                    ),
+                    csharp_namespace: Some(
+                        "Google.Protobuf.WellKnownTypes",
+                    ),
+                    swift_prefix: None,
+                    php_class_prefix: None,
+                    php_namespace: None,
+                    php_metadata_namespace: None,
+                    ruby_package: None,
+                    uninterpreted_option: [],
+                },
+            ),
+            source_code_info: Some(
+                SourceCodeInfo {
+                    location: [
+                        Location {
+                            path: [],
+                            span: [
+                                30,
+                                0,
+                                50,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                2,
+                            ],
+                            span: [
+                                32,
+                                0,
+                                24,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                            ],
+                            span: [
+                                50,
+                                0,
+                                16,
+                            ],
+                            leading_comments: Some(
+                                " A generic empty message that you can re-use to avoid defining duplicated\n empty messages in your APIs. A typical example is to use it as the request\n or the response type of an API method. For instance:\n\n     service Foo {\n       rpc Bar(google.protobuf.Empty) returns (google.protobuf.Empty);\n     }\n\n",
+                            ),
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                50,
+                                8,
+                                13,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                34,
+                                0,
+                                59,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                35,
+                                0,
+                                69,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                36,
+                                0,
+                                44,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                37,
+                                0,
+                                43,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                38,
+                                0,
+                                34,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                39,
+                                0,
+                                33,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                40,
+                                0,
+                                31,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                37,
+                            ],
+                            span: [
+                                34,
+                                0,
+                                59,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                11,
+                            ],
+                            span: [
+                                35,
+                                0,
+                                69,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                1,
+                            ],
+                            span: [
+                                36,
+                                0,
+                                44,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                8,
+                            ],
+                            span: [
+                                37,
+                                0,
+                                43,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                10,
+                            ],
+                            span: [
+                                38,
+                                0,
+                                34,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                36,
+                            ],
+                            span: [
+                                39,
+                                0,
+                                33,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                31,
+                            ],
+                            span: [
+                                40,
+                                0,
+                                31,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                12,
+                            ],
+                            span: [
+                                30,
+                                0,
+                                18,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [
+                                " Protocol Buffers - Google's data interchange format\n Copyright 2008 Google Inc.  All rights reserved.\n https://developers.google.com/protocol-buffers/\n\n Redistribution and use in source and binary forms, with or without\n modification, are permitted provided that the following conditions are\n met:\n\n     * Redistributions of source code must retain the above copyright\n notice, this list of conditions and the following disclaimer.\n     * Redistributions in binary form must reproduce the above\n copyright notice, this list of conditions and the following disclaimer\n in the documentation and/or other materials provided with the\n distribution.\n     * Neither the name of Google Inc. nor the names of its\n contributors may be used to endorse or promote products derived from\n this software without specific prior written permission.\n\n THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\n LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR\n A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT\n OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,\n SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT\n LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,\n DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY\n THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\n OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n",
+                            ],
+                        },
+                    ],
+                },
+            ),
+            syntax: Some(
+                "proto3",
+            ),
+        },
+        FileDescriptorProto {
+            name: Some(
+                "src/codegen/fixture/check.proto",
+            ),
+            package: Some(
+                "com.example.check",
+            ),
+            dependency: [
+                "google/protobuf/empty.proto",
+            ],
+            public_dependency: [],
+            weak_dependency: [],
+            message_type: [
+                DescriptorProto {
+                    name: Some(
+                        "CustomEmpty",
+                    ),
+                    field: [],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+            ],
+            enum_type: [],
+            service: [
+                ServiceDescriptorProto {
+                    name: Some(
+                        "CheckService",
+                    ),
+                    method: [
+                        MethodDescriptorProto {
+                            name: Some(
+                                "Check",
+                            ),
+                            input_type: Some(
+                                ".google.protobuf.Empty",
+                            ),
+                            output_type: Some(
+                                ".com.example.check.CustomEmpty",
+                            ),
+                            options: None,
+                            client_streaming: None,
+                            server_streaming: None,
+                        },
+                    ],
+                    options: None,
+                },
+            ],
+            extension: [],
+            options: None,
+            source_code_info: Some(
+                SourceCodeInfo {
+                    location: [
+                        Location {
+                            path: [],
+                            span: [
+                                0,
+                                0,
+                                12,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                2,
+                            ],
+                            span: [
+                                4,
+                                0,
+                                26,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                3,
+                                0,
+                            ],
+                            span: [
+                                2,
+                                0,
+                                37,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                            ],
+                            span: [
+                                10,
+                                0,
+                                12,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                10,
+                                8,
+                                19,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                            ],
+                            span: [
+                                6,
+                                0,
+                                8,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                6,
+                                8,
+                                20,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                7,
+                                2,
+                                59,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                7,
+                                6,
+                                11,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                2,
+                            ],
+                            span: [
+                                7,
+                                12,
+                                33,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                7,
+                                44,
+                                55,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                12,
+                            ],
+                            span: [
+                                0,
+                                0,
+                                18,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                    ],
+                },
+            ),
+            syntax: Some(
+                "proto3",
+            ),
+        },
+    ],
+}
