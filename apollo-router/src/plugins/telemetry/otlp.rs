@@ -128,13 +128,13 @@ fn process_endpoint(
                 } else {
                     let uri = http::Uri::try_from(&base)?;
                     // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
-                    // We already ensured that our base does not end with "/", so we must append
-                    // `suffix`
+                    // We already ensured that our base does not end with <suffix>, so we must append
+                    // <suffix>
                     if uri.path() == "/" {
                         // We don't have a path, we need to add one
                         Ok(format!("{base}{suffix}"))
                     } else {
-                        // We have a path, it doesn't end with suffix, let it pass...
+                        // We have a path, it doesn't end with <suffix>, let it pass...
                         // We could try and enforce the standard here and only let through paths
                         // which end with the expected suffix. However, I think that would reduce
                         // backwards compatibility and we should just trust that the user knows
