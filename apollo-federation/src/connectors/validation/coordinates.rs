@@ -8,15 +8,13 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 
 use super::DirectiveName;
-use super::source::SourceName;
 use crate::connectors::HTTPMethod;
+use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::connectors::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
@@ -37,9 +35,9 @@ impl Display for ConnectDirectiveCoordinate<'_> {
 }
 
 /// The location of a `@source` directive.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SourceDirectiveCoordinate<'a> {
-    pub(crate) name: SourceName<'a>,
+    pub(crate) name: SourceName,
     pub(super) directive: &'a Node<Directive>,
 }
 
@@ -147,28 +145,6 @@ impl Display for BaseUrlCoordinate<'_> {
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
     format!("`@{source_directive_name}({HTTP_ARGUMENT_NAME}:)`")
-}
-
-pub(super) fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)`")
-}
-
-pub(super) fn source_name_value_coordinate(
-    source_directive_name: &DirectiveName,
-    value: &Node<Value>,
-) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
-}
-
-pub(super) fn connect_directive_name_coordinate(
-    connect_directive_name: &Name,
-    source: &Node<Value>,
-    coordinate: &ConnectDirectiveCoordinate,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{element}`",
-        element = coordinate.element
-    )
 }
 
 /// Coordinate for an `HTTP.headers` argument in `@source` or `@connect`.

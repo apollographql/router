@@ -3,6 +3,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
@@ -22,16 +23,16 @@ use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::PATH_ARGUMENT_NAME;
 use super::schema::QUERY_PARAMS_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
+use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
-use crate::connectors::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -51,7 +52,7 @@ pub(crate) fn extract_source_directive_arguments(
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(SourceDirectiveArguments::from_directive)
+        .map(|directive| SourceDirectiveArguments::from_directive(directive, &schema.sources))
         .collect()
 }
 
@@ -137,24 +138,25 @@ pub(crate) fn extract_connect_directive_arguments(
 type ObjectNode = [(Name, Node<Value>)];
 
 impl SourceDirectiveArguments {
-    fn from_directive(value: &Component<Directive>) -> Result<Self, FederationError> {
+    fn from_directive(
+        value: &Component<Directive>,
+        sources: &SourceMap,
+    ) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
-        let mut name = None;
+        let name = SourceName::from_directive_permissive(value, sources).map_err(|message| {
+            SingleFederationError::InvalidGraphQL {
+                message: message.message,
+            }
+        })?;
         let mut http = None;
         let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
-            if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
-                name = Some(arg.value.as_str().ok_or_else(|| {
-                    internal!(format!(
-                        "`name` field in `@{directive_name}` directive is not a string"
-                    ))
-                })?);
-            } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
+            if arg_name == HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!(format!(
                         "`http` field in `@{directive_name}` directive is not an object"
@@ -172,21 +174,11 @@ impl SourceDirectiveArguments {
                 let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
 
                 errors = Some(errors_value);
-            } else {
-                return Err(internal!(format!(
-                    "unknown argument in `@{directive_name}` directive: {arg_name}"
-                )));
             }
         }
 
         Ok(Self {
-            name: name
-                .ok_or_else(|| {
-                    internal!(format!(
-                        "missing `name` field in `@{directive_name}` directive"
-                    ))
-                })?
-                .to_string(),
+            name,
             http: http.ok_or_else(|| {
                 internal!(format!(
                     "missing `http` field in `@{directive_name}` directive"
@@ -304,7 +296,7 @@ impl ConnectDirectiveArguments {
         let directive_name = &value.name;
 
         // We'll have to iterate over the arg list and keep the properties by their name
-        let mut source = None;
+        let source = SourceName::from_connect(value);
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
@@ -313,15 +305,7 @@ impl ConnectDirectiveArguments {
         for arg in args {
             let arg_name = arg.name.as_str();
 
-            if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
-                let source_value = arg.value.as_str().ok_or_else(|| {
-                    internal!(format!(
-                        "`source` field in `@{directive_name}` directive is not a string"
-                    ))
-                })?;
-
-                source = Some(source_value);
-            } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
+            if arg_name == HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     internal!(format!(
                         "`http` field in `@{directive_name}` directive is not an object"
@@ -369,16 +353,12 @@ impl ConnectDirectiveArguments {
                 })?;
 
                 entity = Some(entity_value);
-            } else {
-                return Err(internal!(format!(
-                    "unknown argument in `@{directive_name}` directive: {arg_name}"
-                )));
             }
         }
 
         Ok(Self {
             position,
-            source: source.map(|s| s.to_string()),
+            source,
             http,
             selection: selection.ok_or_else(|| {
                 internal!(format!(
@@ -616,7 +596,9 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(SourceDirectiveArguments::from_directive)
+            .map(|directive| {
+                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
+            })
             .collect();
 
         insta::assert_debug_snapshot!(

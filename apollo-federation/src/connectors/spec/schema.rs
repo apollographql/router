@@ -6,6 +6,7 @@ use http::Uri;
 
 use crate::connectors::ConnectorPosition;
 use crate::connectors::HeaderSource;
+use crate::connectors::SourceName;
 use crate::connectors::json_selection::JSONSelection;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
@@ -48,7 +49,7 @@ pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLTemplate");
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceDirectiveArguments {
     /// The friendly name of this source for use in `@connect` directives
-    pub(crate) name: String,
+    pub(crate) name: SourceName,
 
     /// Common HTTP options
     pub(crate) http: SourceHTTPArguments,
@@ -90,7 +91,7 @@ pub(crate) struct ConnectDirectiveArguments {
     /// The upstream source for shared connector configuration.
     ///
     /// Must match the `name` argument of a @source directive in this schema.
-    pub(crate) source: Option<String>,
+    pub(crate) source: Option<SourceName>,
 
     /// HTTP options for this connector
     ///

@@ -315,7 +315,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
         entity_checker.add_key(&field_set, directive);
     }
 
-    for (_, connector) in &connectors {
+    for connector in &connectors {
         if connector.entity_resolver == Some(TypeBatch) {
             let input_trie = compute_batch_input_trie(connector);
             match SelectionSetWalker::new(connector.name(), schema, &input_trie)
@@ -327,7 +327,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
         }
     }
 
-    for (_, connector) in connectors {
+    for connector in connectors {
         match connector.resolvable_key(schema) {
             Ok(None) => continue,
             Err(_) => {

@@ -53,11 +53,11 @@ impl<'schema> UrlProperties<'schema> {
             })
             .map(|(property, value)| {
                 let coordinate = Coordinate {
-                    directive,
+                    directive: directive.clone(),
                     property,
                 };
                 let mapping =
-                    parse_mapping_argument(value, coordinate, Code::InvalidUrlProperty, schema)?;
+                    parse_mapping_argument(value, &coordinate, Code::InvalidUrlProperty, schema)?;
                 Ok(Property {
                     coordinate,
                     mapping,
@@ -130,7 +130,7 @@ impl Property<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Coordinate<'schema> {
     directive: ConnectOrSource<'schema>,
     property: PropertyName,
@@ -149,7 +149,7 @@ impl fmt::Display for Coordinate<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum ConnectOrSource<'schema> {
     Source(SourceDirectiveCoordinate<'schema>),
     Connect(ConnectDirectiveCoordinate<'schema>),

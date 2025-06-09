@@ -11,6 +11,7 @@ use shape::Shape;
 
 use crate::connectors::HTTPMethod;
 use crate::connectors::Namespace;
+use crate::connectors::SourceName;
 use crate::connectors::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::connectors::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
@@ -33,7 +34,6 @@ use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::http::UrlProperties;
 use crate::connectors::validation::http::headers::Headers;
 use crate::connectors::validation::http::url::validate_url_scheme;
-use crate::connectors::validation::source::SourceName;
 
 /// A valid, parsed (but not type-checked) `@connect(http:)`.
 ///
@@ -57,7 +57,7 @@ impl<'schema> Http<'schema> {
     /// The order these pieces run in doesn't matter and shouldn't affect the output.
     pub(super) fn parse(
         coordinate: ConnectDirectiveCoordinate<'schema>,
-        source_name: Option<&'schema SourceName>,
+        source_name: Option<&SourceName>,
         schema: &'schema SchemaInfo,
     ) -> Result<Self, Vec<Message>> {
         let Some((http_arg, http_arg_node)) = coordinate
@@ -230,7 +230,7 @@ impl<'schema> Transport<'schema> {
         http_arg: &'schema [(Name, Node<Value>)],
         coordinate: ConnectHTTPCoordinate<'schema>,
         http_arg_node: &Node<Value>,
-        source_name: Option<&SourceName<'schema>>,
+        source_name: Option<&SourceName>,
         schema: &'schema SchemaInfo<'schema>,
     ) -> Result<Self, Vec<Message>> {
         let source_map = &schema.sources;
