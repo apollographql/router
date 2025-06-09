@@ -188,11 +188,12 @@ impl Service<router::Request> for PrometheusService {
             let modified_stats = stats.replace("_total_total", "_total");
 
             router::Response::http_response_builder()
-                .response(http::Response::builder()
-                    .status(StatusCode::OK)
-                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body(router::body::from_bytes(modified_stats))
-                    .map_err(BoxError::from)?
+                .response(
+                    http::Response::builder()
+                        .status(StatusCode::OK)
+                        .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+                        .body(router::body::from_bytes(modified_stats))
+                        .map_err(BoxError::from)?,
                 )
                 .context(req.context)
                 .build()

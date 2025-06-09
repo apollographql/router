@@ -1377,10 +1377,7 @@ mod tests {
         // randomness of Uuid::new_v4()
         let body = res.response.body_mut();
         let old_errors = std::mem::take(&mut body.errors);
-        let new_errors = old_errors
-            .into_iter()
-            .map(|e| e.with_null_id())
-            .collect();
+        let new_errors = old_errors.into_iter().map(|e| e.with_null_id()).collect();
         body.errors = new_errors;
 
         assert_debug_snapshot!(res, @r#"

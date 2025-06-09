@@ -553,10 +553,9 @@ mod tests {
             Ok::<_, BoxError>(
                 router::Response::http_response_builder()
                     .response(
-                        http::Response::builder()
-                            .body::<crate::services::router::Body>(body::from_bytes(
-                                "this is a test".to_string(),
-                            ))?
+                        http::Response::builder().body::<crate::services::router::Body>(
+                            body::from_bytes("this is a test".to_string()),
+                        )?,
                     )
                     .context(req.context)
                     .build()
@@ -597,10 +596,9 @@ mod tests {
         let endpoint = service_fn(|req: router::Request| async move {
             router::Response::http_response_builder()
                 .response(
-                    http::Response::builder()
-                        .body::<crate::services::router::Body>(body::from_bytes(
-                            "this is a test".to_string(),
-                        ))?
+                    http::Response::builder().body::<crate::services::router::Body>(
+                        body::from_bytes("this is a test".to_string()),
+                    )?,
                 )
                 .context(req.context)
                 .build()

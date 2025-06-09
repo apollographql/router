@@ -978,7 +978,7 @@ mod tests {
                       "code": "ERROR"
                    },
                     // Override id to avoid comparing random value
-                   "apolloId": actual_response.errors.first().unwrap().apollo_id() 
+                   "apolloId": actual_response.errors.first().unwrap().apollo_id()
                 }]
             }))
             .unwrap(),

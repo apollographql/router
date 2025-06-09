@@ -76,7 +76,6 @@ mod forbid_http_get_mutations_tests {
 
     use super::*;
     use crate::graphql;
-    use crate::graphql::Response;
     use crate::http_ext::Request;
     use crate::plugin::PluginInit;
     use crate::plugin::test::MockExecutionService;

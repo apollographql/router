@@ -259,6 +259,7 @@ mod tests {
     use serde_json::json;
     use serde_json_bytes::json as bjson;
     use uuid::Uuid;
+
     use super::*;
     use crate::graphql::Location;
 

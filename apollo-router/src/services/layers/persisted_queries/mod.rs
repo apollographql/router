@@ -459,7 +459,7 @@ fn supergraph_err(
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-    use http_body_util::BodyExt;
+
     use serde_json::json;
     use tracing::instrument::WithSubscriber;
 
@@ -705,7 +705,8 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),
@@ -842,7 +843,8 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),
@@ -1086,7 +1088,8 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),
@@ -1213,11 +1216,13 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),
-            vec![graphql_err_pq_id_required().with_null_id()]);
+            vec![graphql_err_pq_id_required().with_null_id()]
+        );
 
         // Try again skipping enforcement.
         let context = Context::new();
@@ -1346,7 +1351,8 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),
@@ -1385,7 +1391,8 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors
+            response
+                .errors
                 .iter()
                 .map(|e| e.clone().with_null_id())
                 .collect::<Vec<Error>>(),

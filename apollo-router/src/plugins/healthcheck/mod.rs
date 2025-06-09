@@ -13,7 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use http::response::Parts;
+
 use http::StatusCode;
 use multimap::MultiMap;
 use schemars::JsonSchema;
@@ -294,7 +294,7 @@ impl PluginPrivate for HealthCheck {
                             .response(http::Response::builder().status(status_code).body(
                                 router::body::from_bytes(
                                     serde_json::to_vec(&health).map_err(BoxError::from)?,
-                                )
+                                ),
                             )?)
                             .context(req.context)
                             .build()

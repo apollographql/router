@@ -291,10 +291,12 @@ fn count_graphql_error(count: u64, code: String) {
 #[cfg(test)]
 mod test {
     use std::collections::HashSet;
+
     use http::StatusCode;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
     use uuid::Uuid;
+
     use crate::Context;
     use crate::context::COUNTED_ERRORS;
     use crate::context::OPERATION_KIND;
@@ -307,8 +309,9 @@ mod test {
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
-    use crate::plugins::telemetry::error_counter::{count_operation_errors, unwrap_from_context};
+    use crate::plugins::telemetry::error_counter::count_operation_errors;
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
+    use crate::plugins::telemetry::error_counter::unwrap_from_context;
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::SupergraphResponse;
 
@@ -414,8 +417,6 @@ mod test {
             let _ = context.insert(OPERATION_KIND, "query".to_string());
             let _ = context.insert(CLIENT_NAME, "client-1".to_string());
             let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
-
-
 
             let new_response = count_supergraph_errors(
                 SupergraphResponse::fake_builder()

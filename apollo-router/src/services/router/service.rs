@@ -321,7 +321,10 @@ impl RouterService {
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
                     router::Response::http_response_builder()
-                        .response(Response::from_parts(parts, router::body::from_bytes(body.clone())))
+                        .response(Response::from_parts(
+                            parts,
+                            router::body::from_bytes(body.clone()),
+                        ))
                         .and_body_to_stash(if display_router_response {
                             Some(body)
                         } else {

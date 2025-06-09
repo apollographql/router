@@ -1070,15 +1070,13 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         status_code: Some(200),
         service: "Mock service".to_string(),
         reason: "Mock error".to_string(),
-    }.to_response();
+    }
+    .to_response();
     // Overwrite error IDs to avoid random Uuid mismatch
     response.errors[0] = response.errors[0].clone().with_null_id();
     expected_response.errors[0] = expected_response.errors[0].clone().with_null_id();
 
-    assert_eq!(
-        response,
-        expected_response
-    );
+    assert_eq!(response, expected_response);
     server.shutdown().await
 }
 

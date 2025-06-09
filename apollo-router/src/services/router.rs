@@ -13,7 +13,6 @@ use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
 use http::header::HeaderName;
-use http::response::Parts;
 use http_body_util::BodyExt;
 use multer::Multipart;
 use multimap::MultiMap;

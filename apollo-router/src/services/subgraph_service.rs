@@ -3233,7 +3233,8 @@ mod tests {
             &parts,
         );
         // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual.errors
+        actual.errors = actual
+            .errors
             .into_iter()
             .map(|e| e.clone().with_null_id())
             .collect();
@@ -3306,7 +3307,8 @@ mod tests {
             &parts,
         );
         // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual.errors
+        actual.errors = actual
+            .errors
             .into_iter()
             .map(|e| e.clone().with_null_id())
             .collect();
@@ -3345,7 +3347,8 @@ mod tests {
             &parts,
         );
         // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual.errors
+        actual.errors = actual
+            .errors
             .into_iter()
             .map(|e| e.clone().with_null_id())
             .collect();

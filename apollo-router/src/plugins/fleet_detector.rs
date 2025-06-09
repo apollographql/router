@@ -276,10 +276,10 @@ impl PluginPrivate for FleetDetector {
                         router::body::from_result_stream(body.into_data_stream().inspect(|res| {
                             if let Ok(bytes) = res {
                                 u64_counter!(
-                                "apollo.router.operations.response_size",
-                                "Total number of response bytes to clients",
-                                bytes.len() as u64
-                            );
+                                    "apollo.router.operations.response_size",
+                                    "Total number of response bytes to clients",
+                                    bytes.len() as u64
+                                );
                             }
                         }))
                     }))
@@ -533,6 +533,7 @@ mod tests {
 
     use http::StatusCode;
     use tower::Service as _;
+
     use super::*;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
