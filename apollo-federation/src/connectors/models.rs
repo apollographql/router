@@ -413,7 +413,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -524,11 +524,7 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                batch_settings: Some(
-                    ConnectorBatchSettings {
-                        max_size: None,
-                    },
-                ),
+                batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
                     source_extensions: None,
@@ -656,11 +652,7 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                batch_settings: Some(
-                    ConnectorBatchSettings {
-                        max_size: None,
-                    },
-                ),
+                batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
                     source_extensions: None,
@@ -668,7 +660,7 @@ mod tests {
                 },
             },
         }
-        "#);
+        "###);
     }
 
     #[test]
