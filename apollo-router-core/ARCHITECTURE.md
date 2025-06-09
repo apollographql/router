@@ -645,11 +645,81 @@ This pattern ensures that error information flows correctly through the service 
 - Separate test files: `tests.rs` adjacent to `mod.rs`
 - Use `#[cfg(test)] mod tests;` in `mod.rs` files
 - Traits should be annotated with `#[cfg_attr(test, mry::mry)]`
+- **Use TowerTest consistently**: Always use `TowerTest` from `test_utils::tower_test` instead of creating custom mock services
 - Avoid mocking when possible; prefer `mry` over `mockall` when mocking is necessary
-- Use `tower-test` for testing Tower layers and services
 - Externalize test fixtures using `include_str!` and prefer YAML format
 - Write tests that exercise real implementations, not just mocks
 - **Extensions Testing**: Always test that layers properly extend and return original Extensions
+
+#### TowerTest Guidelines
+
+**Critical Principle**: All Tower service and layer tests **must** use the `TowerTest` utility instead of creating custom `MockService` implementations.
+
+##### Why TowerTest Over Custom Mocks
+
+- **Standardized Testing**: Consistent test patterns across the codebase
+- **Automatic Timeout Protection**: Prevents hanging tests with configurable timeouts
+- **Panic Detection**: Catches and reports panics in test expectations clearly
+- **Type Inference**: No type annotations required for test expectations
+- **Better Error Messages**: Clear failure messages when tests fail or timeout
+- **Maintenance**: Centralized test utilities reduce code duplication
+
+##### TowerTest Usage Pattern
+
+Always use this pattern for layer and service testing:
+
+```rust
+use crate::test_utils::tower_test::TowerTest;
+
+#[tokio::test]
+async fn test_my_layer() -> Result<(), Box<dyn std::error::Error>> {
+    let layer = MyLayer::new();
+    let request = MyRequest::new("test");
+
+    let response = TowerTest::builder()
+        .layer(layer)
+        .oneshot(request, |mut downstream| async move {
+            downstream.allow(1);
+            let (req, resp) = downstream.next_request().await.expect("should receive request");
+            // Verify and respond to the request
+            resp.send_response(MyResponse::success());
+        })
+        .await?;
+
+    // Verify final response
+    assert_eq!(response.status, "success");
+    Ok(())
+}
+```
+
+##### Migration from Custom Mocks
+
+When encountering tests with custom `MockService` implementations:
+
+1. **Remove** the custom mock service struct and implementation
+2. **Replace** with `TowerTest::builder().layer().oneshot()` pattern
+3. **Update** test logic to use expectations closure for downstream behavior
+4. **Add** proper error handling with `Result<(), Box<dyn std::error::Error>>` return type
+
+**Before (❌ Avoid)**:
+```rust
+struct MockService { /* custom implementation */ }
+let mock = MockService::new(responses);
+let service = layer.layer(mock);
+let response = service.call(request).await;
+```
+
+**After (✅ Correct)**:
+```rust
+let response = TowerTest::builder()
+    .layer(layer)
+    .oneshot(request, |mut downstream| async move {
+        downstream.allow(1);
+        let (req, resp) = downstream.next_request().await.expect("should receive request");
+        resp.send_response(expected_response);
+    })
+    .await?;
+```
 
 #### Error Testing
 
