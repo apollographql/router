@@ -83,11 +83,11 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
         .iter()
-        .map(|directive| directive.name)
+        .map(|directive| directive.name.clone())
         .collect_vec();
 
     for source in source_directives {
-        messages.extend(source.type_check())
+        messages.extend(source.type_check());
     }
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {

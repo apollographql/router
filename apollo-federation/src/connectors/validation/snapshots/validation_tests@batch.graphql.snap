@@ -22,7 +22,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
         code: SourceNameMismatch,
         message: "`@connect(source: \"missing\")` on `T` does not match any defined sources. Did you mean \"json\"?",
         locations: [
-            31:5..31:22,
+            31:13..31:22,
         ],
     },
     Message {
