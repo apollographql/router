@@ -1,12 +1,12 @@
 ---
-source: connectify-ql/src/codegen/grpc.rs
+source: connectify-ql/src/codegen/grpc/mod.rs
 expression: proto
 ---
 FileDescriptorSet {
     file: [
         FileDescriptorProto {
             name: Some(
-                "src/codegen/fixture/user.proto",
+                "src/codegen/grpc/fixture/user.proto",
             ),
             package: Some(
                 "com.example.users",

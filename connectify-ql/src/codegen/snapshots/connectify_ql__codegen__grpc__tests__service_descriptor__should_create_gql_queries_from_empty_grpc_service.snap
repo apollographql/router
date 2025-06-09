@@ -1,7 +1,0 @@
----
-source: connectify-ql/src/codegen/grpc.rs
-expression: s
----
-type Query {
-  check
-}

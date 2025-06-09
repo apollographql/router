@@ -1,5 +1,5 @@
 ---
-source: connectify-ql/src/codegen/grpc.rs
+source: connectify-ql/src/codegen/grpc/processor.rs
 expression: s
 ---
 enum MyEnum {

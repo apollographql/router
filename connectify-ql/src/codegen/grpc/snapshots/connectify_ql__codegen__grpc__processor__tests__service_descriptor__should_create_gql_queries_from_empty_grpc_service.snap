@@ -1,0 +1,7 @@
+---
+source: connectify-ql/src/codegen/grpc/processor.rs
+expression: s
+---
+type Query {
+  check
+}

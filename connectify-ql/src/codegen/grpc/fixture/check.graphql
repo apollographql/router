@@ -1,4 +1,4 @@
-type Empty {
+type Google_Protobuf_Empty {
 }
 
 type CustomEmpty {

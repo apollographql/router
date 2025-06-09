@@ -1,166 +1,16 @@
-use std::fs::File;
-use std::io::prelude::*;
-use std::{
-    fmt::{Display, Write as _},
-    path::PathBuf,
-    str::FromStr,
-};
+use std::fmt::Write as _;
 
+use crate::codegen::grpc::GrpcCodegenError;
+use crate::codegen::grpc::types::{AvailableType, GraphqlType, GrpcType};
 use crate::sources::Grpc;
-use convert_case::{Case, Casing};
-use prost_types::{
-    DescriptorProto, EnumDescriptorProto, FileDescriptorSet, ServiceDescriptorProto,
-};
-use protox::Error as ProtoxError;
+use convert_case::{Boundary, Case, Casing};
+use prost_types::{DescriptorProto, EnumDescriptorProto, ServiceDescriptorProto};
 
-#[derive(Debug, thiserror::Error)]
-pub enum GrpcCodegenError {
-    #[error("failed to compile grpc: {0}")]
-    ProtoxCompile(#[from] ProtoxError),
-    #[error("failed to write new graphql file from grpc")]
-    IO(#[from] std::io::Error),
-    #[error("failed to write graphql content")]
-    Write(#[from] std::fmt::Error),
-    #[error("grpc type `{0:?}` not supported by GraphQL, try {1}")]
-    TypeNotSupported(GrpcType, GraphqlType),
-    #[error("unknown gRPC type")]
-    UnknownGrpcType,
-    #[error("gRPC service `{0}` not found in protos. Available services are: {1}.")]
-    ServiceNotFound(String, String),
-}
-
-#[derive(Debug)]
-#[repr(i32)]
-pub enum GrpcType {
-    Double = 1,
-    Float = 2,
-    Int64 = 3,
-    Uint64 = 4,
-    Int32 = 5,
-    Fixed64 = 6,
-    Fixed32 = 7,
-    Bool = 8,
-    String = 9,
-    Group = 10,
-    Message = 11,
-    Bytes = 12,
-    Uint32 = 13,
-    Enum = 14,
-    Sfixed32 = 15,
-    Sfixed64 = 16,
-    Sint32 = 17,
-    Sint64 = 18,
-}
-
-impl TryFrom<i32> for GrpcType {
-    type Error = GrpcCodegenError;
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        if !(1..=18).contains(&value) {
-            Err(GrpcCodegenError::UnknownGrpcType)
-        } else {
-            // SAFTEY: Borders checked in if branch
-            // SAFETY 2: This value should only be created by the GRPC protox, so it should be contained
-            Ok(unsafe { std::mem::transmute::<i32, GrpcType>(value) })
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GraphqlType {
-    Int,
-    Float,
-    String,
-    Boolean,
-    ID,
-    Enum,
-    CustomType,
-}
-
-impl Display for GraphqlType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl TryFrom<GrpcType> for GraphqlType {
-    type Error = GrpcCodegenError;
-
-    fn try_from(value: GrpcType) -> Result<Self, Self::Error> {
-        Ok(match value {
-            GrpcType::Double => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Double,
-                    GraphqlType::Float,
-                ));
-            }
-            GrpcType::Float => GraphqlType::Float,
-            GrpcType::Int64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Int64,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Uint64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Uint64,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Fixed64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Fixed64,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Fixed32 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Fixed32,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Bool => GraphqlType::Boolean,
-            GrpcType::String => GraphqlType::String,
-            GrpcType::Group => GraphqlType::CustomType,
-            GrpcType::Message => GraphqlType::CustomType,
-            GrpcType::Bytes => GraphqlType::ID,
-            GrpcType::Uint32 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Uint32,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Enum => GraphqlType::Enum,
-            GrpcType::Sfixed64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Sfixed64,
-                    GraphqlType::Int,
-                ));
-            }
-            GrpcType::Sint32 | GrpcType::Sfixed32 | GrpcType::Int32 => GraphqlType::Int,
-            GrpcType::Sint64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Sint64,
-                    GraphqlType::Int,
-                ));
-            }
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AvailableType {
-    name: String,
-    is_empty: bool,
-}
-
-fn proto_ast(grpc: &Grpc) -> Result<FileDescriptorSet, GrpcCodegenError> {
-    Ok(protox::compile([&grpc.file], ["."])?)
-}
-
-fn process_enum_types(
+pub fn process_enum_types(
     content: &mut String,
     enum_types: &[EnumDescriptorProto],
     service: &str,
+    external_path: &str,
 ) -> Result<Vec<AvailableType>, GrpcCodegenError> {
     let default_naming = service.split('.').last().unwrap_or("GrpcService");
     let mut available_types = Vec::new();
@@ -184,11 +34,26 @@ fn process_enum_types(
             })
             .collect::<Vec<_>>();
         available_types.push(AvailableType {
-            name: name.clone(),
+            name: if external_path.is_empty() {
+                name.clone()
+            } else {
+                format!("{external_path}.{name}")
+            },
             is_empty: values.is_empty(),
         });
 
-        writeln!(content, "enum {} {{", name)?;
+        if external_path.is_empty() {
+            writeln!(content, "enum {} {{", name)?;
+        } else {
+            writeln!(
+                content,
+                "enum {}_{} {{",
+                external_path
+                    .with_boundaries(&[Boundary::from_delim(".")])
+                    .to_case(Case::Ada),
+                name
+            )?;
+        };
         for value in values {
             writeln!(content, "  {}", value)?;
         }
@@ -197,10 +62,11 @@ fn process_enum_types(
     Ok(available_types)
 }
 
-fn process_message_types(
+pub fn process_message_types(
     content: &mut String,
     message_types: &[DescriptorProto],
     service: &str,
+    external_path: &str,
 ) -> Result<Vec<AvailableType>, GrpcCodegenError> {
     let default_naming = service.split('.').last().unwrap_or("GrpcService");
     let mut available_types = Vec::new();
@@ -227,11 +93,26 @@ fn process_message_types(
             .collect::<Vec<_>>();
 
         available_types.push(AvailableType {
-            name: name.clone(),
+            name: if external_path.is_empty() {
+                name.clone()
+            } else {
+                format!("{external_path}.{name}")
+            },
             is_empty: values.is_empty(),
         });
 
-        writeln!(content, "type {} {{", name)?;
+        if external_path.is_empty() {
+            writeln!(content, "type {} {{", name)?;
+        } else {
+            writeln!(
+                content,
+                "type {}_{} {{",
+                external_path
+                    .with_boundaries(&[Boundary::from_delim(".")])
+                    .to_case(Case::Ada),
+                name
+            )?;
+        };
         for (idx, attribute_name, mut attribute_type_name, attribute_type, is_optional) in values {
             write!(
                 content,
@@ -269,7 +150,7 @@ fn process_message_types(
     Ok(available_types)
 }
 
-fn process_service(
+pub fn process_service(
     content: &mut String,
     services: &[ServiceDescriptorProto],
     grpc: &Grpc,
@@ -374,102 +255,10 @@ fn process_service(
     Ok(())
 }
 
-pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
-    let proto_ast = proto_ast(grpc)?;
-    let graphql_file = grpc.file.replace(".proto", ".graphql");
-    let mut graphql_content = String::new();
-    let default_service = grpc.service.split('.').last().unwrap_or("GrpcService");
-    if !proto_ast
-        .file
-        .iter()
-        .flat_map(|file| &file.service)
-        .any(|service| service.name() == default_service)
-    {
-        return Err(GrpcCodegenError::ServiceNotFound(
-            default_service.to_string(),
-            proto_ast
-                .file
-                .iter()
-                .flat_map(|file| &file.service)
-                .map(|service| service.name())
-                .collect::<Vec<_>>()
-                .join(", "),
-        ));
-    }
-
-    // process all types first
-    // for file in &proto_ast.file {
-    //     process_enum_types(&mut graphql_content, &file.enum_type, &grpc.service)?;
-    //     process_message_types(&mut graphql_content, &file.message_type, &grpc.service)?;
-    // }
-    let available_types: Result<Vec<AvailableType>, GrpcCodegenError> = proto_ast
-        .file
-        .iter()
-        .map(|file| {
-            Ok((
-                process_enum_types(&mut graphql_content, &file.enum_type, &grpc.service)?,
-                process_message_types(&mut graphql_content, &file.message_type, &grpc.service)?,
-            ))
-        })
-        .try_fold(Vec::new(), |mut acc, types: Result<_, GrpcCodegenError>| {
-            let (mut enums, mut messages) = types?;
-            acc.append(&mut enums);
-            acc.append(&mut messages);
-            Ok(acc)
-        });
-    let available_types = available_types?;
-
-    // process all services
-    for file in &proto_ast.file {
-        process_service(&mut graphql_content, &file.service, grpc, &available_types)?;
-    }
-
-    let mut file = File::create(&graphql_file)?;
-    file.write_all(graphql_content.as_bytes())?;
-
-    // Infallible error
-    Ok(PathBuf::from_str(&graphql_file).unwrap())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use insta::assert_snapshot;
-
-    #[test]
-    fn should_generate_file_descriptor_when_correct_grpc() {
-        let grpc = grpc();
-        let proto = format!("{:#?}", proto_ast(&grpc).unwrap());
-        assert_snapshot!(proto);
-    }
-
-    #[test]
-    fn should_error_when_wrong_file_name() {
-        let mut grpc = grpc();
-        grpc.file = "wrong/name.proto".to_string();
-        let err = proto_ast(&grpc).unwrap_err().to_string();
-        assert_eq!(
-            err,
-            "failed to compile grpc: file 'wrong/name.proto' is not in any include path"
-        );
-    }
-
-    #[test]
-    fn should_generate_graphql_from_grpc() {
-        let grpc = grpc();
-        let path = generate(&grpc).unwrap();
-        let graphql: String = std::fs::read_to_string(path).unwrap();
-        assert_snapshot!(graphql);
-    }
-
-    fn grpc() -> Grpc {
-        Grpc {
-            file: "src/codegen/fixture/user.proto".to_string(),
-            service: "com.example.users.UserService".to_string(),
-            endpoint: "localhost:8080".to_string(),
-            mutations: vec!["CreateUser".to_string()],
-        }
-    }
 
     mod enum_descriptor {
         use std::str::FromStr;
@@ -497,7 +286,7 @@ mod tests {
             };
             let nameless_service = String::new();
 
-            process_enum_types(&mut s, &[enum_descriptor], &nameless_service).unwrap();
+            process_enum_types(&mut s, &[enum_descriptor], &nameless_service, "").unwrap();
 
             assert_snapshot!(s);
         }
@@ -521,13 +310,15 @@ mod tests {
             };
             let service = String::from_str("UserService").unwrap();
 
-            process_enum_types(&mut s, &[enum_descriptor], &service).unwrap();
+            process_enum_types(&mut s, &[enum_descriptor], &service, "").unwrap();
 
             assert_snapshot!(s);
         }
     }
 
     mod message_descriptor {
+        use std::str::FromStr;
+
         use prost_types::FieldDescriptorProto;
 
         use super::*;
@@ -593,7 +384,7 @@ mod tests {
             };
             let nameless_service = String::new();
 
-            process_message_types(&mut s, &[message_descriptor], &nameless_service).unwrap();
+            process_message_types(&mut s, &[message_descriptor], &nameless_service, "").unwrap();
 
             assert_snapshot!(s);
         }
@@ -617,7 +408,7 @@ mod tests {
             };
             let service = String::from_str("MyRandomService").unwrap();
 
-            process_message_types(&mut s, &[message_descriptor], &service).unwrap();
+            process_message_types(&mut s, &[message_descriptor], &service, "").unwrap();
 
             assert_snapshot!(s);
         }
@@ -641,7 +432,8 @@ mod tests {
             };
             let service = String::from_str("MyRandomService").unwrap();
 
-            let err = process_message_types(&mut s, &[message_descriptor], &service).unwrap_err();
+            let err =
+                process_message_types(&mut s, &[message_descriptor], &service, "").unwrap_err();
             let err = err.to_string();
             assert_eq!(err, "unknown gRPC type");
         }
@@ -666,7 +458,8 @@ mod tests {
             };
             let service = String::from_str("MyRandomService").unwrap();
 
-            let err = process_message_types(&mut s, &[message_descriptor], &service).unwrap_err();
+            let err =
+                process_message_types(&mut s, &[message_descriptor], &service, "").unwrap_err();
             let err = err.to_string();
             assert_eq!(err, "unknown gRPC type");
         }
@@ -767,34 +560,6 @@ mod tests {
                 ],
                 options: None,
             }]
-        }
-    }
-
-    mod import_files {
-        use super::*;
-
-        #[test]
-        fn should_generate_file_descriptor_when_correct_grpc() {
-            let grpc = null_grpc();
-            let proto = format!("{:#?}", proto_ast(&grpc).unwrap());
-            assert_snapshot!(proto);
-        }
-
-        #[test]
-        fn should_generate_graphql_from_empty_grpc() {
-            let grpc = null_grpc();
-            let path = generate(&grpc).unwrap();
-            let graphql: String = std::fs::read_to_string(path).unwrap();
-            assert_snapshot!(graphql);
-        }
-
-        fn null_grpc() -> Grpc {
-            Grpc {
-                file: "src/codegen/fixture/check.proto".to_string(),
-                service: "com.example.check.CheckService".to_string(),
-                endpoint: "localhost:8080".to_string(),
-                mutations: vec![],
-            }
         }
     }
 }

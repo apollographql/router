@@ -1,5 +1,5 @@
 ---
-source: connectify-ql/src/codegen/grpc.rs
+source: connectify-ql/src/codegen/grpc/mod.rs
 expression: proto
 ---
 FileDescriptorSet {
@@ -344,7 +344,7 @@ FileDescriptorSet {
         },
         FileDescriptorProto {
             name: Some(
-                "src/codegen/fixture/check.proto",
+                "src/codegen/grpc/fixture/check.proto",
             ),
             package: Some(
                 "com.example.check",

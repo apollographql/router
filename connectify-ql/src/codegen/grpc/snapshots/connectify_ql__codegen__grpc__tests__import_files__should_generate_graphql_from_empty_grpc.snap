@@ -1,8 +1,8 @@
 ---
-source: connectify-ql/src/codegen/grpc.rs
+source: connectify-ql/src/codegen/grpc/mod.rs
 expression: graphql
 ---
-type Empty {
+type Google_Protobuf_Empty {
 }
 
 type CustomEmpty {
