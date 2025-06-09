@@ -93,6 +93,9 @@ fn generate_error_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
     // Generate registry entry
     let registry_entry = generate_registry_entry(enum_name, &variant_info)?;
 
+    // Generate GraphQL error handler registration
+    let graphql_handler_entry = generate_graphql_handler_entry(enum_name)?;
+
     let expanded = quote! {
         // Compile-time check that required traits are implemented
         // This will produce helpful error messages if derives are missing
@@ -121,6 +124,8 @@ fn generate_error_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
         }
 
         #registry_entry
+
+        #graphql_handler_entry
     };
 
     Ok(expanded)
@@ -497,7 +502,7 @@ fn generate_registry_entry(
                     name: #variant_name,
                     code: #error_code,
                     help: #help_value,
-                    graphql_fields: vec![#(#graphql_fields),*],
+                    graphql_fields: &[#(#graphql_fields),*],
                 }
             }
         })
@@ -535,6 +540,30 @@ fn extract_component_and_category(error_code: &str) -> (String, String) {
     } else {
         ("unknown".to_string(), "unknown".to_string())
     }
+}
+
+fn generate_graphql_handler_entry(
+    enum_name: &syn::Ident,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let enum_name_str = enum_name.to_string();
+
+    // Generate a unique identifier for the handler function to avoid name collisions
+    let handler_function_name =
+        format_ident!("__{}_graphql_error_handler", enum_name.to_string().to_uppercase());
+    
+    // Generate a unique static name to avoid collisions
+    let handler_static_name =
+        format_ident!("__{}_GRAPHQL_ERROR_HANDLER", enum_name.to_string().to_uppercase());
+
+    Ok(quote! {
+        #[cfg(feature = "registry")]
+        apollo_router_error::register_graphql_error_handler! {
+            handler_name: #handler_function_name,
+            static_name: #handler_static_name,
+            type_name: #enum_name_str,
+            error_type: #enum_name
+        }
+    })
 }
 
 #[cfg(test)]

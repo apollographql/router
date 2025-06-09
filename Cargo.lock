@@ -157,9 +157,11 @@ dependencies = [
  "http-body",
  "http-body-util",
  "insta",
+ "linkme",
  "miette",
  "mry",
  "proc-macro2",
+ "quick_cache",
  "quote",
  "serde",
  "serde_json",
@@ -1482,6 +1484,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37d3544b3f2748c54e147655edb5025752e2303145b5aefb3c3ea2c78b973bb0"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick_cache"
+version = "0.6.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b450dad8382b1b95061d5ca1eb792081fb082adf48c678791fe917509596d5f"
+dependencies = [
+ "ahash",
+ "equivalent",
+ "hashbrown 0.15.4",
+ "parking_lot",
 ]
 
 [[package]]

@@ -18,6 +18,9 @@ use tower::{Service, ServiceBuilder};
 
 pub use extensions::Extensions;
 
+// Re-export error functionality
+pub use error::{Error, ToGraphQLError, GraphQLError, GraphQLErrorContext};
+
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
 ///
 /// Example usage:

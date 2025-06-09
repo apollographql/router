@@ -30,6 +30,7 @@ serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 apollo-router-error = { path = "../apollo-router-error" }
+linkme = "0.3"
 
 # Optional: For procedural macros if we want custom error code generation
 syn = { version = "2.0", optional = true, features = ["full"] }
@@ -42,5 +43,7 @@ tokio-test = "0.4.4"
 tower-test = "0.4.0"
 
 [features]
+default = ["registry"]
+registry = ["apollo-router-error/registry"]
 # ... existing features ...
 error-code-generation = ["syn", "quote", "proc-macro2"]

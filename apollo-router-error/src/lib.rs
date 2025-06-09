@@ -10,11 +10,12 @@
 //! - JSON serialization of error metadata
 //! - Component and category-based error filtering
 //! - Base error trait for all Apollo Router errors
+//! - Universal GraphQL error conversion through error registry and downcasting
 //!
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use apollo_router_error::{get_registered_errors, Error};
+//! use apollo_router_error::{get_registered_errors, Error, ToGraphQLError};
 //!
 //! // Define errors using the re-exported derive macro
 //! #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
@@ -32,6 +33,10 @@
 //! for error in all_errors {
 //!     println!("Error: {} - {}", error.type_name, error.error_code);
 //! }
+//!
+//! // Convert any error to GraphQL error (even if not Apollo Router error)
+//! let std_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
+//! let graphql_error = std_error.to_graphql_error();
 //! ```
 
 // Re-export linkme for use by the derive macro
@@ -46,7 +51,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Error registration entry for introspection
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ErrorRegistryEntry {
     /// The error type name
     pub type_name: &'static str,
@@ -61,11 +66,11 @@ pub struct ErrorRegistryEntry {
     /// Help text if available
     pub help_text: Option<&'static str>,
     /// Error variants and their codes
-    pub variants: Vec<ErrorVariantInfo>,
+    pub variants: &'static [ErrorVariantInfo],
 }
 
 /// Information about an error variant
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ErrorVariantInfo {
     /// Variant name
     pub name: &'static str,
@@ -74,7 +79,78 @@ pub struct ErrorVariantInfo {
     /// Help text for this variant
     pub help: Option<&'static str>,
     /// Field names that will be included in GraphQL extensions
-    pub graphql_fields: Vec<&'static str>,
+    pub graphql_fields: &'static [&'static str],
+}
+
+/// Serializable version of ErrorRegistryEntry for JSON export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableErrorRegistryEntry {
+    /// The error type name
+    pub type_name: String,
+    /// The primary error code for this type
+    pub error_code: String,
+    /// The error category (extracted from error code)
+    pub category: String,
+    /// The error component (extracted from error code)
+    pub component: String,
+    /// Documentation URL if available
+    pub docs_url: Option<String>,
+    /// Help text if available
+    pub help_text: Option<String>,
+    /// Error variants and their codes
+    pub variants: Vec<SerializableErrorVariantInfo>,
+}
+
+/// Serializable version of ErrorVariantInfo for JSON export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableErrorVariantInfo {
+    /// Variant name
+    pub name: String,
+    /// Error code for this variant
+    pub code: String,
+    /// Help text for this variant
+    pub help: Option<String>,
+    /// Field names that will be included in GraphQL extensions
+    pub graphql_fields: Vec<String>,
+}
+
+impl From<&ErrorRegistryEntry> for SerializableErrorRegistryEntry {
+    fn from(entry: &ErrorRegistryEntry) -> Self {
+        Self {
+            type_name: entry.type_name.to_string(),
+            error_code: entry.error_code.to_string(),
+            category: entry.category.to_string(),
+            component: entry.component.to_string(),
+            docs_url: entry.docs_url.map(|s| s.to_string()),
+            help_text: entry.help_text.map(|s| s.to_string()),
+            variants: entry.variants.iter().map(SerializableErrorVariantInfo::from).collect(),
+        }
+    }
+}
+
+impl From<&ErrorVariantInfo> for SerializableErrorVariantInfo {
+    fn from(variant: &ErrorVariantInfo) -> Self {
+        Self {
+            name: variant.name.to_string(),
+            code: variant.code.to_string(),
+            help: variant.help.map(|s| s.to_string()),
+            graphql_fields: variant.graphql_fields.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+/// Type alias for a GraphQL error conversion handler function
+/// 
+/// This function takes a `dyn std::error::Error + 'static` and attempts to downcast it
+/// to a specific error type. If successful, it converts it to a GraphQL error.
+pub type GraphQLErrorHandler = fn(&(dyn std::error::Error + 'static), GraphQLErrorContext) -> Option<GraphQLError>;
+
+/// GraphQL error conversion handler entry
+pub struct GraphQLErrorHandlerEntry {
+    /// The error type name this handler supports
+    pub type_name: &'static str,
+    /// The conversion function
+    pub handler: GraphQLErrorHandler,
 }
 
 /// Base error trait for all Apollo Router errors.
@@ -124,6 +200,82 @@ pub trait Error: std::error::Error + Diagnostic {
     /// additional context to the GraphQL error extensions.
     fn populate_graphql_extensions(&self, _extensions_map: &mut BTreeMap<String, serde_json::Value>) {
         // Default implementation - specific errors can override
+    }
+}
+
+/// Universal trait for converting any error to GraphQL format
+/// 
+/// This trait is automatically implemented for all types that implement `std::error::Error`
+/// and provides a unified interface for converting errors to GraphQL format.
+/// 
+/// The trait uses the error registry to attempt downcasting to known Apollo Router error types
+/// first, falling back to a generic GraphQL error if no specific handler is found.
+pub trait ToGraphQLError {
+    /// Converts this error to a GraphQL error format using the error registry
+    fn as_graphql_error(&self) -> GraphQLError;
+
+    /// Converts this error to a GraphQL error format with additional context using the error registry
+    fn as_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError;
+}
+
+/// Blanket implementation of ToGraphQLError for all std::error::Error types
+impl<T: std::error::Error + 'static> ToGraphQLError for T {
+    fn as_graphql_error(&self) -> GraphQLError {
+        self.as_graphql_error_with_context(GraphQLErrorContext::default())
+    }
+
+    fn as_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError {
+        // Try to convert using registered handlers first
+        for handler_entry in GRAPHQL_ERROR_HANDLERS.iter() {
+            if let Some(graphql_error) = (handler_entry.handler)(self as &dyn std::error::Error, context.clone()) {
+                return graphql_error;
+            }
+        }
+
+        // Fall back to generic GraphQL error
+        create_generic_graphql_error(self as &dyn std::error::Error, context)
+    }
+}
+
+/// Creates a generic GraphQL error for unknown error types
+fn create_generic_graphql_error(error: &dyn std::error::Error, context: GraphQLErrorContext) -> GraphQLError {
+    let mut extensions = GraphQLErrorExtensions {
+        code: "APOLLO_ROUTER_UNKNOWN_ERROR".to_string(),
+        timestamp: Utc::now(),
+        service: context
+            .service_name
+            .unwrap_or_else(|| "apollo-router".to_string()),
+        trace_id: context.trace_id,
+        request_id: context.request_id,
+        details: BTreeMap::new(),
+    };
+
+    // Add the error type information
+    extensions.details.insert(
+        "errorType".to_string(),
+        serde_json::Value::String(std::any::type_name_of_val(error).to_string()),
+    );
+
+    // Include error chain information
+    let mut error_chain = Vec::new();
+    let mut current = Some(error);
+    while let Some(err) = current {
+        error_chain.push(err.to_string());
+        current = err.source();
+    }
+    
+    if error_chain.len() > 1 {
+        extensions.details.insert(
+            "errorChain".to_string(),
+            serde_json::to_value(error_chain).unwrap_or(serde_json::Value::Null),
+        );
+    }
+
+    GraphQLError {
+        message: error.to_string(),
+        locations: context.locations.unwrap_or_default(),
+        path: context.path,
+        extensions,
     }
 }
 
@@ -214,7 +366,7 @@ pub struct GraphQLErrorExtensions {
 }
 
 /// Context information for creating GraphQL errors
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GraphQLErrorContext {
     /// Name of the service generating the error
     pub service_name: Option<String>,
@@ -301,6 +453,10 @@ impl GraphQLErrorContextBuilder {
 #[linkme::distributed_slice]
 pub static ERROR_REGISTRY: [ErrorRegistryEntry];
 
+/// Distributed static slice for GraphQL error handlers using linkme
+#[linkme::distributed_slice]
+pub static GRAPHQL_ERROR_HANDLERS: [GraphQLErrorHandlerEntry];
+
 /// Register an error type for introspection
 ///
 /// This macro is used by the derive macro to automatically register error types.
@@ -316,7 +472,7 @@ macro_rules! register_error {
         $(help_text: $help_text:expr,)?
         variants: [$($variants:expr),* $(,)?]
     ) => {
-        #[linkme::distributed_slice($crate::ERROR_REGISTRY)]
+        #[$crate::linkme::distributed_slice($crate::ERROR_REGISTRY)]
         static $registry_name: $crate::ErrorRegistryEntry = $crate::ErrorRegistryEntry {
             type_name: $type_name,
             error_code: $error_code,
@@ -324,7 +480,40 @@ macro_rules! register_error {
             component: $component,
             docs_url: None $(.or(Some($docs_url)))?,
             help_text: None $(.or(Some($help_text)))?,
-            variants: vec![$($variants),*],
+            variants: &[$($variants),*],
+        };
+    };
+}
+
+/// Register a GraphQL error conversion handler
+///
+/// This macro is used by the derive macro to automatically register GraphQL error handlers.
+#[macro_export]
+macro_rules! register_graphql_error_handler {
+    (
+        handler_name: $handler_name:ident,
+        static_name: $static_name:ident,
+        type_name: $type_name:expr,
+        error_type: $error_type:ty
+    ) => {
+        fn $handler_name(
+            error: &(dyn std::error::Error + 'static),
+            context: $crate::GraphQLErrorContext,
+        ) -> Option<$crate::GraphQLError> {
+            // Attempt to downcast to the specific error type
+            if let Some(typed_error) = error.downcast_ref::<$error_type>() {
+                // Convert using the Error trait implementation
+                use $crate::Error as RouterError;
+                Some(RouterError::to_graphql_error_with_context(typed_error, context))
+            } else {
+                None
+            }
+        }
+
+        #[$crate::linkme::distributed_slice($crate::GRAPHQL_ERROR_HANDLERS)]
+        static $static_name: $crate::GraphQLErrorHandlerEntry = $crate::GraphQLErrorHandlerEntry {
+            type_name: $type_name,
+            handler: $handler_name,
         };
     };
 }
@@ -332,6 +521,11 @@ macro_rules! register_error {
 /// Get all registered errors for introspection
 pub fn get_registered_errors() -> &'static [ErrorRegistryEntry] {
     &ERROR_REGISTRY
+}
+
+/// Get all registered GraphQL error handlers
+pub fn get_registered_graphql_handlers() -> &'static [GraphQLErrorHandlerEntry] {
+    &GRAPHQL_ERROR_HANDLERS
 }
 
 /// Get error by exact code match
@@ -344,7 +538,7 @@ pub fn get_error_by_variant_code(
     code: &str,
 ) -> Option<(&'static ErrorRegistryEntry, &ErrorVariantInfo)> {
     for entry in ERROR_REGISTRY.iter() {
-        for variant in &entry.variants {
+        for variant in entry.variants.iter() {
             if variant.code == code {
                 return Some((entry, variant));
             }
@@ -373,7 +567,7 @@ pub fn get_errors_by_category(category: &str) -> Vec<&'static ErrorRegistryEntry
 pub fn get_all_error_codes() -> Vec<&'static str> {
     let mut codes = Vec::new();
     for entry in ERROR_REGISTRY.iter() {
-        for variant in &entry.variants {
+        for variant in entry.variants.iter() {
             codes.push(variant.code);
         }
     }
@@ -387,6 +581,7 @@ pub fn get_all_error_codes() -> Vec<&'static str> {
 pub struct ErrorStats {
     pub total_error_types: usize,
     pub total_variants: usize,
+    pub total_graphql_handlers: usize,
     pub components: Vec<String>,
     pub categories: Vec<String>,
 }
@@ -398,6 +593,7 @@ pub fn get_error_stats() -> ErrorStats {
         .iter()
         .map(|entry| entry.variants.len())
         .sum();
+    let total_graphql_handlers = GRAPHQL_ERROR_HANDLERS.len();
 
     let mut components: Vec<String> = ERROR_REGISTRY
         .iter()
@@ -416,6 +612,7 @@ pub fn get_error_stats() -> ErrorStats {
     ErrorStats {
         total_error_types,
         total_variants,
+        total_graphql_handlers,
         components,
         categories,
     }
@@ -423,7 +620,11 @@ pub fn get_error_stats() -> ErrorStats {
 
 /// Export error registry as JSON
 pub fn export_error_registry_json() -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(&*ERROR_REGISTRY)
+    let serializable: Vec<SerializableErrorRegistryEntry> = ERROR_REGISTRY
+        .iter()
+        .map(SerializableErrorRegistryEntry::from)
+        .collect();
+    serde_json::to_string_pretty(&serializable)
 }
 
 /// Extract component and category from error code
@@ -469,6 +670,7 @@ mod tests {
         let stats = get_error_stats();
         assert!(stats.total_error_types >= 0);
         assert!(stats.total_variants >= 0);
+        assert!(stats.total_graphql_handlers >= 0);
     }
 
     #[test]
@@ -479,5 +681,52 @@ mod tests {
         let json = json_result.unwrap();
         assert!(json.starts_with('['));
         assert!(json.ends_with(']'));
+    }
+
+    #[test]
+    fn test_as_graphql_error_for_std_error() {
+        let std_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
+        let graphql_error = std_error.as_graphql_error();
+        
+        assert_eq!(graphql_error.message, "File not found");
+        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
+        assert_eq!(graphql_error.extensions.service, "apollo-router");
+        
+        // Should have error type information
+        assert!(graphql_error.extensions.details.contains_key("errorType"));
+    }
+
+    #[test]
+    fn test_as_graphql_error_with_context() {
+        let std_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Access denied");
+        let context = GraphQLErrorContext::builder()
+            .service_name("test-service")
+            .trace_id("trace-123")
+            .request_id("req-456")
+            .location(10, 5)
+            .path_field("user")
+            .build();
+            
+        let graphql_error = std_error.as_graphql_error_with_context(context);
+        
+        assert_eq!(graphql_error.message, "Access denied");
+        assert_eq!(graphql_error.extensions.service, "test-service");
+        assert_eq!(graphql_error.extensions.trace_id, Some("trace-123".to_string()));
+        assert_eq!(graphql_error.extensions.request_id, Some("req-456".to_string()));
+        assert_eq!(graphql_error.locations.len(), 1);
+        assert!(graphql_error.path.is_some());
+    }
+
+    #[test]
+    fn test_generic_graphql_error_with_error_chain() {
+        // Create a nested error chain
+        let root_cause = std::io::Error::new(std::io::ErrorKind::NotFound, "Root cause");
+        let wrapper_error = std::io::Error::new(std::io::ErrorKind::Other, "Wrapper error");
+        
+        // Note: std::io::Error doesn't easily allow chaining, so this is a simplified test
+        let graphql_error = root_cause.as_graphql_error();
+        
+        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
+        assert!(graphql_error.extensions.details.contains_key("errorType"));
     }
 }

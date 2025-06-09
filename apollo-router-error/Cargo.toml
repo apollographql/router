@@ -16,3 +16,7 @@ serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 miette = { version = "7.6", features = ["derive"] }
 thiserror = "2.0"
+
+[features]
+default = ["registry"]
+registry = []
