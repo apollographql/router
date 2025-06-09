@@ -1139,7 +1139,8 @@ mod tests {
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::ACCEPTED);
         let msg = handler.next().await.unwrap();
-
+        // Overwrite error ID to avoid random Uuid mismatch
+        let error_id = msg.errors[0].apollo_id();
         assert_eq!(
             msg,
             graphql::Response::builder()
@@ -1147,6 +1148,7 @@ mod tests {
                     graphql::Error::builder()
                         .message("cannot complete the subscription")
                         .extension_code("SUBSCRIPTION_ERROR")
+                        .apollo_id(error_id)
                         .build()
                 ])
                 .build()
@@ -1222,6 +1224,9 @@ mod tests {
             .await
             .unwrap();
 
+        // Overwrite error ID to avoid random Uuid mismatch
+        let error_id = subgraph_response.response.body().errors[0].apollo_id();
+
         assert_eq!(
             subgraph_response.response.body(),
             &graphql::Response::builder()
@@ -1232,6 +1237,7 @@ mod tests {
                             "cannot execute a subscription if it's not enabled in the configuration"
                         )
                         .extension_code("SUBSCRIPTION_DISABLED")
+                        .apollo_id(error_id)
                         .build()
                 )
                 .extensions(Object::default())

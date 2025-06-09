@@ -182,6 +182,9 @@ fn count_operation_errors(
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
+    let _id_str = errors[0].apollo_id().to_string(); // TODO DEBUG REMOVE
+    let _msg_str = errors[0].message.clone(); // TODO DEBUG REMOVE
+
     let previously_counted_errors_map: HashSet<Uuid> = unwrap_from_context(context, COUNTED_ERRORS);
 
     let mut operation_id: String = unwrap_from_context(context, APOLLO_OPERATION_ID);

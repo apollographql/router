@@ -165,6 +165,7 @@ mod test {
     }
 
     #[tokio::test]
+    // TODO CONVERT THIS INTO INTEGRATION TEST WITH free license plugin + telemetry
     async fn it_emits_metrics_when_tps_enforced() {
         async {
             // GIVEN

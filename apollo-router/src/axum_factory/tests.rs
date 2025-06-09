@@ -1047,7 +1047,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
     .await;
     let (server, client) = init(router_service).await;
 
-    let response = client
+    let mut response = client
         .post(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1066,14 +1066,18 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
+    let mut expected_response = crate::error::FetchError::SubrequestHttpError {
+        status_code: Some(200),
+        service: "Mock service".to_string(),
+        reason: "Mock error".to_string(),
+    }.to_response();
+    // Overwrite error IDs to avoid random Uuid mismatch
+    response.errors[0] = response.errors[0].clone().with_null_id();
+    expected_response.errors[0] = expected_response.errors[0].clone().with_null_id();
+
     assert_eq!(
         response,
-        crate::error::FetchError::SubrequestHttpError {
-            status_code: Some(200),
-            service: "Mock service".to_string(),
-            reason: "Mock error".to_string(),
-        }
-        .to_response()
+        expected_response
     );
     server.shutdown().await
 }

@@ -982,12 +982,15 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
+        // Overwrite error ID to avoid random Uuid mismatch
+        let error_id = next_payload.errors[0].apollo_id();
         assert_eq!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
                         "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                     .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .apollo_id(error_id)
                     .build(),
             )
             .build()
@@ -1044,12 +1047,15 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
+        // Overwrite error ID to avoid random Uuid mismatch
+        let error_id = next_payload.errors[0].apollo_id();
         assert_eq!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
                         "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                     .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .apollo_id(error_id)
                     .build(),
             )
             .build()

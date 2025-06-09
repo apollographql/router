@@ -634,6 +634,8 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
         .unwrap_err();
 
     let processed_error = process_error(error);
+    // Overwrite error ID to avoid random Uuid mismatch
+    let error_id = processed_error.body.clone().unwrap().errors[0].apollo_id();
     assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
     assert_eq!(
         processed_error.body,
@@ -643,6 +645,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
                     Error::builder()
                         .message("I have raised a 403")
                         .extension_code("ACCESS_DENIED")
+                        .apollo_id(error_id)
                         .build()
                 }])
                 .build()

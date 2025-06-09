@@ -3226,12 +3226,17 @@ mod tests {
             .body(None)
             .unwrap()
             .into_parts();
-        let actual = super::http_response_to_graphql_response(
+        let mut actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
+        // Null out error IDs so we can avoid random Uuid mismatch
+        actual.errors = actual.errors
+            .into_iter()
+            .map(|e| e.clone().with_null_id())
+            .collect();
 
         let expected = graphql::Response::builder()
             .error(
@@ -3240,7 +3245,8 @@ mod tests {
                     service: "test_service".into(),
                     reason: "418: I'm a teapot".into(),
                 }
-                .to_graphql_error(None),
+                .to_graphql_error(None)
+                .with_null_id(),
             )
             .build();
         assert_eq!(actual, expected);
@@ -3293,16 +3299,21 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let actual = super::http_response_to_graphql_response(
+        let mut actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
+        // Null out error IDs so we can avoid random Uuid mismatch
+        actual.errors = actual.errors
+            .into_iter()
+            .map(|e| e.clone().with_null_id())
+            .collect();
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
-            .error(error)
+            .error(error.with_null_id())
             .build();
         assert_eq!(actual, expected);
     }
@@ -3327,12 +3338,17 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let actual = super::http_response_to_graphql_response(
+        let mut actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
+        // Null out error IDs so we can avoid random Uuid mismatch
+        actual.errors = actual.errors
+            .into_iter()
+            .map(|e| e.clone().with_null_id())
+            .collect();
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
@@ -3342,7 +3358,8 @@ mod tests {
                     service: "test_service".into(),
                     reason: "418: I'm a teapot".into(),
                 }
-                .to_graphql_error(None),
+                .to_graphql_error(None)
+                .with_null_id(),
             )
             .error(error)
             .build();

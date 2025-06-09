@@ -488,7 +488,7 @@ mod apq_tests {
             .path(Path::default())
             .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
             .build();
-        assert_eq!(graphql_response.errors[0], expected_apq_insert_failed_error);
+        assert_eq!(graphql_response.errors[0].clone().with_null_id(), expected_apq_insert_failed_error.with_null_id());
 
         // apq insert failed, this call will miss
         let second_apq_error = router_service
@@ -616,7 +616,7 @@ mod apq_tests {
     }
 
     fn assert_error_matches(expected_error: &Error, res: Response) {
-        assert_eq!(&res.errors[0], expected_error);
+        assert_eq!(res.errors[0].clone().with_null_id(), expected_error.clone().with_null_id());
     }
 
     fn new_context() -> Context {
