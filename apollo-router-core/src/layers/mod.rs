@@ -4,6 +4,7 @@ use tower::layer::util::Stack;
 pub mod bytes_client_to_json_client;
 pub mod bytes_to_http;
 pub mod bytes_to_json;
+pub mod cache;
 pub mod http_client_to_bytes_client;
 pub mod http_to_bytes;
 pub mod json_to_bytes;
@@ -12,10 +13,14 @@ pub mod prepare_query;
 pub use bytes_client_to_json_client::Error as BytesClientToJsonClientError;
 pub use bytes_to_http::Error as BytesToHttpError;
 pub use bytes_to_json::Error as BytesToJsonError;
+pub use cache::Error as CacheError;
 pub use http_client_to_bytes_client::Error as HttpClientToBytesClientError;
 pub use http_to_bytes::Error as HttpToBytesError;
 pub use json_to_bytes::Error as JsonToBytesError;
 pub use prepare_query::Error as PrepareQueryError;
+
+// Re-export cache layer types and functions for convenience
+pub use cache::{CacheLayer, CacheService, query_parse_cache, ArcError};
 
 pub trait ServiceBuilderExt<L> {
     // Server-side transformations (request pipeline)
@@ -30,6 +35,17 @@ pub trait ServiceBuilderExt<L> {
     // Response transformations (reverse direction)
     fn json_to_bytes(self) -> ServiceBuilder<Stack<json_to_bytes::JsonToBytesLayer, L>>;
     fn bytes_to_http(self) -> ServiceBuilder<Stack<bytes_to_http::BytesToHttpLayer, L>>;
+
+    // Caching layer
+    fn cache<Req, Resp, K, F, P>(
+        self, 
+        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>
+    ) -> ServiceBuilder<Stack<cache::CacheLayer<Req, Resp, K, F, P>, L>>
+    where
+        K: std::hash::Hash + Eq + Clone + Send + Sync + 'static,
+        Resp: Send + Sync + 'static,
+        F: Fn(&Req) -> K + Clone + Send + Sync + 'static,
+        P: Fn(&cache::ArcError) -> bool + Clone + Send + Sync + 'static;
 }
 
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -62,5 +78,18 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
     fn bytes_to_http(self) -> ServiceBuilder<Stack<bytes_to_http::BytesToHttpLayer, L>> {
         self.layer(bytes_to_http::BytesToHttpLayer::new())
+    }
+
+    // Caching layer
+    fn cache<Req, Resp, K, F, P>(
+        self, 
+        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>
+    ) -> ServiceBuilder<Stack<cache::CacheLayer<Req, Resp, K, F, P>, L>>
+    where
+        K: std::hash::Hash + Eq + Clone + Send + Sync + 'static,
+        Resp: Send + Sync + 'static,
+        F: Fn(&Req) -> K + Clone + Send + Sync + 'static,
+        P: Fn(&cache::ArcError) -> bool + Clone + Send + Sync + 'static {
+        self.layer(cache_layer)
     }
 }

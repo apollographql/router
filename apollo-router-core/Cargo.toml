@@ -22,6 +22,7 @@ tower.workspace = true
 tokio = { version = "1.45.1", features = ["macros", "full"] }
 mry = "0.14"
 bon = "3.6"
+quick_cache = "0.6.14"
 
 # Error handling strategy
 miette = { version = "7.6", features = ["derive"] }
