@@ -22,9 +22,9 @@
 //! pub enum MyError {
 //!     #[error("Something went wrong: {message}")]
 //!     #[diagnostic(code(apollo_router::my_service::something_wrong))]
-//!     SomethingWrong { 
+//!     SomethingWrong {
 //!         #[extension("errorMessage")]
-//!         message: String 
+//!         message: String
 //!     },
 //! }
 //!
@@ -123,7 +123,11 @@ impl From<&ErrorRegistryEntry> for SerializableErrorRegistryEntry {
             component: entry.component.to_string(),
             docs_url: entry.docs_url.map(|s| s.to_string()),
             help_text: entry.help_text.map(|s| s.to_string()),
-            variants: entry.variants.iter().map(SerializableErrorVariantInfo::from).collect(),
+            variants: entry
+                .variants
+                .iter()
+                .map(SerializableErrorVariantInfo::from)
+                .collect(),
         }
     }
 }
@@ -134,16 +138,21 @@ impl From<&ErrorVariantInfo> for SerializableErrorVariantInfo {
             name: variant.name.to_string(),
             code: variant.code.to_string(),
             help: variant.help.map(|s| s.to_string()),
-            graphql_fields: variant.graphql_fields.iter().map(|s| s.to_string()).collect(),
+            graphql_fields: variant
+                .graphql_fields
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }
 
 /// Type alias for a GraphQL error conversion handler function
-/// 
+///
 /// This function takes a `dyn std::error::Error + 'static` and attempts to downcast it
 /// to a specific error type. If successful, it converts it to a GraphQL error.
-pub type GraphQLErrorHandler = fn(&(dyn std::error::Error + 'static), GraphQLErrorContext) -> Option<GraphQLError>;
+pub type GraphQLErrorHandler =
+    fn(&(dyn std::error::Error + 'static), GraphQLErrorContext) -> Option<GraphQLError>;
 
 /// GraphQL error conversion handler entry
 pub struct GraphQLErrorHandlerEntry {
@@ -198,16 +207,19 @@ pub trait Error: std::error::Error + Diagnostic {
     ///
     /// This method can be overridden by specific error types to add
     /// additional context to the GraphQL error extensions.
-    fn populate_graphql_extensions(&self, _extensions_map: &mut BTreeMap<String, serde_json::Value>) {
+    fn populate_graphql_extensions(
+        &self,
+        _extensions_map: &mut BTreeMap<String, serde_json::Value>,
+    ) {
         // Default implementation - specific errors can override
     }
 }
 
 /// Universal trait for converting any error to GraphQL format
-/// 
+///
 /// This trait is automatically implemented for all types that implement `std::error::Error`
 /// and provides a unified interface for converting errors to GraphQL format.
-/// 
+///
 /// The trait uses the error registry to attempt downcasting to known Apollo Router error types
 /// first, falling back to a generic GraphQL error if no specific handler is found.
 pub trait ToGraphQLError {
@@ -227,7 +239,9 @@ impl<T: std::error::Error + 'static> ToGraphQLError for T {
     fn as_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError {
         // Try to convert using registered handlers first
         for handler_entry in GRAPHQL_ERROR_HANDLERS.iter() {
-            if let Some(graphql_error) = (handler_entry.handler)(self as &dyn std::error::Error, context.clone()) {
+            if let Some(graphql_error) =
+                (handler_entry.handler)(self as &dyn std::error::Error, context.clone())
+            {
                 return graphql_error;
             }
         }
@@ -238,13 +252,16 @@ impl<T: std::error::Error + 'static> ToGraphQLError for T {
 }
 
 /// Creates a generic GraphQL error for unknown error types
-fn create_generic_graphql_error(error: &dyn std::error::Error, context: GraphQLErrorContext) -> GraphQLError {
+fn create_generic_graphql_error(
+    error: &dyn std::error::Error,
+    context: GraphQLErrorContext,
+) -> GraphQLError {
     let mut extensions = GraphQLErrorExtensions {
-        code: "APOLLO_ROUTER_UNKNOWN_ERROR".to_string(),
+        code: "INTERNAL_ERROR".to_string(),
         timestamp: Utc::now(),
         service: context
             .service_name
-            .unwrap_or_else(|| "apollo-router".to_string()),
+            .unwrap_or_else(|| "unknown".to_string()),
         trace_id: context.trace_id,
         request_id: context.request_id,
         details: BTreeMap::new(),
@@ -263,7 +280,7 @@ fn create_generic_graphql_error(error: &dyn std::error::Error, context: GraphQLE
         error_chain.push(err.to_string());
         current = err.source();
     }
-    
+
     if error_chain.len() > 1 {
         extensions.details.insert(
             "errorChain".to_string(),
@@ -504,7 +521,10 @@ macro_rules! register_graphql_error_handler {
             if let Some(typed_error) = error.downcast_ref::<$error_type>() {
                 // Convert using the Error trait implementation
                 use $crate::Error as RouterError;
-                Some(RouterError::to_graphql_error_with_context(typed_error, context))
+                Some(RouterError::to_graphql_error_with_context(
+                    typed_error,
+                    context,
+                ))
             } else {
                 None
             }
@@ -687,11 +707,11 @@ mod tests {
     fn test_as_graphql_error_for_std_error() {
         let std_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
         let graphql_error = std_error.as_graphql_error();
-        
+
         assert_eq!(graphql_error.message, "File not found");
-        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
-        assert_eq!(graphql_error.extensions.service, "apollo-router");
-        
+        assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
+        assert_eq!(graphql_error.extensions.service, "unknown");
+
         // Should have error type information
         assert!(graphql_error.extensions.details.contains_key("errorType"));
     }
@@ -706,13 +726,19 @@ mod tests {
             .location(10, 5)
             .path_field("user")
             .build();
-            
+
         let graphql_error = std_error.as_graphql_error_with_context(context);
-        
+
         assert_eq!(graphql_error.message, "Access denied");
         assert_eq!(graphql_error.extensions.service, "test-service");
-        assert_eq!(graphql_error.extensions.trace_id, Some("trace-123".to_string()));
-        assert_eq!(graphql_error.extensions.request_id, Some("req-456".to_string()));
+        assert_eq!(
+            graphql_error.extensions.trace_id,
+            Some("trace-123".to_string())
+        );
+        assert_eq!(
+            graphql_error.extensions.request_id,
+            Some("req-456".to_string())
+        );
         assert_eq!(graphql_error.locations.len(), 1);
         assert!(graphql_error.path.is_some());
     }
@@ -722,11 +748,11 @@ mod tests {
         // Create a nested error chain
         let root_cause = std::io::Error::new(std::io::ErrorKind::NotFound, "Root cause");
         let wrapper_error = std::io::Error::new(std::io::ErrorKind::Other, "Wrapper error");
-        
+
         // Note: std::io::Error doesn't easily allow chaining, so this is a simplified test
         let graphql_error = root_cause.as_graphql_error();
-        
-        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
+
+        assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
         assert!(graphql_error.extensions.details.contains_key("errorType"));
     }
 }

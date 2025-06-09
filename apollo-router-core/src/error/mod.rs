@@ -5,13 +5,11 @@
 
 // Re-export error trait and GraphQL types from apollo-router-error
 pub use apollo_router_error::{
-    Error, ToGraphQLError, GraphQLError, GraphQLErrorContext, GraphQLErrorExtensions,
-    GraphQLErrorLocation, GraphQLPathSegment, GraphQLErrorContextBuilder,
+    Error, ErrorRegistryEntry, ErrorStats, ErrorVariantInfo, GraphQLError, GraphQLErrorContext,
+    GraphQLErrorContextBuilder, GraphQLErrorExtensions, GraphQLErrorLocation, GraphQLPathSegment,
+    ToGraphQLError, export_error_registry_json, get_all_error_codes, get_error_by_code,
+    get_error_by_variant_code, get_error_stats, get_errors_by_category, get_errors_by_component,
     get_registered_errors, get_registered_graphql_handlers,
-    get_error_by_code, get_error_by_variant_code,
-    get_errors_by_component, get_errors_by_category,
-    get_all_error_codes, get_error_stats,
-    export_error_registry_json, ErrorStats, ErrorRegistryEntry, ErrorVariantInfo
 };
 
 #[cfg(test)]
@@ -24,9 +22,9 @@ mod tests {
         // Test that the ToGraphQLError trait is available and works
         let io_error = io::Error::new(io::ErrorKind::NotFound, "Test error");
         let graphql_error = io_error.as_graphql_error();
-        
+
         assert_eq!(graphql_error.message, "Test error");
-        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_UNKNOWN_ERROR");
+        assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
     }
 
     #[test]
@@ -34,7 +32,7 @@ mod tests {
         // Test that error registry functions are accessible
         let all_errors = get_registered_errors();
         let stats = get_error_stats();
-        
+
         assert!(all_errors.len() >= 0);
         assert!(stats.total_error_types >= 0);
     }
