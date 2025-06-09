@@ -21,7 +21,7 @@ mod tests {
     fn test_to_graphql_error_trait_available() {
         // Test that the ToGraphQLError trait is available and works
         let io_error = io::Error::new(io::ErrorKind::NotFound, "Test error");
-        let graphql_error = io_error.as_graphql_error();
+        let graphql_error = io_error.to_graphql_error();
         
         assert_eq!(graphql_error.message, "Test error");
         assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");

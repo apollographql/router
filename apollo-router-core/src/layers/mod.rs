@@ -5,6 +5,7 @@ pub mod bytes_client_to_json_client;
 pub mod bytes_to_http;
 pub mod bytes_to_json;
 pub mod cache;
+pub mod error_to_graphql;
 pub mod http_client_to_bytes_client;
 pub mod http_to_bytes;
 pub mod json_to_bytes;
@@ -20,26 +21,34 @@ pub use json_to_bytes::Error as JsonToBytesError;
 pub use prepare_query::Error as PrepareQueryError;
 
 // Re-export cache layer types and functions for convenience
-pub use cache::{CacheLayer, CacheService, query_parse_cache, ArcError};
+pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 
 pub trait ServiceBuilderExt<L> {
     // Server-side transformations (request pipeline)
     fn http_to_bytes(self) -> ServiceBuilder<Stack<http_to_bytes::HttpToBytesLayer, L>>;
     fn bytes_to_json(self) -> ServiceBuilder<Stack<bytes_to_json::BytesToJsonLayer, L>>;
-    fn prepare_query<P, Pl>(self, query_parse_service: P, query_plan_service: Pl) -> ServiceBuilder<Stack<prepare_query::PrepareQueryLayer<P, Pl>, L>>;
-    
+    fn prepare_query<P, Pl>(
+        self,
+        query_parse_service: P,
+        query_plan_service: Pl,
+    ) -> ServiceBuilder<Stack<prepare_query::PrepareQueryLayer<P, Pl>, L>>;
+
     // Client-side transformations
-    fn http_client_to_bytes_client(self) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>>;
-    fn bytes_client_to_json_client(self) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>>;
-    
+    fn http_client_to_bytes_client(
+        self,
+    ) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>>;
+    fn bytes_client_to_json_client(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>>;
+
     // Response transformations (reverse direction)
     fn json_to_bytes(self) -> ServiceBuilder<Stack<json_to_bytes::JsonToBytesLayer, L>>;
     fn bytes_to_http(self) -> ServiceBuilder<Stack<bytes_to_http::BytesToHttpLayer, L>>;
 
     // Caching layer
     fn cache<Req, Resp, K, F, P>(
-        self, 
-        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>
+        self,
+        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>,
     ) -> ServiceBuilder<Stack<cache::CacheLayer<Req, Resp, K, F, P>, L>>
     where
         K: std::hash::Hash + Eq + Clone + Send + Sync + 'static,
@@ -58,16 +67,27 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.layer(bytes_to_json::BytesToJsonLayer)
     }
 
-    fn prepare_query<P, Pl>(self, query_parse_service: P, query_plan_service: Pl) -> ServiceBuilder<Stack<prepare_query::PrepareQueryLayer<P, Pl>, L>> {
-        self.layer(prepare_query::PrepareQueryLayer::new(query_parse_service, query_plan_service))
+    fn prepare_query<P, Pl>(
+        self,
+        query_parse_service: P,
+        query_plan_service: Pl,
+    ) -> ServiceBuilder<Stack<prepare_query::PrepareQueryLayer<P, Pl>, L>> {
+        self.layer(prepare_query::PrepareQueryLayer::new(
+            query_parse_service,
+            query_plan_service,
+        ))
     }
 
     // Client-side transformations
-    fn http_client_to_bytes_client(self) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>> {
+    fn http_client_to_bytes_client(
+        self,
+    ) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>> {
         self.layer(http_client_to_bytes_client::HttpClientToBytesClientLayer)
     }
 
-    fn bytes_client_to_json_client(self) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>> {
+    fn bytes_client_to_json_client(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>> {
         self.layer(bytes_client_to_json_client::BytesClientToJsonClientLayer)
     }
 
@@ -82,14 +102,15 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
     // Caching layer
     fn cache<Req, Resp, K, F, P>(
-        self, 
-        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>
+        self,
+        cache_layer: cache::CacheLayer<Req, Resp, K, F, P>,
     ) -> ServiceBuilder<Stack<cache::CacheLayer<Req, Resp, K, F, P>, L>>
     where
         K: std::hash::Hash + Eq + Clone + Send + Sync + 'static,
         Resp: Send + Sync + 'static,
         F: Fn(&Req) -> K + Clone + Send + Sync + 'static,
-        P: Fn(&cache::ArcError) -> bool + Clone + Send + Sync + 'static {
+        P: Fn(&cache::ArcError) -> bool + Clone + Send + Sync + 'static,
+    {
         self.layer(cache_layer)
     }
 }
