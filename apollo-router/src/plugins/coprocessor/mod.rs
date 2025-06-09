@@ -1105,10 +1105,9 @@ where
     ));
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.
-    router::Response::parts_builder()
+    router::Response::http_response_builder()
         .context(context)
-        .parts(parts)
-        .body(final_stream)
+        .response(http::Response::from_parts(parts, final_stream))
         .build()
 }
 // -----------------------------------------------------------------------------------------------------

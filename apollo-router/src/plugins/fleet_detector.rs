@@ -271,20 +271,18 @@ impl PluginPrivate for FleetDetector {
             })
             // Count the number of response bytes from the router to clients
             .map_response(move |res: router::Response| {
-                let (parts, body) = res.response.into_parts();
-                let body =
-                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
-                        if let Ok(bytes) = res {
-                            u64_counter!(
+                router::Response::http_response_builder()
+                    .response(res.response.map(move |body| {
+                        router::body::from_result_stream(body.into_data_stream().inspect(|res| {
+                            if let Ok(bytes) = res {
+                                u64_counter!(
                                 "apollo.router.operations.response_size",
                                 "Total number of response bytes to clients",
                                 bytes.len() as u64
                             );
-                        }
-                    }));
-                router::Response::parts_builder()
-                    .parts(parts)
-                    .body(body)
+                            }
+                        }))
+                    }))
                     .context(res.context)
                     .build()
                     .expect("cannot fail") // TODO better error handling

@@ -282,13 +282,11 @@ impl Response {
     }
 
     #[builder(visibility = "pub")]
-    fn parts_new(
-        parts: Parts,
-        body: Body,
+    fn http_response_new(
+        response: http::Response<Body>,
         context: Context,
         body_to_stash: Option<String>,
     ) -> Result<Self, BoxError> {
-        let response = http::Response::from_parts(parts, body);
         let mut res = Self { response, context };
         if let Some(body_to_stash) = body_to_stash {
             res.stash_the_body_in_extensions(body_to_stash)

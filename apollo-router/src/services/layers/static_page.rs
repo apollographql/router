@@ -60,14 +60,15 @@ where
                         && accepts_html(req.router_request.headers())
                     {
                         ControlFlow::Break(
-                            router::Response::builder()
-                                .header(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
-                                )
-                                .data(
-                                    serde_json_bytes::Value::from_bytes(page.clone())
-                                        .map_err(BoxError::from)?,
+                            router::Response::http_response_builder()
+                                .response(
+                                    http::Response::builder()
+                                        .header(
+                                            CONTENT_TYPE,
+                                            HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
+                                        )
+                                        .body(router::body::from_bytes(page.clone()))
+                                        .unwrap()
                                 )
                                 .context(req.context)
                                 .build()

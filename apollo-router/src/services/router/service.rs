@@ -320,9 +320,8 @@ impl RouterService {
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
-                    router::Response::parts_builder()
-                        .parts(parts)
-                        .body(router::body::from_bytes(body.clone()))
+                    router::Response::http_response_builder()
+                        .response(Response::from_parts(parts, router::body::from_bytes(body.clone())))
                         .and_body_to_stash(if display_router_response {
                             Some(body)
                         } else {
@@ -356,9 +355,11 @@ impl RouterService {
                         }
                     };
 
-                    RouterResponse::parts_builder()
-                        .parts(parts)
-                        .body(router::body::from_result_stream(response_multipart))
+                    RouterResponse::http_response_builder()
+                        .response(http::Response::from_parts(
+                            parts,
+                            router::body::from_result_stream(response_multipart),
+                        ))
                         .context(context)
                         .build()
                 } else {
