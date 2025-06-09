@@ -136,7 +136,7 @@ async fn test_invalid_field_query() {
     assert!(result.is_err());
 
     // Verify we get a validation error for the non-existent field
-    assert_error!(result, Error, Error::ParsingFailed { message } => {
+    assert_error!(result, Error::ParsingFailed { message } => {
         assert!(message.contains("nonExistentField") || message.contains("does not have a field"));
     });
 }
@@ -185,7 +185,7 @@ async fn test_result_structure() {
     assert!(!document.operations.is_empty());
 
     // Invalid query: Service Error with proper error validation
-    assert_error!(invalid_result, Error, Error::ParsingFailed { message } => {
+    assert_error!(invalid_result, Error::ParsingFailed { message } => {
         assert!(message.contains("unknownField") || message.contains("does not have a field"));
     });
 }
@@ -267,7 +267,7 @@ async fn test_syntax_error_parsing() {
     assert!(result.is_err());
 
     // This syntax error consistently returns MultipleParsingErrors
-    assert_error!(result, Error, Error::MultipleParsingErrors { errors, .. } => {
+    assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
         // Should contain syntax errors
         let has_syntax_errors = errors.iter().any(|e| matches!(e, ParseErrorDetail::SyntaxError { .. }));
         assert!(has_syntax_errors, "Should contain syntax errors");
@@ -296,7 +296,7 @@ async fn test_validation_error_unknown_field() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error, Error::ParsingFailed { message } => {
+    assert_error!(result, Error::ParsingFailed { message } => {
         assert!(message.contains("Unknown field") || message.contains("unknownField"));
     });
 }
@@ -325,7 +325,7 @@ async fn test_multiple_validation_errors() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error, Error::MultipleParsingErrors { count, errors } => {
+    assert_error!(result, Error::MultipleParsingErrors { count, errors } => {
         assert!(*count > 1);
         assert!(errors.len() > 1);
         // Should contain multiple validation errors
@@ -356,7 +356,7 @@ async fn test_invalid_syntax_error() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error, Error::ParsingFailed { message } => {
+    assert_error!(result, Error::ParsingFailed { message } => {
         assert!(message.contains("syntax") || message.contains("expected"));
     });
 }
@@ -383,7 +383,7 @@ async fn test_error_serialization() {
     assert!(result.is_err());
 
     // This validation error consistently returns MultipleParsingErrors
-    assert_error!(result, Error, Error::MultipleParsingErrors { errors, .. } => {
+    assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
         // Should contain validation errors for unknown field
         let has_unknown_field_error = errors.iter().any(|e| {
             if let ParseErrorDetail::ValidationError { message, .. } = e {
@@ -436,7 +436,7 @@ async fn test_error_categorization() {
         assert!(result.is_err());
         
         // Verify we get the correct error categorization for each query type
-        assert_error!(result, Error, Error::MultipleParsingErrors { errors, .. } => {
+        assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
             assert!(error_check(&errors), "Error categorization failed for query: {}", query);
         });
     }
@@ -501,7 +501,7 @@ async fn test_error_location_information() {
     assert!(result.is_err());
 
     // Verify we get multiple validation errors for the unknown fields
-    assert_error!(result, Error, Error::MultipleParsingErrors { count, errors } => {
+    assert_error!(result, Error::MultipleParsingErrors { count, errors } => {
         assert!(*count >= 4, "Should have at least 4 validation errors");
         assert!(errors.len() >= 4, "Should have error details for each invalid field");
         // Should all be validation errors for unknown fields

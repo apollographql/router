@@ -11,7 +11,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower::{BoxError, Service};
+use tower::Service;
 
 #[derive(Clone)]
 pub struct Request {
@@ -250,7 +250,7 @@ impl QueryPlanService {
 
 impl Service<Request> for QueryPlanService {
     type Response = Response;
-    type Error = BoxError;
+    type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -265,8 +265,7 @@ impl Service<Request> for QueryPlanService {
 
         Box::pin(async move {
             // Generate the query plan using apollo-federation
-            let query_plan = service.plan_query(&document, operation_name.clone()).await
-                .map_err(|e| Box::new(e) as BoxError)?;
+            let query_plan = service.plan_query(&document, operation_name.clone()).await?;
 
             Ok(Response {
                 extensions,

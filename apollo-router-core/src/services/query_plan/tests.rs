@@ -292,7 +292,7 @@ async fn test_tower_service_trait_implementation() {
     
     fn _assert_service_trait<T>()
     where
-        T: Service<Request, Response = Response, Error = BoxError> + Clone,
+        T: Service<Request, Response = Response, Error = Error> + Clone,
     {
         // This function exists only to verify trait bounds at compile time
     }
