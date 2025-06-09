@@ -484,6 +484,8 @@ pub enum SingleFederationError {
     ListSizeInvalidSlicingArgument { message: String },
     #[error("{message}")]
     ListSizeInvalidSizedField { message: String },
+    #[error("{message}")]
+    InvalidTagName { message: String },
 }
 
 impl SingleFederationError {
@@ -709,6 +711,7 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
     }
 
@@ -1955,6 +1958,17 @@ static CONTEXT_SELECTION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
+static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INVALID_TAG_NAME".to_owned(),
+        "Invalid value for argument \"name\" in application of @tag.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -2050,6 +2064,7 @@ pub enum ErrorCode {
     NoSelectionForContext,
     ContextNoResolvableKey,
     ContextSelectionInvalid,
+    InvalidTagName,
 }
 
 impl ErrorCode {
@@ -2163,6 +2178,7 @@ impl ErrorCode {
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
+            ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
         }
     }
 }

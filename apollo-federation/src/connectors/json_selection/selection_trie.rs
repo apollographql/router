@@ -250,11 +250,11 @@ impl SelectionTrie {
     }
 
     fn add_str(&mut self, key: &str) -> &mut Self {
-        if !self.selections.contains_key(key) {
+        Ref::make_mut(
             self.selections
-                .insert(key.to_string(), Ref::new(SelectionTrie::new()));
-        }
-        Ref::make_mut(self.selections.get_mut(key).expect("should exist"))
+                .entry(key.to_string())
+                .or_insert_with(|| Ref::new(SelectionTrie::new())),
+        )
     }
 
     fn add_str_with_ranges(
