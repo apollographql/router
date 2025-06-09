@@ -151,19 +151,9 @@ impl PrettyPrintable for PathList {
                 );
             }
             Self::Question(continuation) => {
-                // Handle special spacing for selection sets to match expected output
-                match continuation.as_ref() {
-                    Self::Selection(_) => {
-                        result.push_str(" ?");
-                        let rest = continuation.pretty_print_with_indentation(true, indentation);
-                        result.push_str(rest.trim_start());
-                    }
-                    _ => {
-                        result.push('?');
-                        let rest = continuation.pretty_print_with_indentation(true, indentation);
-                        result.push_str(rest.as_str());
-                    }
-                }
+                result.push('?');
+                let rest = continuation.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
             }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
