@@ -637,22 +637,10 @@ impl ApplyToInternal for WithRange<PathList> {
             PathList::Question(continuation) => {
                 // Universal null check for any operation after ?
                 if data.is_null() {
-                    return (Some(JSON::Null), vec![]);
+                    (Some(JSON::Null), vec![])
+                } else {
+                    continuation.apply_to_path(data, vars, input_path)
                 }
-
-                // If not null, continue with the wrapped operation
-                let (result, mut errors) = continuation.apply_to_path(data, vars, input_path);
-
-                // Post-process errors to add ? prefix for method errors
-                if let PathList::Method(_, _, _) = continuation.as_ref() {
-                    for error in &mut errors {
-                        if error.message().starts_with("Method ->") {
-                            error.message = error.message().replace("Method ->", "Method ?->");
-                        }
-                    }
-                }
-
-                (result, errors)
             }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
@@ -3154,7 +3142,7 @@ mod tests {
             .unwrap()
             .apply_to(&data);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].message().contains("Method ?->length not found"));
+        assert!(errors[0].message().contains("Method ->length not found"));
         assert_eq!(result, None);
     }
 
