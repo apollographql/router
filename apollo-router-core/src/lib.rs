@@ -10,9 +10,7 @@ pub mod services;
 pub mod test_utils;
 
 use crate::layers::ServiceBuilderExt;
-use crate::services::fetch;
 use crate::services::http_server;
-use crate::services::json_client;
 use crate::services::query_execution;
 use crate::services::query_parse;
 
@@ -75,39 +73,7 @@ where
         .service(execute_service)
 }
 
-/// Builds a complete client-side fetch pipeline from fetch requests to JSON client operations
-///
-/// Example usage:
-/// ```no_run
-/// use apollo_router_core::{client_pipeline, services::{fetch, json_client}};
-/// use tower::{Service, service_fn};
-///
-/// let json_service = service_fn(|req: json_client::Request| async move {
-///     // Your JSON client logic here
-///     Ok::<_, std::convert::Infallible>(json_client::Response {
-///         extensions: req.extensions,
-///         responses: Box::pin(futures::stream::empty())
-///     })
-/// });
-///
-/// let pipeline = client_pipeline(json_service);
-/// ```
-pub fn client_pipeline<S>(
-    json_client_service: S,
-) -> impl Service<fetch::Request, Response = fetch::Response>
-where
-    S: Service<json_client::Request, Response = json_client::Response> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    S::Error: Into<tower::BoxError>,
-{
-    // Client-side request transformation:
-    // Fetch Request → HTTP Client Request → Bytes Client Request → JSON Client Request → JsonClient Service
-    ServiceBuilder::new()
-        .fetch_to_http_client()
-        .http_client_to_bytes_client()
-        .bytes_client_to_json_client()
-        .service(json_client_service)
-}
+
 
 #[test]
 fn test() {

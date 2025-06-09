@@ -112,7 +112,7 @@ services/
 - `query_plan` - Query planning
 - `query_preparation` - Composite service combining query parsing and planning
 - `query_execution` - Query execution
-- `fetch` - Data fetching coordination
+- `request_dispatcher` - Request routing and dispatch coordination
 - `http_client` - HTTP client operations
 - `bytes_client` - Byte stream client operations
 - `json_client` - JSON client operations
@@ -878,8 +878,8 @@ Query Preparation Request (Extensions Layer 3)
 Execution Request (Extensions Layer 4)
     ↓ (query_execution)
     ↓ extends() → Extensions Layer 5
-Fetch Request (Extensions Layer 5)
-    ↓ (fetch)
+Request Dispatcher Request (Extensions Layer 5)
+    ↓ (request_dispatcher)
 HTTP Response (Returns Layer 0 - Original Extensions)
 ```
 
