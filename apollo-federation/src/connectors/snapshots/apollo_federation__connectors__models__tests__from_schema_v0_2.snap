@@ -2,21 +2,8 @@
 source: apollo-federation/src/connectors/models.rs
 expression: "&connectors"
 ---
-{
-    ConnectId {
-        label: "connectors.json http: GET /posts",
-        subgraph_name: "connectors",
-        source_name: Some(
-            "json",
-        ),
-        directive: Field(
-            ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.posts),
-                directive_name: "connect",
-                directive_index: 0,
-            },
-        ),
-    }: Connector {
+[
+    Connector {
         id: ConnectId {
             label: "connectors.json http: GET /posts",
             subgraph_name: "connectors",
@@ -131,20 +118,7 @@ expression: "&connectors"
             connect_extensions: None,
         },
     },
-    ConnectId {
-        label: "[BATCH] connectors.json http: POST /posts",
-        subgraph_name: "connectors",
-        source_name: Some(
-            "json",
-        ),
-        directive: Type(
-            ObjectTypeDefinitionDirectivePosition {
-                type_name: "Post",
-                directive_name: "connect",
-                directive_index: 0,
-            },
-        ),
-    }: Connector {
+    Connector {
         id: ConnectId {
             label: "[BATCH] connectors.json http: POST /posts",
             subgraph_name: "connectors",
@@ -327,4 +301,4 @@ expression: "&connectors"
             connect_extensions: None,
         },
     },
-}
+]
