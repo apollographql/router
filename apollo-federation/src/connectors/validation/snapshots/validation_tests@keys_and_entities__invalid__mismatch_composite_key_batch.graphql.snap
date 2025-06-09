@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/mismatch_composite_key_batch.graphql
+---
+[
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Product`: `Country` doesn't have a field named `id`",
+        locations: [
+            13:41..13:43,
+        ],
+    },
+]

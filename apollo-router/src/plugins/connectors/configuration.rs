@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::CustomConfiguration;
-use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::connectors::CustomConfiguration;
+use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
 use schemars::schema::InstanceType;

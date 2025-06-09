@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
@@ -500,5 +501,18 @@ impl LinksMetadata {
                     import: None,
                 })
         })
+    }
+
+    pub(crate) fn import_to_feature_url_map(&self) -> HashMap<String, Url> {
+        let directive_entries = self
+            .directives_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+        let type_entries = self
+            .types_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+
+        directive_entries.chain(type_entries).collect()
     }
 }

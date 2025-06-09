@@ -3,60 +3,227 @@ use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 
+use crate::bail;
 use crate::error::CompositionError;
+use crate::error::FederationError;
+use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::JOIN_VERSIONS;
+use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
+use crate::merger::hints::HintCode;
+use crate::merger::merge_enum::EnumTypeUsage;
+use crate::schema::FederationSchema;
+use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 
+/// Type alias for Sources mapping - maps subgraph indices to optional values
+pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
+
 #[derive(Debug)]
 pub(crate) struct MergeResult {
     #[allow(dead_code)]
-    pub(crate) supergraph: Option<Valid<Schema>>,
+    pub(crate) supergraph: Option<Valid<FederationSchema>>,
     #[allow(dead_code)]
     pub(crate) errors: Vec<CompositionError>,
     #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
 }
 
 #[allow(unused)]
 pub(crate) struct Merger {
-    subgraphs: Vec<Subgraph<Validated>>,
-    options: CompositionOptions,
-    names: Vec<String>,
-    error_reporter: ErrorReporter,
-    merged: Schema,
-    subgraph_names_to_join_spec_name: HashMap<String, String>,
-    merged_federation_directive_names: HashSet<String>,
-    enum_usages: HashMap<String, String>, // Simplified for now
-    fields_with_from_context: HashSet<String>,
-    fields_with_override: HashSet<String>,
+    pub(in crate::merger) subgraphs: Vec<Subgraph<Validated>>,
+    pub(in crate::merger) options: CompositionOptions,
+    pub(in crate::merger) compose_directive_manager: ComposeDirectiveManager,
+    pub(in crate::merger) names: Vec<String>,
+    pub(in crate::merger) error_reporter: ErrorReporter,
+    pub(in crate::merger) merged: FederationSchema,
+    pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
+    pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
+    pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
+    pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
+    pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
 }
 
 #[allow(unused)]
 impl Merger {
-    pub(crate) fn new(subgraphs: Vec<Subgraph<Validated>>, options: CompositionOptions) -> Self {
-        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+    pub(crate) fn new(
+        subgraphs: Vec<Subgraph<Validated>>,
+        options: CompositionOptions,
+    ) -> Result<Self, FederationError> {
+        let mut error_reporter = ErrorReporter::new();
+        let latest_federation_version_used =
+            Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
+        let Some(join_spec) =
+            JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No join spec version found for federation version {}",
+                latest_federation_version_used
+            )
+        };
+        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
+        let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
-        Self {
+        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        let schema_to_import_to_feature_url = subgraphs
+            .iter()
+            .map(|s| {
+                (
+                    s.name.clone(),
+                    s.schema()
+                        .metadata()
+                        .map(|l| l.import_to_feature_url_map())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        let subgraph_names_to_join_spec_name = Self::prepare_supergraph()?;
+        let join_directive_identities = HashSet::from([Identity::connect_identity()]);
+
+        Ok(Self {
             subgraphs,
             options,
             names,
-            error_reporter: ErrorReporter::new(),
-            merged: Schema::new(),
-            subgraph_names_to_join_spec_name: todo!(),
+            compose_directive_manager: ComposeDirectiveManager::new(),
+            error_reporter,
+            merged: FederationSchema::new(Schema::new())?,
+            subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
             enum_usages: HashMap::new(),
-            fields_with_from_context: todo!(),
-            fields_with_override: todo!(),
+            fields_with_from_context,
+            fields_with_override,
+            schema_to_import_to_feature_url,
+            join_directive_identities,
+            inaccessible_directive_name_in_supergraph: todo!(),
+            join_spec_definition: join_spec,
+        })
+    }
+
+    fn get_latest_federation_version_used<'a>(
+        subgraphs: &'a [Subgraph<Validated>],
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
+        subgraphs
+            .iter()
+            .map(|subgraph| {
+                Self::get_latest_federation_version_used_in_subgraph(subgraph, error_reporter)
+            })
+            .max()
+            .unwrap_or_else(|| FEDERATION_VERSIONS.latest().version())
+    }
+
+    fn get_latest_federation_version_used_in_subgraph<'a>(
+        subgraph: &'a Subgraph<Validated>,
+        error_reporter: &mut ErrorReporter,
+    ) -> &'a Version {
+        let linked_federation_version = subgraph.metadata().federation_spec_definition().version();
+
+        let linked_features = subgraph.schema().all_features().unwrap_or_default();
+        let spec_with_max_implied_version = linked_features
+            .iter()
+            .max_by_key(|spec| spec.minimum_federation_version());
+
+        if let Some(spec) = spec_with_max_implied_version {
+            if spec
+                .minimum_federation_version()
+                .satisfies(linked_federation_version)
+                && spec
+                    .minimum_federation_version()
+                    .gt(linked_federation_version)
+            {
+                error_reporter.add_hint(CompositionHint {
+                    code: HintCode::ImplicitlyUpgradedFederationVersion
+                        .code()
+                        .to_string(),
+                    message: format!(
+                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                        subgraph.name,
+                        linked_federation_version,
+                        spec.minimum_federation_version()
+                    ),
+                });
+                return spec.minimum_federation_version();
+            }
         }
+        linked_federation_version
+    }
+
+    fn get_fields_with_from_context_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn get_fields_with_override_directive(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> DirectiveReferencers {
+        subgraphs
+            .iter()
+            .fold(Default::default(), |mut acc, subgraph| {
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                    if let Ok(referencers) = subgraph
+                        .schema()
+                        .referencers()
+                        .get_directive(&directive_name)
+                    {
+                        acc.extend(referencers);
+                    }
+                }
+                acc
+            })
+    }
+
+    fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
+        todo!("Prepare supergraph")
+    }
+
+    /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
+    pub(crate) fn join_spec_name(&self, subgraph_index: usize) -> Result<&Name, FederationError> {
+        let subgraph_name = &self.names[subgraph_index];
+        self.subgraph_names_to_join_spec_name
+            .get(subgraph_name)
+            .ok_or_else(|| {
+                internal_error!(
+                    "Could not find join spec name for subgraph '{}'",
+                    subgraph_name
+                )
+            })
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
@@ -181,7 +348,7 @@ impl Merger {
     }
 
     fn merge_type_enum(&mut self, _enum_type: &Name) {
-        todo!("Implement enum type merging")
+        todo!("Implement enum type merging - collect sources and call merge_enum")
     }
 
     fn validate_query_root(&mut self) {
@@ -199,6 +366,113 @@ impl Merger {
     fn post_merge_validations(&mut self) {
         todo!("Implement post-merge validations")
     }
+
+    // Helper functions that need to be implemented as stubs
+
+    fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
+        todo!("Implement merge_description")
+    }
+
+    fn record_applied_directives_to_merge<T>(
+        &mut self,
+        _sources: &Sources<Option<T>>,
+        _dest: &mut T,
+    ) {
+        todo!("Implement record_applied_directives_to_merge")
+    }
+
+    fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
+        todo!("Implement is_inaccessible_directive_in_supergraph")
+    }
+
+    // TODO: These error reporting functions are not yet fully implemented
+    pub(crate) fn report_mismatch_error_with_specifics<T>(
+        &mut self,
+        error: CompositionError,
+        sources: &Sources<T>,
+        accessor: impl Fn(&Option<T>) -> &str,
+    ) {
+        // Build a detailed error message by showing which subgraphs have/don't have the element
+        let mut details = Vec::new();
+        let mut has_subgraphs = Vec::new();
+        let mut missing_subgraphs = Vec::new();
+
+        for (&idx, source) in sources.iter() {
+            let subgraph_name = if idx < self.names.len() {
+                &self.names[idx]
+            } else {
+                "unknown"
+            };
+
+            let result = accessor(source);
+            if result == "yes" {
+                has_subgraphs.push(subgraph_name);
+            } else {
+                missing_subgraphs.push(subgraph_name);
+            }
+        }
+
+        // Format the subgraph lists
+        if !has_subgraphs.is_empty() {
+            details.push(format!("defined in {}", has_subgraphs.join(", ")));
+        }
+        if !missing_subgraphs.is_empty() {
+            details.push(format!("but not in {}", missing_subgraphs.join(", ")));
+        }
+
+        // Create the enhanced error with details
+        let enhanced_error = match error {
+            CompositionError::EnumValueMismatch { message } => {
+                CompositionError::EnumValueMismatch {
+                    message: format!("{}{}", message, details.join(" ")),
+                }
+            }
+            // Add other error types as needed
+            other => other,
+        };
+
+        self.error_reporter.add_error(enhanced_error);
+    }
+
+    pub(crate) fn report_mismatch_hint<T>(
+        &mut self,
+        code: HintCode,
+        message: String,
+        sources: &Sources<T>,
+        accessor: impl Fn(&Option<T>) -> bool,
+    ) {
+        // Build detailed hint message showing which subgraphs have/don't have the element
+        let mut has_subgraphs = Vec::new();
+        let mut missing_subgraphs = Vec::new();
+
+        for (&idx, source) in sources.iter() {
+            let subgraph_name = if idx < self.names.len() {
+                &self.names[idx]
+            } else {
+                "unknown"
+            };
+            let result = accessor(source);
+            if result {
+                has_subgraphs.push(subgraph_name);
+            } else {
+                missing_subgraphs.push(subgraph_name);
+            }
+        }
+
+        let detailed_message = format!(
+            "{}defined in {} but not in {}",
+            message,
+            has_subgraphs.join(", "),
+            missing_subgraphs.join(", ")
+        );
+
+        // Add the hint to the error reporter
+        let hint = CompositionHint {
+            code: code.definition().code().to_string(),
+            message: detailed_message,
+        };
+        self.error_reporter.add_hint(hint);
+    }
 }
 
 // Public function to start the merging process
@@ -206,6 +480,6 @@ impl Merger {
 pub(crate) fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
     options: CompositionOptions,
-) -> MergeResult {
-    Merger::new(subgraphs, options).merge()
+) -> Result<MergeResult, FederationError> {
+    Ok(Merger::new(subgraphs, options)?.merge())
 }
