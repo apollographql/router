@@ -8,7 +8,9 @@ The router wasn't setting the path correctly, so exporting metrics over http was
 
 We have fixed our interactions with the dependency and improved our testing to make sure this does not occur again.
 
-The router now supports setting standard OTEL environment variables for endpoints. However, there is a known problem when using environment variables to configure endpoints for the http protocol. If any of:
+The router now supports setting standard OTEL environment variables for endpoints.
+
+There is a known problem when using environment variables to configure endpoints for the http protocol with un-encrypted traffic, i.e. TLS not configured. If any of:
 
 OTEL_EXPORTER_OTLP_ENDPOINT
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
@@ -22,5 +24,7 @@ are set, then you will see log messages which look like:
 ```
 
 The traces and metrics are processed and delivered correctly to the specified endpoint regardless of this message.
+
+Note: For more details about the issue with non-TLS traffic: https://github.com/open-telemetry/opentelemetry-collector/issues/10952
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7595
