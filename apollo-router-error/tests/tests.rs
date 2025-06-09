@@ -1,6 +1,6 @@
 use apollo_router_error::{
-    GraphQLErrorContext, ToGraphQLError, export_error_registry_json, get_error_stats,
-    get_registered_errors,
+    GraphQLErrorContext, ToGraphQLError, arc_to_graphql_error, box_to_graphql_error,
+    export_error_registry_json, get_error_stats, get_registered_errors,
 };
 use std::sync::Arc;
 
@@ -106,12 +106,20 @@ fn test_graphql_error() {
         config_path: "world".to_string(),
     };
     let graphql_error = error.to_graphql_error();
-    
+
     // Verify the conversion worked
     assert_eq!(graphql_error.message, "Configuration error: hello");
-    assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
     assert_eq!(graphql_error.extensions.service, "apollo-router");
-    assert!(graphql_error.extensions.details.contains_key("configMessage"));
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
     assert!(graphql_error.extensions.details.contains_key("configPath"));
 }
 
@@ -123,12 +131,20 @@ fn test_box_error() {
         config_path: "world".to_string(),
     });
     let graphql_error = error.to_graphql_error();
-    
+
     // Verify the conversion worked
     assert_eq!(graphql_error.message, "Configuration error: hello");
-    assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
     assert_eq!(graphql_error.extensions.service, "apollo-router");
-    assert!(graphql_error.extensions.details.contains_key("configMessage"));
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
     assert!(graphql_error.extensions.details.contains_key("configPath"));
 }
 
@@ -140,12 +156,20 @@ fn test_arc_error() {
         config_path: "world".to_string(),
     });
     let graphql_error = error.to_graphql_error();
-    
+
     // Verify the conversion worked
     assert_eq!(graphql_error.message, "Configuration error: hello");
-    assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
     assert_eq!(graphql_error.extensions.service, "apollo-router");
-    assert!(graphql_error.extensions.details.contains_key("configMessage"));
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
     assert!(graphql_error.extensions.details.contains_key("configPath"));
 }
 
@@ -157,11 +181,99 @@ fn test_box_arc_error() {
         config_path: "world".to_string(),
     }));
     let graphql_error = error.to_graphql_error();
-    
+
     // Verify the conversion worked
     assert_eq!(graphql_error.message, "Configuration error: hello");
-    assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
     assert_eq!(graphql_error.extensions.service, "apollo-router");
-    assert!(graphql_error.extensions.details.contains_key("configMessage"));
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
+    assert!(graphql_error.extensions.details.contains_key("configPath"));
+}
+
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub type ArcError = Arc<dyn std::error::Error + Send + Sync>;
+
+#[test]
+fn test_tower_box_error() {
+    // Test with concrete Box<GraphQLError> instead of Box<dyn Error + Send + Sync>
+    let error = BoxError::from(GraphQLError::TestError {
+        message: "hello".to_string(),
+        config_path: "world".to_string(),
+    });
+
+    let graphql_error = box_to_graphql_error(&error);
+
+    // Verify the conversion worked
+    assert_eq!(graphql_error.message, "Configuration error: hello");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
+    assert_eq!(graphql_error.extensions.service, "apollo-router");
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
+    assert!(graphql_error.extensions.details.contains_key("configPath"));
+}
+#[test]
+fn test_tower_arc_error() {
+    // Test with concrete Box<GraphQLError> instead of Box<dyn Error + Send + Sync>
+    let error = ArcError::from(BoxError::from(GraphQLError::TestError {
+        message: "hello".to_string(),
+        config_path: "world".to_string(),
+    }));
+
+    let graphql_error = arc_to_graphql_error(&error);
+
+    // Verify the conversion worked
+    assert_eq!(graphql_error.message, "Configuration error: hello");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
+    assert_eq!(graphql_error.extensions.service, "apollo-router");
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
+    assert!(graphql_error.extensions.details.contains_key("configPath"));
+}
+
+#[test]
+fn test_tower_box_arc_error() {
+    // Test with concrete Box<GraphQLError> instead of Box<dyn Error + Send + Sync>
+    let error = BoxError::from(ArcError::from(BoxError::from(GraphQLError::TestError {
+        message: "hello".to_string(),
+        config_path: "world".to_string(),
+    })));
+
+    let graphql_error = box_to_graphql_error(&error);
+
+    // Verify the conversion worked
+    assert_eq!(graphql_error.message, "Configuration error: hello");
+    assert_eq!(
+        graphql_error.extensions.code,
+        "APOLLO_ROUTER_MY_SERVICE_CONFIG_ERROR"
+    );
+    assert_eq!(graphql_error.extensions.service, "apollo-router");
+    assert!(
+        graphql_error
+            .extensions
+            .details
+            .contains_key("configMessage")
+    );
     assert!(graphql_error.extensions.details.contains_key("configPath"));
 }

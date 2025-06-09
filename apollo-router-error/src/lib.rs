@@ -49,6 +49,7 @@ use chrono::{DateTime, Utc};
 use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Error registration entry for introspection
 #[derive(Debug, Clone)]
@@ -230,6 +231,55 @@ pub trait ToGraphQLError {
 
     /// Converts this error to a GraphQL error format with additional context using the error registry
     fn to_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError;
+}
+
+pub fn box_to_graphql_error(error: &Box<dyn std::error::Error + Send + Sync>) -> GraphQLError {
+    box_to_graphql_error_with_context(error, GraphQLErrorContext::default())
+}
+
+pub fn arc_to_graphql_error(error: &Arc<dyn std::error::Error + Send + Sync>) -> GraphQLError {
+    arc_to_graphql_error_with_context(error, GraphQLErrorContext::default())
+}
+
+/// Convert a boxed error to GraphQL format with context
+pub fn box_to_graphql_error_with_context(
+    error: &Box<dyn std::error::Error + Send + Sync>,
+    context: GraphQLErrorContext,
+) -> GraphQLError {
+    let error_ref: &dyn std::error::Error = error.as_ref();
+
+    // First try to unwrap nested wrapper types recursively
+    if let Some(nested_arc) = error_ref.downcast_ref::<Arc<dyn std::error::Error + Send + Sync>>() {
+        return arc_to_graphql_error_with_context(nested_arc, context);
+    }
+
+    // Try to convert using registered handlers
+    for handler_entry in GRAPHQL_ERROR_HANDLERS.iter() {
+        if let Some(graphql_error) = (handler_entry.handler)(error_ref, context.clone()) {
+            return graphql_error;
+        }
+    }
+
+    // Fall back to generic GraphQL error
+    create_generic_graphql_error(error_ref, context)
+}
+
+/// Convert an arc error to GraphQL format with context
+pub fn arc_to_graphql_error_with_context(
+    error: &Arc<dyn std::error::Error + Send + Sync>,
+    context: GraphQLErrorContext,
+) -> GraphQLError {
+    let error_ref: &dyn std::error::Error = error.as_ref();
+
+    // Try to convert using registered handlers
+    for handler_entry in GRAPHQL_ERROR_HANDLERS.iter() {
+        if let Some(graphql_error) = (handler_entry.handler)(error_ref, context.clone()) {
+            return graphql_error;
+        }
+    }
+
+    // Fall back to generic GraphQL error
+    create_generic_graphql_error(error_ref, context)
 }
 
 /// Blanket implementation of ToGraphQLError for all std::error::Error types
