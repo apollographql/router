@@ -146,10 +146,10 @@ pub struct ConnectHTTPArguments {
 }
 
 /// Settings for the connector when it is doing a $batch entity resolver
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectBatchArguments {
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectBatchArguments {
     /// Set a maximum number of requests to be batched together.
     ///
     /// Over this maximum, will be split into multiple batch requests of max_size.
-    pub(crate) max_size: Option<usize>,
+    pub max_size: Option<usize>,
 }
