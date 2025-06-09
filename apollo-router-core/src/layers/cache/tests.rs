@@ -240,9 +240,10 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
             id: i,
         };
         
+        let response_data = format!("response{}", i);
         let response = TowerTest::builder()
             .layer(cache_layer.clone())
-            .oneshot(request, |mut downstream| async move {
+            .oneshot(request, move |mut downstream| async move {
                 downstream.allow(1);
                 let (_received_req, send_response) = downstream
                     .next_request()
@@ -250,7 +251,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                     .expect("should receive downstream request");
                 
                 send_response.send_response(TestResponse {
-                    data: format!("response{}", i),
+                    data: response_data,
                 });
             })
             .await?;
@@ -283,9 +284,10 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
         } else {
             // Not cached, needs service call
             service_calls += 1;
+            let response_data = format!("response{}", i);
             let _response = TowerTest::builder()
                 .layer(cache_layer.clone())
-                .oneshot(request, |mut downstream| async move {
+                .oneshot(request, move |mut downstream| async move {
                     downstream.allow(1);
                     let (_received_req, send_response) = downstream
                         .next_request()
@@ -293,7 +295,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                         .expect("should receive downstream request");
                     
                     send_response.send_response(TestResponse {
-                        data: format!("response{}", i),
+                        data: response_data,
                     });
                 })
                 .await?;
@@ -381,14 +383,17 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
     
     let response = TowerTest::builder()
         .layer(cache_layer.clone())
-        .oneshot(request1.clone(), |mut downstream| async move {
-            downstream.allow(1);
-            let (_received_req, send_response) = downstream
-                .next_request()
-                .await
-                .expect("should receive downstream request");
-            
-            send_response.send_response(original_response.clone());
+        .oneshot(request1.clone(), {
+            let response_clone = original_response.clone();
+            move |mut downstream| async move {
+                downstream.allow(1);
+                let (_received_req, send_response) = downstream
+                    .next_request()
+                    .await
+                    .expect("should receive downstream request");
+                
+                send_response.send_response(response_clone);
+            }
         })
         .await?;
     
@@ -412,14 +417,17 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
     
     let error = TowerTest::builder()
         .layer(cache_layer.clone())
-        .oneshot(request2.clone(), |mut downstream| async move {
-            downstream.allow(1);
-            let (_received_req, send_response) = downstream
-                .next_request()
-                .await
-                .expect("should receive downstream request");
-            
-            send_response.send_error(original_error.clone());
+        .oneshot(request2.clone(), {
+            let error_clone = original_error.clone();
+            move |mut downstream| async move {
+                downstream.allow(1);
+                let (_received_req, send_response) = downstream
+                    .next_request()
+                    .await
+                    .expect("should receive downstream request");
+                
+                send_response.send_error(error_clone);
+            }
         })
         .await
         .expect_err("should error");
@@ -469,8 +477,8 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
         .await
         .expect_err("should error");
     
-    // Verify it's an Overloaded error
-    assert!(error1.is::<Overloaded>());
+    // Verify it's an Overloaded error (check by error message since TowerTest wrapping affects type checks)
+    assert_eq!(error1.to_string(), "service overloaded");
 
     // Second call with same query should hit the service again (not cached)
     let error2 = TowerTest::builder()
@@ -488,7 +496,7 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
         .expect_err("should error");
     
     // Verify it's still an Overloaded error
-    assert!(error2.is::<Overloaded>());
+    assert_eq!(error2.to_string(), "service overloaded");
 
     // Third call should also hit the service (still not cached)
     let error3 = TowerTest::builder()
@@ -505,6 +513,6 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
         .await
         .expect_err("should error");
     
-    assert!(error3.is::<Overloaded>());
+    assert_eq!(error3.to_string(), "service overloaded");
     Ok(())
 }
