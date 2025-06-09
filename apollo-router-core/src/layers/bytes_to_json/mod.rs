@@ -1,3 +1,69 @@
+//! # Bytes to JSON Layer
+//!
+//! The `BytesToJsonLayer` transforms bytes requests into JSON requests in the Apollo Router Core 
+//! request pipeline. This layer is responsible for parsing bytes as JSON and converting them into 
+//! structured JSON requests that can be processed by GraphQL services.
+//!
+//! ## Purpose
+//!
+//! - **JSON Parsing**: Deserializes bytes into structured JSON values
+//! - **Request Type Transformation**: Converts `BytesRequest` to `JsonRequest`
+//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Error Handling**: Provides detailed error reporting for JSON parsing failures
+//! - **Fail-Fast Design**: Validates JSON synchronously to catch errors early
+//!
+//! ## Usage
+//!
+//! The layer is typically used in the server-side request pipeline after HTTP body extraction:
+//!
+//! ```rust,ignore
+//! use apollo_router_core::layers::ServiceBuilderExt;
+//! use tower::ServiceBuilder;
+//!
+//! # fn example() {
+//! # let (json_service, _handle) = tower_test::mock::spawn();
+//! let service = ServiceBuilder::new()
+//!     .http_to_bytes()    // Extract HTTP body as bytes
+//!     .bytes_to_json()    // Parse bytes as JSON
+//!     .service(json_service);
+//! # }
+//! ```
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! Bytes Request
+//!     ↓ Parse bytes as JSON (fail-fast)
+//!     ↓ Extend Extensions (child layer)
+//! JSON Request → Inner Service
+//!     ↓ JSON Response (stream)
+//!     ↓ Serialize JSON values back to bytes
+//!     ↓ Return original Extensions
+//! Bytes Response
+//! ```
+//!
+//! ## Extensions Handling
+//!
+//! This layer follows the standard Extensions pattern:
+//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Inner service receives extended Extensions with access to parent context
+//! - Response returns the **original** Extensions from the bytes request
+//! - Parent values always take precedence over inner service values
+//!
+//! ## Error Handling
+//!
+//! The layer can produce `BytesToJsonError` in these situations:
+//! - **JSON Deserialization**: When bytes cannot be parsed as valid JSON
+//! - **Position Information**: Provides source spans for detailed error reporting
+//! - **Input Preservation**: Includes the invalid input data for debugging
+//!
+//! ## Performance Considerations
+//!
+//! - **Synchronous Parsing**: JSON parsing happens synchronously for fail-fast behavior
+//! - **No Service Cloning**: More efficient than HTTP layer as no async body collection needed
+//! - **Stream Processing**: Handles JSON response streams efficiently
+//! - **Fallback Handling**: Uses empty JSON object `{}` as fallback for serialization errors
+
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
 use bytes::Bytes;
@@ -25,6 +91,26 @@ pub enum Error {
     },
 }
 
+/// A Tower layer that transforms bytes requests into JSON requests.
+///
+/// This layer sits in the server-side request pipeline after bytes extraction and is responsible for:
+/// - Parsing bytes as JSON with fail-fast error handling
+/// - Converting bytes requests to JSON requests for GraphQL processing
+/// - Managing Extensions hierarchy correctly
+/// - Converting JSON responses back to bytes responses
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use apollo_router_core::layers::bytes_to_json::BytesToJsonLayer;
+/// use tower::{Layer, ServiceExt};
+///
+/// # fn example() {
+/// # let (json_service, _handle) = tower_test::mock::spawn();
+/// let layer = BytesToJsonLayer;
+/// let service = layer.layer(json_service);
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct BytesToJsonLayer;
 
@@ -36,6 +122,14 @@ impl<S> Layer<S> for BytesToJsonLayer {
     }
 }
 
+/// The service implementation that performs the bytes to JSON transformation.
+///
+/// This service:
+/// 1. Parses the bytes as JSON synchronously (fail-fast)
+/// 2. Creates an extended Extensions layer for the inner service
+/// 3. Calls the inner service with a JSON request
+/// 4. Converts the JSON response stream back to bytes
+/// 5. Returns the original Extensions in the bytes response
 #[derive(Clone, Debug)]
 pub struct BytesToJsonService<S> {
     inner: S,

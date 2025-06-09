@@ -24,49 +24,55 @@ pub enum Error {
     },
 }
 
-/// A generic caching layer that can cache successful responses or responses with specific error types.
+/// A generic caching layer that can cache successful responses and specific error types.
 ///
-/// This layer caches responses based on configurable key extraction and uses Arc for efficient storage
-/// of both responses and errors.
+/// This layer provides intelligent caching with configurable key extraction and selective
+/// error caching. It uses Arc for efficient storage, making cache hits extremely cheap
+/// as they only require Arc pointer cloning.
+///
+/// # Key Features
+///
+/// - **Selective Error Caching**: Configurable predicate determines which errors to cache
+/// - **Arc-Based Storage**: Zero-copy cache hits through Arc pointer cloning
+/// - **Clock-PRO Eviction**: Uses quick_cache's optimal eviction algorithm
+/// - **Load Shedding Protection**: Never caches transient Overloaded errors
+/// - **Type Safety**: Strongly typed key extraction and error predicates
 ///
 /// # Type Parameters
 ///
-/// * `Req` - The request type  
-/// * `Resp` - The response type
-/// * `K` - The cache key type (must implement Hash + Eq + Clone)
-/// * `F` - The key extraction function type
-/// * `P` - The error predicate function type that consumes BoxError and returns either the extracted error or the original BoxError
+/// * `Req` - The request type for the service
+/// * `Resp` - The response type for the service
+/// * `K` - The cache key type (must implement Hash + Eq + Clone + Send + Sync)
+/// * `F` - The key extraction function type `Fn(&Req) -> K`
+/// * `P` - The error predicate function type `Fn(&ArcError) -> bool`
 ///
-/// # Example
+/// # Usage Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use apollo_router_core::layers::cache::{CacheLayer, ArcError};
 /// use apollo_router_core::services::query_parse::{Request as QueryParseRequest, Response as QueryParseResponse, Error as QueryParseError};
 ///
-/// // Create a cache layer for query parsing with explicit types
-/// let cache_layer: CacheLayer<
-///     QueryParseRequest,
-///     QueryParseResponse,
-///     String,
-///     _,
-///     _
-/// > = CacheLayer::new(
+/// # fn example() {
+/// // Create a cache layer for query parsing
+/// let cache_layer: CacheLayer<QueryParseRequest, QueryParseResponse, String, _, _> = CacheLayer::new(
 ///     1000, // Cache capacity
 ///     |req: &QueryParseRequest| req.query.clone(), // Extract query string as key
 ///     |err: &ArcError| {
-///         // Cache ParseError but not other error types
+///         // Cache parse errors but not other error types
 ///         err.is::<QueryParseError>()
 ///     }
 /// );
+/// # }
 /// ```
 ///
 /// # Cache Behavior
 ///
-/// - **Successful responses** are cached as `Arc<Resp>` for zero-copy cache hits
-/// - **Specific error types** can be cached as `Arc<Err>` based on the error predicate
-/// - **Overloaded errors** are never cached (as they are transient load shedding errors)
-/// - **Cache hits** only clone Arc pointers (extremely cheap)
-/// - **Cache eviction** uses quick_cache's Clock-PRO algorithm for optimal hit rates
+/// - **Successful Responses**: Cached as `Arc<Resp>` for zero-copy hits
+/// - **Selective Error Caching**: Only errors matching the predicate are cached
+/// - **Overloaded Error Protection**: `tower::load_shed::Overloaded` errors are never cached
+/// - **Efficient Hits**: Cache hits only clone Arc pointers (extremely fast)
+/// - **Smart Eviction**: Uses Clock-PRO algorithm for optimal cache hit rates
+/// - **Memory Efficient**: Shares data between cache entries and active responses
 #[derive(Clone, Debug)]
 pub struct CacheLayer<Req, Resp, K, F, P> {
     cache: Arc<Cache<K, Result<Arc<Resp>, ArcError>>>,

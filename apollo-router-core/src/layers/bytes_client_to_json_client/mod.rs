@@ -1,3 +1,70 @@
+//! # Bytes Client to JSON Client Layer
+//!
+//! The `BytesClientToJsonClientLayer` transforms bytes client requests into JSON client requests 
+//! in the Apollo Router Core client-side pipeline. This layer is responsible for deserializing
+//! bytes into JSON format for client services and serializing JSON responses back to bytes.
+//!
+//! ## Purpose
+//!
+//! - **JSON Deserialization**: Converts bytes data into structured JSON values
+//! - **Request Type Transformation**: Converts `BytesClientRequest` to `JsonClientRequest`
+//! - **Client-Side Processing**: Enables JSON-based client service processing
+//! - **Response Serialization**: Converts JSON responses back to bytes format
+//! - **Error Handling**: Provides detailed error reporting for JSON processing failures
+//!
+//! ## Usage
+//!
+//! The layer is typically used in client-side pipelines after bytes abstraction:
+//!
+//! ```rust,ignore
+//! use apollo_router_core::layers::ServiceBuilderExt;
+//! use tower::ServiceBuilder;
+//!
+//! # fn example() {
+//! # let (json_client, _handle) = tower_test::mock::spawn();
+//! let client = ServiceBuilder::new()
+//!     .http_client_to_bytes_client()    // HTTP to bytes
+//!     .bytes_client_to_json_client()    // Bytes to JSON
+//!     .service(json_client);
+//! # }
+//! ```
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! Bytes Client Request
+//!     ↓ Deserialize bytes to JSON (fail-fast)
+//!     ↓ Create default Extensions
+//! JSON Client Request → Inner Service
+//!     ↓ JSON Client Response
+//!     ↓ Serialize JSON values back to bytes
+//!     ↓ Return default Extensions
+//! Bytes Client Response
+//! ```
+//!
+//! ## Extensions Handling
+//!
+//! This layer follows the standard Extensions pattern:
+//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Inner service receives extended Extensions with access to parent context
+//! - Response returns the **original** Extensions from the bytes client request
+//! - Parent values always take precedence over inner service values
+//!
+//! ## Error Handling
+//!
+//! The layer can produce `BytesClientToJsonClientError` in these situations:
+//! - **JSON Deserialization**: When bytes cannot be parsed as valid JSON
+//! - **JSON Serialization**: When JSON values cannot be serialized back to bytes
+//! - **Content Preservation**: Includes problematic data for debugging
+//! - **Context Information**: Provides processing context for error reporting
+//!
+//! ## Performance Considerations
+//!
+//! - **Synchronous Processing**: JSON operations happen synchronously for fail-fast behavior
+//! - **Memory Efficiency**: Direct bytes-to-JSON conversion without intermediate steps
+//! - **Fallback Handling**: Uses empty JSON object `{}` as fallback for serialization errors
+//! - **Client Pipeline Position**: Positioned after protocol abstraction layers
+
 use crate::services::bytes_client::{Request as BytesClientRequest, Response as BytesClientResponse};
 use crate::services::json_client::{Request as JsonClientRequest, Response as JsonClientResponse};
 use futures::StreamExt;
@@ -38,6 +105,26 @@ pub enum Error {
     },
 }
 
+/// A Tower layer that transforms bytes client requests into JSON client requests.
+///
+/// This layer sits in client-side pipelines and is responsible for:
+/// - Deserializing bytes data to JSON with fail-fast error handling
+/// - Converting bytes client requests to JSON client requests for processing
+/// - Managing Extensions hierarchy correctly using extend() pattern
+/// - Converting JSON responses back to bytes format
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use apollo_router_core::layers::bytes_client_to_json_client::BytesClientToJsonClientLayer;
+/// use tower::{Layer, ServiceExt};
+///
+/// # fn example() {
+/// # let (json_client, _handle) = tower_test::mock::spawn();
+/// let layer = BytesClientToJsonClientLayer;
+/// let service = layer.layer(json_client);
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct BytesClientToJsonClientLayer;
 
@@ -49,6 +136,14 @@ impl<S> Layer<S> for BytesClientToJsonClientLayer {
     }
 }
 
+/// The service implementation that performs bytes client to JSON client transformation.
+///
+/// This service:
+/// 1. Deserializes the bytes request body to JSON synchronously (fail-fast)
+/// 2. Creates an extended Extensions layer for the inner service
+/// 3. Calls the inner JSON client service
+/// 4. Converts the JSON response stream back to bytes
+/// 5. Returns the original Extensions in the bytes client response
 #[derive(Clone, Debug)]
 pub struct BytesClientToJsonClientService<S> {
     inner: S,

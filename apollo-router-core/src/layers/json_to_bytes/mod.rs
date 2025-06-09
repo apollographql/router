@@ -1,3 +1,70 @@
+//! # JSON to Bytes Layer
+//!
+//! The `JsonToBytesLayer` transforms JSON client requests into bytes client requests in the 
+//! Apollo Router Core client-side pipeline. This layer is responsible for serializing JSON 
+//! values into bytes for transmission to downstream services or external APIs.
+//!
+//! ## Purpose
+//!
+//! - **JSON Serialization**: Converts JSON values into bytes representation
+//! - **Request Type Transformation**: Converts `JsonRequest` to `BytesRequest` for client services
+//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Error Handling**: Provides detailed error reporting for JSON serialization failures
+//! - **Fail-Fast Design**: Validates JSON serialization synchronously to catch errors early
+//!
+//! ## Usage
+//!
+//! The layer is typically used in client-side pipelines before bytes transmission:
+//!
+//! ```rust,ignore
+//! use apollo_router_core::layers::ServiceBuilderExt;
+//! use tower::ServiceBuilder;
+//!
+//! # fn example() {
+//! # let (http_client, _handle) = tower_test::mock::spawn();
+//! let client = ServiceBuilder::new()
+//!     .json_to_bytes()      // Serialize JSON to bytes
+//!     .bytes_to_http()      // Convert to HTTP requests
+//!     .service(http_client);
+//! # }
+//! ```
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! JSON Request (client-side)
+//!     ↓ Serialize JSON to bytes (fail-fast)
+//!     ↓ Extend Extensions (child layer)
+//! Bytes Request → Inner Service
+//!     ↓ Bytes Response (stream)
+//!     ↓ Deserialize bytes back to JSON values
+//!     ↓ Return original Extensions
+//! JSON Response
+//! ```
+//!
+//! ## Extensions Handling
+//!
+//! This layer follows the standard Extensions pattern:
+//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Inner service receives extended Extensions with access to parent context
+//! - Response returns the **original** Extensions from the JSON request
+//! - Parent values always take precedence over inner service values
+//!
+//! ## Error Handling
+//!
+//! The layer can produce `JsonToBytesError` in these situations:
+//! - **JSON Serialization**: When JSON values cannot be serialized to bytes
+//! - **Content Preservation**: Includes the problematic JSON content for debugging
+//! - **Context Information**: Provides serialization context for error reporting
+//!
+//! ## Performance Considerations
+//!
+//! - **Synchronous Serialization**: JSON serialization happens synchronously for fail-fast behavior
+//! - **No Service Cloning**: Efficient implementation without async complexity
+//! - **Stream Processing**: Handles bytes response streams efficiently
+//! - **Fallback Handling**: Uses empty JSON object `{}` as fallback for deserialization errors
+//! - **Memory Efficiency**: Converts JSON directly to bytes without intermediate representations
+
 use crate::services::bytes_client::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::json_client::{Request as JsonRequest, Response as JsonResponse};
 use bytes::Bytes;
@@ -25,6 +92,26 @@ pub enum Error {
     },
 }
 
+/// A Tower layer that transforms JSON client requests into bytes client requests.
+///
+/// This layer sits in client-side pipelines and is responsible for:
+/// - Serializing JSON values to bytes with fail-fast error handling
+/// - Converting JSON requests to bytes requests for transmission
+/// - Managing Extensions hierarchy correctly
+/// - Converting bytes responses back to JSON responses
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use apollo_router_core::layers::json_to_bytes::JsonToBytesLayer;
+/// use tower::{Layer, ServiceExt};
+///
+/// # fn example() {
+/// # let (bytes_client, _handle) = tower_test::mock::spawn();
+/// let layer = JsonToBytesLayer;
+/// let service = layer.layer(bytes_client);
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct JsonToBytesLayer;
 
@@ -36,6 +123,14 @@ impl<S> Layer<S> for JsonToBytesLayer {
     }
 }
 
+/// The service implementation that performs the JSON to bytes transformation.
+///
+/// This service:
+/// 1. Serializes the JSON request body to bytes synchronously (fail-fast)
+/// 2. Creates an extended Extensions layer for the inner service
+/// 3. Calls the inner service with a bytes request
+/// 4. Converts the bytes response stream back to JSON values
+/// 5. Returns the original Extensions in the JSON response
 #[derive(Clone, Debug)]
 pub struct JsonToBytesService<S> {
     inner: S,

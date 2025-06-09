@@ -1,3 +1,66 @@
+//! # HTTP to Bytes Layer
+//!
+//! The `HttpToBytesLayer` transforms HTTP requests into bytes requests in the Apollo Router Core 
+//! request pipeline. This layer is responsible for extracting the body from incoming HTTP requests
+//! and converting them into a bytes representation that can be processed by downstream services.
+//!
+//! ## Purpose
+//!
+//! - **HTTP Body Extraction**: Collects the entire HTTP request body into bytes
+//! - **Request Type Transformation**: Converts `HttpRequest` to `BytesRequest`
+//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Error Handling**: Provides structured error reporting for HTTP response building failures
+//!
+//! ## Usage
+//!
+//! The layer is typically used early in the server-side request pipeline:
+//!
+//! ```rust,ignore
+//! use apollo_router_core::layers::ServiceBuilderExt;
+//! use tower::ServiceBuilder;
+//!
+//! # fn example() {
+//! # let (inner_service, _handle) = tower_test::mock::spawn();
+//! let service = ServiceBuilder::new()
+//!     .http_to_bytes()  // Add this layer
+//!     .bytes_to_json()  // Continue pipeline
+//!     .service(inner_service);
+//! # }
+//! ```
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! HTTP Request
+//!     ↓ Extract body as bytes
+//!     ↓ Extend Extensions (child layer)
+//! Bytes Request → Inner Service
+//!     ↓ Bytes Response
+//!     ↓ Convert to HTTP response with streaming body
+//!     ↓ Return original Extensions
+//! HTTP Response
+//! ```
+//!
+//! ## Extensions Handling
+//!
+//! This layer follows the standard Extensions pattern:
+//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Inner service receives extended Extensions with access to parent context
+//! - Response returns the **original** Extensions from the HTTP request
+//! - Parent values always take precedence over inner service values
+//!
+//! ## Error Handling
+//!
+//! The layer can produce `HttpToBytesError` in these situations:
+//! - **HTTP Response Building**: When converting bytes response back to HTTP response fails
+//!
+//! ## Performance Considerations
+//!
+//! - **Body Collection**: Collects the entire HTTP body into memory before processing
+//! - **Async Body Handling**: Uses async body collection, requiring service cloning
+//! - **Streaming Response**: Converts bytes response back to streaming HTTP body
+//! - **Extensions Cloning**: Efficiently handles Extensions conversion via Arc references
+
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::http_server::{Request as HttpRequest, Response as HttpResponse};
 use futures::StreamExt;
@@ -27,6 +90,26 @@ pub enum Error {
     },
 }
 
+/// A Tower layer that transforms HTTP requests into bytes requests.
+///
+/// This layer sits early in the server-side request pipeline and is responsible for:
+/// - Extracting HTTP request bodies as bytes
+/// - Converting HTTP requests to bytes requests for downstream processing
+/// - Managing Extensions hierarchy correctly
+/// - Converting bytes responses back to streaming HTTP responses
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use apollo_router_core::layers::http_to_bytes::HttpToBytesLayer;
+/// use tower::{Layer, ServiceExt};
+///
+/// # fn example() {
+/// # let (inner_service, _handle) = tower_test::mock::spawn();
+/// let layer = HttpToBytesLayer;
+/// let service = layer.layer(inner_service);
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct HttpToBytesLayer;
 
@@ -38,6 +121,14 @@ impl<S> Layer<S> for HttpToBytesLayer {
     }
 }
 
+/// The service implementation that performs the HTTP to bytes transformation.
+///
+/// This service:
+/// 1. Extracts the HTTP request body as bytes
+/// 2. Creates an extended Extensions layer for the inner service  
+/// 3. Calls the inner service with a bytes request
+/// 4. Converts the bytes response back to a streaming HTTP response
+/// 5. Returns the original Extensions in the HTTP response
 #[derive(Clone, Debug)]
 pub struct HttpToBytesService<S> {
     inner: S,

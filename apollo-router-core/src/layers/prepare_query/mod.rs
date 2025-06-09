@@ -1,3 +1,100 @@
+//! # Prepare Query Layer
+//!
+//! The `PrepareQueryLayer` is a **composite layer** that orchestrates GraphQL query preparation
+//! by combining query parsing and query planning services. This layer transforms JSON requests
+//! containing GraphQL queries into execution requests ready for query execution.
+//!
+//! ## Purpose
+//!
+//! - **Query Orchestration**: Coordinates query parsing and planning services
+//! - **Request Type Transformation**: Converts `JsonRequest` to `ExecutionRequest`
+//! - **GraphQL Processing**: Handles GraphQL query strings, operation names, and variables
+//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Error Aggregation**: Consolidates errors from parsing and planning phases
+//!
+//! ## Architecture
+//!
+//! This is a **composite layer** that internally uses two services:
+//! - **Query Parse Service**: Parses GraphQL query strings into executable documents
+//! - **Query Plan Service**: Creates execution plans from parsed queries
+//!
+//! Unlike atomic layers, this layer orchestrates multiple service calls to provide
+//! a higher-level abstraction for the complete query preparation phase.
+//!
+//! ## Usage
+//!
+//! The layer requires both parsing and planning services to be configured:
+//!
+//! ```rust,ignore
+//! use apollo_router_core::layers::ServiceBuilderExt;
+//! use tower::ServiceBuilder;
+//!
+//! # fn example() {
+//! # let (query_parse_service, _handle1) = tower_test::mock::spawn();
+//! # let (query_plan_service, _handle2) = tower_test::mock::spawn();
+//! # let (execution_service, _handle3) = tower_test::mock::spawn();
+//! let service = ServiceBuilder::new()
+//!     .bytes_to_json()  // JSON parsing
+//!     .prepare_query(   // Query preparation
+//!         query_parse_service,
+//!         query_plan_service
+//!     )
+//!     .service(execution_service);
+//! # }
+//! ```
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! JSON Request (GraphQL query)
+//!     ↓ Extract query string, operation name, variables
+//!     ↓ Extend Extensions (child layer)
+//!     ↓ Call query_parse_service
+//! ExecutableDocument
+//!     ↓ Call query_plan_service  
+//! QueryPlan
+//!     ↓ Combine into ExecutionRequest
+//! Execution Request → Inner Service
+//!     ↓ Execution Response
+//!     ↓ Transform to JSON Response
+//!     ↓ Return original Extensions
+//! JSON Response
+//! ```
+//!
+//! ## Extensions Handling
+//!
+//! This layer follows the standard Extensions pattern:
+//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Inner service receives extended Extensions with access to parent context
+//! - Response returns the **original** Extensions from the JSON request
+//! - Parent values always take precedence over inner service values
+//!
+//! ## Error Handling
+//!
+//! The layer can produce `PrepareQueryError` in these situations:
+//! - **Orchestration Errors**: When service coordination fails
+//! - **JSON Extraction**: When required GraphQL fields are missing from JSON
+//! - **Query Plan Service**: When query planning fails after successful parsing
+//!
+//! ## GraphQL Request Format
+//!
+//! The layer expects JSON requests with standard GraphQL structure:
+//!
+//! ```json
+//! {
+//!   "query": "query GetUser($id: ID!) { user(id: $id) { name } }",
+//!   "operationName": "GetUser",
+//!   "variables": { "id": "123" }
+//! }
+//! ```
+//!
+//! ## Performance Considerations
+//!
+//! - **Service Orchestration**: Requires sequential calls to parse and plan services
+//! - **Composite Nature**: More complex than atomic layers due to multi-service coordination
+//! - **Error Propagation**: Handles errors from multiple service boundaries
+//! - **Future Enhancement**: Currently uses placeholder logic pending full implementation
+
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
 use crate::services::query_execution::{Request as ExecutionRequest, Response as ExecutionResponse};
 use crate::services::query_parse;
@@ -48,6 +145,31 @@ pub enum Error {
     },
 }
 
+/// A composite Tower layer that orchestrates GraphQL query preparation.
+///
+/// This layer combines query parsing and query planning services to transform
+/// JSON requests containing GraphQL queries into execution requests. It acts as
+/// a higher-level abstraction that coordinates multiple services internally.
+///
+/// # Type Parameters
+///
+/// * `P` - The query parse service type
+/// * `Pl` - The query plan service type
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use apollo_router_core::layers::prepare_query::PrepareQueryLayer;
+/// use tower::{Layer, ServiceExt};
+///
+/// # fn example() {
+/// # let (parse_service, _handle1) = tower_test::mock::spawn();
+/// # let (plan_service, _handle2) = tower_test::mock::spawn();
+/// # let (execution_service, _handle3) = tower_test::mock::spawn();
+/// let layer = PrepareQueryLayer::new(parse_service, plan_service);
+/// let service = layer.layer(execution_service);
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct PrepareQueryLayer<P, Pl> {
     query_parse_service: P,
@@ -79,6 +201,21 @@ where
     }
 }
 
+/// The service implementation that orchestrates query preparation.
+///
+/// This service:
+/// 1. Extracts GraphQL query details from JSON requests
+/// 2. Creates an extended Extensions layer for the inner service
+/// 3. Coordinates calls to query parse and plan services (currently placeholder)
+/// 4. Calls the inner execution service with the prepared request
+/// 5. Transforms execution responses back to JSON responses
+/// 6. Returns the original Extensions in the JSON response
+///
+/// # Type Parameters
+///
+/// * `S` - The inner execution service type
+/// * `P` - The query parse service type
+/// * `Pl` - The query plan service type
 #[derive(Clone, Debug)]
 pub struct PrepareQueryService<S, P, Pl> {
     inner: S,
