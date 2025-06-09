@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 
 use quick_cache::sync::Cache;
 use tower::{Layer, Service};
+use tower::load_shed::error::Overloaded;
 pub type ArcError = Arc<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
@@ -63,6 +64,7 @@ pub enum Error {
 ///
 /// - **Successful responses** are cached as `Arc<Resp>` for zero-copy cache hits
 /// - **Specific error types** can be cached as `Arc<Err>` based on the error predicate
+/// - **Overloaded errors** are never cached (as they are transient load shedding errors)
 /// - **Cache hits** only clone Arc pointers (extremely cheap)
 /// - **Cache eviction** uses quick_cache's Clock-PRO algorithm for optimal hit rates
 #[derive(Clone, Debug)]
@@ -87,7 +89,7 @@ where
     ///
     /// * `capacity` - Maximum number of entries to cache
     /// * `key_extractor` - Function to extract cache key from requests
-    /// * `error_predicate` - Function that consumes BoxError and returns either the extracted error for caching or the original BoxError
+    /// * `error_predicate` - Function that determines which errors to cache (evaluated after excluding Overloaded errors)
     pub fn new(capacity: usize, key_extractor: F, error_predicate: P) -> Self {
         Self {
             cache: Arc::new(Cache::new(capacity)),
@@ -104,7 +106,7 @@ where
     ///
     /// * `cache` - Pre-configured quick_cache instance
     /// * `key_extractor` - Function to extract cache key from requests
-    /// * `error_predicate` - Function that consumes BoxError and returns either the extracted error for caching or the original BoxError
+    /// * `error_predicate` - Function that determines which errors to cache (evaluated after excluding Overloaded errors)
     pub fn with_cache(
         cache: Cache<K, Result<Arc<Resp>, ArcError>>,
         key_extractor: F,
@@ -211,6 +213,12 @@ where
                 }
                 Err(err) => {
                     let arc_err = err.into();
+                    
+                    // Never cache Overloaded errors as they are transient
+                    if arc_err.is::<Overloaded>() {
+                        return Err(arc_err);
+                    }
+                    
                     let should_cache = error_predicate(&arc_err);
 
                     // Try to extract cacheable error

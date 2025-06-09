@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tower::{BoxError, Service};
+use tower::load_shed::error::Overloaded;
 
 use super::*;
 
@@ -400,4 +401,58 @@ async fn test_response_and_error_conversion_to_arc() {
 
     // Verify service was only called twice (once for each unique key)
     assert_eq!(mock_service.call_count(), 2);
+}
+
+#[tokio::test]
+async fn test_overloaded_errors_never_cached() {
+    // Create a service that returns Overloaded errors
+    let mock_service = MockService::new(vec![
+        Err(Box::new(Overloaded::new()) as BoxError),
+        Err(Box::new(Overloaded::new()) as BoxError),
+        Err(Box::new(Overloaded::new()) as BoxError),
+    ]);
+
+    // Create cache layer with a predicate that would cache ANY error
+    // This tests that Overloaded errors are excluded even when the predicate says to cache
+    let cache_layer: CacheLayer<TestRequest, TestResponse, String, _, _> = CacheLayer::new(
+        10,
+        |req: &TestRequest| req.query.clone(),
+        |_err: &ArcError| true, // Cache ALL errors (but Overloaded should still be excluded)
+    );
+
+    let mut cached_service = cache_layer.layer(mock_service.clone());
+
+    let request = TestRequest {
+        query: "overloaded query".to_string(),
+        id: 1,
+    };
+
+    // First call should hit the service and NOT cache the Overloaded error
+    let error1 = cached_service
+        .call(request.clone())
+        .await
+        .expect_err("should error");
+    
+    // Verify it's an Overloaded error
+    assert!(error1.is::<Overloaded>());
+    assert_eq!(mock_service.call_count(), 1);
+
+    // Second call with same query should hit the service again (not cached)
+    let error2 = cached_service
+        .call(request.clone())
+        .await
+        .expect_err("should error");
+    
+    // Verify it's still an Overloaded error and service was called again
+    assert!(error2.is::<Overloaded>());
+    assert_eq!(mock_service.call_count(), 2); // Service called again because error wasn't cached
+
+    // Third call should also hit the service (still not cached)
+    let error3 = cached_service
+        .call(request.clone())
+        .await
+        .expect_err("should error");
+    
+    assert!(error3.is::<Overloaded>());
+    assert_eq!(mock_service.call_count(), 3); // Service called again because error wasn't cached
 }
