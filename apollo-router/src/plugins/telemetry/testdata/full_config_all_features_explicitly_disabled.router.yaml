@@ -1,6 +1,13 @@
 # Disable apq
 apq:
   enabled: false
+  router:
+    cache:
+      in_memory:
+        limit: 1000
+  subgraph:
+    all:
+      enabled: true
 
 # Disable entity cache
 preview_entity_cache:

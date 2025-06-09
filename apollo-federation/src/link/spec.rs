@@ -102,10 +102,45 @@ impl Identity {
             name: name!("context"),
         }
     }
+
+    pub fn tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("tag"),
+        }
+    }
+
+    pub fn requires_scopes_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("requiresScopes"),
+        }
+    }
+
+    pub fn authenticated_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("authenticated"),
+        }
+    }
+
+    pub fn policy_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("policy"),
+        }
+    }
+
+    pub fn connect_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("connect"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Version {
     /// The major number part of the version.
     pub major: u32,
@@ -181,7 +216,7 @@ impl Version {
 }
 
 /// A `@link` specification url, which identifies a specific version of a specification.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Url {
     /// The identity of the `@link` specification pointed by this url.
     pub identity: Identity,

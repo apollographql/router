@@ -4,7 +4,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ty;
-use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -14,7 +13,6 @@ use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
-use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
@@ -38,6 +36,8 @@ use crate::schema::validators::key::validate_key_directives;
 use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
+use crate::schema::validators::shareable::validate_shareable_directives;
+use crate::schema::validators::tag::validate_tag_directives;
 use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
@@ -135,8 +135,10 @@ impl FederationBlueprint {
         validate_requires_directives(schema, meta, &mut error_collector)?;
         validate_external_directives(schema, meta, &mut error_collector)?;
         validate_interface_object_directives(schema, meta, &mut error_collector)?;
+        validate_shareable_directives(schema, meta, &mut error_collector)?;
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
+        validate_tag_directives(schema, &mut error_collector)?;
 
         error_collector.into_result()
     }
@@ -337,23 +339,10 @@ impl FederationBlueprint {
     }
 
     fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let Some(links_metadata) = schema.metadata() else {
-            return Ok(());
-        };
-
-        for link in links_metadata.links.clone() {
-            // TODO: Pick out known features by link identity and call `add_elements_to_schema`.
-            // JS calls coreFeatureDefinitionIfKnown here, but we don't have a feature registry yet.
-
-            if link.url.identity == Identity::cost_identity() {
-                let spec = COST_VERSIONS
-                    .find(&link.url.version)
-                    .ok_or_else(|| SingleFederationError::UnknownLinkVersion {
-                        message: format!("Detected unsupported cost specification version {}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.", link.url.version, COST_VERSIONS.versions().join(", "))
-                    })?;
-                spec.add_elements_to_schema(schema)?;
-            }
+        for feature in schema.all_features()? {
+            feature.add_elements_to_schema(schema)?;
         }
+
         Ok(())
     }
 }

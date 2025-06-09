@@ -20,6 +20,7 @@ use http::header::TE;
 use http::header::TRAILER;
 use http::header::TRANSFER_ENCODING;
 use http::header::UPGRADE;
+use itertools::Itertools;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -389,6 +390,7 @@ impl<S> HeadersService<S> {
                 &body_to_value,
                 context,
                 headers_mut,
+                None,
             );
         }
     }
@@ -400,6 +402,8 @@ impl<S> HeadersService<S> {
         let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
+        // We need to know what headers were added prior to this processing to that we can properly override as needed
+        let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
         for operation in &*self.operations {
@@ -409,6 +413,7 @@ impl<S> HeadersService<S> {
                 &body_to_value,
                 context,
                 headers_mut,
+                Some(&existing_headers),
             );
         }
     }
@@ -422,15 +427,19 @@ impl Operation {
         body_to_value: &Option<Value>,
         context: &crate::Context,
         headers_mut: &mut HeaderMap,
+        existing_headers: Option<&HeaderMap>,
     ) {
         match self {
             Operation::Insert(insert) => {
                 insert.process_header_rules(body_to_value, context, headers_mut)
             }
             Operation::Remove(remove) => remove.process_header_rules(headers_mut),
-            Operation::Propagate(propagate) => {
-                propagate.process_header_rules(already_propagated, supergraph_headers, headers_mut)
-            }
+            Operation::Propagate(propagate) => propagate.process_header_rules(
+                already_propagated,
+                supergraph_headers,
+                headers_mut,
+                existing_headers,
+            ),
         }
     }
 }
@@ -527,7 +536,10 @@ impl Propagate {
         already_propagated: &mut HashSet<String>,
         supergraph_headers: &HeaderMap,
         headers_mut: &mut HeaderMap,
+        existing_headers: Option<&HeaderMap>,
     ) {
+        let default_headers = Default::default();
+        let existing_headers = existing_headers.unwrap_or(&default_headers);
         match self {
             Propagate::Named {
                 named,
@@ -536,6 +548,17 @@ impl Propagate {
             } => {
                 let target_header = rename.as_ref().unwrap_or(named);
                 if !already_propagated.contains(target_header.as_str()) {
+                    // If the header was already added previously by some other
+                    // method (e.g Connectors), remove it first before propagating
+                    // the value from the client request. This allows us to use
+                    // `.append` instead of `.insert` to handle multiple headers.
+                    //
+                    // Note: Rhai and Coprocessor plugins run after this plugin,
+                    // so this will not remove headers added there.
+                    if existing_headers.contains_key(target_header) {
+                        headers_mut.remove(target_header);
+                    }
+
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
@@ -551,34 +574,32 @@ impl Propagate {
                 }
             }
             Propagate::Matching { matching } => {
-                let mut previous_name = None;
-
                 supergraph_headers
                     .iter()
                     .filter(|(name, _)| {
                         !RESERVED_HEADERS.contains(*name) && matching.is_match(name.as_str())
                     })
-                    .for_each(|(name, value)| {
+                    .chunk_by(|(name, ..)| name.to_owned())
+                    .into_iter()
+                    .for_each(|(name, headers)| {
                         if !already_propagated.contains(name.as_str()) {
-                            headers_mut.append(name, value.clone());
-
-                            // we have to this because don't want to propagate headers that are accounted for in the
-                            // `already_propagated` set, but in the iteration here we might go through the same header
-                            // multiple times
-                            match previous_name {
-                                None => previous_name = Some(name),
-                                Some(previous) => {
-                                    if previous != name {
-                                        already_propagated.insert(previous.to_string());
-                                        previous_name = Some(name);
-                                    }
-                                }
+                            // If the header was already added previously by some other
+                            // method (e.g Connectors), remove it first before propagating
+                            // the value from the client request. This allows us to use
+                            // `.append` instead of `.insert` to handle multiple headers.
+                            //
+                            // Note: Rhai and Coprocessor plugins run after this plugin,
+                            // so this will not remove headers added there.
+                            if existing_headers.contains_key(name) {
+                                headers_mut.remove(name);
                             }
+
+                            headers.for_each(|(_, value)| {
+                                headers_mut.append(name, value.clone());
+                            });
+                            already_propagated.insert(name.to_string());
                         }
                     });
-                if let Some(name) = previous_name {
-                    already_propagated.insert(name.to_string());
-                }
             }
         }
     }
@@ -591,11 +612,11 @@ mod test {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
@@ -975,6 +996,66 @@ mod test {
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_exact_multiple() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
+        .layer(mock);
+
+        let ctx = Context::new();
+        ctx.insert("my_key", "my_value_from_context".to_string())
+            .unwrap();
+        let req = SubgraphRequest {
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header("db", "vdb2")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+            subgraph_request: http::Request::builder()
+                .header("aa", "vaa") // will be removed
+                .header("aa", "vaa") // will be removed
+                .header("aa", "vaa2") // will be removed
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
+                .body(Request::builder().query("query").build())
+                .expect("expecting valid request"),
+            operation_kind: OperationKind::Query,
+            context: ctx,
+            subgraph_name: String::from("test"),
+            subscription_stream: None,
+            connection_closed_signal: None,
+            query_hash: Default::default(),
+            authorization: Default::default(),
+            executable_document: None,
+            id: SubgraphRequestId(String::new()),
+        };
+
+        service.ready().await?.call(req).await?;
         Ok(())
     }
 

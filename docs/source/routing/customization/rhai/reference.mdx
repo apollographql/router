@@ -57,11 +57,28 @@ log_trace("trace-level log message");
 
 ## Terminating client requests
 
-Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from the supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
+Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from either the router service or supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
+
+When choosing between router service versus supergraph service termination:
+
+- **Router service**: Cannot access request/response body and executes before parsing and validation; ideal for checks that should be consistently applied, like checking required headers, even when invalid operations are provided by the client.
+- **Supergraph service**: Use whenever you need to examine request bodies to enforce termination.
 
 For example:
 ```rhai
-// Must throw exception from supergraph service
+// Throw exception from router service
+// Note: The request/response body is unavailable from the router_service.
+fn router_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something is malformed in the request...
+        throw "An was found to be wrong in the request_service...";
+    };
+    // Map our response using our closure
+    service.map_request(f);
+}
+
+// ...or throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -79,7 +96,22 @@ The key must be a number and the message must be something which can be converte
 
 For example:
 ```rhai
-// Must throw exception from supergraph service
+// Throw exception from router service
+// Note: The request/response body is unavailable from the router_service.
+fn router_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something is malformed in the request...
+        throw #{
+            status: 400,
+            message: "An was found to be wrong in the request_service..."
+        };
+    };
+    // Map our response using our closure
+    service.map_request(f);
+}
+
+// ...or throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {

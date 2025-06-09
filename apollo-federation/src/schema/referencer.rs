@@ -77,6 +77,18 @@ pub(crate) struct ScalarTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl ScalarTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.union_fields.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ObjectTypeReferencers {
     pub(crate) schema_roots: IndexSet<SchemaRootDefinitionPosition>,
@@ -127,12 +139,32 @@ pub(crate) struct EnumTypeReferencers {
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
 }
 
+impl EnumTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_fields.len()
+            + self.object_field_arguments.len()
+            + self.interface_fields.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InputObjectTypeReferencers {
     pub(crate) object_field_arguments: IndexSet<ObjectFieldArgumentDefinitionPosition>,
     pub(crate) interface_field_arguments: IndexSet<InterfaceFieldArgumentDefinitionPosition>,
     pub(crate) input_object_fields: IndexSet<InputObjectFieldDefinitionPosition>,
     pub(crate) directive_arguments: IndexSet<DirectiveArgumentDefinitionPosition>,
+}
+
+impl InputObjectTypeReferencers {
+    pub(crate) fn len(&self) -> usize {
+        self.object_field_arguments.len()
+            + self.interface_field_arguments.len()
+            + self.input_object_fields.len()
+            + self.directive_arguments.len()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -165,5 +197,32 @@ impl DirectiveReferencers {
                     .iter()
                     .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
             )
+    }
+
+    pub(crate) fn extend(&mut self, other: &Self) {
+        if let Some(schema) = &other.schema {
+            self.schema = Some(schema.clone());
+        }
+        self.scalar_types.extend(other.scalar_types.iter().cloned());
+        self.object_types.extend(other.object_types.iter().cloned());
+        self.object_fields
+            .extend(other.object_fields.iter().cloned());
+        self.object_field_arguments
+            .extend(other.object_field_arguments.iter().cloned());
+        self.interface_types
+            .extend(other.interface_types.iter().cloned());
+        self.interface_fields
+            .extend(other.interface_fields.iter().cloned());
+        self.interface_field_arguments
+            .extend(other.interface_field_arguments.iter().cloned());
+        self.union_types.extend(other.union_types.iter().cloned());
+        self.enum_types.extend(other.enum_types.iter().cloned());
+        self.enum_values.extend(other.enum_values.iter().cloned());
+        self.input_object_types
+            .extend(other.input_object_types.iter().cloned());
+        self.input_object_fields
+            .extend(other.input_object_fields.iter().cloned());
+        self.directive_arguments
+            .extend(other.directive_arguments.iter().cloned());
     }
 }

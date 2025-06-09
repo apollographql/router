@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1527,8 +1526,10 @@ snapshot_kind: text
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
@@ -1569,6 +1570,10 @@ snapshot_kind: text
           "default": "/metrics",
           "description": "The path where prometheus will be exposed",
           "type": "string"
+        },
+        "resource_selector": {
+          "$ref": "#/definitions/ResourceSelectorConfig",
+          "description": "#/definitions/ResourceSelectorConfig"
         }
       },
       "type": "object"
@@ -2208,7 +2213,14 @@ snapshot_kind: text
         },
         "preview_connect_v0_2": {
           "default": null,
-          "description": "Feature gate for connect spec v0.2. Set to `true` to enable the using the v0.2 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Enables Connect spec v0.2 during the preview.",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "preview_connect_v0_3": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using the v0.3 spec during the preview phase.",
           "nullable": true,
           "type": "boolean"
         },
@@ -4176,6 +4188,15 @@ snapshot_kind: text
           "nullable": true,
           "type": "array"
         },
+        "audiences": {
+          "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array",
+          "uniqueItems": true
+        },
         "headers": {
           "description": "List of headers to add to the JWKS request",
           "items": {
@@ -4185,7 +4206,7 @@ snapshot_kind: text
           "type": "array"
         },
         "issuers": {
-          "description": "Expected issuers for tokens verified by that JWKS",
+          "description": "Expected issuers for tokens verified by that JWKS\n\nIf not specified, the issuer will not be checked.",
           "items": {
             "type": "string"
           },
@@ -5218,6 +5239,24 @@ snapshot_kind: text
         "header_name"
       ],
       "type": "object"
+    },
+    "ResourceSelectorConfig": {
+      "oneOf": [
+        {
+          "description": "Export all resource attributes with every metrics.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Do not export any resource attributes with every metrics.",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ResponseStatus": {
       "oneOf": [

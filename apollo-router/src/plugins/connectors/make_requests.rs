@@ -2,21 +2,18 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
-use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::CustomConfiguration;
-use apollo_federation::sources::connect::EntityResolver;
-use apollo_federation::sources::connect::JSONSelection;
-use apollo_federation::sources::connect::Namespace;
-use http::response::Parts;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::EntityResolver;
+use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::Namespace;
 use parking_lot::Mutex;
+use request_merger::MappingContextMerger;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use serde_json_bytes::json;
 
 use super::http_json_transport::HttpJsonTransportError;
 use super::http_json_transport::make_request;
@@ -26,7 +23,8 @@ use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-use crate::services::external::externalize_header_map;
+
+pub(crate) mod request_merger;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -43,120 +41,16 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn merge(
-        &self,
-        variables_used: &HashSet<Namespace>,
-        headers_used: &HashSet<String>,
-        config: Option<&CustomConfiguration>,
-        context: &Context,
-        status: Option<u16>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-        response_parts: Option<&Parts>,
-    ) -> IndexMap<String, Value> {
-        let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
-
-        // Not all connectors reference $args
-        if variables_used.contains(&Namespace::Args) {
-            map.insert(
-                Namespace::Args.as_str().into(),
-                Value::Object(self.args.clone()),
-            );
+    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
+        MappingContextMerger {
+            inputs: self,
+            variables_used,
+            config: None,
+            context: None,
+            status: None,
+            request: None,
+            response: None,
         }
-
-        // $this only applies to fields on entity types (not Query or Mutation)
-        if variables_used.contains(&Namespace::This) {
-            map.insert(
-                Namespace::This.as_str().into(),
-                Value::Object(self.this.clone()),
-            );
-        }
-
-        // $batch only applies to entity resolvers on types
-        if variables_used.contains(&Namespace::Batch) {
-            map.insert(
-                Namespace::Batch.as_str().into(),
-                Value::Array(self.batch.clone().into_iter().map(Value::Object).collect()),
-            );
-        }
-
-        // $context could be a large object, so we only convert it to JSON
-        // if it's used. It can also be mutated between requests, so we have
-        // to convert it each time.
-        if variables_used.contains(&Namespace::Context) {
-            let context: Map<ByteString, Value> = context
-                .iter()
-                .map(|r| (r.key().as_str().into(), r.value().clone()))
-                .collect();
-            map.insert(Namespace::Context.as_str().into(), Value::Object(context));
-        }
-
-        // $config doesn't change unless the schema reloads, but we can avoid
-        // the allocation if it's unused.
-        if variables_used.contains(&Namespace::Config) {
-            if let Some(config) = config {
-                map.insert(Namespace::Config.as_str().into(), json!(config));
-            }
-        }
-
-        // $status is available only for response mapping
-        if variables_used.contains(&Namespace::Status) {
-            if let Some(status) = status {
-                map.insert(
-                    Namespace::Status.as_str().into(),
-                    Value::Number(status.into()),
-                );
-            }
-        }
-
-        // Add headers from the original router request.
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|(key, value)| {
-                    headers_used.contains(key.as_str()).then_some((
-                        key.as_str().into(),
-                        value
-                            .iter()
-                            .map(|s| Value::String(s.as_str().into()))
-                            .collect(),
-                    ))
-                })
-                .collect();
-            let request_object = json!({
-                "headers": Value::Object(new_headers)
-            });
-            map.insert(Namespace::Request.as_str().into(), request_object);
-        }
-
-        // Add headers from the connectors response
-        // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if variables_used.contains(&Namespace::Response) {
-            if let Some(response_parts) = response_parts {
-                let new_headers: Map<ByteString, Value> =
-                    externalize_header_map(&response_parts.headers)
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            headers_used.contains(key.as_str()).then_some((
-                                key.as_str().into(),
-                                value
-                                    .iter()
-                                    .map(|s| Value::String(s.as_str().into()))
-                                    .collect(),
-                            ))
-                        })
-                        .collect();
-                let response_object = json!({
-                    "headers": Value::Object(new_headers)
-                });
-                map.insert(Namespace::Response.as_str().into(), response_object);
-            }
-        }
-
-        map
     }
 }
 
@@ -345,15 +239,17 @@ fn request_params_to_requests(
         let connector = connector.clone();
         let (transport_request, mapping_problems) = make_request(
             &connector.transport,
-            response_key.inputs().merge(
-                &connector.request_variables,
-                &connector.request_headers,
-                connector.config.as_ref(),
-                &original_request.context,
-                None,
-                original_request.supergraph_request.clone(),
-                None,
-            ),
+            response_key
+                .inputs()
+                .clone()
+                .merger(&connector.request_variables)
+                .config(connector.config.as_ref())
+                .context(&original_request.context)
+                .request(
+                    &connector.request_headers,
+                    &original_request.supergraph_request,
+                )
+                .merge(),
             &original_request,
             debug,
         )?;
@@ -812,12 +708,12 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::ConnectorBatchSettings;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectBatchArguments;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use insta::assert_debug_snapshot;
 
@@ -2105,7 +2001,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),
@@ -2225,7 +2121,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
             error_settings: Default::default(),

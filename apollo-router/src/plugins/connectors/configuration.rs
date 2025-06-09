@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::CustomConfiguration;
-use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::connectors::CustomConfiguration;
+use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
 use schemars::schema::InstanceType;
@@ -50,10 +50,15 @@ pub(crate) struct ConnectorsConfig {
     #[serde(default)]
     pub(crate) expose_sources_in_context: bool,
 
-    /// Feature gate for connect spec v0.2. Set to `true` to enable the using
-    /// the v0.2 spec during the preview phase.
+    /// Enables Connect spec v0.2 during the preview.
     #[serde(default)]
+    #[deprecated(note = "Connect spec v0.2 is now available.")]
     pub(crate) preview_connect_v0_2: Option<bool>,
+
+    /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
+    /// the v0.3 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_3: Option<bool>,
 }
 
 // TODO: remove this after deprecation period

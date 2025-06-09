@@ -69,6 +69,7 @@ serde_json = { version = "1.0.114", features = [
     "float_roundtrip",
 ] }
 serde_json_bytes = { version = "0.2.5", features = ["preserve_order"] }
+similar = { version = "2.5.0", features = ["inline"] }
 sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }

@@ -2,7 +2,7 @@
 title: Configure GraphQL Subscription Support
 subtitle: Enable clients to receive real-time updates
 description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
-minVersion: 1.22.0
+minVersion: Router v1.22.0
 ---
 
 <PremiumFeature />
@@ -43,7 +43,11 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 After completing all [prerequisites](#prerequisites), in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
-The router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
+When communicating with subgraphs, the router will use routing URLs defined in the supergraph or, if specified, the router YAML config. The router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
+
+<Note>
+Use `wss://` (WebSocket Secure) instead of `ws://` to encrypt data transmission between the router and subgraphs, providing similar security benefits as using `https://` over `http://`.
+</Note>
 
 ### WebSocket setup
 

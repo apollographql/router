@@ -2,8 +2,8 @@ use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
-use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::JSONSelection;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::JSONSelection;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -72,7 +72,7 @@ enum RawResponse {
         parts: http::response::Parts,
         data: Value,
         key: ResponseKey,
-        debug_request: Option<ConnectorDebugHttpRequest>,
+        debug_request: Option<Box<ConnectorDebugHttpRequest>>,
     },
 }
 
@@ -96,15 +96,16 @@ impl RawResponse {
                 parts,
                 debug_request,
             } => {
-                let inputs = key.inputs().merge(
-                    &connector.response_variables,
-                    &connector.response_headers,
-                    connector.config.as_ref(),
-                    context,
-                    Some(parts.status.as_u16()),
-                    supergraph_request,
-                    Some(&parts),
-                );
+                let inputs = key
+                    .inputs()
+                    .clone()
+                    .merger(&connector.response_variables)
+                    .config(connector.config.as_ref())
+                    .context(context)
+                    .status(parts.status.as_u16())
+                    .request(&connector.response_headers, &supergraph_request)
+                    .response(&connector.response_headers, Some(&parts))
+                    .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
@@ -162,15 +163,15 @@ impl RawResponse {
                 data,
             } => {
                 let inputs = LazyCell::new(|| {
-                    key.inputs().merge(
-                        &connector.response_variables,
-                        &connector.response_headers,
-                        connector.config.as_ref(),
-                        context,
-                        Some(parts.status.as_u16()),
-                        supergraph_request,
-                        Some(&parts),
-                    )
+                    key.inputs()
+                        .clone()
+                        .merger(&connector.response_variables)
+                        .config(connector.config.as_ref())
+                        .context(context)
+                        .status(parts.status.as_u16())
+                        .request(&connector.response_headers, &supergraph_request)
+                        .response(&connector.response_headers, Some(&parts))
+                        .merge()
                 });
 
                 // Do we have a error message mapping set for this connector?
@@ -444,7 +445,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: Option<ConnectorDebugHttpRequest>,
+    debug_request: Option<Box<ConnectorDebugHttpRequest>>,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
@@ -571,7 +572,7 @@ async fn deserialize_response<T: HttpBody>(
     context: &Context,
     response_key: &ResponseKey,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    debug_request: &Option<ConnectorDebugHttpRequest>,
+    debug_request: &Option<Box<ConnectorDebugHttpRequest>>,
 ) -> Result<Value, graphql::Error> {
     use serde_json_bytes::*;
 
@@ -755,13 +756,13 @@ mod tests {
 
     use apollo_compiler::Schema;
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::EntityResolver;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::EntityResolver;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;

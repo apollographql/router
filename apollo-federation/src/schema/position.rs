@@ -421,6 +421,13 @@ impl Debug for OutputTypeDefinitionPosition {
 impl OutputTypeDefinitionPosition {
     const EXPECTED: &'static str = "an output type";
 
+    pub(crate) fn is_leaf_type(&self) -> bool {
+        matches!(
+            self,
+            OutputTypeDefinitionPosition::Scalar(_) | OutputTypeDefinitionPosition::Enum(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -901,7 +908,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
@@ -921,6 +928,15 @@ impl SchemaDefinitionPosition {
         schema: &mut FederationSchema,
         directive: Component<Directive>,
     ) -> Result<(), FederationError> {
+        self.insert_directive_at(schema, directive, self.get(&schema.schema).directives.len())
+    }
+
+    pub(crate) fn insert_directive_at(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+        index: usize,
+    ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         if schema_definition
             .directives
@@ -936,7 +952,10 @@ impl SchemaDefinitionPosition {
             .into());
         }
         let name = directive.name.clone();
-        schema_definition.make_mut().directives.push(directive);
+        schema_definition
+            .make_mut()
+            .directives
+            .insert(index, directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)?;
         schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         Ok(())
@@ -1041,12 +1060,14 @@ pub(crate) enum TagDirectiveTargetPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
-    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    ArgumentDefinition(FieldArgumentDefinitionPosition),
     Scalar(ScalarTypeDefinitionPosition),
     Enum(EnumTypeDefinitionPosition),
     EnumValue(EnumValueDefinitionPosition),
     InputObject(InputObjectTypeDefinitionPosition),
     InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+    Schema(SchemaDefinitionPosition),
+    DirectiveArgumentDefinition(DirectiveArgumentDefinitionPosition),
 }
 
 impl Debug for TagDirectiveTargetPosition {
@@ -1064,6 +1085,10 @@ impl Debug for TagDirectiveTargetPosition {
             Self::EnumValue(p) => write!(f, "EnumValue({p})"),
             Self::InputObject(p) => write!(f, "InputObject({p})"),
             Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+            Self::Schema(p) => write!(f, "Schema({p})"),
+            Self::DirectiveArgumentDefinition(p) => {
+                write!(f, "DirectiveArgumentDefinition({p})")
+            }
         }
     }
 }

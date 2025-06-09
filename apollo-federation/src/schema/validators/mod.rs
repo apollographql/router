@@ -1,10 +1,12 @@
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::diagnostic::Diagnostic;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::DiagnosticData;
 
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -28,6 +30,8 @@ pub(crate) mod list_size;
 pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
+pub(crate) mod shareable;
+pub(crate) mod tag;
 
 /// A trait for validating FieldSets used in schema directives. Do not use this
 /// to validate FieldSets used in operations. This will skip named fragments
@@ -352,4 +356,12 @@ pub(crate) fn deny_unsupported_directive_on_interface_field<D: AppliesOnField>(
             .into(),
         );
     }
+}
+
+pub(crate) fn normalize_diagnostic_message(diagnostic: Diagnostic<'_, DiagnosticData>) -> String {
+    diagnostic
+        .error
+        .unstable_compat_message() // Attempt to convert to something closer to the original JS error messages
+        .unwrap_or_else(|| diagnostic.error.to_string()) // Using `diagnostic.error` strips the potentially misleading location info from the message
+        .replace("syntax error:", "Syntax error:")
 }

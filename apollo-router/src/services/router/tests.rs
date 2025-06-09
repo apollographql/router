@@ -832,3 +832,74 @@ fn batch_with_three_unique_queries() -> Request<RouterBody> {
             router::body::from_bytes(result)
         })
 }
+
+const ENUM_SCHEMA: &str = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+      query: Query
+   }
+   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+     SECURITY
+     EXECUTION
+   }
+
+   scalar join__FieldSet
+
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query @join__type(graph: USER) @join__type(graph: ORGA){
+      test(input: InputEnum): String @join__field(graph: USER)
+   }
+
+   enum InputEnum @join__type(graph: USER) @join__type(graph: ORGA) {
+    A
+    B
+  }"#;
+
+// Companion test: services::supergraph::tests::invalid_input_enum
+#[tokio::test]
+async fn invalid_input_enum() {
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
+        }))
+        .unwrap()
+        .schema(ENUM_SCHEMA)
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { test(input: C) }")
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .expect("should have one response")
+        .unwrap();
+
+    let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+
+    insta::assert_json_snapshot!(response);
+}

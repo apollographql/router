@@ -1,0 +1,10 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"{$this { x: { y } }\")"
+---
+Err(
+    Error {
+        message: "Invalid expression, missing closing }",
+        location: 0..19,
+    },
+)

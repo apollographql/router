@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/composite_key_doesnt_match.graphql
+---
+[
+    Message {
+        code: MissingEntityConnector,
+        message: "Entity resolution for `@key(fields: \"id store { id country { key_id region } }\")` on `Product` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
+        locations: [
+            17:14..17:71,
+        ],
+    },
+]

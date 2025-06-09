@@ -19,6 +19,7 @@ use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -160,7 +161,9 @@ impl SchemaUpgrader {
 
         let upgraded_subgraph =
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
-                .assume_expanded()?
+                // This error will be wrapped up as a SubgraphError in `Self::upgrade`
+                .assume_expanded()
+                .map_err(|err| err.error)?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
     }
@@ -629,11 +632,7 @@ impl SchemaUpgrader {
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
-        schema
-            .schema()
-            .schema_definition
-            .iter_root_operations()
-            .any(|op| op.1.as_str() == ty.type_name().as_str())
+        schema.is_root_type(ty.type_name())
     }
 
     fn remove_directives_on_interface(
@@ -952,7 +951,7 @@ impl SchemaUpgrader {
 // However, those messages were never used, so we have omitted them here.
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Upgraded>>, Vec<FederationError>> {
+) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
@@ -963,7 +962,7 @@ pub fn upgrade_subgraphs_if_necessary(
 
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
-    let mut errors: Vec<FederationError> = vec![];
+    let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
     let upgraded_subgraphs: Vec<Subgraph<Upgraded>> = subgraphs
         .into_iter()
@@ -1004,12 +1003,14 @@ pub fn upgrade_subgraphs_if_necessary(
 
         let interface_object_subgraphs = format_subgraph_names(subgraphs_using_interface_object);
         let fed_v1_subgraphs = format_subgraph_names(fed_1_subgraphs);
-        return Err(vec![SingleFederationError::InterfaceObjectUsageError {
-            message: format!("The @interfaceObject directive can only be used if all subgraphs have \
+        return Err(vec![CompositionError::InterfaceObjectUsageError {
+            message: format!(
+                "The @interfaceObject directive can only be used if all subgraphs have \
             federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" \
             version 2.0 or newer): @interfaceObject is used in {interface_object_subgraphs} but \
-            {fed_v1_subgraphs} is not a federation 2 subgraph schema.")
-        }.into()]);
+            {fed_v1_subgraphs} is not a federation 2 subgraph schema."
+            ),
+        }]);
     }
     Ok(upgraded_subgraphs)
 }
@@ -1083,7 +1084,7 @@ mod tests {
             upc: ID!
             name: String
             description: String
-            }            
+            }
         "#,
         )
         .expect("parses schema")
@@ -1097,77 +1098,81 @@ mod tests {
 
         insta::assert_snapshot!(
             s1.schema().schema().to_string(), @r###"
-            schema @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@tag", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/link/v1.0") {
-              query: Query
-            }
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+          query: Query
+        }
 
-            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
-            directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
-            directive @override(from: String!) on FIELD_DEFINITION
+        directive @extends on OBJECT | INTERFACE
 
-            directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+        directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
-            directive @composeDirective(name: String!) repeatable on SCHEMA
-            
-            directive @interfaceObject on OBJECT
+        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-            type Query {
-              products: [Product!]! @provides(fields: "description")
-              _entities(representations: [_Any!]!): [_Entity]! @shareable
-              _service: _Service! @shareable
-            }
+        directive @override(from: String!) on FIELD_DEFINITION
 
-            interface I {
-              upc: ID!
-              description: String
-            }
+        directive @composeDirective(name: String!) repeatable on SCHEMA
 
-            type Random {
-              x: Int
-            }
+        directive @interfaceObject on OBJECT
 
-            extend type Random {
-              y: Int
-            }
+        type Query {
+          products: [Product!]! @provides(fields: "description")
+          _entities(representations: [_Any!]!): [_Entity]! @shareable
+          _service: _Service! @shareable
+        }
 
-            type Product implements I @key(fields: "upc") {
-              upc: ID!
-              inventory: Int
-              description: String @external
-            }
+        interface I {
+          upc: ID!
+          description: String
+        }
 
-            enum link__Purpose {
-              """
-              `SECURITY` features provide metadata necessary to securely resolve fields.
-              """
-              SECURITY
-              """
-              `EXECUTION` features provide metadata necessary for operation execution.
-              """
-              EXECUTION
-            }
+        type Random {
+          x: Int
+        }
 
-            scalar link__Import
+        extend type Random {
+          y: Int
+        }
 
-            scalar federation__FieldSet
+        type Product implements I @key(fields: "upc") {
+          upc: ID!
+          inventory: Int
+          description: String @external
+        }
 
-            scalar _Any
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
 
-            type _Service @shareable {
-              sdl: String
-            }
+        scalar link__Import
 
-            union _Entity = Product
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service @shareable {
+          sdl: String
+        }
+
+        union _Entity = Product
         "###
         );
     }
@@ -1186,7 +1191,7 @@ mod tests {
             type A @key(fields: id) @key(fields: ["id", "x"]) {
                 id: String
                 x: Int
-            }  
+            }
         "#,
         )
         .expect("parses schema")
@@ -1442,55 +1447,59 @@ mod tests {
         insta::assert_snapshot!(
             subgraph.schema().schema().to_string(),
             @r###"
-            schema @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@shareable", "@override", "@tag", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/link/v1.0") {
-              query: Query
-            }
-            
-            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+          query: Query
+        }
 
-            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-            directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
-            directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
 
-            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-            directive @override(from: String!) on FIELD_DEFINITION
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
-            directive @tag repeatable on ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+        directive @extends on OBJECT | INTERFACE
 
-            directive @composeDirective(name: String!) repeatable on SCHEMA
-            
-            directive @interfaceObject on OBJECT
+        directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
-            type Query {
-              hello: String
-              _service: _Service!
-            }
+        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-            enum link__Purpose {
-              """
-              `SECURITY` features provide metadata necessary to securely resolve fields.
-              """
-              SECURITY
-              """
-              `EXECUTION` features provide metadata necessary for operation execution.
-              """
-              EXECUTION
-            }
+        directive @override(from: String!) on FIELD_DEFINITION
 
-            scalar link__Import
+        directive @composeDirective(name: String!) repeatable on SCHEMA
 
-            scalar federation__FieldSet
+        directive @interfaceObject on OBJECT
 
-            scalar _Any
+        type Query {
+          hello: String
+          _service: _Service!
+        }
 
-            type _Service {
-              sdl: String
-            }
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
         "###
         );
     }
@@ -1507,7 +1516,7 @@ mod tests {
 
             type Subscription {
                 update: String!
-            }   
+            }
         "#,
         )
         .expect("parses schema")

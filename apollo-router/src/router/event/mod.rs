@@ -6,6 +6,7 @@ mod shutdown;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::sync::Arc;
 
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
@@ -29,7 +30,7 @@ use crate::uplink::schema::SchemaState;
 /// Messages that are broadcast across the app.
 pub(crate) enum Event {
     /// The configuration was updated.
-    UpdateConfiguration(Configuration),
+    UpdateConfiguration(Arc<Configuration>),
 
     /// There are no more updates to the configuration
     NoMoreConfiguration,

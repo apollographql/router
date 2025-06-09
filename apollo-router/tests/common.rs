@@ -8,12 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
-use fred::clients::RedisClient;
+use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
-use fred::prelude::RedisConfig;
-use fred::types::ScanType;
-use fred::types::Scanner;
+use fred::prelude::Config as RedisConfig;
+use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;

@@ -438,6 +438,7 @@ impl Exporter {
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
+        router_id: String,
         buffer_size: NonZeroUsize,
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
@@ -470,6 +471,7 @@ impl Exporter {
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
+                    router_id,
                     metrics_reference_mode,
                 )?))
             } else {

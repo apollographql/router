@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod authenticated_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;
 pub mod database;
@@ -30,8 +32,11 @@ pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
+pub(crate) mod policy_spec_definition;
+pub(crate) mod requires_scopes_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
+pub(crate) mod tag_spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
@@ -496,5 +501,18 @@ impl LinksMetadata {
                     import: None,
                 })
         })
+    }
+
+    pub(crate) fn import_to_feature_url_map(&self) -> HashMap<String, Url> {
+        let directive_entries = self
+            .directives_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+        let type_entries = self
+            .types_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+
+        directive_entries.chain(type_entries).collect()
     }
 }

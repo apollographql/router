@@ -14,7 +14,7 @@ use crate::operation::SelectionSet;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
@@ -533,12 +533,11 @@ pub(crate) fn precompute_non_local_selection_metadata(
             } => {
                 // We skip selections where the tail is a non-composite type, as we'll never
                 // need to estimate the next nodes for such selections.
-                let Ok(_): Result<CompositeTypeDefinitionPosition, _> = graph
-                    .node_weight(edge_ref.target())?
-                    .type_
-                    .clone()
-                    .try_into()
-                else {
+                if CompositeTypeDefinitionPosition::try_from(
+                    graph.node_weight(edge_ref.target())?.type_.clone(),
+                )
+                .is_err()
+                {
                     continue;
                 };
                 let target = edge_ref
@@ -677,8 +676,8 @@ pub(crate) fn precompute_non_local_selection_metadata(
     // For all composite type nodes, we pretend that there's a self-downcast edge for that type,
     // as this simplifies next node calculation.
     for (node, node_weight) in graph.graph().node_references() {
-        let Ok(node_type_pos): Result<CompositeTypeDefinitionPosition, _> =
-            node_weight.type_.clone().try_into()
+        let Ok(node_type_pos) =
+            CompositeTypeDefinitionPosition::try_from(node_weight.type_.clone())
         else {
             continue;
         };
