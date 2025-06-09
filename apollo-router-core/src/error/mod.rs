@@ -22,7 +22,7 @@ mod tests {
         // Test that the ToGraphQLError trait is available and works
         let io_error = io::Error::new(io::ErrorKind::NotFound, "Test error");
         let graphql_error = io_error.as_graphql_error();
-
+        
         assert_eq!(graphql_error.message, "Test error");
         assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
     }
@@ -32,8 +32,9 @@ mod tests {
         // Test that error registry functions are accessible
         let all_errors = get_registered_errors();
         let stats = get_error_stats();
-
-        assert!(all_errors.len() >= 0);
-        assert!(stats.total_error_types >= 0);
+        
+        // Check that we can access the registry (no need to check >= 0 for unsigned integers)
+        assert!(all_errors.len() < 1000); // Sanity check
+        assert!(stats.total_error_types < 1000); // Sanity check
     }
 }
