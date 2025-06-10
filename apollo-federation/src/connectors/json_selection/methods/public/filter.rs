@@ -138,7 +138,10 @@ fn filter_shape(
     // Validate that the condition evaluates to a boolean
     if !matches!(condition_shape.case(), ShapeCase::Bool(_)) {
         return Shape::error(
-            "Filter condition must return a boolean value".to_string(),
+            format!(
+                "->{} condition must return a boolean value",
+                method_name.as_ref()
+            ),
             method_name.shape_location(source_id),
         );
     }
@@ -253,7 +256,7 @@ mod tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Filter condition must return a boolean value")
+                .contains("->filter condition must return a boolean value")
         );
     }
 
