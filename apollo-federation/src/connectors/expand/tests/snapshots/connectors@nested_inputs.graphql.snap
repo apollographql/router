@@ -220,7 +220,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,

@@ -18,7 +18,6 @@ use super::schema::ERRORS_ARGUMENT_NAME;
 use super::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
 use super::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
 use super::schema::ErrorsArguments;
-use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::PATH_ARGUMENT_NAME;
 use super::schema::QUERY_PARAMS_ARGUMENT_NAME;
@@ -194,7 +193,10 @@ impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
 
     fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut base_url = None;
-        let mut headers = None;
+        let headers: Vec<Header> = Header::from_http_arg(values)
+            .into_iter()
+            .try_collect()
+            .map_err(|err| internal!(err.to_string()))?;
         let mut path = None;
         let mut query = None;
         for (name, value) in values {
@@ -210,14 +212,6 @@ impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
                         .parse()
                         .map_err(|err| internal!(format!("Invalid base URL: {}", err)))?,
                 );
-            } else if name == HEADERS_ARGUMENT_NAME.as_str() {
-                headers = Some(
-                    Header::from_headers_arg(value)
-                        .into_iter()
-                        .map_ok(|Header { name, source, .. }| (name, source))
-                        .try_collect()
-                        .map_err(|err| internal!(err.to_string()))?,
-                );
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     internal!(format!(
@@ -232,10 +226,6 @@ impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
                     QUERY_PARAMS_ARGUMENT_NAME
                 )))?;
                 query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
-            } else {
-                return Err(internal!(format!(
-                    "unknown argument in `@{directive_name}` directive's `http` field: {name}"
-                )));
             }
         }
 
@@ -245,7 +235,7 @@ impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
                     "missing `base_url` field in `@{directive_name}` directive's `http` argument"
                 ))
             })?,
-            headers: headers.unwrap_or_default(),
+            headers,
             path,
             query_params: query,
         })
@@ -382,7 +372,10 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let mut headers = None;
+        let headers: Vec<Header> = Header::from_http_arg(values)
+            .into_iter()
+            .try_collect()
+            .map_err(|err| internal!(err.to_string()))?;
         let mut path = None;
         let mut query_params = None;
         for (name, value) in values {
@@ -393,14 +386,6 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
                     internal!(format!("`body` field in `@{directive_name}` directive's `http` field is not a string"))
                 })?;
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
-            } else if name == HEADERS_ARGUMENT_NAME.as_str() {
-                headers = Some(
-                    Header::from_headers_arg(value)
-                        .into_iter()
-                        .map_ok(|Header { name, source, .. }| (name, source))
-                        .try_collect()
-                        .map_err(|err| internal!(err.to_string()))?,
-                );
             } else if name == "GET" {
                 get = Some(value.as_str().ok_or_else(|| internal!(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
@@ -447,7 +432,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
             put,
             delete,
             body,
-            headers: headers.unwrap_or_default(),
+            headers,
             path,
             query_params,
         })
@@ -609,25 +594,31 @@ mod tests {
                 name: "json",
                 http: SourceHTTPArguments {
                     base_url: https://jsonplaceholder.typicode.com/,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
+                                "x-auth-token",
                             ),
-                        ),
-                    },
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
                     path: None,
                     query_params: None,
                 },
@@ -649,7 +640,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r###"
+            @r#"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -672,7 +663,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: {},
+                        headers: [],
                         path: None,
                         query_params: None,
                     },
@@ -735,7 +726,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: {},
+                        headers: [],
                         path: None,
                         query_params: None,
                     },
@@ -790,7 +781,7 @@ mod tests {
                 errors: None,
             },
         ]
-        "###
+        "#
         );
     }
 }

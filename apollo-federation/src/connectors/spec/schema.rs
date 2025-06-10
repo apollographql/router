@@ -1,13 +1,11 @@
 use apollo_compiler::Name;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
-use http::HeaderName;
 use http::Uri;
 
 use crate::connectors::ConnectorPosition;
-use crate::connectors::HeaderSource;
 use crate::connectors::SourceName;
 use crate::connectors::json_selection::JSONSelection;
+use crate::connectors::models::Header;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -64,7 +62,7 @@ pub struct SourceHTTPArguments {
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
-    pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+    pub(crate) headers: Vec<Header>,
     pub(crate) path: Option<JSONSelection>,
     pub(crate) query_params: Option<JSONSelection>,
 }
@@ -136,7 +134,7 @@ pub struct ConnectHTTPArguments {
     /// Configuration for headers to attach to the request.
     ///
     /// Overrides headers from the associated @source by name.
-    pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+    pub(crate) headers: Vec<Header>,
 
     /// A [`JSONSelection`] that should resolve to an array of strings to append to the path.
     pub(crate) path: Option<JSONSelection>,

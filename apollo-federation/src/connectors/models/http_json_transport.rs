@@ -6,7 +6,6 @@ use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
 use either::Either;
-use http::HeaderName;
 use http::Uri;
 use http::uri::InvalidUri;
 use http::uri::InvalidUriParts;
@@ -16,13 +15,13 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
-use super::headers::HeaderSource;
 use crate::connectors::ApplyToError;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::PathSelection;
 use crate::connectors::StringTemplate;
 use crate::connectors::json_selection::ExternalVarPaths;
+use crate::connectors::models::Header;
 use crate::connectors::spec::ConnectHTTPArguments;
 use crate::connectors::spec::SourceHTTPArguments;
 use crate::connectors::string_template;
@@ -36,7 +35,7 @@ pub struct HttpJsonTransport {
     pub source_url: Option<Uri>,
     pub connect_template: StringTemplate,
     pub method: HTTPMethod,
-    pub headers: IndexMap<HeaderName, HeaderSource>,
+    pub headers: Vec<Header>,
     pub body: Option<JSONSelection>,
     pub source_path: Option<JSONSelection>,
     pub source_query_params: Option<JSONSelection>,
@@ -63,14 +62,13 @@ impl HttpJsonTransport {
             return Err(FederationError::internal("missing http method"));
         };
 
-        #[allow(clippy::mutable_key_type)]
-        // HeaderName is internally mutable, but we don't mutate it
         let mut headers = http.headers;
-        for (header_name, header_source) in
-            source.map(|source| &source.headers).into_iter().flatten()
-        {
-            if !headers.contains_key(header_name) {
-                headers.insert(header_name.clone(), header_source.clone());
+        for header in source.map(|source| &source.headers).into_iter().flatten() {
+            if !headers
+                .iter()
+                .any(|connect_header| connect_header.name == header.name)
+            {
+                headers.push(header.clone());
             }
         }
 
@@ -101,7 +99,7 @@ impl HttpJsonTransport {
         let header_selections = self
             .headers
             .iter()
-            .flat_map(|(_, source)| source.expressions());
+            .flat_map(|header| header.source.expressions());
         url_selections
             .chain(header_selections)
             .chain(self.body.iter())
