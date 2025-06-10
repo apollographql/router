@@ -27,7 +27,7 @@ mod tests
 Do not use `mod test { }` from within a test.rs file.
 Keep functions small, single purpose and testable.
 Remember to use the request and response types from the services mod when creating services that do something, e.g. request response transformation. However for http request and response types remember to construct them you have to use http::Request::builder() or http::Response::builder(), you can't use the type aliases in our service.
-Tower services should always have an error type. The constraint from any inner service shouold be Into<BoxError>
+Tower services should always have an error type. The constraint from any inner service should be Into<BoxError>. If the tower service is a leaf or terminal service then the Service::Error type may be the direct error type of the service. Otherwise it should be BoxError.
 When testing tower services ALWAYS use test_utils::TowerTest, this is better than the normal tower test utils because it implements timeout.
 Always make sure linter errors pass before moving onto the next task.
 Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps.
