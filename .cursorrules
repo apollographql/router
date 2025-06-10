@@ -1,5 +1,5 @@
 We are working in the apollo-router-core, apollo-router-error-derive and pollo-router-error directories only for now. Ignore all other directories
-Use hexagonal architecture to allow testing and to not expose client details to callers.
+Use hexagonal architecture to allow testing and to not expose client details to callers. But don't introduce traits for tower services as Service is already an interface that can have multiple implementations for any request and response.
 Traits and interfaces should generally be in a mod.rs and then implementations should be in sub modules. Submodules should be in their own directories because they will require a test.rs.
 Always separate tests and test helpers out into a separate tests.rs file that are adjacent to a mod.rs
 Traits should not expose client types. Instead create a new type and implement From.
@@ -30,6 +30,8 @@ Remember to use the request and response types from the services mod when creati
 Tower services should always have an error type. The constraint from any inner service shouold be Into<BoxError>
 When testing tower services ALWAYS use test_utils::TowerTest, this is better than the normal tower test utils because it implements timeout.
 Always make sure linter errors pass before moving onto the next task.
-Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps making sure that you do a git commit between each step. Make sure to use conventional commit names. Git messages should include why the change was made and the rationale.
-Before committing all tests and doctests must pass, run cargo to ensure this is the case.
+Whenever you are instructed to so something plan how to achieve it in a number of easy to review steps.
+When asked to commit make sure make sure to use conventional commit names. Git messages should include why the change was made and the rationale.
+Before committing all tests and doctests MUST pass, run cargo test to ensure this is the case.
+
 
