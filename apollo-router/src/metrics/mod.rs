@@ -1,3 +1,76 @@
+<<<<<<< HEAD
+=======
+//! APIs for integrating with the router's metrics.
+//!
+//! The macros contained here are a replacement for the telemetry crate's `MetricsLayer`. We will
+//! eventually convert all metrics to use these macros and deprecate the `MetricsLayer`.
+//! The reason for this is that the `MetricsLayer` has:
+//!
+//! * No support for dynamic attributes
+//! * No support dynamic metrics.
+//! * Imperfect mapping to metrics API that can only be checked at runtime.
+//!
+//! New metrics should be added using these macros.
+//!
+//! Prefer using `_with_unit` types for all new macros. Units should conform to the
+//! [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units),
+//! some of which has been copied here for reference:
+//! * Instruments that measure a count of something should only use annotations with curly braces to
+//!   give additional meaning. For example, use `{packet}`, `{error}`, `{fault}`, etc., not `packet`,
+//!   `error`, `fault`, etc.
+//! * Other instrument units should be specified using the UCUM case sensitive (c/s) variant. For
+//!   example, Cel for the unit with full name degree Celsius.
+//! * When instruments are measuring durations, seconds (i.e. s) should be used.
+//! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
+//!   technical reason to not do so.
+//!
+//! NB: we have not yet modified the existing metrics because some metric exporters (notably
+//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
+//! change for customers.
+//!
+//! ## Compatibility
+//! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
+//! API-stable, we may update it in a minor version, which may require code changes to plugins.
+//!
+//!
+//! # Examples
+//! ```ignore
+//! // Count a thing:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1
+//! );
+//! // Count a thing with attributes:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     frobbles.color = "blue"
+//! );
+//! // Count a thing with dynamic attributes:
+//! let attributes = vec![];
+//! if (frobbled) {
+//!     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
+//! }
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     attributes
+//! );
+//! // Measure a thing with units:
+//! f64_histogram_with_unit!(
+//!     "apollo.router.operation.frobbles.time",
+//!     "Duration to operate on frobbles",
+//!     "s",
+//!     1.0,
+//!     frobbles.color = "red"
+//! );
+//! ```
+
+use std::collections::HashMap;
+>>>>>>> e7b7e401 (feat(subscription): add operation_name label to apollo.router.opened.subscriptions counter (#7606))
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -1231,10 +1304,27 @@ macro_rules! assert_non_zero_metrics_snapshot {
 #[cfg(test)]
 pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output> + Send>>;
 
-#[cfg(test)]
+/// Extension trait for Futures that wish to test metrics.
 pub(crate) trait FutureMetricsExt<T> {
-    /// See [dev-docs/metrics.md](https://github.com/apollographql/router/blob/dev/dev-docs/metrics.md#testing-async)
-    /// for details on this function.
+    /// Wraps a Future with metrics collection capabilities.
+    ///
+    /// This method creates a new Future that will:
+    /// 1. Initialize the meter provider before executing the Future
+    /// 2. Execute the original Future
+    /// 3. Shutdown the meter provider after completion
+    ///
+    /// This is useful for testing scenarios where you need to ensure metrics are properly
+    /// collected throughout the entire Future's execution.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use apollo_router::metrics::FutureMetricsExt;
+    /// # async fn example() {
+    /// let future = async { /* your async code that produces metrics */ };
+    /// let result = future.with_metrics().await;
+    /// # }
+    /// ```
+    #[cfg(test)]
     fn with_metrics(
         self,
     ) -> tokio::task::futures::TaskLocalFuture<
@@ -1248,6 +1338,8 @@ pub(crate) trait FutureMetricsExt<T> {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
             async move {
+                // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
+                let _ = meter_provider_internal();
                 let result = self.await;
                 let _ = tokio::task::spawn_blocking(|| {
                     meter_provider().shutdown();
@@ -1258,9 +1350,53 @@ pub(crate) trait FutureMetricsExt<T> {
             .boxed(),
         )
     }
+
+    /// Propagates the current meter provider to child tasks during test execution.
+    ///
+    /// This method ensures that the meter provider is properly shared across tasks
+    /// during test scenarios. In non-test contexts, it returns the original Future
+    /// unchanged.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use apollo_router::metrics::FutureMetricsExt;
+    /// # async fn example() {
+    /// let result = tokio::task::spawn(async { /* your async code that produces metrics */ }.with_current_meter_provider()).await;
+    /// # }
+    /// ```
+    #[cfg(test)]
+    fn with_current_meter_provider(
+        self,
+    ) -> tokio::task::futures::TaskLocalFuture<
+        OnceLock<(AggregateMeterProvider, test_utils::ClonableManualReader)>,
+        Self,
+    >
+    where
+        Self: Sized + Future + 'static,
+        <Self as Future>::Output: 'static,
+    {
+        // We need to determine if the meter was set. If not then we can use default provider which is empty
+        let meter_provider_set = test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+            .try_with(|_| {})
+            .is_ok();
+        if meter_provider_set {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+                .scope(test_utils::AGGREGATE_METER_PROVIDER_ASYNC.get(), self)
+        } else {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(Default::default(), self)
+        }
+    }
+
+    #[cfg(not(test))]
+    fn with_current_meter_provider(self) -> Self
+    where
+        Self: Sized + Future + 'static,
+    {
+        // This is intentionally a noop. In the real world meter provider is a global variable.
+        self
+    }
 }
 
-#[cfg(test)]
 impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
@@ -1510,5 +1646,30 @@ mod test {
         // Fast path
         test();
         assert_eq!(meter_provider().registered_instruments(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_across_tasks() {
+        async {
+            // Initial metric in the main task
+            u64_counter!("apollo.router.test", "metric", 1);
+            assert_counter!("apollo.router.test", 1);
+
+            // Spawn a task that also records metrics
+            let handle = tokio::spawn(
+                async move {
+                    u64_counter!("apollo.router.test", "metric", 2);
+                }
+                .with_current_meter_provider(),
+            );
+
+            // Wait for the spawned task to complete
+            handle.await.unwrap();
+
+            // The metric should now be 3 since both tasks contributed
+            assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
     }
 }
