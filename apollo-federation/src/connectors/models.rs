@@ -1,3 +1,4 @@
+mod headers;
 mod http_json_transport;
 mod keys;
 mod source;
@@ -13,10 +14,10 @@ use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
+pub(crate) use self::headers::Header;
+pub(crate) use self::headers::HeaderParseError;
+pub use self::headers::HeaderSource;
 pub use self::http_json_transport::HTTPMethod;
-pub(crate) use self::http_json_transport::Header;
-pub(crate) use self::http_json_transport::HeaderParseError;
-pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
 pub use self::source::SourceName;
