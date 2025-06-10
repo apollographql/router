@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .path_field("server")
         .build();
 
-    let graphql_error = apollo_error.to_graphql_error_with_context(context);
+    let graphql_error = ToGraphQLError::to_graphql_error_with_context(&apollo_error, context);
     println!("GraphQL Error:");
     println!("{}", serde_json::to_string_pretty(&graphql_error)?);
     println!();
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .trace_id("trace-def-789")
         .build();
 
-    let graphql_error = std_error.as_graphql_error_with_context(context);
+    let graphql_error = ToGraphQLError::to_graphql_error_with_context(&std_error, context);
     println!("GraphQL Error:");
     println!("{}", serde_json::to_string_pretty(&graphql_error)?);
     println!();
@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         network_error: root_cause,
     };
 
-    let graphql_error = apollo_error.to_graphql_error();
+    let graphql_error = ToGraphQLError::to_graphql_error(&apollo_error);
     println!("GraphQL Error:");
     println!("{}", serde_json::to_string_pretty(&graphql_error)?);
     println!();
@@ -156,7 +156,7 @@ mod tests {
             column: 15,
         };
 
-        let graphql_error = error.to_graphql_error();
+        let graphql_error = ToGraphQLError::to_graphql_error(&error);
         
         assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_EXAMPLE_SERVICE_QUERY_PARSING_FAILED");
         assert!(graphql_error.extensions.details.contains_key("queryText"));
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_std_error_conversion() {
         let std_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
-        let graphql_error = std_error.as_graphql_error();
+        let graphql_error = ToGraphQLError::to_graphql_error(&std_error);
         
         assert_eq!(graphql_error.message, "File not found");
         assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
