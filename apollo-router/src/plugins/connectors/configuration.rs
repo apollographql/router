@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::connectors::CustomConfiguration;
+use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
@@ -67,7 +68,7 @@ pub(crate) struct ConnectorsConfig {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphConnectorConfiguration {
     /// A map of `@source(name:)` to configuration for that source
-    pub(crate) sources: HashMap<String, SourceConfiguration>,
+    pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]

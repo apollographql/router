@@ -268,6 +268,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
@@ -821,7 +822,7 @@ connector:
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
                         0,
@@ -1174,7 +1175,7 @@ subgraph:
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
                         0,

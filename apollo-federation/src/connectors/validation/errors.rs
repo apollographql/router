@@ -47,7 +47,7 @@ impl<'schema> Errors<'schema> {
         coordinate: ErrorsCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Self, Vec<Message>> {
-        let directive = match coordinate {
+        let directive = match &coordinate {
             ErrorsCoordinate::Source { source } => source.directive,
             ErrorsCoordinate::Connect { connect } => connect.directive,
         };
@@ -59,7 +59,7 @@ impl<'schema> Errors<'schema> {
         };
 
         if let Some(errors_arg) = arg.as_object() {
-            ErrorsMessage::parse(errors_arg, coordinate, schema)
+            ErrorsMessage::parse(errors_arg, coordinate.clone(), schema)
                 .and_try(ErrorsExtensions::parse(errors_arg, coordinate, schema))
                 .map(|(message, extensions)| Self {
                     message,
@@ -139,8 +139,12 @@ impl<'schema> ErrorsMessage<'schema> {
         };
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
-        let mapping =
-            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
+        let mapping = parse_mapping_argument(
+            value,
+            coordinate.clone(),
+            Code::InvalidErrorsMessage,
+            schema,
+        )?;
 
         Ok(Some(Self {
             mapping,
@@ -176,7 +180,7 @@ impl<'schema> ErrorsMessage<'schema> {
 }
 
 /// Coordinate for an `errors` argument in `@source` or `@connect`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum ErrorsCoordinate<'a> {
     Source {
         source: SourceDirectiveCoordinate<'a>,
@@ -199,14 +203,14 @@ impl Display for ErrorsCoordinate<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ErrorsMessageCoordinate<'schema> {
     coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsMessageCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.coordinate {
+        match &self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
@@ -247,8 +251,12 @@ impl<'schema> ErrorsExtensions<'schema> {
         };
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
-        let MappingArgument { expression, string } =
-            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
+        let MappingArgument { expression, string } = parse_mapping_argument(
+            value,
+            coordinate.clone(),
+            Code::InvalidErrorsMessage,
+            schema,
+        )?;
 
         Ok(Some(Self {
             selection: expression.expression,
@@ -288,14 +296,14 @@ impl<'schema> ErrorsExtensions<'schema> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ErrorsExtensionsCoordinate<'schema> {
     coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsExtensionsCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.coordinate {
+        match &self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
