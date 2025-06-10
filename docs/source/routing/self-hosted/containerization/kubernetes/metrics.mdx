@@ -8,6 +8,9 @@ description: Use the Apollo GraphOS Router or Apollo Router Core in Kubernetes w
 
 The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](/router/configuration/telemetry/exporters/metrics/overview). The default deployment doesn't enable metrics endpoints because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
 
+This guide shows how to deploy a router with metric endpoints in Kubernetes.
+
+## Deploy with metrics endpoints
 To enable metrics endpoints in your deployed router through a YAML configuration file:
 
 1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
