@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task;
 use std::time::Duration;
 
@@ -104,7 +105,7 @@ fn init_query_plan_from_redis(
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
     if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
-        // Arc freshly deserialized from Redis should be unique, so this doesn’t clone:
+        // Arc freshly deserialized from Redis should be unique, so this doesn't clone:
         let plan = Arc::make_mut(plan);
         let root = Arc::make_mut(&mut plan.root);
         root.init_parsed_operations(subgraph_schemas)
@@ -612,7 +613,7 @@ where
                             abort_handle.abort();
                         } else if self.cooperative_cancellation.is_measure_mode() {
                             // This is always going to get dropped so we have to make sure we're
-                            // only measuring when the task would be cancelled. 
+                            // only measuring when the task would be cancelled.
                             if !abort_handle.is_finished() {
                                 u64_counter_with_unit!(
                                     "apollo.router.operations.cooperative_cancellations",
@@ -624,7 +625,7 @@ where
                             }
                         }
                     });
-                
+
                 match self
                     .cooperative_cancellation
                     .timeout_in_seconds()
@@ -637,7 +638,7 @@ where
                                     QueryPlannerError::Timeout(e.to_string()),
                                 ))
                             }
-    
+
                             let res = planning_task
                                 .timeout(timeout)
                                 .await;
@@ -677,7 +678,7 @@ where
                 tokio::task::spawn(async move {
                     planning_task.await
                 }).await
-                    
+
             }
             .map_err(convert_join_error)?
         } else {
@@ -813,8 +814,8 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
-    use crate::configuration::Supergraph;
     use crate::configuration::QueryPlanning;
+    use crate::configuration::Supergraph;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -933,73 +934,6 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    #[tracing_test::traced_test]
-    async fn test_query_planning_can_be_cancelled() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner.expect_sync_call().returning(|_| {
-                panic!("This query planner should not be called, as it is expected to be cancelled")
-            });
-            planner
-        });
-
-        let configuration = Configuration::builder()
-            .and_supergraph(Some(
-                Supergraph::builder()
-                    .query_planning(
-                        QueryPlanning::builder()
-                            .experimental_cooperative_cancellation(
-                                CooperativeCancellation::enabled(),
-                            )
-                            .build(),
-                    )
-                    .build(),
-            ))
-            .build()
-            .expect("configuration is valid");
-        let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
-
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
-            schema.clone(),
-            Default::default(),
-            &configuration,
-            IndexMap::default(),
-        )
-        .await
-        .unwrap();
-
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "query Me { me { username } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
-        let planning_task = planner.call(query_planner::CachingRequest::new(
-            "query Me { me { username } }".to_string(),
-            Some("".into()),
-            context.clone(),
-        ));
-        let planning_task = tokio::task::spawn(planning_task);
-        planning_task.abort();
-        match planning_task.await {
-            Ok(_) => panic!("Expected the task to be aborted, but it completed successfully"),
-            Err(e) => assert!(e.is_cancelled(),),
-        }
-    }
-
-    #[test(tokio::test)]
     async fn test_cooperative_cancellation_timeout() {
         #[derive(Clone)]
         struct SlowQueryPlanner;
@@ -1077,6 +1011,114 @@ mod tests {
                 assert!(matches!(e, CacheResolverError::RetrievalError(_)));
                 assert!(e.to_string().contains("timed out"));
             }
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_client_drop() {
+        use std::sync::Arc;
+        use tokio::sync::Barrier;
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+
+        #[derive(Clone)]
+        struct SlowQueryPlanner {
+            barrier: Arc<Barrier>,
+        }
+
+        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+            type Response = QueryPlannerResponse;
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                let barrier = self.barrier.clone();
+                Box::pin(async move {
+                    // Signal that we've started
+                    barrier.wait().await;
+
+                    // Now sleep for a long time - this should get cancelled
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    panic!(
+                        "This query planner should not complete, as it should be cancelled by client drop"
+                    );
+                })
+            }
+        }
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::enabled(),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner {
+                barrier: barrier_clone,
+            },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Spawn the planning task
+        let planning_task = tokio::spawn(async move {
+            planner
+                .call(query_planner::CachingRequest::new(
+                    "query Me { me { name { first } } }".to_string(),
+                    Some("".into()),
+                    context.clone(),
+                ))
+                .await
+        });
+
+        // Wait for the inner SlowQueryPlanner task to start
+        barrier.wait().await;
+
+        // Now abort the outer task - the inner task should have definitely started
+        planning_task.abort();
+
+        // Verify the task was cancelled
+        match planning_task.await {
+            Ok(_) => panic!(
+                "Expected the task to be aborted due to client drop, but it completed successfully"
+            ),
+            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {:?}", e),
         }
     }
 
