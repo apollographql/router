@@ -67,12 +67,7 @@ impl TryFrom<GrpcType> for GraphqlType {
                 ));
             }
             GrpcType::Float => GraphqlType::Float,
-            GrpcType::Int64 => {
-                return Err(GrpcCodegenError::TypeNotSupported(
-                    GrpcType::Int64,
-                    GraphqlType::Int,
-                ));
-            }
+            GrpcType::Int64 => GraphqlType::String, // formats like date
             GrpcType::Uint64 => {
                 return Err(GrpcCodegenError::TypeNotSupported(
                     GrpcType::Uint64,
@@ -123,5 +118,6 @@ impl TryFrom<GrpcType> for GraphqlType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvailableType {
     pub name: String,
+    pub graph_name: String,
     pub is_empty: bool,
 }

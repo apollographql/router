@@ -1,0 +1,2 @@
+import check.CheckService::Check as Query::check
+import check.CheckService::time_since as Query::timeSince

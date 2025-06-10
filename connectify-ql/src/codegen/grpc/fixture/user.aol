@@ -1,0 +1,9 @@
+import user.UserService::GetUser as Query::getUser {
+    input: user.GetUserRequest.user_id as id,
+    output: user.GetUserResponse.user as User
+}
+
+import user.UserService::CreateUser as Mutation::createUser {
+    input: $ as input,
+    output: user.CreatedUserResponse.user_id
+}

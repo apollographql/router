@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::{path::PathBuf, str::FromStr};
@@ -89,7 +90,19 @@ pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
 
     // process all services
     for file in &proto_ast.file {
-        process_service(&mut graphql_content, &file.service, grpc, &available_types)?;
+        let dependencies = file
+            .dependency
+            .iter()
+            .filter_map(|proto| proto.strip_suffix(".proto"))
+            .map(|proto| proto.replace('/', "."))
+            .collect::<BTreeSet<String>>();
+        process_service(
+            &mut graphql_content,
+            &file.service,
+            grpc,
+            &available_types,
+            dependencies,
+        )?;
     }
 
     let mut file = File::create(&graphql_file)?;

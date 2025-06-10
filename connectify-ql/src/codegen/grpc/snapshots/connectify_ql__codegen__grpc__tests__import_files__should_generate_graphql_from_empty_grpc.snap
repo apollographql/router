@@ -5,9 +5,15 @@ expression: graphql
 type Google_Protobuf_Empty {
 }
 
+type Google_Protobuf_Timestamp {
+  seconds: String!
+  nanos: Int!
+}
+
 type CustomEmpty {
 }
 
 type Query {
   check
+  timeSince(input: Google_Protobuf_Timestamp!): Google_Protobuf_Timestamp!
 }

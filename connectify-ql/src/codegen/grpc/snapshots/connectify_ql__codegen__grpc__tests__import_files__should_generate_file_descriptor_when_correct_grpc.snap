@@ -344,6 +344,530 @@ FileDescriptorSet {
         },
         FileDescriptorProto {
             name: Some(
+                "google/protobuf/timestamp.proto",
+            ),
+            package: Some(
+                "google.protobuf",
+            ),
+            dependency: [],
+            public_dependency: [],
+            weak_dependency: [],
+            message_type: [
+                DescriptorProto {
+                    name: Some(
+                        "Timestamp",
+                    ),
+                    field: [
+                        FieldDescriptorProto {
+                            name: Some(
+                                "seconds",
+                            ),
+                            number: Some(
+                                1,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                Int64,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "seconds",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                        FieldDescriptorProto {
+                            name: Some(
+                                "nanos",
+                            ),
+                            number: Some(
+                                2,
+                            ),
+                            label: Some(
+                                Optional,
+                            ),
+                            r#type: Some(
+                                Int32,
+                            ),
+                            type_name: None,
+                            extendee: None,
+                            default_value: None,
+                            oneof_index: None,
+                            json_name: Some(
+                                "nanos",
+                            ),
+                            options: None,
+                            proto3_optional: None,
+                        },
+                    ],
+                    extension: [],
+                    nested_type: [],
+                    enum_type: [],
+                    extension_range: [],
+                    oneof_decl: [],
+                    options: None,
+                    reserved_range: [],
+                    reserved_name: [],
+                },
+            ],
+            enum_type: [],
+            service: [],
+            extension: [],
+            options: Some(
+                FileOptions {
+                    java_package: Some(
+                        "com.google.protobuf",
+                    ),
+                    java_outer_classname: Some(
+                        "TimestampProto",
+                    ),
+                    java_multiple_files: Some(
+                        true,
+                    ),
+                    java_generate_equals_and_hash: None,
+                    java_string_check_utf8: None,
+                    optimize_for: None,
+                    go_package: Some(
+                        "google.golang.org/protobuf/types/known/timestamppb",
+                    ),
+                    cc_generic_services: None,
+                    java_generic_services: None,
+                    py_generic_services: None,
+                    php_generic_services: None,
+                    deprecated: None,
+                    cc_enable_arenas: Some(
+                        true,
+                    ),
+                    objc_class_prefix: Some(
+                        "GPB",
+                    ),
+                    csharp_namespace: Some(
+                        "Google.Protobuf.WellKnownTypes",
+                    ),
+                    swift_prefix: None,
+                    php_class_prefix: None,
+                    php_namespace: None,
+                    php_metadata_namespace: None,
+                    ruby_package: None,
+                    uninterpreted_option: [],
+                },
+            ),
+            source_code_info: Some(
+                SourceCodeInfo {
+                    location: [
+                        Location {
+                            path: [],
+                            span: [
+                                30,
+                                0,
+                                146,
+                                1,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                2,
+                            ],
+                            span: [
+                                32,
+                                0,
+                                24,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                            ],
+                            span: [
+                                135,
+                                0,
+                                146,
+                                1,
+                            ],
+                            leading_comments: Some(
+                                " A Timestamp represents a point in time independent of any time zone or local\n calendar, encoded as a count of seconds and fractions of seconds at\n nanosecond resolution. The count is relative to an epoch at UTC midnight on\n January 1, 1970, in the proleptic Gregorian calendar which extends the\n Gregorian calendar backwards to year one.\n\n All minutes are 60 seconds long. Leap seconds are \"smeared\" so that no leap\n second table is needed for interpretation, using a [24-hour linear\n smear](https://developers.google.com/time/smear).\n\n The range is from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z. By\n restricting to that range, we ensure that we can convert to and from [RFC\n 3339](https://www.ietf.org/rfc/rfc3339.txt) date strings.\n\n # Examples\n\n Example 1: Compute Timestamp from POSIX `time()`.\n\n     Timestamp timestamp;\n     timestamp.set_seconds(time(NULL));\n     timestamp.set_nanos(0);\n\n Example 2: Compute Timestamp from POSIX `gettimeofday()`.\n\n     struct timeval tv;\n     gettimeofday(&tv, NULL);\n\n     Timestamp timestamp;\n     timestamp.set_seconds(tv.tv_sec);\n     timestamp.set_nanos(tv.tv_usec * 1000);\n\n Example 3: Compute Timestamp from Win32 `GetSystemTimeAsFileTime()`.\n\n     FILETIME ft;\n     GetSystemTimeAsFileTime(&ft);\n     UINT64 ticks = (((UINT64)ft.dwHighDateTime) << 32) | ft.dwLowDateTime;\n\n     // A Windows tick is 100 nanoseconds. Windows epoch 1601-01-01T00:00:00Z\n     // is 11644473600 seconds before Unix epoch 1970-01-01T00:00:00Z.\n     Timestamp timestamp;\n     timestamp.set_seconds((INT64) ((ticks / 10000000) - 11644473600LL));\n     timestamp.set_nanos((INT32) ((ticks % 10000000) * 100));\n\n Example 4: Compute Timestamp from Java `System.currentTimeMillis()`.\n\n     long millis = System.currentTimeMillis();\n\n     Timestamp timestamp = Timestamp.newBuilder().setSeconds(millis / 1000)\n         .setNanos((int) ((millis % 1000) * 1000000)).build();\n\n\n Example 5: Compute Timestamp from Java `Instant.now()`.\n\n     Instant now = Instant.now();\n\n     Timestamp timestamp =\n         Timestamp.newBuilder().setSeconds(now.getEpochSecond())\n             .setNanos(now.getNano()).build();\n\n\n Example 6: Compute Timestamp from current time in Python.\n\n     timestamp = Timestamp()\n     timestamp.GetCurrentTime()\n\n # JSON Mapping\n\n In JSON format, the Timestamp type is encoded as a string in the\n [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format. That is, the\n format is \"{year}-{month}-{day}T{hour}:{min}:{sec}[.{frac_sec}]Z\"\n where {year} is always expressed using four digits while {month}, {day},\n {hour}, {min}, and {sec} are zero-padded to two digits each. The fractional\n seconds, which can go up to 9 digits (i.e. up to 1 nanosecond resolution),\n are optional. The \"Z\" suffix indicates the timezone (\"UTC\"); the timezone\n is required. A proto3 JSON serializer should always use UTC (as indicated by\n \"Z\") when printing the Timestamp type and a proto3 JSON parser should be\n able to accept both UTC and other timezones (as indicated by an offset).\n\n For example, \"2017-01-15T01:30:15.01Z\" encodes 15.01 seconds past\n 01:30 UTC on January 15, 2017.\n\n In JavaScript, one can convert a Date object to this format using the\n standard\n [toISOString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toISOString)\n method. In Python, a standard `datetime.datetime` object can be converted\n to this format using\n [`strftime`](https://docs.python.org/2/library/time.html#time.strftime) with\n the time format spec '%Y-%m-%dT%H:%M:%S.%fZ'. Likewise, in Java, one can use\n the Joda Time's [`ISODateTimeFormat.dateTime()`](\n http://www.joda.org/joda-time/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime%2D%2D\n ) to obtain a formatter capable of generating timestamps in this format.\n\n\n",
+                            ),
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                135,
+                                8,
+                                17,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                            ],
+                            span: [
+                                139,
+                                2,
+                                20,
+                            ],
+                            leading_comments: Some(
+                                " Represents seconds of UTC time since Unix epoch\n 1970-01-01T00:00:00Z. Must be from 0001-01-01T00:00:00Z to\n 9999-12-31T23:59:59Z inclusive.\n",
+                            ),
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                1,
+                            ],
+                            span: [
+                                139,
+                                8,
+                                15,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                3,
+                            ],
+                            span: [
+                                139,
+                                18,
+                                19,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                0,
+                                5,
+                            ],
+                            span: [
+                                139,
+                                2,
+                                7,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                145,
+                                2,
+                                18,
+                            ],
+                            leading_comments: Some(
+                                " Non-negative fractions of a second at nanosecond resolution. Negative\n second values with fractions must still have non-negative nanos values\n that count forward in time. Must be from 0 to 999,999,999\n inclusive.\n",
+                            ),
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                145,
+                                8,
+                                13,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                1,
+                                3,
+                            ],
+                            span: [
+                                145,
+                                16,
+                                17,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                4,
+                                0,
+                                2,
+                                1,
+                                5,
+                            ],
+                            span: [
+                                145,
+                                2,
+                                7,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                34,
+                                0,
+                                59,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                35,
+                                0,
+                                31,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                36,
+                                0,
+                                73,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                37,
+                                0,
+                                44,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                38,
+                                0,
+                                47,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                39,
+                                0,
+                                34,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                            ],
+                            span: [
+                                40,
+                                0,
+                                33,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                37,
+                            ],
+                            span: [
+                                34,
+                                0,
+                                59,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                31,
+                            ],
+                            span: [
+                                35,
+                                0,
+                                31,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                11,
+                            ],
+                            span: [
+                                36,
+                                0,
+                                73,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                1,
+                            ],
+                            span: [
+                                37,
+                                0,
+                                44,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                8,
+                            ],
+                            span: [
+                                38,
+                                0,
+                                47,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                10,
+                            ],
+                            span: [
+                                39,
+                                0,
+                                34,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                8,
+                                36,
+                            ],
+                            span: [
+                                40,
+                                0,
+                                33,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                12,
+                            ],
+                            span: [
+                                30,
+                                0,
+                                18,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [
+                                " Protocol Buffers - Google's data interchange format\n Copyright 2008 Google Inc.  All rights reserved.\n https://developers.google.com/protocol-buffers/\n\n Redistribution and use in source and binary forms, with or without\n modification, are permitted provided that the following conditions are\n met:\n\n     * Redistributions of source code must retain the above copyright\n notice, this list of conditions and the following disclaimer.\n     * Redistributions in binary form must reproduce the above\n copyright notice, this list of conditions and the following disclaimer\n in the documentation and/or other materials provided with the\n distribution.\n     * Neither the name of Google Inc. nor the names of its\n contributors may be used to endorse or promote products derived from\n this software without specific prior written permission.\n\n THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\n LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR\n A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT\n OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,\n SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT\n LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,\n DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY\n THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\n OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n",
+                            ],
+                        },
+                    ],
+                },
+            ),
+            syntax: Some(
+                "proto3",
+            ),
+        },
+        FileDescriptorProto {
+            name: Some(
                 "src/codegen/grpc/fixture/check.proto",
             ),
             package: Some(
@@ -351,6 +875,7 @@ FileDescriptorSet {
             ),
             dependency: [
                 "google/protobuf/empty.proto",
+                "google/protobuf/timestamp.proto",
             ],
             public_dependency: [],
             weak_dependency: [],
@@ -391,6 +916,20 @@ FileDescriptorSet {
                             client_streaming: None,
                             server_streaming: None,
                         },
+                        MethodDescriptorProto {
+                            name: Some(
+                                "time_since",
+                            ),
+                            input_type: Some(
+                                ".google.protobuf.Timestamp",
+                            ),
+                            output_type: Some(
+                                ".google.protobuf.Timestamp",
+                            ),
+                            options: None,
+                            client_streaming: None,
+                            server_streaming: None,
+                        },
                     ],
                     options: None,
                 },
@@ -405,7 +944,7 @@ FileDescriptorSet {
                             span: [
                                 0,
                                 0,
-                                12,
+                                14,
                                 1,
                             ],
                             leading_comments: None,
@@ -417,7 +956,7 @@ FileDescriptorSet {
                                 2,
                             ],
                             span: [
-                                4,
+                                5,
                                 0,
                                 26,
                             ],
@@ -441,13 +980,27 @@ FileDescriptorSet {
                         },
                         Location {
                             path: [
+                                3,
+                                1,
+                            ],
+                            span: [
+                                3,
+                                0,
+                                41,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
                                 4,
                                 0,
                             ],
                             span: [
-                                10,
-                                0,
                                 12,
+                                0,
+                                14,
                                 1,
                             ],
                             leading_comments: None,
@@ -461,7 +1014,7 @@ FileDescriptorSet {
                                 1,
                             ],
                             span: [
-                                10,
+                                12,
                                 8,
                                 19,
                             ],
@@ -475,9 +1028,9 @@ FileDescriptorSet {
                                 0,
                             ],
                             span: [
-                                6,
+                                7,
                                 0,
-                                8,
+                                10,
                                 1,
                             ],
                             leading_comments: None,
@@ -491,7 +1044,7 @@ FileDescriptorSet {
                                 1,
                             ],
                             span: [
-                                6,
+                                7,
                                 8,
                                 20,
                             ],
@@ -507,7 +1060,7 @@ FileDescriptorSet {
                                 0,
                             ],
                             span: [
-                                7,
+                                8,
                                 2,
                                 59,
                             ],
@@ -524,7 +1077,7 @@ FileDescriptorSet {
                                 1,
                             ],
                             span: [
-                                7,
+                                8,
                                 6,
                                 11,
                             ],
@@ -541,7 +1094,7 @@ FileDescriptorSet {
                                 2,
                             ],
                             span: [
-                                7,
+                                8,
                                 12,
                                 33,
                             ],
@@ -558,9 +1111,78 @@ FileDescriptorSet {
                                 3,
                             ],
                             span: [
-                                7,
+                                8,
                                 44,
                                 55,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                            ],
+                            span: [
+                                9,
+                                2,
+                                82,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: Some(
+                                " intentional snake_case\n",
+                            ),
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                1,
+                            ],
+                            span: [
+                                9,
+                                6,
+                                16,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                2,
+                            ],
+                            span: [
+                                9,
+                                17,
+                                42,
+                            ],
+                            leading_comments: None,
+                            trailing_comments: None,
+                            leading_detached_comments: [],
+                        },
+                        Location {
+                            path: [
+                                6,
+                                0,
+                                2,
+                                1,
+                                3,
+                            ],
+                            span: [
+                                9,
+                                53,
+                                78,
                             ],
                             leading_comments: None,
                             trailing_comments: None,

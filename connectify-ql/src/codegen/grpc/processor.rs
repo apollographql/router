@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use crate::codegen::grpc::GrpcCodegenError;
@@ -38,6 +39,13 @@ pub fn process_enum_types(
                 name.clone()
             } else {
                 format!("{external_path}.{name}")
+            },
+            graph_name: if external_path.is_empty() {
+                name.clone()
+            } else {
+                format!("{external_path}.{name}")
+                    .with_boundaries(&[Boundary::from_delim(".")])
+                    .to_case(Case::Ada)
             },
             is_empty: values.is_empty(),
         });
@@ -98,6 +106,13 @@ pub fn process_message_types(
             } else {
                 format!("{external_path}.{name}")
             },
+            graph_name: if external_path.is_empty() {
+                name.clone()
+            } else {
+                format!("{external_path}.{name}")
+                    .with_boundaries(&[Boundary::from_delim(".")])
+                    .to_case(Case::Ada)
+            },
             is_empty: values.is_empty(),
         });
 
@@ -155,10 +170,12 @@ pub fn process_service(
     services: &[ServiceDescriptorProto],
     grpc: &Grpc,
     available_types: &[AvailableType],
+    dependencies: BTreeSet<String>,
 ) -> Result<(), GrpcCodegenError> {
     let default_naming = grpc.service.split('.').last().unwrap_or("GrpcService");
     let registered_mutations = grpc.mutations.as_slice();
 
+    #[derive(Debug)]
     struct Method<'d> {
         name: String,
         input: Option<&'d str>,
@@ -180,11 +197,22 @@ pub fn process_service(
             let input = method
                 .input_type
                 .as_ref()
-                .and_then(|name| name.split('.').last());
-            let output = method
-                .output_type
-                .as_ref()
-                .and_then(|name| name.split('.').last());
+                .and_then(|name| match name.strip_prefix('.') {
+                    Some(strip_name) if dependencies.contains(&strip_name.to_lowercase()) => {
+                        Some(strip_name)
+                    }
+                    _ => name.split('.').last(),
+                });
+            let output =
+                method
+                    .output_type
+                    .as_ref()
+                    .and_then(|name| match name.strip_prefix('.') {
+                        Some(strip_name) if dependencies.contains(&strip_name.to_lowercase()) => {
+                            Some(strip_name)
+                        }
+                        _ => name.split('.').last(),
+                    });
 
             if registered_mutations.contains(&method_name) {
                 mutations.push(Method {
@@ -205,20 +233,22 @@ pub fn process_service(
             writeln!(content, "type Query {{")?;
             for query in queries {
                 write!(content, "  {}", query.name.to_case(Case::Camel))?;
-                if let Some(input) = query
-                    .input
-                    .and_then(|input| available_types.iter().find(|ty| ty.name == input))
-                {
+                if let Some(input) = query.input.and_then(|input| {
+                    available_types
+                        .iter()
+                        .find(|ty| ty.graph_name == input || ty.name == input)
+                }) {
                     if !input.is_empty {
-                        write!(content, "(input: {}!)", input.name)?;
+                        write!(content, "(input: {}!)", input.graph_name)?;
                     }
                 }
-                if let Some(output) = query
-                    .output
-                    .and_then(|output| available_types.iter().find(|ty| ty.name == output))
-                {
+                if let Some(output) = query.output.and_then(|output| {
+                    available_types
+                        .iter()
+                        .find(|ty| ty.graph_name == output || ty.name == output)
+                }) {
                     if !output.is_empty {
-                        write!(content, ": {}!", output.name)?;
+                        write!(content, ": {}!", output.graph_name)?;
                     }
                 }
                 writeln!(content)?;
@@ -232,18 +262,18 @@ pub fn process_service(
                 write!(content, "  {}", mutation.name.to_case(Case::Camel))?;
                 if let Some(input) = mutation
                     .input
-                    .and_then(|input| available_types.iter().find(|ty| ty.name == input))
+                    .and_then(|input| available_types.iter().find(|ty| ty.graph_name == input))
                 {
                     if !input.is_empty {
-                        write!(content, "(input: {}!)", input.name)?;
+                        write!(content, "(input: {}!)", input.graph_name)?;
                     }
                 }
                 if let Some(output) = mutation
                     .output
-                    .and_then(|output| available_types.iter().find(|ty| ty.name == output))
+                    .and_then(|output| available_types.iter().find(|ty| ty.graph_name == output))
                 {
                     if !output.is_empty {
-                        write!(content, ": {}!", output.name)?;
+                        write!(content, ": {}!", output.graph_name)?;
                     }
                 }
                 writeln!(content)?;
@@ -483,22 +513,26 @@ mod tests {
             let types = vec![
                 AvailableType {
                     name: "GetUserRequest".to_string(),
+                    graph_name: "GetUserRequest".to_string(),
                     is_empty: false,
                 },
                 AvailableType {
                     name: "GetUserResponse".to_string(),
+                    graph_name: "GetUserResponse".to_string(),
                     is_empty: false,
                 },
                 AvailableType {
                     name: "CreatedUserResponse".to_string(),
+                    graph_name: "CreatedUserResponse".to_string(),
                     is_empty: false,
                 },
                 AvailableType {
                     name: "User".to_string(),
+                    graph_name: "User".to_string(),
                     is_empty: false,
                 },
             ];
-            process_service(&mut s, &grpc_service, &grpc, &types).unwrap();
+            process_service(&mut s, &grpc_service, &grpc, &types, [].into()).unwrap();
 
             assert_snapshot!(s);
         }
@@ -516,14 +550,16 @@ mod tests {
             let types = vec![
                 AvailableType {
                     name: "Empty".to_string(),
+                    graph_name: "Google_Protobuf_Empty".to_string(),
                     is_empty: true,
                 },
                 AvailableType {
                     name: "CustomEmpty".to_string(),
+                    graph_name: "CustomEmpty".to_string(),
                     is_empty: true,
                 },
             ];
-            process_service(&mut s, &grpc_service, &grpc, &types).unwrap();
+            process_service(&mut s, &grpc_service, &grpc, &types, [].into()).unwrap();
 
             assert_snapshot!(s);
         }

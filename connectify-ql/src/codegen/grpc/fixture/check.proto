@@ -1,11 +1,13 @@
 syntax = "proto3";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 package com.example.check;
 
 service CheckService {
   rpc Check(google.protobuf.Empty) returns (CustomEmpty) {}
+  rpc time_since(google.protobuf.Timestamp) returns (google.protobuf.Timestamp) {} // intentional snake_case
 }
 
 message CustomEmpty {
