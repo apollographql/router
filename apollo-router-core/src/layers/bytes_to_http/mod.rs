@@ -177,7 +177,11 @@ where
 
         let inner = self.inner.clone();
         // Clone is required here because we need to handle async HTTP body collection
-        let mut inner = mem::replace(&mut self.inner, inner);
+        let inner = mem::replace(&mut self.inner, inner);
+
+        // XXX(@goto-bus-stop): This fixes a problem with `Send` bounds on the response
+        // future of the inner service. We should figure out a real fix if we can.
+        let mut inner = tower::util::BoxService::new(inner);
 
         Box::pin(async move {
             // Create HTTP request

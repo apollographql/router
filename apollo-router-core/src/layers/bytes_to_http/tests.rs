@@ -41,7 +41,7 @@ async fn test_bytes_to_http_layer_success() {
                 .status(200)
                 .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
                     Bytes::from("response body"),
-                )))
+                ).map_err(Into::into)))
                 .unwrap();
 
             send_response.send_response(http_response);
@@ -88,7 +88,7 @@ async fn test_bytes_to_http_empty_body() {
                 .status(200)
                 .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
                     Bytes::from("empty response"),
-                )))
+                ).map_err(Into::into)))
                 .unwrap();
 
             send_response.send_response(http_response);
@@ -179,7 +179,7 @@ async fn test_extensions_passthrough() {
                 .status(200)
                 .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
                     Bytes::from("{}"),
-                )))
+                ).map_err(Into::into)))
                 .unwrap();
 
             send_response.send_response(http_response);
