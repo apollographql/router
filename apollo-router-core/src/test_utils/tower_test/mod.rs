@@ -196,13 +196,13 @@ where
 ///     .timeout(Duration::from_secs(2))
 ///     .service(|mut handle| async move {
 ///         handle.allow(2);
-///         
+///
 ///         // Handle first request
 ///         let (request, response) = handle.next_request().await.expect("service must not fail");
 ///         assert_eq!(request, "get_user:123");
 ///         response.send_response("User{id: 123, name: 'Alice'}");
-///         
-///         // Handle second request  
+///
+///         // Handle second request
 ///         let (request, response) = handle.next_request().await.expect("service must not fail");
 ///         assert_eq!(request, "get_orders:123");
 ///         response.send_response("Orders[Order{id: 1}, Order{id: 2}]");
@@ -443,6 +443,39 @@ impl<L> LayerTestBuilderWithLayer<L> {
     /// This provides more control over the service interaction for complex scenarios.
     /// The expectations closure receives a mock handle where you can set up
     /// the expected downstream behavior. Types are automatically inferred!
+    ///
+    /// # ⚠️ Important: Avoid `ServiceExt::oneshot()` in Test Closures
+    ///
+    /// **Do NOT use `service.oneshot(request)` inside the test closure!** This will cause
+    /// Higher-Ranked Trait Bounds (HRTB) compilation errors because `oneshot` requires
+    /// the service to work with any lifetime, but your service may only work with `'static`.
+    ///
+    /// Instead, use the explicit `Service::ready()` + `Service::call()` pattern:
+    ///
+    /// ```rust,ignore
+    /// // ❌ DON'T DO THIS - Will cause HRTB compile errors:
+    /// TowerTest::builder()
+    ///     .layer(my_layer)
+    ///     .test(
+    ///         |service| async move { service.oneshot(request).await }, // ❌ HRTB error!
+    ///         |downstream| async move { /* expectations */ }
+    ///     )
+    ///
+    /// // ✅ DO THIS INSTEAD - Works correctly:
+    /// TowerTest::builder()
+    ///     .layer(my_layer)
+    ///     .test(
+    ///         |mut service| async move {
+    ///             use tower::Service;
+    ///             service.ready().await?;           // ✅ Explicit readiness check
+    ///             service.call(request).await       // ✅ Direct call works fine
+    ///         },
+    ///         |downstream| async move { /* expectations */ }
+    ///     )
+    /// ```
+    ///
+    /// For simple oneshot scenarios, prefer `TowerTest::oneshot()` instead of `test()`,
+    /// as the framework handles the service interaction internally.
     pub async fn test<Req, Resp, TestResp, E, F, G, Fut1, Fut2>(
         self,
         test_fn: G,

@@ -100,14 +100,15 @@ async fn test_clean_builder_api_custom_test() {
     let result = TowerTest::builder()
         .layer(layer)
         .test(
-            |service| async move {
+            |mut service| async move {
                 let http_req = http::Request::builder()
                     .uri("http://example.com")
                     .body(UnsyncBoxBody::new(
                         http_body_util::Full::from("test body").map_err(Into::into),
                     ))
                     .unwrap();
-                service.oneshot(http_req).await
+                service.ready().await?;
+                service.call(http_req).await
             },
             |mut downstream| async move {
                 downstream.allow(1);

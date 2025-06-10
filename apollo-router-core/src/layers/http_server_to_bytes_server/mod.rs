@@ -1,6 +1,6 @@
 //! # HTTP to Bytes Layer
 //!
-//! The `HttpToBytesLayer` transforms HTTP requests into bytes requests in the Apollo Router Core 
+//! The `HttpToBytesLayer` transforms HTTP requests into bytes requests in the Apollo Router Core
 //! request pipeline. This layer is responsible for extracting the body from incoming HTTP requests
 //! and converting them into a bytes representation that can be processed by downstream services.
 //!
@@ -63,7 +63,7 @@
 
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::http_server::{Request as HttpRequest, Response as HttpResponse};
-use bytes::Bytes;
+
 use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::BodyExt;
@@ -127,7 +127,7 @@ impl<S> Layer<S> for HttpToBytesLayer {
 ///
 /// This service:
 /// 1. Extracts the HTTP request body as bytes
-/// 2. Creates an extended Extensions layer for the inner service  
+/// 2. Creates an extended Extensions layer for the inner service
 /// 3. Calls the inner service with a bytes request
 /// 4. Converts the bytes response back to a streaming HTTP response
 /// 5. Returns the original Extensions in the HTTP response
@@ -165,8 +165,7 @@ where
         Box::pin(async move {
             // Convert HTTP request to bytes request
             let (parts, body) = req.into_parts();
-            // Since body error type is now Infallible, collection cannot fail
-            let body_bytes = body.collect().await.unwrap().to_bytes();
+            let body_bytes = body.collect().await?.to_bytes();
 
             // Convert http::Extensions directly to our Extensions
             let original_extensions: crate::Extensions = parts.extensions.into();
@@ -184,15 +183,9 @@ where
 
             // Convert bytes response to HTTP response
             // Convert error stream to infallible stream by providing fallback for errors
-            let infallible_stream = bytes_resp.responses.map(|chunk_result| {
-                match chunk_result {
-                    Ok(chunk) => Ok(Frame::data(chunk)),
-                    Err(_e) => {
-                        // Provide empty bytes as fallback for stream errors
-                        // Errors are handled at higher layers in the pipeline
-                        Ok(Frame::data(Bytes::new()))
-                    }
-                }
+            let infallible_stream = bytes_resp.responses.map(|chunk_result| match chunk_result {
+                Ok(chunk) => Ok(Frame::data(chunk)),
+                Err(e) => Err(e),
             });
 
             let mut http_resp = http::Response::builder()
