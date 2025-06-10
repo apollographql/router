@@ -34,17 +34,7 @@ fn filter_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let Some(args) = method_args else {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!("Method ->{} requires one argument", method_name.as_ref()),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        );
-    };
-    let Some(first_arg) = args.args.first() else {
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
             None,
             vec![ApplyToError::new(
@@ -76,7 +66,10 @@ fn filter_method(
                     // Condition returned a non-boolean value, this is an error
                     has_non_boolean_error = true;
                     errors.push(ApplyToError::new(
-                        "Filter condition must return a boolean value".to_string(),
+                        format!(
+                            "->{} condition must return a boolean value",
+                            method_name.as_ref()
+                        ),
                         input_path.to_vec(),
                         method_name.range(),
                     ));
@@ -101,7 +94,10 @@ fn filter_method(
             Some(_) => {
                 // Condition returned a non-boolean value, this is an error
                 condition_errors.push(ApplyToError::new(
-                    "Filter condition must return a boolean value".to_string(),
+                    format!(
+                        "->{} condition must return a boolean value",
+                        method_name.as_ref()
+                    ),
                     input_path.to_vec(),
                     method_name.range(),
                 ));
