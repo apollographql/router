@@ -31,6 +31,7 @@ mod header;
 mod id;
 mod json_selection;
 mod models;
+pub use models::ProblemLocation;
 pub(crate) mod spec;
 mod string_template;
 pub mod validation;
