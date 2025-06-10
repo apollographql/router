@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 //! APIs for integrating with the router's metrics.
 //!
 //! The macros contained here are a replacement for the telemetry crate's `MetricsLayer`. We will
@@ -69,9 +67,6 @@
 //! );
 //! ```
 
-use std::collections::HashMap;
->>>>>>> e7b7e401 (feat(subscription): add operation_name label to apollo.router.opened.subscriptions counter (#7606))
-#[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
 use std::pin::Pin;
@@ -1339,7 +1334,7 @@ pub(crate) trait FutureMetricsExt<T> {
             Default::default(),
             async move {
                 // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
-                let _ = meter_provider_internal();
+                let _ = meter_provider();
                 let result = self.await;
                 let _ = tokio::task::spawn_blocking(|| {
                     meter_provider().shutdown();

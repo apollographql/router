@@ -1124,12 +1124,12 @@ mod tests {
                 .unwrap();
             assert!(created);
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 1i64,
                 "graphql.operation.name" = "TestSubscription"
             );
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 1i64,
                 "graphql.operation.name" = "TestSubscriptionBis"
             );
@@ -1148,12 +1148,12 @@ mod tests {
 
             notify.try_delete(topic_1).unwrap();
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 1i64,
                 "graphql.operation.name" = "TestSubscription"
             );
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 1i64,
                 "graphql.operation.name" = "TestSubscriptionBis"
             );
@@ -1165,12 +1165,12 @@ mod tests {
 
             notify.force_delete(topic_1).await.unwrap();
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 0i64,
                 "graphql.operation.name" = "TestSubscription"
             );
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 1i64,
                 "graphql.operation.name" = "TestSubscriptionBis"
             );
@@ -1185,12 +1185,12 @@ mod tests {
             let subscriptions_nb = notify.debug().await.unwrap();
             assert_eq!(subscriptions_nb, 0);
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 0i64,
                 "graphql.operation.name" = "TestSubscription"
             );
             assert_up_down_counter!(
-                "apollo.router.opened.subscriptions",
+                "apollo_router_opened_subscriptions",
                 0i64,
                 "graphql.operation.name" = "TestSubscriptionBis"
             );
