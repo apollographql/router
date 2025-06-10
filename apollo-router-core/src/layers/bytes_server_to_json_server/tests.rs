@@ -1,9 +1,9 @@
+use crate::assert_error;
 use crate::json::JsonValue;
-use crate::layers::bytes_to_json::{BytesToJsonLayer, Error as BytesToJsonError};
+use crate::layers::bytes_server_to_json_server::{BytesToJsonLayer, Error as BytesToJsonError};
 use crate::services::bytes_server::Request as BytesRequest;
 use crate::services::json_server::Response as JsonResponse;
 use crate::test_utils::TowerTest;
-use crate::assert_error;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream;
@@ -81,7 +81,11 @@ async fn test_invalid_json_bytes() {
         .await;
 
     // Verify it's specifically a JSON deserialization error using the assert_error! macro
-    assert_error!(result, BytesToJsonError, BytesToJsonError::JsonDeserialization { .. });
+    assert_error!(
+        result,
+        BytesToJsonError,
+        BytesToJsonError::JsonDeserialization { .. }
+    );
 }
 
 #[tokio::test]

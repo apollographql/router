@@ -1,4 +1,4 @@
-use crate::layers::http_to_bytes::HttpToBytesLayer;
+use crate::layers::http_server_to_bytes_server::HttpToBytesLayer;
 use crate::services::bytes_server::Response as BytesResponse;
 use crate::test_utils::TowerTest;
 use bytes::Bytes;

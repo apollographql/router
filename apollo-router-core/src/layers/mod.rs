@@ -1,23 +1,19 @@
 use tower::ServiceBuilder;
 use tower::layer::util::Stack;
 
-pub mod bytes_client_to_json_client;
-pub mod bytes_to_http;
-pub mod bytes_to_json;
+pub mod bytes_client_to_http_client;
+pub mod bytes_server_to_json_server;
 pub mod cache;
 pub mod error_to_graphql;
-pub mod http_client_to_bytes_client;
-pub mod http_to_bytes;
-pub mod json_to_bytes;
+pub mod http_server_to_bytes_server;
+pub mod json_client_to_bytes_client;
 pub mod prepare_query;
 
-pub use bytes_client_to_json_client::Error as BytesClientToJsonClientError;
-pub use bytes_to_http::Error as BytesToHttpError;
-pub use bytes_to_json::Error as BytesToJsonError;
+pub use bytes_client_to_http_client::Error as BytesToHttpError;
+pub use bytes_server_to_json_server::Error as BytesToJsonError;
 pub use cache::Error as CacheError;
-pub use http_client_to_bytes_client::Error as HttpClientToBytesClientError;
-pub use http_to_bytes::Error as HttpToBytesError;
-pub use json_to_bytes::Error as JsonToBytesError;
+pub use http_server_to_bytes_server::Error as HttpToBytesError;
+pub use json_client_to_bytes_client::Error as JsonToBytesError;
 pub use prepare_query::Error as PrepareQueryError;
 
 // Re-export cache layer types and functions for convenience
@@ -33,10 +29,10 @@ pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 ///
 /// ## Server-Side Request Transformations
 /// - `http_to_bytes()` - Extracts HTTP request bodies as bytes
-/// - `bytes_to_json()` - Parses bytes as JSON 
+/// - `bytes_to_json()` - Parses bytes as JSON
 /// - `prepare_query()` - Orchestrates GraphQL query parsing and planning (composite layer)
 ///
-/// ## Client-Side Request Transformations  
+/// ## Client-Side Request Transformations
 /// - `http_client_to_bytes_client()` - Serializes HTTP client requests to bytes
 /// - `bytes_client_to_json_client()` - Deserializes bytes to JSON for client services
 ///
@@ -70,7 +66,7 @@ pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 ///     )
 ///     .service(execution_service);
 ///
-/// // Client-side pipeline  
+/// // Client-side pipeline
 /// let client = ServiceBuilder::new()
 ///     .json_to_bytes()                    // JSON → Bytes
 ///     .bytes_to_http()                    // Bytes → HTTP
@@ -88,19 +84,23 @@ pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 /// - Parent values always take precedence over child values
 pub trait ServiceBuilderExt<L> {
     // Server-side transformations (request pipeline)
-    
+
     /// Adds HTTP to bytes transformation layer to the service stack.
     ///
     /// This layer extracts HTTP request bodies as bytes and converts HTTP responses
     /// back to streaming format. Used early in server-side request pipelines.
-    fn http_to_bytes(self) -> ServiceBuilder<Stack<http_to_bytes::HttpToBytesLayer, L>>;
-    
+    fn http_server_to_bytes_server(
+        self,
+    ) -> ServiceBuilder<Stack<http_server_to_bytes_server::HttpToBytesLayer, L>>;
+
     /// Adds bytes to JSON transformation layer to the service stack.
     ///
     /// This layer parses bytes as JSON with fail-fast error handling and converts
     /// JSON responses back to bytes. Used after HTTP body extraction.
-    fn bytes_to_json(self) -> ServiceBuilder<Stack<bytes_to_json::BytesToJsonLayer, L>>;
-    
+    fn bytes_server_to_json_server(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_server_to_json_server::BytesToJsonLayer, L>>;
+
     /// Adds query preparation composite layer to the service stack.
     ///
     /// This composite layer orchestrates GraphQL query parsing and planning services
@@ -116,20 +116,16 @@ pub trait ServiceBuilderExt<L> {
         query_plan_service: Pl,
     ) -> ServiceBuilder<Stack<prepare_query::PrepareQueryLayer<P, Pl>, L>>;
 
-    // Client-side transformations
-    fn http_client_to_bytes_client(
-        self,
-    ) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>>;
-    fn bytes_client_to_json_client(
-        self,
-    ) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>>;
-
     // Response transformations (reverse direction)
-    fn json_to_bytes(self) -> ServiceBuilder<Stack<json_to_bytes::JsonToBytesLayer, L>>;
-    fn bytes_to_http(self) -> ServiceBuilder<Stack<bytes_to_http::BytesToHttpLayer, L>>;
+    fn json_client_to_bytes_client(
+        self,
+    ) -> ServiceBuilder<Stack<json_client_to_bytes_client::JsonToBytesLayer, L>>;
+    fn bytes_client_to_http_client(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_client_to_http_client::BytesToHttpLayer, L>>;
 
     // Caching layer
-    
+
     /// Adds intelligent caching layer to the service stack.
     ///
     /// This layer provides configurable caching of successful responses and specific
@@ -143,7 +139,7 @@ pub trait ServiceBuilderExt<L> {
     /// ```rust,ignore
     /// use apollo_router_core::layers::cache::CacheLayer;
     /// use tower::ServiceBuilder;
-    /// 
+    ///
     /// # fn example() {
     /// # let (inner, _handle) = tower_test::mock::spawn();
     /// let cache_layer = CacheLayer::new(
@@ -167,12 +163,16 @@ pub trait ServiceBuilderExt<L> {
 
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     // Server-side transformations (request pipeline)
-    fn http_to_bytes(self) -> ServiceBuilder<Stack<http_to_bytes::HttpToBytesLayer, L>> {
-        self.layer(http_to_bytes::HttpToBytesLayer)
+    fn http_server_to_bytes_server(
+        self,
+    ) -> ServiceBuilder<Stack<http_server_to_bytes_server::HttpToBytesLayer, L>> {
+        self.layer(http_server_to_bytes_server::HttpToBytesLayer)
     }
 
-    fn bytes_to_json(self) -> ServiceBuilder<Stack<bytes_to_json::BytesToJsonLayer, L>> {
-        self.layer(bytes_to_json::BytesToJsonLayer)
+    fn bytes_server_to_json_server(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_server_to_json_server::BytesToJsonLayer, L>> {
+        self.layer(bytes_server_to_json_server::BytesToJsonLayer)
     }
 
     fn prepare_query<P, Pl>(
@@ -186,26 +186,17 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         ))
     }
 
-    // Client-side transformations
-    fn http_client_to_bytes_client(
-        self,
-    ) -> ServiceBuilder<Stack<http_client_to_bytes_client::HttpClientToBytesClientLayer, L>> {
-        self.layer(http_client_to_bytes_client::HttpClientToBytesClientLayer)
-    }
-
-    fn bytes_client_to_json_client(
-        self,
-    ) -> ServiceBuilder<Stack<bytes_client_to_json_client::BytesClientToJsonClientLayer, L>> {
-        self.layer(bytes_client_to_json_client::BytesClientToJsonClientLayer)
-    }
-
     // Response transformations (reverse direction)
-    fn json_to_bytes(self) -> ServiceBuilder<Stack<json_to_bytes::JsonToBytesLayer, L>> {
-        self.layer(json_to_bytes::JsonToBytesLayer)
+    fn json_client_to_bytes_client(
+        self,
+    ) -> ServiceBuilder<Stack<json_client_to_bytes_client::JsonToBytesLayer, L>> {
+        self.layer(json_client_to_bytes_client::JsonToBytesLayer)
     }
 
-    fn bytes_to_http(self) -> ServiceBuilder<Stack<bytes_to_http::BytesToHttpLayer, L>> {
-        self.layer(bytes_to_http::BytesToHttpLayer::new())
+    fn bytes_client_to_http_client(
+        self,
+    ) -> ServiceBuilder<Stack<bytes_client_to_http_client::BytesToHttpLayer, L>> {
+        self.layer(bytes_client_to_http_client::BytesToHttpLayer::new())
     }
 
     // Caching layer

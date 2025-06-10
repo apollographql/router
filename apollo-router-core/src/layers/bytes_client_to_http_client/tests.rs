@@ -1,5 +1,5 @@
 use crate::Extensions;
-use crate::layers::bytes_to_http::BytesToHttpLayer;
+use crate::layers::bytes_client_to_http_client::BytesToHttpLayer;
 use crate::services::bytes_client::Request as BytesRequest;
 use crate::test_utils::TowerTest;
 use bytes::Bytes;
@@ -39,9 +39,9 @@ async fn test_bytes_to_http_layer_success() {
             // Send HTTP response back
             let http_response = http::Response::builder()
                 .status(200)
-                .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
-                    Bytes::from("response body"),
-                ).map_err(Into::into)))
+                .body(http_body_util::combinators::UnsyncBoxBody::new(
+                    Full::new(Bytes::from("response body")).map_err(Into::into),
+                ))
                 .unwrap();
 
             send_response.send_response(http_response);
@@ -86,9 +86,9 @@ async fn test_bytes_to_http_empty_body() {
 
             let http_response = http::Response::builder()
                 .status(200)
-                .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
-                    Bytes::from("empty response"),
-                ).map_err(Into::into)))
+                .body(http_body_util::combinators::UnsyncBoxBody::new(
+                    Full::new(Bytes::from("empty response")).map_err(Into::into),
+                ))
                 .unwrap();
 
             send_response.send_response(http_response);
@@ -177,9 +177,9 @@ async fn test_extensions_passthrough() {
 
             let http_response = http::Response::builder()
                 .status(200)
-                .body(http_body_util::combinators::UnsyncBoxBody::new(Full::new(
-                    Bytes::from("{}"),
-                ).map_err(Into::into)))
+                .body(http_body_util::combinators::UnsyncBoxBody::new(
+                    Full::new(Bytes::from("{}")).map_err(Into::into),
+                ))
                 .unwrap();
 
             send_response.send_response(http_response);

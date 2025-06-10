@@ -19,7 +19,7 @@ use tower::{Service, ServiceBuilder};
 pub use extensions::Extensions;
 
 // Re-export error functionality
-pub use error::{Error, ToGraphQLError, GraphQLError, GraphQLErrorContext};
+pub use error::{Error, GraphQLError, GraphQLErrorContext, ToGraphQLError};
 
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
 ///
@@ -70,13 +70,11 @@ where
     // Server-side request transformation:
     // HTTP Request → Bytes Request → JSON Request → Execution Request → ExecuteQuery Service
     ServiceBuilder::new()
-        .http_to_bytes()
-        .bytes_to_json()
+        .http_server_to_bytes_server()
+        .bytes_server_to_json_server()
         .prepare_query(query_parse_service, query_plan_service)
         .service(execute_service)
 }
-
-
 
 #[test]
 fn test() {
