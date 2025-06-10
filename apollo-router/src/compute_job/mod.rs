@@ -317,9 +317,6 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    use futures::FutureExt;
-    use futures::StreamExt;
-    use futures::stream::FuturesUnordered;
     use tracing_futures::WithSubscriber;
 
     use super::*;
