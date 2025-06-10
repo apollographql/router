@@ -11,6 +11,8 @@ The router supports two extensibility options to customize the router's behavior
 - [Rhai scripting](/graphos/routing/customization/rhai)
 - [External coprocessors](/router/customizations/coprocessor)
 
+This guide shows how to deploy a router with these features in Kubernetes.
+
 ## Deploy with Rhai scripts
 
 The router supports [Rhai scripting](/graphos/routing/customization/rhai) to add custom functionality.
@@ -95,7 +97,7 @@ charts/
 ```
 
 
-The `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/kubernetes/quickstart).
+The `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/self-hosted/containerization/kubernetes/quickstart).
 
 #### Using the router's Helm chart as a dependency
 
@@ -124,7 +126,7 @@ charts/
 │   └── ...
 ```
 
-In the above example, the `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/kubernetes/quickstart). The `templates` folder would contain the configuration for the coprocessor's deployment. Within the `values.yaml` you can then nest the necessary configuration under the `router` key, such as: 
+In the above example, the `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/self-hosted/containerization/kubernetes/quickstart). The `templates` folder would contain the configuration for the coprocessor's deployment. Within the `values.yaml` you can then nest the necessary configuration under the `router` key, such as: 
 
 ```values.yaml
 router:
