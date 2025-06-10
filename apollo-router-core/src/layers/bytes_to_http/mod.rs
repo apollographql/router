@@ -1,6 +1,6 @@
 //! # Bytes to HTTP Layer
 //!
-//! The `BytesToHttpLayer` transforms bytes client requests into HTTP client requests in the 
+//! The `BytesToHttpLayer` transforms bytes client requests into HTTP client requests in the
 //! Apollo Router Core client-side pipeline. This layer is responsible for wrapping bytes
 //! data in HTTP requests for transmission to HTTP services and converting HTTP responses
 //! back to bytes format.
@@ -77,13 +77,9 @@ use crate::services::bytes_client::{Request as BytesRequest, Response as BytesRe
 use crate::services::http_client::{Request as HttpRequest, Response as HttpResponse};
 use bytes::Bytes;
 use http_body_util::{BodyExt, combinators::UnsyncBoxBody};
-use std::convert::Infallible;
 use std::pin::Pin;
 use tower::BoxError;
 use tower::{Layer, Service};
-
-// Type alias to match exactly what http_client uses
-type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
@@ -198,8 +194,7 @@ where
             // Convert HTTP response to bytes response
             let (_parts, body) = http_resp.into_parts();
 
-            // Since body error type is Infallible, collection cannot fail
-            let collected_bytes = body.collect().await.unwrap().to_bytes();
+            let collected_bytes = body.collect().await?.to_bytes();
             let bytes_stream = futures::stream::once(async move { Ok(collected_bytes) });
 
             let bytes_resp = BytesResponse {
@@ -215,8 +210,8 @@ where
 impl<S> BytesToHttpService<S> {
     /// Create HTTP request from bytes - helper to avoid lifetime issues
     fn create_http_request(body_bytes: Bytes) -> Result<HttpRequest, BoxError> {
-        let full_body = http_body_util::Full::new(body_bytes);
-        let body: HttpBody = UnsyncBoxBody::new(full_body);
+        let full_body = http_body_util::Full::new(body_bytes).map_err(Into::into);
+        let body = UnsyncBoxBody::new(full_body);
 
         let http_req = http::Request::builder()
             .method("POST")

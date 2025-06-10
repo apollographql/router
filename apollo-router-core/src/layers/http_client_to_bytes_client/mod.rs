@@ -1,6 +1,6 @@
 //! # HTTP Client to Bytes Client Layer
 //!
-//! The `HttpClientToBytesClientLayer` transforms HTTP client requests into bytes client requests 
+//! The `HttpClientToBytesClientLayer` transforms HTTP client requests into bytes client requests
 //! in the Apollo Router Core client-side pipeline. This layer is responsible for serializing
 //! HTTP requests into bytes format and deserializing bytes responses back to HTTP format.
 //!
@@ -70,9 +70,12 @@
 //! - **Memory Usage**: Will need to serialize entire HTTP requests/responses
 //! - **Protocol Overhead**: Adds serialization overhead for HTTP abstraction
 
+use crate::services::bytes_client::{
+    Request as BytesClientRequest, Response as BytesClientResponse,
+};
 use crate::services::http_client::{Request as HttpClientRequest, Response as HttpClientResponse};
-use crate::services::bytes_client::{Request as BytesClientRequest, Response as BytesClientResponse};
 use bytes::Bytes;
+use http_body_util::BodyExt;
 use std::pin::Pin;
 use tower::BoxError;
 use tower::{Layer, Service};
@@ -159,7 +162,8 @@ where
 {
     type Response = HttpClientResponse;
     type Error = BoxError;
-    type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
@@ -189,8 +193,10 @@ where
             // For now, create a simple HTTP response - in real implementation,
             // would parse the bytes stream back into proper HTTP responses
             use http_body_util::BodyExt;
-            let body = http_body_util::Full::new(bytes::Bytes::from("{}")).boxed_unsync();
-            
+            let body = http_body_util::Full::new(bytes::Bytes::from("{}"))
+                .map_err(Into::into)
+                .boxed_unsync();
+
             let http_resp = http::Response::builder()
                 .status(200)
                 .header("content-type", "application/json")
@@ -205,14 +211,14 @@ where
     }
 }
 
-fn serialize_http_request(http_req: &http::Request<http_body_util::combinators::UnsyncBoxBody<bytes::Bytes, std::convert::Infallible>>) -> Bytes {
+fn serialize_http_request(
+    http_req: &http::Request<http_body_util::combinators::UnsyncBoxBody<bytes::Bytes, BoxError>>,
+) -> Bytes {
     // Placeholder implementation - in real scenario, would serialize
     // the HTTP request (method, URI, headers, body) into bytes
     let request_line = format!("{} {} HTTP/1.1\r\n", http_req.method(), http_req.uri());
     Bytes::from(request_line)
 }
 
-
-
 #[cfg(test)]
-mod tests; 
+mod tests;

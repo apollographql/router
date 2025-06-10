@@ -1,9 +1,9 @@
 use bytes::Bytes;
 use http_body_util::combinators::UnsyncBoxBody;
-use std::convert::Infallible;
+use tower::BoxError;
 
-pub type Request = http::Request<UnsyncBoxBody<Bytes, Infallible>>;
-pub type Response = http::Response<UnsyncBoxBody<Bytes, Infallible>>;
+pub type Request = http::Request<UnsyncBoxBody<Bytes, BoxError>>;
+pub type Response = http::Response<UnsyncBoxBody<Bytes, BoxError>>;
 
 /// Error types for HTTP client services
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
