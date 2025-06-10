@@ -145,6 +145,57 @@ services/
 
 **Stream-based Services**: Services marked with "error streams" return streaming responses where each stream item is a `Result<T, E>`. This enables error handling layers to process both successful responses and various error conditions (serialization errors, network errors, etc.) in a consistent manner.
 
+#### Layer Descriptions
+
+**http_server_to_bytes_server**
+- **Purpose**: Extracts HTTP request bodies as bytes and transforms back to HTTP responses
+- **Input**: `http::Request<Body>` with HTTP Extensions
+- **Output**: `BytesRequest` with Router Extensions
+- **Reverse Transform**: `BytesResponse` with streams → HTTP response with extracted Extensions
+- **Use Case**: Entry point for server-side request processing pipelines
+
+**bytes_server_to_json_server**
+- **Purpose**: Parses bytes as JSON with fail-fast error handling
+- **Input**: `BytesRequest` with byte streams
+- **Output**: `JsonRequest` with parsed JSON body
+- **Reverse Transform**: `JsonResponse` with response streams → `BytesResponse` with serialized streams
+- **Use Case**: JSON parsing layer after HTTP body extraction
+
+**json_client_to_bytes_client**
+- **Purpose**: Serializes JSON client requests to bytes for transmission
+- **Input**: `JsonRequest` with JSON body
+- **Output**: `BytesRequest` with serialized byte streams
+- **Reverse Transform**: `BytesResponse` → `JsonResponse` with deserialized JSON
+- **Use Case**: Client-side request serialization before HTTP transmission
+
+**bytes_client_to_http_client**
+- **Purpose**: Wraps bytes in HTTP requests for client transmission
+- **Input**: `BytesRequest` with byte streams
+- **Output**: `http::Request<Body>` with HTTP headers and body
+- **Reverse Transform**: HTTP response → `BytesResponse` with extracted body
+- **Use Case**: Final client-side transformation before network transmission
+
+**prepare_query**
+- **Purpose**: Composite layer orchestrating GraphQL query parsing and planning
+- **Input**: `JsonRequest` with GraphQL query, variables, operation name
+- **Output**: `ExecutionRequest` with query plan ready for execution
+- **Internal Flow**: JSON → QueryParse → QueryPlan → ExecutionRequest
+- **Use Case**: Complete GraphQL query preparation before execution
+
+**cache**
+- **Purpose**: Intelligent caching with Arc-based storage and Clock-PRO eviction
+- **Configuration**: Custom key extraction function and error predicate
+- **Caching Strategy**: Successful responses and specific error types based on predicate
+- **Performance**: Zero-copy cache hits, minimal overhead for cache misses
+- **Use Case**: Performance optimization for repeated requests
+
+**error_to_graphql**
+- **Purpose**: Transforms service errors into GraphQL-compliant error responses
+- **Input**: Any request type (pass-through)
+- **Error Handling**: Converts service errors to GraphQL format with proper extensions
+- **Output**: GraphQL error response with null data and formatted errors array
+- **Use Case**: Top-level error boundary for GraphQL-compliant error responses
+
 #### Composite Services
 
 Some services are **composite services** that internally orchestrate multiple sub-services to provide a higher-level abstraction:
@@ -249,7 +300,7 @@ Layers implement cross-cutting concerns using Tower's layer system. They provide
 #### Layer Structure
 
 ```rust
-// mod.rs
+// mod.rs - Example layer structure
 pub struct LayerName;
 
 impl<S> Layer<S> for LayerName {
@@ -269,41 +320,110 @@ where
     S: Service<Request>,
 {
     type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
+    type Error = BoxError; // All layers use BoxError for compatibility
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
     
     fn call(&mut self, req: Request) -> Self::Future {
-        // Layer logic here
-        self.inner.call(req)
+        // Layer logic here - always follow Extensions pattern:
+        // 1. Preserve original Extensions
+        // 2. Create extended Extensions for inner service
+        // 3. Return original Extensions in response
+        let original_extensions = req.extensions;
+        let extended_extensions = original_extensions.extend();
+        
+        // Transform request with extended Extensions
+        let inner_req = InnerRequest {
+            extensions: extended_extensions,
+            // ... other fields
+        };
+        
+        let future = self.inner.call(inner_req);
+        Box::pin(async move {
+            let inner_resp = future.await?;
+            
+            // Transform response back with original Extensions
+            Ok(OuterResponse {
+                extensions: original_extensions, // Always return original
+                // ... other fields from inner_resp
+            })
+        })
     }
 }
 ```
 
 #### ServiceBuilder Extensions
 
-Layers are exposed through `ServiceBuilderExt` trait:
+Layers are exposed through `ServiceBuilderExt` trait with organized methods:
 
+**Server-Side Request Transformations:**
 ```rust
 pub trait ServiceBuilderExt<L> {
-    fn layer_name(self) -> ServiceBuilder<Stack<LayerNameLayer, L>>;
+    fn http_server_to_bytes_server(self) -> ServiceBuilder<Stack<HttpToBytesLayer, L>>;
+    fn bytes_server_to_json_server(self) -> ServiceBuilder<Stack<BytesToJsonLayer, L>>;
+    fn prepare_query<P, Pl>(self, parse_service: P, plan_service: Pl) -> ServiceBuilder<Stack<PrepareQueryLayer<P, Pl>, L>>;
+}
+```
+
+**Client-Side Request Transformations:**
+```rust
+pub trait ServiceBuilderExt<L> {
+    fn json_client_to_bytes_client(self) -> ServiceBuilder<Stack<JsonToBytesLayer, L>>;
+    fn bytes_client_to_http_client(self) -> ServiceBuilder<Stack<BytesToHttpLayer, L>>;
+}
+```
+
+**Utility Layers:**
+```rust
+pub trait ServiceBuilderExt<L> {
+    fn cache<Req, Resp, K, F, P>(self, cache_layer: CacheLayer<Req, Resp, K, F, P>) -> ServiceBuilder<Stack<CacheLayer<Req, Resp, K, F, P>, L>>;
+    // Note: error_to_graphql layer is used directly via .layer(ErrorToGraphQLLayer)
 }
 ```
 
 #### Current Layers
 
-- `http_to_bytes` - HTTP to bytes transformation
-- `bytes_to_json` - Bytes to JSON transformation
+**Server-Side Transformation Layers:**
+- `http_server_to_bytes_server` - HTTP request to bytes transformation for server processing
+- `bytes_server_to_json_server` - Bytes to JSON transformation for server request processing
+
+**Client-Side Transformation Layers:**
+- `json_client_to_bytes_client` - JSON to bytes transformation for client requests
+- `bytes_client_to_http_client` - Bytes to HTTP transformation for client requests
+
+**Composite Layers:**
+- `prepare_query` - Composite layer that orchestrates GraphQL query parsing and planning services
+
+**Utility Layers:**
+- `cache` - Intelligent caching layer with Arc-based storage and Clock-PRO eviction
+- `error_to_graphql` - Converts service errors to GraphQL-compliant error responses
 
 #### Error Handling Layers
 
 With streaming responses now containing error streams, specialized error handling layers can be implemented:
 
+**Implemented Error Handling Layers:**
+- **error_to_graphql** - Transforms service errors into GraphQL-compliant error responses with proper formatting and extensions
+
+**Potential Future Error Handling Layers:**
 - **Stream Error Recovery** - Layers that can retry failed stream items or provide fallback responses
 - **Error Transformation** - Convert serialization errors into appropriate GraphQL error formats
 - **Error Aggregation** - Collect and contextualize errors from streaming operations
 - **Error Filtering** - Apply business logic to determine which errors should be exposed vs. handled silently
 
 These layers intercept `Result<T, E>` stream items and can transform errors, implement retry logic, or provide alternative responses before passing the stream to the next layer in the pipeline.
+
+**ErrorToGraphQLLayer Usage:**
+```rust
+use apollo_router_core::layers::error_to_graphql::ErrorToGraphQLLayer;
+
+let service = ServiceBuilder::new()
+    .layer(ErrorToGraphQLLayer)  // Convert errors to GraphQL format
+    .http_server_to_bytes_server()
+    .bytes_server_to_json_server()
+    .service(graphql_service);
+```
+
+The `ErrorToGraphQLLayer` should typically be placed at the top of the service stack to catch all errors and ensure they are properly formatted for GraphQL clients.
 
 ### 3. Extensions (`src/extensions/`)
 
@@ -431,7 +551,7 @@ where
 
 ##### Examples from Existing Layers
 
-**HttpToBytesLayer**:
+**HttpServerToBytesServerLayer**:
 ```rust
 // Extract and preserve original extensions
 let original_extensions = parts.extensions.get::<crate::Extensions>().cloned().unwrap_or_default();
@@ -450,7 +570,7 @@ let bytes_req = BytesRequest {
 http_resp.extensions_mut().insert(original_extensions);
 ```
 
-**BytesToJsonLayer**:
+**BytesServerToJsonServerLayer**:
 ```rust
 // Preserve original extensions from bytes request
 let original_extensions = req.extensions;
@@ -952,13 +1072,54 @@ If tests timeout, check that expectations match actual service behavior and that
 
 ### Service Composition
 
-Services are composed using Tower's `ServiceBuilder`:
+Services are composed using Tower's `ServiceBuilder` with Apollo Router's extension methods:
 
+**Complete Server-Side Pipeline:**
+```rust
+use apollo_router_core::layers::ServiceBuilderExt;
+
+// Create the query parsing and planning services
+let (query_parse_service, _) = tower_test::mock::spawn();
+let (query_plan_service, _) = tower_test::mock::spawn();
+let (execution_service, _) = tower_test::mock::spawn();
+
+let server_service = ServiceBuilder::new()
+    .layer(error_to_graphql::ErrorToGraphQLLayer) // Error boundary
+    .http_server_to_bytes_server()                // HTTP → Bytes
+    .bytes_server_to_json_server()               // Bytes → JSON
+    .prepare_query(                              // JSON → Execution (composite)
+        query_parse_service,
+        query_plan_service
+    )
+    .service(execution_service);
+```
+
+**Client-Side Pipeline with Caching:**
+```rust
+use apollo_router_core::layers::{ServiceBuilderExt, cache::CacheLayer};
+
+let cache_layer = CacheLayer::new(
+    1000,                          // Cache capacity
+    |req: &JsonRequest| "key".to_string(), // Key extraction function
+    |err| false                    // Error predicate (don't cache errors)
+);
+
+let (http_client, _) = tower_test::mock::spawn();
+
+let client_service = ServiceBuilder::new()
+    .json_client_to_bytes_client()    // JSON → Bytes
+    .bytes_client_to_http_client()    // Bytes → HTTP
+    .cache(cache_layer)               // Add caching
+    .service(http_client);
+```
+
+**Mixed Pipeline Example:**
 ```rust
 let service = ServiceBuilder::new()
-    .layer(TelemetryLayer)
-    .layer(AuthLayer)
-    .layer(CacheLayer)
+    .layer(TelemetryLayer)                    // Custom telemetry
+    .layer(AuthLayer)                         // Custom authentication
+    .cache(cache_layer)                       // Apollo Router caching
+    .http_server_to_bytes_server()            // Apollo Router transformation
     .service(CoreService);
 ```
 
@@ -968,28 +1129,26 @@ Each service in the pipeline transforms requests and responses, with Extensions 
 
 ```
 HTTP Request (Extensions Layer 0)
-    ↓ http_to_bytes layer
+    ↓ http_server_to_bytes_server layer
     ↓ extends() → Extensions Layer 1
 Bytes Request (Extensions Layer 1)
-    ↓ bytes_to_json layer  
+    ↓ bytes_server_to_json_server layer  
     ↓ extends() → Extensions Layer 2
 JSON Request (Extensions Layer 2)
-    ↓ (json_server)
+    ↓ prepare_query layer (Composite Layer)
     ↓ extends() → Extensions Layer 3
-Query Preparation Request (Extensions Layer 3)
-    ↓ (query_preparation) - Composite Service:
-    │   JSON Request 
-    │       ↓ query_parse
-    │   QueryParse Response 
-    │       ↓ query_plan
-    │   QueryPlan Response
-    ↓ extends() → Extensions Layer 4
-Execution Request (Extensions Layer 4)
-    ↓ (query_execution) [produces Stream<Result<Item, Error>>]
+    │   Query Parse Request (Extensions Layer 3)
+    │       ↓ query_parse service
+    │   Query Parse Response 
+    │       ↓ query_plan service
+    │   Query Plan Response
+    │       ↓ combined into ExecutionRequest
+Execution Request (Extensions Layer 3) [same layer as prepare_query input]
+    ↓ (query_execution service) [produces Stream<Result<Item, Error>>]
     ↓ [Error Handling Layers can intercept stream errors]
-    ↓ extends() → Extensions Layer 5
-Request Dispatcher Request (Extensions Layer 5)
-    ↓ (request_dispatcher)
+    ↓ extends() → Extensions Layer 4
+Request Dispatcher Request (Extensions Layer 4)
+    ↓ (request_dispatcher service)
 HTTP Response (Returns Layer 0 - Original Extensions)
 ```
 
