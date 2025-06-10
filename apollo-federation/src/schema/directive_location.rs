@@ -17,6 +17,7 @@ impl DirectiveLocationExt for DirectiveLocation {
                 | DirectiveLocation::FragmentDefinition
                 | DirectiveLocation::FragmentSpread
                 | DirectiveLocation::InlineFragment
+                | DirectiveLocation::VariableDefinition
         )
     }
 
