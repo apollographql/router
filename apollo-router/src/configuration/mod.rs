@@ -26,7 +26,6 @@ use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
-use schema::Mode;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -50,6 +49,7 @@ use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
+use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
@@ -63,10 +63,12 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
+pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
+pub(crate) mod mode;
 mod persisted_queries;
 pub(crate) mod schema;
 pub(crate) mod server;
@@ -573,7 +575,8 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, schema::Mode::Upgrade)?
+            .validate()
     }
 }
 
@@ -901,7 +904,7 @@ pub(crate) struct QueryPlanning {
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
 
-    /// Enable cooperative cancellation of query planning
+    /// Configures cooperative cancellation of query planning
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
@@ -927,41 +930,6 @@ impl QueryPlanning {
             experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
-        }
-    }
-}
-
-/// Controls cooperative cancellation of query planning.
-///
-/// When enabled, query planning will be cancelled if the client waiting on the query plan closes
-/// their connection. Additionally, when enabled with a timeout, the query planning will be
-/// cancelled if it takes longer than the specified timeout.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-pub(crate) enum CooperativeCancellation {
-    /// Enables cooperative cancellation of query planning, but does not set a timeout.
-    Enabled,
-    /// Enables cooperative cancellation of query planning with a timeout.
-    EnabledWithTimeoutInSeconds(f64),
-    /// Disables cooperative cancellation of query planning.
-    #[default]
-    Disabled,
-}
-
-impl CooperativeCancellation {
-    /// Returns true if cooperative cancellation is enabled.
-    pub(crate) fn is_enabled(&self) -> bool {
-        matches!(
-            self,
-            CooperativeCancellation::Enabled
-                | CooperativeCancellation::EnabledWithTimeoutInSeconds(_)
-        )
-    }
-
-    /// Returns the timeout in seconds if cooperative cancellation is enabled with a timeout.
-    pub(crate) fn timeout_in_seconds(&self) -> Option<f64> {
-        match self {
-            CooperativeCancellation::EnabledWithTimeoutInSeconds(timeout) => Some(*timeout),
-            _ => None,
         }
     }
 }

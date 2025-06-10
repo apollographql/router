@@ -28,8 +28,8 @@ use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
-use crate::configuration::CooperativeCancellation;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
+use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -518,7 +518,6 @@ where
                 .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
-            let (query, operation_name) = (request.query.clone(), request.operation_name.clone());
             let planning_task = async move {
                 let service = match self.delegate.ready().await {
                     Ok(service) => service,
@@ -608,49 +607,75 @@ where
                 let planning_task = tokio::task::spawn(planning_task);
                 let _abort_guard =
                     scopeguard::guard(planning_task.abort_handle(), |abort_handle| {
-                        // Abort is a no-op if the task has already completed.
-                        abort_handle.abort();
+                        if self.cooperative_cancellation.is_enforce_mode() {
+                            // Abort is a no-op if the task has already completed.
+                            abort_handle.abort();
+                        } else if self.cooperative_cancellation.is_measure_mode() {
+                            // This is always going to get dropped so we have to make sure we're
+                            // only measuring when the task would be cancelled. 
+                            if !abort_handle.is_finished() {
+                                u64_counter_with_unit!(
+                                    "apollo.router.operations.cooperative_cancellations",
+                                    "The number of times cooperative cancellation was triggered but not enforced",
+                                    "cancellations",
+                                    1
+                                );
+                                tracing::debug!("Cooperative cancellation is enabled, but not enforced. Clients dropped but task will not be cancelled.");
+                            }
+                        }
                     });
-                let task = match self
+                
+                match self
                     .cooperative_cancellation
                     .timeout_in_seconds()
                     .map(Duration::from_secs_f64)
                 {
                     Some(timeout) => {
-                        fn convert_timeout_error(e: impl std::fmt::Display) -> CacheResolverError {
-                            CacheResolverError::RetrievalError(Arc::new(
-                                QueryPlannerError::Timeout(e.to_string()),
-                            ))
-                        }
+                        if self.cooperative_cancellation.is_enforce_mode() {
+                            fn convert_timeout_error(e: impl std::fmt::Display) -> CacheResolverError {
+                                CacheResolverError::RetrievalError(Arc::new(
+                                    QueryPlannerError::Timeout(e.to_string()),
+                                ))
+                            }
+    
+                            let res = planning_task
+                                .timeout(timeout)
+                                .await;
 
-                        planning_task
-                            .timeout(timeout)
-                            .await
-                            .map_err(convert_timeout_error)?
+                            res.map_err(convert_timeout_error)?
+                        } else if self.cooperative_cancellation.is_measure_mode() {
+                            // When in measure mode, we want to spawn a timeout task, but we don't
+                            // want to race it against the planning task. If it happens to finish
+                            // first, we emit a log. Otherwise, the scopeguard will ensure that it
+                            // gets cancelled and no log will be emitted.
+                            let timeout_task = tokio::task::spawn(async move {
+                                tokio::time::sleep(timeout).await;
+                                u64_counter_with_unit!(
+                                    "apollo.router.operations.cooperative_cancellations",
+                                    "The number of times cooperative cancellation was triggered but not enforced",
+                                    "cancellations",
+                                    1
+                                );
+                                tracing::debug!("Cooperative cancellation is enabled, but not enforced. Timeout elapsed but task will not be cancelled.");
+                            });
+                            let _dropped_timeout_guard = scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
+                                abort_handle.abort();
+                            });
+
+                            planning_task.await
+                        } else {
+                            unreachable!("Can't set a timeout without enabling cooperative cancellation");
+                        }
                     }
                     None => planning_task.await,
-                };
-
-                tracing::debug!(
-                    "Query planning task completed for query: {}, operation: {:?}",
-                    query, operation_name
-                );
-                
-                task
+                }
             } else {
                 // some clients might timeout and cancel the request before query planning is finished,
                 // so we execute it in a task that can continue even after the request was canceled and
                 // the join handle was dropped. That way, the next similar query will use the cache instead
                 // of restarting the query planner until another timeout
                 tokio::task::spawn(async move {
-                    let res = planning_task.await;
-
-                    tracing::debug!(
-                        "Query planning task completed for query: {}, operation: {:?}",
-                        query, operation_name
-                    );
-
-                    res
+                    planning_task.await
                 }).await
                     
             }
@@ -788,8 +813,8 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
-    use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
+    use crate::configuration::QueryPlanning;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -913,9 +938,9 @@ mod tests {
         let mut delegate = MockMyQueryPlanner::new();
         delegate.expect_clone().returning(|| {
             let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                .returning(|_| panic!("This query planner should not be called, as it is expected to be cancelled"));
+            planner.expect_sync_call().returning(|_| {
+                panic!("This query planner should not be called, as it is expected to be cancelled")
+            });
             planner
         });
 
@@ -925,7 +950,7 @@ mod tests {
                     .query_planning(
                         QueryPlanning::builder()
                             .experimental_cooperative_cancellation(
-                                CooperativeCancellation::Enabled,
+                                CooperativeCancellation::enabled(),
                             )
                             .build(),
                     )
@@ -943,8 +968,8 @@ mod tests {
             &configuration,
             IndexMap::default(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         let configuration = Configuration::default();
 
@@ -954,26 +979,23 @@ mod tests {
             &schema,
             &configuration,
         )
-            .unwrap();
+        .unwrap();
 
         let context = Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-        
-        let planning_task = planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { username } }".to_string(),
-                    Some("".into()),
-                    context.clone()
-                ));
+
+        let planning_task = planner.call(query_planner::CachingRequest::new(
+            "query Me { me { username } }".to_string(),
+            Some("".into()),
+            context.clone(),
+        ));
         let planning_task = tokio::task::spawn(planning_task);
         planning_task.abort();
         match planning_task.await {
             Ok(_) => panic!("Expected the task to be aborted, but it completed successfully"),
-            Err(e) => assert!(
-                e.is_cancelled(),
-            ),
+            Err(e) => assert!(e.is_cancelled(),),
         }
     }
 
@@ -1008,7 +1030,7 @@ mod tests {
                     .query_planning(
                         QueryPlanning::builder()
                             .experimental_cooperative_cancellation(
-                                CooperativeCancellation::EnabledWithTimeoutInSeconds(0.1),
+                                CooperativeCancellation::enabled_with_timeout_in_seconds(0.1),
                             )
                             .build(),
                     )
