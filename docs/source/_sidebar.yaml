@@ -205,11 +205,11 @@ items:
         children:
           - label: "Quickstart"
             href: "./self-hosted/containerization/kubernetes/quickstart"
-          - label: "Deploying with extensibility"
+          - label: "Deploying with Extensibility"
             href: "./self-hosted/containerization/kubernetes/extensibility"
-          - label: "Enabling metrics"
+          - label: "Enabling Metrics"
             href: "./self-hosted/containerization/kubernetes/metrics"
-          - label: "Other consideration"
+          - label: "Other Considerations"
             href: "./self-hosted/containerization/kubernetes/other-considerations"
       - label: "AWS"
         children:
