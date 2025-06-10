@@ -37,7 +37,7 @@ impl Test {
         // desired by the configuration, but not any other arguments.
         // In the event that cargo-nextest is not available, we will
         // fall back to cargo test and pass all the arguments.
-        if let Ok(_) = which::which("cargo-nextest") {
+        if which::which("cargo-nextest").is_ok() {
             let mut args = NEXTEST_DEFAULT_ARGS
                 .iter()
                 .map(|s| s.to_string())
@@ -57,7 +57,7 @@ impl Test {
             }
 
             cargo!(args);
-            return Ok(());
+            Ok(())
         } else {
             eprintln!("cargo-nextest not found, falling back to cargo test");
 
