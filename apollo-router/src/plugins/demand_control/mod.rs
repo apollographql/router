@@ -47,13 +47,9 @@ pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
 pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
-pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
 pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
-pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
 pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
-pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
 pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
-pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
