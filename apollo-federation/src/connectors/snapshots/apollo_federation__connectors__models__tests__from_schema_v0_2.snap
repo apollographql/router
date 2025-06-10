@@ -33,25 +33,31 @@ expression: "&connectors"
                 ],
             },
             method: Get,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
+                        "x-auth-token",
                     ),
-                ),
-            },
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+            ],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -148,25 +154,31 @@ expression: "&connectors"
                 ],
             },
             method: Post,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
+                        "x-auth-token",
                     ),
-                ),
-            },
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+            ],
             body: Some(
                 Named(
                     SubSelection {

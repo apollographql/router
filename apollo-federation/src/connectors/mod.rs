@@ -45,6 +45,7 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
+pub use models::Header;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;

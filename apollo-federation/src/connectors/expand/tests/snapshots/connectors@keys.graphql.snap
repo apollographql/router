@@ -73,7 +73,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -262,7 +262,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -402,7 +402,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -542,7 +542,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -719,7 +719,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -847,7 +847,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -976,7 +976,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Post,
-            headers: {},
+            headers: [],
             body: Some(
                 Named(
                     SubSelection {
@@ -1125,7 +1125,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 ],
             },
             method: Post,
-            headers: {},
+            headers: [],
             body: Some(
                 Named(
                     SubSelection {

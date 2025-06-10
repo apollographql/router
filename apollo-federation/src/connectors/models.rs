@@ -14,7 +14,7 @@ use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
-pub(crate) use self::headers::Header;
+pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
 pub use self::headers::HeaderSource;
 pub use self::http_json_transport::HTTPMethod;
@@ -448,25 +448,31 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
+                                "x-auth-token",
                             ),
-                        ),
-                    },
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,
@@ -551,25 +557,31 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
+                                "x-auth-token",
                             ),
-                        ),
-                    },
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,

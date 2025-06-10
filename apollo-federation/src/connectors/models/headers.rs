@@ -1,11 +1,13 @@
 #![deny(clippy::pedantic)]
 
 use std::error::Error;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast;
+use apollo_compiler::ast::Value;
 use apollo_compiler::parser::SourceSpan;
 use either::Either;
 use http::HeaderName;
@@ -19,34 +21,52 @@ use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::connectors::string_template;
 
-#[derive(Clone, Debug)]
-pub(crate) struct Header<'a> {
-    pub(crate) name: HeaderName,
-    pub(crate) name_node: &'a Node<ast::Value>,
-    pub(crate) source: HeaderSource,
-    pub(crate) source_node: &'a Node<ast::Value>,
+#[derive(Clone)]
+pub struct Header {
+    pub name: HeaderName,
+    pub(crate) name_node: Option<Node<Value>>,
+    pub source: HeaderSource,
+    pub(crate) source_node: Option<Node<Value>>,
 }
 
-impl<'a> Header<'a> {
+impl Header {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
-    pub(crate) fn from_headers_arg(
-        node: &'a Node<ast::Value>,
-    ) -> Vec<Result<Self, HeaderParseError<'a>>> {
-        match (node.as_list(), node.as_object()) {
-            (Some(values), _) => values.iter().map(Self::from_single).collect(),
-            (None, Some(_)) => vec![Self::from_single(node)],
-            _ => vec![Err(HeaderParseError::Other {
+    pub(crate) fn from_http_arg(
+        http_arg: &[(Name, Node<Value>)],
+    ) -> Vec<Result<Self, HeaderParseError>> {
+        let Some(headers_arg) = http_arg
+            .iter()
+            .find_map(|(key, value)| (*key == HEADERS_ARGUMENT_NAME).then_some(value))
+        else {
+            return Vec::new();
+        };
+        if let Some(values) = headers_arg.as_list() {
+            values.iter().map(Self::from_single).collect()
+        } else if headers_arg.as_object().is_some() {
+            vec![Self::from_single(headers_arg)]
+        } else {
+            vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
-                node,
-            })],
+                node: headers_arg.clone(),
+            })]
+        }
+    }
+
+    /// Create a single `Header` directly, not from schema. Mostly useful for testing.
+    pub fn from_values(name: HeaderName, source: HeaderSource) -> Self {
+        Self {
+            name,
+            name_node: None,
+            source,
+            source_node: None,
         }
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
+    fn from_single(node: &Node<Value>) -> Result<Self, HeaderParseError> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
-            node,
+            node: node.clone(),
         })?;
         let name_node = mappings
             .iter()
@@ -55,7 +75,7 @@ impl<'a> Header<'a> {
             })
             .ok_or_else(|| HeaderParseError::Other {
                 message: format!("missing `{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` field"),
-                node,
+                node: node.clone(),
             })?;
         let name = name_node
             .as_str()
@@ -66,13 +86,13 @@ impl<'a> Header<'a> {
             })
             .map_err(|message| HeaderParseError::Other {
                 message,
-                node: name_node,
+                node: name_node.clone(),
             })?;
 
         if RESERVED_HEADERS.contains(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
-                node: name_node,
+                node: name_node.clone(),
             });
         }
 
@@ -85,9 +105,12 @@ impl<'a> Header<'a> {
 
         match (from, value) {
             (Some(_), None) if STATIC_HEADERS.contains(&name) => {
-                Err(HeaderParseError::Other{ message: format!(
-                    "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
-                ), node: name_node})
+                Err(HeaderParseError::Other{
+                    message: format!(
+                        "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
+                    ),
+                    node: name_node.clone()
+                })
             }
             (Some((_, from_node)), None) => {
                 from_node.as_str()
@@ -99,32 +122,35 @@ impl<'a> Header<'a> {
                     })
                     .map(|from| Self {
                         name,
-                        name_node,
+                        name_node: Some(name_node.clone()),
                         source: HeaderSource::From(from),
-                        source_node: from_node,
+                        source_node: Some(from_node.clone()),
                     })
-                    .map_err(|message| HeaderParseError::Other{ message, node: from_node})
+                    .map_err(|message| HeaderParseError::Other{ message, node: from_node.clone()})
             }
             (None, Some((_, value_node))) => {
                 value_node
                     .as_str()
-                    .ok_or_else(|| HeaderParseError::Other{ message: format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"), node: value_node})
+                    .ok_or_else(|| HeaderParseError::Other{
+                        message: format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"),
+                        node: value_node.clone()
+                    })
                     .and_then(|value_str| {
                         value_str
                             .parse::<HeaderValue>()
-                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node})
+                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node.clone()})
                     })
                     .map(|value| Self {
                         name,
-                        name_node,
+                        name_node: Some(name_node.clone()),
                         source: HeaderSource::Value(value),
-                        source_node: value_node,
+                        source_node: Some(value_node.clone()),
                     })
             }
             (None, None) => {
                 Err(HeaderParseError::Other {
                     message: format!("either `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` or `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` must be set"),
-                    node,
+                    node: node.clone(),
                 })
             },
             (Some((from_name, _)), Some((value_name, _))) => {
@@ -135,6 +161,16 @@ impl<'a> Header<'a> {
                 })
             }
         }
+    }
+}
+
+#[allow(clippy::missing_fields_in_debug)]
+impl Debug for Header {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Header")
+            .field("name", &self.name)
+            .field("source", &self.source)
+            .finish()
     }
 }
 
@@ -154,10 +190,10 @@ impl HeaderSource {
 }
 
 #[derive(Debug)]
-pub(crate) enum HeaderParseError<'a> {
+pub(crate) enum HeaderParseError {
     ValueError {
         err: string_template::Error,
-        node: &'a Node<ast::Value>,
+        node: Node<Value>,
     },
     /// Both `value` and `from` are set
     ConflictingArguments {
@@ -167,11 +203,11 @@ pub(crate) enum HeaderParseError<'a> {
     },
     Other {
         message: String,
-        node: &'a Node<ast::Value>,
+        node: Node<Value>,
     },
 }
 
-impl Display for HeaderParseError<'_> {
+impl Display for HeaderParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ConflictingArguments { message, .. } | Self::Other { message, .. } => {
@@ -182,7 +218,7 @@ impl Display for HeaderParseError<'_> {
     }
 }
 
-impl Error for HeaderParseError<'_> {}
+impl Error for HeaderParseError {}
 
 const RESERVED_HEADERS: [HeaderName; 11] = [
     header::CONNECTION,
