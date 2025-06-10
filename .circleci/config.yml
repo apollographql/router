@@ -29,7 +29,7 @@ executors:
       - image: cimg/redis:7.4.3
       - image: cimg/postgres:14.0
         environment:
-          POSTGRES_USER: postgres
+          POSTGRES_USER: root
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
     resource_class: 2xlarge
