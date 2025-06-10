@@ -323,7 +323,7 @@ impl Selector for SupergraphSelector {
                 let limits_opt = response
                     .context
                     .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                    .with_lock(|lock| lock.get::<OperationLimits>().cloned());
                 match query {
                     Query::Aliases => {
                         limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
@@ -539,7 +539,7 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::Query { query, .. } => {
                 let limits_opt = ctx
                     .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                    .with_lock(|lock| lock.get::<OperationLimits>().cloned());
                 match query {
                     Query::Aliases => {
                         limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
@@ -1105,7 +1105,7 @@ mod test {
         let context = crate::Context::new();
         context
             .extensions()
-            .with_lock(|lock| lock.insert::<OperationLimits<u32>>(limits));
+            .with_lock(|lock| lock.insert::<OperationLimits>(limits));
         (selector, context)
     }
 

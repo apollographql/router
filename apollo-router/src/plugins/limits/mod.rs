@@ -152,7 +152,7 @@ impl Default for Config {
 }
 
 // Pub for use in telemetry.
-pub(crate) use operation_limits::OperationLimits;
+pub(crate) type OperationLimits = operation_limits::OperationLimits<u32>;
 
 struct LimitsPlugin {
     config: Config,

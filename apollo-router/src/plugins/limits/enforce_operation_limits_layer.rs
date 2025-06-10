@@ -131,8 +131,6 @@ where
 
                 return std::future::ready(response).boxed();
             }
-        } else {
-            panic!("No document?");
         }
 
         self.inner.call(req).boxed()

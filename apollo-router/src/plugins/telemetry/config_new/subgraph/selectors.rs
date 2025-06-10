@@ -347,7 +347,7 @@ impl Selector for SubgraphSelector {
                 let limits_opt = request
                     .context
                     .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                    .with_lock(|lock| lock.get::<OperationLimits>().cloned());
                 match supergraph_query {
                     Query::Aliases => {
                         limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
