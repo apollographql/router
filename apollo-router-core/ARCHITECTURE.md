@@ -70,6 +70,8 @@ pub struct Request {
 pub struct Response {
     pub extensions: Extensions,
     // ... service-specific fields
+    // Note: Any streams in responses are streams of errors to enable
+    // error handling layers and proper serialization error management
 }
 
 #[derive(Debug, Error)]
@@ -85,6 +87,30 @@ pub trait ServiceName {
 #[cfg(test)]
 mod tests; // Include if trait-level tests exist
 ```
+
+#### Stream Response Architecture
+
+Services that return streaming responses now use **streams of errors** rather than streams of successful data. This architectural decision enables:
+
+- **Layered Error Handling**: Error handling layers can intercept and transform errors in streams
+- **Serialization Error Management**: Instead of defaulting on serialization errors, they flow through the error stream
+- **Consistent Error Processing**: All errors, whether immediate or streaming, follow the same handling pipeline
+- **Composable Error Transformations**: Multiple layers can participate in error processing and recovery
+
+**Example Stream Response Pattern**:
+```rust
+pub struct StreamingResponse {
+    pub extensions: Extensions,
+    // Stream contains Result<SuccessType, ErrorType> instead of just SuccessType
+    pub stream: Pin<Box<dyn Stream<Item = Result<ResponseItem, StreamError>> + Send>>,
+}
+```
+
+This allows error handling layers to:
+- Transform serialization errors into GraphQL errors
+- Apply retry logic to transient errors
+- Add contextual information to streaming errors
+- Implement fallback strategies for failed stream items
 
 #### Service Implementation Structure
 
@@ -106,16 +132,18 @@ services/
 #### Current Services
 
 - `http_server` - HTTP request handling
-- `bytes_server` - Byte stream processing
-- `json_server` - JSON request/response handling
+- `bytes_server` - Byte stream processing (responses contain error streams)
+- `json_server` - JSON request/response handling  
 - `query_parse` - GraphQL query parsing
 - `query_plan` - Query planning
 - `query_preparation` - Composite service combining query parsing and planning
-- `query_execution` - Query execution
+- `query_execution` - Query execution (responses may contain error streams)
 - `request_dispatcher` - Request routing and dispatch coordination
 - `http_client` - HTTP client operations
-- `bytes_client` - Byte stream client operations
+- `bytes_client` - Byte stream client operations (responses contain error streams)
 - `json_client` - JSON client operations
+
+**Stream-based Services**: Services marked with "error streams" return streaming responses where each stream item is a `Result<T, E>`. This enables error handling layers to process both successful responses and various error conditions (serialization errors, network errors, etc.) in a consistent manner.
 
 #### Composite Services
 
@@ -265,6 +293,17 @@ pub trait ServiceBuilderExt<L> {
 
 - `http_to_bytes` - HTTP to bytes transformation
 - `bytes_to_json` - Bytes to JSON transformation
+
+#### Error Handling Layers
+
+With streaming responses now containing error streams, specialized error handling layers can be implemented:
+
+- **Stream Error Recovery** - Layers that can retry failed stream items or provide fallback responses
+- **Error Transformation** - Convert serialization errors into appropriate GraphQL error formats
+- **Error Aggregation** - Collect and contextualize errors from streaming operations
+- **Error Filtering** - Apply business logic to determine which errors should be exposed vs. handled silently
+
+These layers intercept `Result<T, E>` stream items and can transform errors, implement retry logic, or provide alternative responses before passing the stream to the next layer in the pipeline.
 
 ### 3. Extensions (`src/extensions/`)
 
@@ -925,7 +964,7 @@ let service = ServiceBuilder::new()
 
 ## Request/Response Flow
 
-Each service in the pipeline transforms requests and responses, with Extensions providing hierarchical context:
+Each service in the pipeline transforms requests and responses, with Extensions providing hierarchical context. Stream-based responses contain error streams that enable error handling layers to process failures:
 
 ```
 HTTP Request (Extensions Layer 0)
@@ -946,7 +985,8 @@ Query Preparation Request (Extensions Layer 3)
     │   QueryPlan Response
     ↓ extends() → Extensions Layer 4
 Execution Request (Extensions Layer 4)
-    ↓ (query_execution)
+    ↓ (query_execution) [produces Stream<Result<Item, Error>>]
+    ↓ [Error Handling Layers can intercept stream errors]
     ↓ extends() → Extensions Layer 5
 Request Dispatcher Request (Extensions Layer 5)
     ↓ (request_dispatcher)
@@ -959,6 +999,13 @@ HTTP Response (Returns Layer 0 - Original Extensions)
 - Response transformations return the **original** Extensions from the request
 - Parent values always take precedence over child values
 - **Composite Services**: Internal sub-service calls within composite services (like QueryPreparation) maintain the same Extensions layer - they don't create additional extension layers
+
+**Error Stream Flow:**
+- Streaming services return `Stream<Result<T, E>>` instead of `Stream<T>`
+- Error handling layers can intercept, transform, or recover from errors in streams
+- Serialization errors flow through the error stream rather than causing default responses
+- Multiple error handling layers can be composed to provide comprehensive error management
+- Error context is preserved through the Extensions system during error processing
 
 ## Extension Points
 
@@ -986,6 +1033,9 @@ The architecture provides several extension points:
 - **Service Composition**: Tower's zero-cost abstractions minimize overhead
 - **Async Efficiency**: Native async/await provides optimal performance
 - **Memory Management**: Services should be mindful of memory usage patterns
+- **Error Stream Processing**: Error streams add minimal overhead to successful paths while enabling comprehensive error handling
+- **Stream Backpressure**: Error handling layers should respect stream backpressure to avoid memory buildup
+- **Error Recovery Costs**: Error handling layers should be designed to minimize performance impact on successful operations
 
 ## Future Considerations
 
@@ -993,4 +1043,8 @@ The architecture provides several extension points:
 - Enhanced monitoring and observability
 - Additional service implementations for different protocols
 - Configuration system for service composition
-- Performance optimization and benchmarking 
+- Performance optimization and benchmarking
+- **Advanced Error Handling**: Sophisticated error recovery strategies using the error stream architecture
+- **Stream Error Analytics**: Monitoring and metrics collection for streaming error patterns
+- **Adaptive Error Policies**: Dynamic error handling behavior based on runtime conditions
+- **Error Circuit Breaking**: Circuit breaker patterns for streaming services with high error rates 
