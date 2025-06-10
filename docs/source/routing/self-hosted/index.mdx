@@ -1,6 +1,6 @@
 ---
 title: Self-Hosting the Apollo Router
-subtitle: How to deploy router on your own infrastructure
+subtitle: How to deploy the router on your own infrastructure
 ---
 
 Apollo Router is a graph runtime that you can deploy in your own infrastructure.
@@ -24,15 +24,15 @@ For each version of the Apollo Router, Apollo provides:
 - [A binary](#local-binary)
 - [A Docker image](#container)
 
-## Kubernetes Using Helm
+## Kubernetes using Helm
 
-Helm is a package manager for Kubernetes. Apollo provides an application Helm chart with each release of Apollo Router in GitHub Container Registry. Since router v0.14.0, Apollo has released each router Helm chart as an Open Container Initiative (OCI) image in `oci://ghcr.io/apollographql/helm-charts/router`.
+Helm is a package manager for Kubernetes. Apollo provides a Helm chart with each release of Apollo Router in the GitHub Container Registry. Since router v0.14.0, Apollo has released each router Helm chart as an Open Container Initiative (OCI) image in `oci://ghcr.io/apollographql/helm-charts/router`.
 
-Follow the [Kubernetes quickstart](/graphos/routing/kubernetes/quickstart) to deploy the router with a Helm chart.
+Follow our [Kubernetes quickstart](/graphos/routing/kubernetes/quickstart) to deploy the router with a Helm chart.
 
 ## Docker
 
-Apollo provides Docker images with each release of Apollo Router. The images are available via GitHub, downloadable from the `ghcr.io/apollographql/router` and the [router repository](https://github.com/apollographql/router/pkgs/container/router). Both debug and production images are provided.
+Apollo provides Docker images for each release of Apollo Router. The images are available via GitHub, downloadable from the `ghcr.io/apollographql/router` and the [router repository](https://github.com/apollographql/router/pkgs/container/router). Both debug and production images are provided.
 
 For more information on deploying using your container environment:
 
@@ -43,6 +43,6 @@ For more information on deploying using your container environment:
 
 ## Local binary
 
-Running the Apollo Router directly from its binary speeds up local development, and it enables embedded use cases where containers are unavailable. 
+Running the Apollo Router directly from its binary speeds up local development and enables embedded use cases where containers are unavailable. 
 
 Follow the [quickstart](/graphos/routing/get-started) to run a router binary.
