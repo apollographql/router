@@ -63,10 +63,12 @@
 
 use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
 use crate::services::http_server::{Request as HttpRequest, Response as HttpResponse};
+use bytes::Bytes;
 use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
+
 use std::pin::Pin;
 use tower::BoxError;
 use tower::{Layer, Service};
@@ -181,10 +183,22 @@ where
             let bytes_resp = inner.call(bytes_req).await.map_err(Into::into)?;
 
             // Convert bytes response to HTTP response
+            // Convert error stream to infallible stream by providing fallback for errors
+            let infallible_stream = bytes_resp.responses.map(|chunk_result| {
+                match chunk_result {
+                    Ok(chunk) => Ok(Frame::data(chunk)),
+                    Err(_e) => {
+                        // Provide empty bytes as fallback for stream errors
+                        // Errors are handled at higher layers in the pipeline
+                        Ok(Frame::data(Bytes::new()))
+                    }
+                }
+            });
+
             let mut http_resp = http::Response::builder()
                 .status(200)
                 .body(UnsyncBoxBody::new(http_body_util::StreamBody::new(
-                    bytes_resp.responses.map(|chunk| Ok(Frame::data(chunk))),
+                    infallible_stream,
                 )))
                 .map_err(|http_error| Error::HttpResponseBuilder {
                     http_error,

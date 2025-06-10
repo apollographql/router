@@ -43,7 +43,7 @@ async fn test_json_to_bytes_layer_success() {
             let response_bytes = serde_json::to_vec(&response_json).unwrap();
             let bytes_response = BytesResponse {
                 extensions: bytes_req.extensions,
-                responses: Box::pin(stream::once(async { Bytes::from(response_bytes) })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from(response_bytes)) })),
             };
 
             send_response.send_response(bytes_response);
@@ -60,7 +60,8 @@ async fn test_json_to_bytes_layer_success() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     assert_eq!(response_bytes, json!("response bytes"));
 }
@@ -96,7 +97,7 @@ async fn test_json_serialization_error() {
             let response_bytes = serde_json::to_vec(&response_json).unwrap();
             let bytes_response = BytesResponse {
                 extensions: bytes_req.extensions,
-                responses: Box::pin(stream::once(async { Bytes::from(response_bytes) })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from(response_bytes)) })),
             };
 
             send_response.send_response(bytes_response);
@@ -109,7 +110,8 @@ async fn test_json_serialization_error() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     assert_eq!(response_bytes, json!("serialized"));
 }
@@ -138,7 +140,7 @@ async fn test_empty_json_serialization() {
 
             let bytes_response = BytesResponse {
                 extensions: bytes_req.extensions,
-                responses: Box::pin(stream::once(async { Bytes::from("{}") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("{}")) })),
             };
 
             send_response.send_response(bytes_response);
@@ -151,7 +153,8 @@ async fn test_empty_json_serialization() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     assert_eq!(response_bytes, json!({}));
 }
@@ -226,7 +229,7 @@ async fn test_extensions_passthrough() {
 
             let bytes_response = BytesResponse {
                 extensions: bytes_req.extensions,
-                responses: Box::pin(stream::once(async { Bytes::from("{}") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("{}")) })),
             };
 
             send_response.send_response(bytes_response);

@@ -39,7 +39,7 @@ async fn test_bytes_to_json_conversion() {
             let response_json = json!({"data": {"hello": "world"}});
             response.send_response(JsonResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async move { response_json })),
+                responses: Box::pin(stream::once(async move { Ok(response_json) })),
             });
         })
         .await
@@ -50,7 +50,8 @@ async fn test_bytes_to_json_conversion() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     // Parse the response back to JSON to verify it's correct
     let response_json: JsonValue =
@@ -112,7 +113,7 @@ async fn test_empty_json_object() {
             let response_json = json!({"status": "ok"});
             response.send_response(JsonResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async move { response_json })),
+                responses: Box::pin(stream::once(async move { Ok(response_json) })),
             });
         })
         .await
@@ -123,7 +124,8 @@ async fn test_empty_json_object() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     // Parse the response back to JSON to verify it's correct
     let response_json: JsonValue =
@@ -179,7 +181,7 @@ async fn test_extensions_passthrough() {
             let response_json = json!({"data": {"hello": "world"}});
             response.send_response(JsonResponse {
                 extensions: request.extensions,
-                responses: Box::pin(stream::once(async move { response_json })),
+                responses: Box::pin(stream::once(async move { Ok(response_json) })),
             });
         })
         .await
@@ -201,7 +203,8 @@ async fn test_extensions_passthrough() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     let response_json: JsonValue =
         serde_json::from_slice(&response_bytes).expect("Response should be valid JSON");

@@ -185,10 +185,16 @@ where
             let json_resp = future.await.map_err(Into::into)?;
 
             // Convert JSON response to bytes response
-            let bytes_stream = json_resp.responses.map(|json_value| {
-                match serde_json::to_vec(&json_value) {
-                    Ok(bytes) => Bytes::from(bytes),
-                    Err(_) => Bytes::from("{}"), // Fallback to empty JSON object on serialization error
+            let bytes_stream = json_resp.responses.map(|json_result| {
+                match json_result {
+                    Ok(json_value) => {
+                        // Try to serialize the JSON value to bytes
+                        match serde_json::to_vec(&json_value) {
+                            Ok(bytes) => Ok(Bytes::from(bytes)),
+                            Err(e) => Err(e.into()), // Return serialization error instead of defaulting
+                        }
+                    }
+                    Err(e) => Err(e), // Propagate upstream errors
                 }
             });
 

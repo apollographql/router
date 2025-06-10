@@ -29,7 +29,7 @@ async fn test_clean_builder_api_oneshot() {
             assert_eq!(request.body, "test body".as_bytes());
             response.send_response(BytesResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("test response")) })),
             });
         })
         .await
@@ -118,7 +118,7 @@ async fn test_clean_builder_api_custom_test() {
                 assert_eq!(request.body, "test body".as_bytes());
                 response.send_response(BytesResponse {
                     extensions: crate::Extensions::default(),
-                    responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+                    responses: Box::pin(stream::once(async { Ok(Bytes::from("test response")) })),
                 });
             },
         )

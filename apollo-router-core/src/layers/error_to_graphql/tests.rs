@@ -58,7 +58,7 @@ async fn test_layer_converts_service_errors_to_graphql() {
     let responses: Vec<_> = response.responses.collect().await;
     assert_eq!(responses.len(), 1);
     
-    let graphql_response = &responses[0];
+    let graphql_response = &responses[0].as_ref().expect("response should be Ok");
     
     // Verify it's a proper GraphQL error response
     assert!(graphql_response["data"].is_null());
@@ -86,7 +86,7 @@ async fn test_layer_passes_through_successful_responses() {
             // Send a successful response from the downstream service
             response.send_response(JsonResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async { json!({"data": "success"}) })),
+                responses: Box::pin(stream::once(async { Ok(json!({"data": "success"})) })),
             });
         })
         .await
@@ -96,7 +96,7 @@ async fn test_layer_passes_through_successful_responses() {
     let responses: Vec<_> = response.responses.collect().await;
     assert_eq!(responses.len(), 1);
     
-    let json_response = &responses[0];
+    let json_response = &responses[0].as_ref().expect("response should be Ok");
     assert_eq!(json_response["data"], "success");
 }
 
@@ -130,7 +130,7 @@ async fn test_layer_converts_apollo_router_errors_properly() {
     let responses: Vec<_> = response.responses.collect().await;
     assert_eq!(responses.len(), 1);
     
-    let graphql_response = &responses[0];
+    let graphql_response = &responses[0].as_ref().expect("response should be Ok");
     
     // Verify it's a proper GraphQL error response
     assert!(graphql_response["data"].is_null());
@@ -198,7 +198,7 @@ async fn test_layer_converts_nested_apollo_router_errors() {
     let responses: Vec<_> = response.responses.collect().await;
     assert_eq!(responses.len(), 1);
     
-    let graphql_response = &responses[0];
+    let graphql_response = &responses[0].as_ref().expect("response should be Ok");
     
     // Verify it's a proper GraphQL error response
     assert!(graphql_response["data"].is_null());

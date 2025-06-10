@@ -197,14 +197,16 @@ where
 
             // Transform JsonClientResponse back to BytesClientResponse
             // Convert JSON responses back to bytes
-            let bytes_responses = json_resp.responses.map(|json_value| {
-                match serde_json::to_vec(&json_value) {
-                    Ok(bytes) => bytes::Bytes::from(bytes),
-                    Err(_) => {
-                        // Fallback to empty JSON object on serialization error
-                        // In a real scenario, this error should be logged or handled differently
-                        bytes::Bytes::from("{}")
+            let bytes_responses = json_resp.responses.map(|json_result| {
+                match json_result {
+                    Ok(json_value) => {
+                        // Try to serialize the JSON value to bytes
+                        match serde_json::to_vec(&json_value) {
+                            Ok(bytes) => Ok(bytes::Bytes::from(bytes)),
+                            Err(e) => Err(e.into()), // Return serialization error instead of defaulting
+                        }
                     }
+                    Err(e) => Err(e), // Propagate upstream errors
                 }
             });
 

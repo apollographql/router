@@ -58,7 +58,8 @@ async fn test_bytes_to_http_layer_success() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     assert_eq!(response_bytes, "response body".as_bytes());
 }
@@ -100,7 +101,8 @@ async fn test_bytes_to_http_empty_body() {
     let response_bytes = response_stream
         .next()
         .await
-        .expect("response stream should have at least one item");
+        .expect("response stream should have at least one item")
+        .expect("response should be Ok");
 
     assert_eq!(response_bytes, "empty response".as_bytes());
 }

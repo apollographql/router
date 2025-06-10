@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
 use thiserror::Error;
+use tower::BoxError;
 
 pub struct Request {
     pub extensions: Extensions,
@@ -14,7 +15,7 @@ pub struct Request {
     pub query_variables: HashMap<String, Value>,
 }
 
-pub type ResponseStream = Pin<Box<dyn Stream<Item = JsonValue> + Send>>;
+pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<JsonValue, BoxError>> + Send>>;
 
 pub struct Response {
     pub extensions: Extensions,

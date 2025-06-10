@@ -184,10 +184,16 @@ where
             let bytes_resp = future.await.map_err(Into::into)?;
 
             // Convert bytes response to JSON response
-            let json_stream = bytes_resp.responses.map(|bytes| {
-                match serde_json::from_slice(&bytes) {
-                    Ok(json_value) => json_value,
-                    Err(_) => serde_json::Value::Object(serde_json::Map::new()), // Fallback to empty JSON object on deserialization error
+            let json_stream = bytes_resp.responses.map(|bytes_result| {
+                match bytes_result {
+                    Ok(bytes) => {
+                        // Try to deserialize the bytes to JSON
+                        match serde_json::from_slice(&bytes) {
+                            Ok(json_value) => Ok(json_value),
+                            Err(e) => Err(e.into()), // Return deserialization error instead of defaulting
+                        }
+                    }
+                    Err(e) => Err(e), // Propagate upstream errors
                 }
             });
 

@@ -200,7 +200,7 @@ where
 
             // Since body error type is Infallible, collection cannot fail
             let collected_bytes = body.collect().await.unwrap().to_bytes();
-            let bytes_stream = futures::stream::once(async move { collected_bytes });
+            let bytes_stream = futures::stream::once(async move { Ok(collected_bytes) });
 
             let bytes_resp = BytesResponse {
                 extensions: original_extensions,

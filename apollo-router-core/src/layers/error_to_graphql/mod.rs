@@ -182,7 +182,7 @@ where
                     });
 
                     let response_stream: ResponseStream =
-                        Box::pin(stream::once(async move { graphql_response }));
+                        Box::pin(stream::once(async move { Ok(graphql_response) }));
 
                     Ok(JsonResponse {
                         extensions: Default::default(),

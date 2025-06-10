@@ -32,7 +32,7 @@ async fn test_http_to_bytes_conversion() {
             // Send back a bytes response
             response.send_response(BytesResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("test response")) })),
             });
         })
         .await
@@ -87,7 +87,7 @@ async fn test_extensions_passthrough() {
 
             response.send_response(BytesResponse {
                 extensions: request.extensions,
-                responses: Box::pin(stream::once(async { Bytes::from("test response") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("test response")) })),
             });
         })
         .await
@@ -168,7 +168,7 @@ async fn test_empty_body() {
             // Send back a response
             response.send_response(BytesResponse {
                 extensions: crate::Extensions::default(),
-                responses: Box::pin(stream::once(async { Bytes::from("empty response") })),
+                responses: Box::pin(stream::once(async { Ok(Bytes::from("empty response")) })),
             });
         })
         .await
