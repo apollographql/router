@@ -49,12 +49,6 @@ impl std::fmt::Display for InvalidationErrors {
 
 impl std::error::Error for InvalidationErrors {}
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum InvalidationOrigin {
-    Endpoint,
-    Extensions,
-}
-
 impl Invalidation {
     pub(crate) async fn new(
         storage: Arc<EntityStorage>,
@@ -68,33 +62,23 @@ impl Invalidation {
 
     pub(crate) async fn invalidate(
         &self,
-        origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        let origin = match origin {
-            InvalidationOrigin::Endpoint => "endpoint",
-            InvalidationOrigin::Extensions => "extensions",
-        };
         u64_counter!(
             "apollo.router.operations.entity.invalidation.event",
             "Entity cache received a batch of invalidation requests",
-            1u64,
-            "origin" = origin
+            1u64
         );
 
         Ok(self
-            .handle_request_batch(origin, requests)
-            .instrument(tracing::info_span!(
-                "cache.invalidation.batch",
-                "origin" = origin
-            ))
+            .handle_request_batch(requests)
+            .instrument(tracing::info_span!("cache.invalidation.batch"))
             .await?)
     }
 
     async fn handle_request(
         &self,
         pg_storage: &PostgresCacheStorage,
-        origin: &'static str,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let key_prefix = request.key_prefix();
@@ -111,7 +95,6 @@ impl Invalidation {
                     "apollo.router.operations.entity.invalidation.entry",
                     "Entity cache counter for invalidated entries",
                     count,
-                    "origin" = origin,
                     "subgraph.name" = subgraph.clone()
                 );
                 count
@@ -126,7 +109,6 @@ impl Invalidation {
                     "apollo.router.operations.entity.invalidation.entry",
                     "Entity cache counter for invalidated entries",
                     count,
-                    "origin" = origin,
                     "subgraph.name" = subgraph.clone()
                 );
                 count
@@ -163,7 +145,6 @@ impl Invalidation {
 
     async fn handle_request_batch(
         &self,
-        origin: &'static str,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, InvalidationError> {
         let mut count = 0;
@@ -202,7 +183,7 @@ impl Invalidation {
                     let start = Instant::now();
 
                     let res = self
-                        .handle_request(pg_storage, origin, &mut request)
+                        .handle_request(pg_storage, &mut request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await;
 

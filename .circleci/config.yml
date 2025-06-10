@@ -27,6 +27,9 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
       - image: cimg/redis:7.4.3
+      - image: cimg/postgres:14.0
+        environment:
+          POSTGRES_USER: postgres
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
     resource_class: 2xlarge
@@ -117,7 +120,6 @@ common_job_environment: &common_job_environment
   CARGO_INCREMENTAL: 0
   MISE_VERSION: v2025.5.8
 commands:
-
   setup_environment:
     parameters:
       platform:
@@ -154,9 +156,9 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+              - equal: [*amd_linux_helm_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Write arch
@@ -165,8 +167,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Write arch
@@ -175,8 +177,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [*macos_build_executor, << parameters.platform >>]
+              - equal: [*macos_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Make link to md5
@@ -190,8 +192,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
+              - equal: [*windows_build_executor, << parameters.platform >>]
+              - equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Extend Bash profile for Windows
@@ -232,13 +234,13 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_helm_executor, << parameters.platform >>]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_test_executor, << parameters.platform >>]
+              - equal: [*macos_build_executor, << parameters.platform >>]
+              - equal: [*macos_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install mise
@@ -251,8 +253,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
+              - equal: [*windows_build_executor, << parameters.platform >>]
+              - equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install scoop
@@ -297,7 +299,7 @@ commands:
       - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX lint
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-lint"
@@ -365,7 +367,7 @@ commands:
       - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX check-compliance
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-compliance"
@@ -397,7 +399,7 @@ commands:
             rm target/debug/router*
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
@@ -454,7 +456,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
+            equal: [*amd_linux_helm_executor, << parameters.platform >>]
           steps:
             - checkout
             - setup_environment:
@@ -538,7 +540,8 @@ jobs:
 
       - when:
           condition:
-            equal: [ true, << parameters.from_test_updated_cargo_deps_workflow >> ]
+            equal:
+              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
           steps:
             - slack/notify:
                 event: fail
@@ -630,12 +633,12 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [*macos_build_executor, << parameters.platform >>]
 
           steps:
             - when:
                 condition:
-                  equal: [ true, << parameters.nightly >> ]
+                  equal: [true, << parameters.nightly >>]
                 steps:
                   - run: cargo xtask release prepare nightly
             - run:
@@ -672,14 +675,14 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*windows_build_executor, << parameters.platform >>]
           steps:
             # This will set the version to include current date and commit hash
             - when:
                 condition:
-                  equal: [ true, << parameters.nightly >> ]
+                  equal: [true, << parameters.nightly >>]
                 steps:
                   - run: cargo xtask release prepare nightly
             - run:
@@ -700,8 +703,8 @@ jobs:
       - when:
           condition:
             and:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ true, << parameters.nightly >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [true, << parameters.nightly >>]
               - matches:
                   pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
                   value: << pipeline.project.git_url >>
@@ -766,7 +769,7 @@ jobs:
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
       - when:
           condition:
-            equal: [ true, << parameters.nightly >> ]
+            equal: [true, << parameters.nightly >>]
           steps:
             - slack/notify:
                 event: fail
@@ -836,14 +839,22 @@ jobs:
       - when:
           condition:
             not:
-              equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+              equal:
+                [
+                  "https://github.com/apollographql/router",
+                  << pipeline.project.git_url >>,
+                ]
           steps:
             - run:
                 command: >
                   echo "Not publishing any github release."
       - when:
           condition:
-            equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+            equal:
+              [
+                "https://github.com/apollographql/router",
+                << pipeline.project.git_url >>,
+              ]
           steps:
             - checkout
             - setup_environment:
@@ -930,15 +941,15 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
 
       - test:
           # this should be changed back to true on dev after release
@@ -950,7 +961,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
@@ -962,42 +973,40 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
   coverage_only:
     when: << pipeline.parameters.coverage >>
     jobs:
       - coverage:
           matrix:
             parameters:
-              platform:
-                [ macos_test ]
+              platform: [macos_test]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - test:
           requires:
             - lint
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
       - coverage:
           matrix:
             parameters:
-              platform:
-                [ macos_test ]
+              platform: [macos_test]
       - build_release:
           requires:
             - test
@@ -1011,7 +1020,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1031,7 +1040,6 @@ workflows:
           # This allows us to tailor the policy applied during the scans to router.
           wiz-policies: Apollo-Router-Vulnerabilities-Policy
 
-
   release:
     when:
       not:
@@ -1043,7 +1051,7 @@ workflows:
       - pre_verify_release:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1052,7 +1060,7 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1061,7 +1069,7 @@ workflows:
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
           filters:
             branches:
               ignore: /.*/
@@ -1070,7 +1078,7 @@ workflows:
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1080,7 +1088,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
           filters:
             branches:
               ignore: /.*/
@@ -1090,7 +1098,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
           filters:
             branches:
               ignore: /.*/

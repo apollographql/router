@@ -465,59 +465,59 @@ impl Plugin for SubgraphCache {
     }
 }
 
-#[cfg(test)]
-pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
+// #[cfg(test)]
+// pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl SubgraphCache {
-    #[cfg(test)]
-    pub(crate) async fn with_mocks(
-        storage: PostgresCacheStorage,
-        subgraphs: HashMap<String, Subgraph>,
-        supergraph_schema: Arc<Valid<Schema>>,
-    ) -> Result<Self, BoxError>
-    where
-        Self: Sized,
-    {
-        use std::net::IpAddr;
-        use std::net::Ipv4Addr;
-        use std::net::SocketAddr;
+    //     #[cfg(test)]
+    //     pub(crate) async fn with_mocks(
+    //         storage: PostgresCacheStorage,
+    //         subgraphs: HashMap<String, Subgraph>,
+    //         supergraph_schema: Arc<Valid<Schema>>,
+    //     ) -> Result<Self, BoxError>
+    //     where
+    //         Self: Sized,
+    //     {
+    //         use std::net::IpAddr;
+    //         use std::net::Ipv4Addr;
+    //         use std::net::SocketAddr;
 
-        let storage = Arc::new(Storage {
-            all: Some(storage),
-            subgraphs: HashMap::new(),
-        });
-        let invalidation = Invalidation::new(storage.clone(), 10).await?;
+    //         let storage = Arc::new(Storage {
+    //             all: Some(storage),
+    //             subgraphs: HashMap::new(),
+    //         });
+    //         let invalidation = Invalidation::new(storage.clone(), 10).await?;
 
-        Ok(Self {
-            storage,
-            entity_type: None,
-            enabled: true,
-            debug: true,
-            subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph {
-                    invalidation: Some(SubgraphInvalidationConfig {
-                        enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
-                    }),
-                    ..Default::default()
-                },
-                subgraphs,
-            }),
-            metrics: Metrics::default(),
-            private_queries: Default::default(),
-            endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
-                path: String::from("/invalidation"),
-                listen: ListenAddr::SocketAddr(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                    4000,
-                )),
-                scan_count: 1000,
-                concurrent_requests: 10,
-            })),
-            invalidation,
-            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
-            supergraph_schema,
-        })
-    }
+    //         Ok(Self {
+    //             storage,
+    //             entity_type: None,
+    //             enabled: true,
+    //             debug: true,
+    //             subgraphs: Arc::new(SubgraphConfiguration {
+    //                 all: Subgraph {
+    //                     invalidation: Some(SubgraphInvalidationConfig {
+    //                         enabled: true,
+    //                         shared_key: INVALIDATION_SHARED_KEY.to_string(),
+    //                     }),
+    //                     ..Default::default()
+    //                 },
+    //                 subgraphs,
+    //             }),
+    //             metrics: Metrics::default(),
+    //             private_queries: Default::default(),
+    //             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
+    //                 path: String::from("/invalidation"),
+    //                 listen: ListenAddr::SocketAddr(SocketAddr::new(
+    //                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+    //                     4000,
+    //                 )),
+    //                 scan_count: 1000,
+    //                 concurrent_requests: 10,
+    //             })),
+    //             invalidation,
+    //             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
+    //             supergraph_schema,
+    //         })
+    //     }
 
     // Returns boolean to know if cache is enabled for this subgraph
     fn subgraph_enabled(&self, subgraph_name: &str) -> bool {

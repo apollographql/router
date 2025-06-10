@@ -17,7 +17,6 @@ use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
-use super::invalidation::InvalidationOrigin;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::new_cache::invalidation::InvalidationRequest;
@@ -169,7 +168,7 @@ impl Service<router::Request> for InvalidationService {
                                     });
                                 }
                                 match invalidation
-                                    .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .invalidate(body)
                                     .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {

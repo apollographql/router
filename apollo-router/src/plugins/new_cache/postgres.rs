@@ -1,12 +1,15 @@
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
+use std::time::Duration;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sqlx::{
-    Acquire, PgPool,
-    postgres::{PgConnectOptions, PgPoolOptions},
-    types::chrono::{DateTime, Utc},
-};
+use serde::Deserialize;
+use serde::Serialize;
+use sqlx::Acquire;
+use sqlx::PgPool;
+use sqlx::postgres::PgConnectOptions;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::types::chrono::DateTime;
+use sqlx::types::chrono::Utc;
 
 use super::cache_control::CacheControl;
 
@@ -19,6 +22,7 @@ pub(crate) struct CacheEntryRow {
     pub(crate) control: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct CacheEntry {
     pub(crate) id: i64,
@@ -160,6 +164,7 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn truncate(&self) -> anyhow::Result<()> {
         let mut conn = self.pg_pool.acquire().await?;
         let mut transaction = conn.begin().await?;
