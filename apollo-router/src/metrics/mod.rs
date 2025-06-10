@@ -1593,8 +1593,16 @@ pub(crate) trait FutureMetricsExt<T> {
         Self: Sized + Future + 'static,
         <Self as Future>::Output: 'static,
     {
-        test_utils::AGGREGATE_METER_PROVIDER_ASYNC
-            .scope(test_utils::AGGREGATE_METER_PROVIDER_ASYNC.get(), self)
+        // We need to determine if the meter was set. If not then we can use default provider which is empty
+        let meter_provider_set = test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+            .try_with(|_| {})
+            .is_ok();
+        if meter_provider_set {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+                .scope(test_utils::AGGREGATE_METER_PROVIDER_ASYNC.get(), self)
+        } else {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(Default::default(), self)
+        }
     }
 
     #[cfg(not(test))]
