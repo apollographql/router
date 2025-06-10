@@ -16,7 +16,7 @@ pub enum Error {
     )]
     RequestFailed {
         #[source]
-        reqwest_error: Box<::reqwest::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
         #[extension("url")]
         url: String,
         #[extension("method")]

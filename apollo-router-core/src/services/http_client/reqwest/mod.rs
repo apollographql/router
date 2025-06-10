@@ -61,7 +61,7 @@ impl ReqwestService {
             .send()
             .await
             .map_err(|err| Error::RequestFailed {
-                reqwest_error: Box::new(err),
+                source: Box::new(err),
                 url: uri,
                 method: method.to_string(),
             })?;
