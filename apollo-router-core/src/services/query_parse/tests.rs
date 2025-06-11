@@ -1,6 +1,6 @@
 use crate::assert_error;
 use crate::Extensions;
-use crate::services::query_parse::{Error, ParseErrorDetail, QueryParseService, Request};
+use crate::services::query_parse::{Error, QueryParseService, Request};
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 use tower::{Service, ServiceExt};
@@ -136,8 +136,9 @@ async fn test_invalid_field_query() {
     assert!(result.is_err());
 
     // Verify we get a validation error for the non-existent field
-    assert_error!(result, Error::ParsingFailed { message } => {
-        assert!(message.contains("nonExistentField") || message.contains("does not have a field"));
+    assert_error!(result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Validation error"));
+        assert!(!errors.is_empty());
     });
 }
 
@@ -185,8 +186,9 @@ async fn test_result_structure() {
     assert!(!document.operations.is_empty());
 
     // Invalid query: Service Error with proper error validation
-    assert_error!(invalid_result, Error::ParsingFailed { message } => {
-        assert!(message.contains("unknownField") || message.contains("does not have a field"));
+    assert_error!(invalid_result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Validation error"));
+        assert!(!errors.is_empty());
     });
 }
 
@@ -266,11 +268,10 @@ async fn test_syntax_error_parsing() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    // This syntax error consistently returns MultipleParsingErrors
-    assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
-        // Should contain syntax errors
-        let has_syntax_errors = errors.iter().any(|e| matches!(e, ParseErrorDetail::SyntaxError { .. }));
-        assert!(has_syntax_errors, "Should contain syntax errors");
+    // Should get a parse error for syntax issues
+    assert_error!(result, Error::ParseError { message, errors } => {
+        assert!(message.contains("Parse error") || message.contains("Multiple parse errors"));
+        assert!(!errors.is_empty());
     });
 }
 
@@ -296,8 +297,9 @@ async fn test_validation_error_unknown_field() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error::ParsingFailed { message } => {
-        assert!(message.contains("Unknown field") || message.contains("unknownField"));
+    assert_error!(result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Validation error"));
+        assert!(!errors.is_empty());
     });
 }
 
@@ -325,12 +327,9 @@ async fn test_multiple_validation_errors() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error::MultipleParsingErrors { count, errors } => {
-        assert!(*count > 1);
+    assert_error!(result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Multiple validation errors"));
         assert!(errors.len() > 1);
-        // Should contain multiple validation errors
-        let has_validation_errors = errors.iter().any(|e| matches!(e, ParseErrorDetail::ValidationError { .. }));
-        assert!(has_validation_errors, "Should contain validation errors for unknown fields");
     });
 }
 
@@ -356,8 +355,9 @@ async fn test_invalid_syntax_error() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    assert_error!(result, Error::ParsingFailed { message } => {
-        assert!(message.contains("syntax") || message.contains("expected"));
+    assert_error!(result, Error::ParseError { message, errors } => {
+        assert!(message.contains("Parse error"));
+        assert!(!errors.is_empty());
     });
 }
 
@@ -382,50 +382,40 @@ async fn test_error_serialization() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    // This validation error consistently returns MultipleParsingErrors
-    assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
-        // Should contain validation errors for unknown field
-        let has_unknown_field_error = errors.iter().any(|e| {
-            if let ParseErrorDetail::ValidationError { message, .. } = e {
-                message.contains("unknownField")
-            } else {
-                false
-            }
-        });
-        assert!(has_unknown_field_error, "Should contain validation error for unknownField");
+    // Should get validation error for unknown field
+    assert_error!(result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Validation error") || message.contains("Multiple validation errors"));
+        assert!(!errors.is_empty());
+        
+        // Verify we have GraphQLError objects in the errors vec
+        for error in errors {
+            assert!(!error.message.is_empty());
+        }
     });
 }
 
 #[tokio::test]
-async fn test_error_categorization() {
+async fn test_error_to_json_functionality() {
     let schema = test_schema();
     let mut service = QueryParseService::new(schema);
 
-    // Test different types of errors to ensure proper categorization
-    let test_cases: Vec<(&str, fn(&[ParseErrorDetail]) -> bool)> = vec![
+    // Test different types of errors to ensure to_json works properly
+    let test_cases: Vec<(&str, fn(&Error) -> bool)> = vec![
         (
             r#"query { user( }"#, // Syntax error
-            |errors: &[ParseErrorDetail]| {
-                errors
-                    .iter()
-                    .any(|e| matches!(e, ParseErrorDetail::SyntaxError { .. }))
+            |error: &Error| {
+                matches!(error, Error::ParseError { errors, .. } if !errors.is_empty())
             },
         ),
         (
             r#"query { user(id: "123") { unknownField } }"#, // Unknown field
-            |errors: &[ParseErrorDetail]| {
-                errors.iter().any(|e| {
-                    matches!(
-                        e,
-                        ParseErrorDetail::UnknownField { .. }
-                            | ParseErrorDetail::ValidationError { .. }
-                    )
-                })
+            |error: &Error| {
+                matches!(error, Error::ValidationError { errors, .. } if !errors.is_empty())
             },
         ),
     ];
 
-        for (query, error_check) in test_cases {
+    for (query, error_check) in test_cases {
         let request = Request {
             extensions: Extensions::new(),
             operation_name: None,
@@ -435,10 +425,8 @@ async fn test_error_categorization() {
         let result = service.call(request).await;
         assert!(result.is_err());
         
-        // Verify we get the correct error categorization for each query type
-        assert_error!(result, Error::MultipleParsingErrors { errors, .. } => {
-            assert!(error_check(&errors), "Error categorization failed for query: {}", query);
-        });
+        let error = result.unwrap_err();
+        assert!(error_check(&error), "Error structure check failed for query: {}", query);
     }
 }
 
@@ -476,7 +464,7 @@ async fn test_new_service_extensions_preservation() {
 }
 
 #[tokio::test]
-async fn test_error_location_information() {
+async fn test_error_json_structure() {
     let schema = test_schema();
     let mut service = QueryParseService::new(schema);
 
@@ -500,32 +488,40 @@ async fn test_error_location_information() {
     let result = service.call(request).await;
     assert!(result.is_err());
 
-    // Verify we get multiple validation errors for the unknown fields
-    assert_error!(result, Error::MultipleParsingErrors { count, errors } => {
-        assert!(*count >= 4, "Should have at least 4 validation errors");
-        assert!(errors.len() >= 4, "Should have error details for each invalid field");
-        // Should all be validation errors for unknown fields
-        let all_validation_errors = errors.iter().all(|e| matches!(e, ParseErrorDetail::ValidationError { .. }));
-        assert!(all_validation_errors, "All errors should be validation errors");
+    assert_error!(result, Error::ValidationError { message, errors } => {
+        assert!(message.contains("Multiple validation errors"));
+        assert!(errors.len() > 1);
+        
+        // Verify each error is a GraphQLError from diagnostic.to_json()
+        for error in errors {
+            // The error should be a GraphQLError with diagnostic information
+            assert!(!error.message.is_empty());
+        }
     });
 }
 
-#[test]
-fn test_extract_quoted_text() {
-    use crate::services::query_parse::extract_quoted_text;
+#[tokio::test]
+async fn test_parse_vs_validation_error_separation() {
+    let schema = test_schema();
+    let mut service = QueryParseService::new(schema);
 
-    let text = "Unknown field 'fieldName' on type 'TypeName'";
-    assert_eq!(extract_quoted_text(text, 0), Some("fieldName".to_string()));
-    assert_eq!(extract_quoted_text(text, 1), Some("TypeName".to_string()));
-    assert_eq!(extract_quoted_text(text, 2), None);
+    // Test syntax error (should be ParseError)
+    let parse_request = Request {
+        extensions: Extensions::new(),
+        operation_name: None,
+        query: r#"query { user( }"#.to_string(),
+    };
 
-    let no_quotes = "No quotes here";
-    assert_eq!(extract_quoted_text(no_quotes, 0), None);
+    let parse_result = service.call(parse_request).await;
+    assert_error!(parse_result, Error::ParseError { .. });
 
-    let single_quote = "Only 'one' quote";
-    assert_eq!(
-        extract_quoted_text(single_quote, 0),
-        Some("one".to_string())
-    );
-    assert_eq!(extract_quoted_text(single_quote, 1), None);
+    // Test validation error (should be ValidationError) 
+    let validation_request = Request {
+        extensions: Extensions::new(),
+        operation_name: None,
+        query: r#"query { user(id: "123") { unknownField } }"#.to_string(),
+    };
+
+    let validation_result = service.call(validation_request).await;
+    assert_error!(validation_result, Error::ValidationError { .. });
 }

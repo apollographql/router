@@ -30,8 +30,9 @@ fn create_failing_parse_service() -> MockService<query_parse::Request, query_par
             let (_req, resp) = handle.next_request().await.expect("should receive parse request");
 
             // Send error response
-            resp.send_error(query_parse::Error::ParsingFailed {
+            resp.send_error(query_parse::Error::ParseError {
                 message: "Mock parsing error".to_string(),
+                errors: vec![],
             });
         })
 }
@@ -124,7 +125,7 @@ async fn test_query_preparation_with_parse_error() -> Result<(), Box<dyn std::er
     assert_error!(
         result,
         query_parse::Error,
-        query_parse::Error::ParsingFailed { .. }
+        query_parse::Error::ParseError { .. }
     );
 
     Ok(())
