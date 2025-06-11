@@ -722,8 +722,7 @@ mod test {
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;
     use super::jwt_expires_in;
-    use crate::test_harness::tracing_test_logs_contain;
-    use crate::test_harness::tracing_test_subscriber;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn test_exp_defaults_to_max_when_no_jwt_claims_present() {
@@ -734,8 +733,7 @@ mod test {
 
     #[test]
     fn test_jwt_claims_not_object() {
-        let subscriber = tracing_test_subscriber();
-        let _guard = tracing::dispatcher::set_default(&subscriber);
+        let _guard = tracing_test::dispatcher_guard();
 
         let context = Context::new();
         context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!("not an object"));
@@ -743,15 +741,14 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(tracing_test_logs_contain(
+        assert!(tracing_test::logs_contain(
             "expected JWT claims to be an object"
         ));
     }
 
     #[test]
     fn test_expiry_claim_not_integer() {
-        let subscriber = tracing_test_subscriber();
-        let _guard = tracing::dispatcher::set_default(&subscriber);
+        let _guard = tracing_test::dispatcher_guard();
 
         let context = Context::new();
         context.insert_json_value(
@@ -764,7 +761,7 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(tracing_test_logs_contain(
+        assert!(tracing_test::logs_contain(
             "expected JWT 'exp' (expiry) claim to be an integer"
         ));
     }
