@@ -315,7 +315,6 @@ impl TransitionGraphPath {
                 }
             }
         }
-        let to_advance: &Self = either::for_both!(&to_advance, p => p);
 
         let mut options: Vec<Arc<TransitionGraphPath>> = vec![];
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];

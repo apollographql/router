@@ -2005,7 +2005,7 @@ where
                     }
                 }
             }
-            if does_non_collecting_next_edge_exist {
+            if !does_non_collecting_next_edge_exist {
                 // The subtlety here is that this may either mean that there are no non-collecting
                 // edges from the tail of this path, or that there are some but that they're
                 // considered "trivial" edges since `next_edges()` above may end up calling
