@@ -8,7 +8,7 @@
 //!
 //! - **HTTP Body Extraction**: Collects the entire HTTP request body into bytes
 //! - **Request Type Transformation**: Converts `HttpRequest` to `BytesRequest`
-//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Extensions Management**: Properly handles Extensions using `clone()` pattern
 //! - **Error Handling**: Provides structured error reporting for HTTP response building failures
 //!
 //! ## Usage
@@ -44,7 +44,7 @@
 //! ## Extensions Handling
 //!
 //! This layer follows the standard Extensions pattern:
-//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Creates a **cloned** Extensions layer for the inner service using `clone()`
 //! - Inner service receives extended Extensions with access to parent context
 //! - Response returns the **original** Extensions from the HTTP request
 //! - Parent values always take precedence over inner service values
@@ -169,10 +169,10 @@ where
             let original_extensions: crate::Extensions = parts.extensions.into();
 
             // Create an extended layer for the inner service
-            let extended_extensions = original_extensions.extend();
+            let cloned_extensions = original_extensions.clone();
 
             let bytes_req = BytesRequest {
-                extensions: extended_extensions,
+                extensions: cloned_extensions,
                 body: body_bytes,
             };
 

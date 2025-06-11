@@ -59,6 +59,7 @@ snapshot = ["axum-server", "serde_regex"]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.2.1" }
+apollo-router-core = { path = "../apollo-router-core" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",

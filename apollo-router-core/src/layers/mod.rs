@@ -77,7 +77,7 @@ pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 /// # Extensions Handling
 ///
 /// All layers follow the standard Extensions pattern:
-/// - Create **extended** Extensions for inner services using `extend()`
+/// - Create **cloned** Extensions for inner services using `clone()`
 /// - Inner services receive Extensions with access to parent context
 /// - Responses return **original** Extensions from the request
 /// - Parent values always take precedence over child values

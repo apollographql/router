@@ -433,27 +433,22 @@ The Extensions system provides a type-safe, thread-safe context for storing and 
 
 - **Type-safe**: Values are stored and retrieved by type
 - **Thread-safe**: Can be used across multiple threads
-- **Clone-efficient**: Designed to be cloned cheaply using Arc for parent chains
 - **http::Extensions Compatible**: Built on http::Extensions internally with conversion support
 - **Mutable Access Required**: Requires `&mut self` for modifications (no internal mutability)
 
 #### Internal Architecture
 
-Extensions uses an enum-based internal architecture for optimal flexibility:
+Extensions wraps `http::Extensions` directly for simplicity and performance:
 
 ```rust
-enum ExtensionsInner {
-    /// Native http::Extensions storage for new Extensions
-    Native(http::Extensions),
-    /// Wrapped http::Extensions when converted from external sources
-    HttpWrapped(http::Extensions),
+pub struct Extensions {
+    inner: http::Extensions,
 }
 ```
 
-- **Native**: Created via `Extensions::new()` or `extend()`
-- **HttpWrapped**: Created when converting from external `http::Extensions`
-- **Parent Chain**: Uses `Arc<Extensions>` for efficient hierarchical sharing
-- **Conversions**: Direct extraction/wrapping without intermediate wrapper types
+- **Simple Wrapper**: Direct wrapper around `http::Extensions`
+- **No Hierarchy**: Each Extensions instance is independent
+- **Easy Conversion**: Seamless interoperability with `http::Extensions`
 
 #### Usage Pattern
 
@@ -470,6 +465,9 @@ extensions.insert("hello".to_string());
 let number: Option<i32> = extensions.get();
 let text: Option<String> = extensions.get();
 
+// Clone Extensions for independent copies
+let copy = extensions.clone();
+
 // Convert to/from http::Extensions for interoperability
 let http_ext: http::Extensions = extensions.into();
 let extensions: Extensions = http_ext.into();
@@ -477,34 +475,13 @@ let extensions: Extensions = http_ext.into();
 
 #### Conversion Behavior
 
-- **Extensions → http::Extensions**: Extracts the current layer's `http::Extensions` directly
-- **http::Extensions → Extensions**: Creates an `HttpWrapped` variant
-- **Hierarchical Data**: Only current layer data is included in conversions, not parent layers
-- **Round-trip Safe**: Converting Extensions to http::Extensions and back preserves the data
-
-#### Hierarchical Extensions System
-
-Extensions supports a hierarchical architecture through the `extend()` method:
-
-```rust
-let mut parent = Extensions::default();
-parent.insert("upstream_value".to_string());
-
-let mut child = parent.extend();
-child.insert(42i32); // New type, allowed
-child.insert("downstream_attempt".to_string()); // Same type as parent
-
-// Parent values always take precedence
-assert_eq!(child.get::<String>(), Some("upstream_value".to_string()));
-assert_eq!(child.get::<i32>(), Some(42));
-
-// Parent only sees its own values
-assert_eq!(parent.get::<i32>(), None);
-```
+- **Extensions → http::Extensions**: Extracts the wrapped `http::Extensions` directly
+- **http::Extensions → Extensions**: Wraps the `http::Extensions` instance
+- **Round-trip Safe**: Converting Extensions to http::Extensions and back preserves all data
 
 #### Extensions in Layers
 
-**Critical Rule**: When implementing layers that transform request types, always use `Extensions::extend()` and return the **original** extensions in the response.
+**Critical Rule**: When implementing layers that transform request types, always use `Extensions::clone()` and return the **original** extensions in the response.
 
 ##### Correct Layer Implementation Pattern
 
@@ -518,12 +495,12 @@ where
             // 1. Preserve original extensions
             let original_extensions = req.extensions;
             
-            // 2. Create extended layer for inner service
-            let extended_extensions = original_extensions.extend();
+            // 2. Create cloned extensions for inner service
+            let cloned_extensions = original_extensions.clone();
             
-            // 3. Transform request with extended extensions
+            // 3. Transform request with cloned extensions
             let output_req = OutputRequest {
-                extensions: extended_extensions,
+                extensions: cloned_extensions,
                 // ... other transformed fields
             };
             
@@ -544,10 +521,10 @@ where
 
 ##### Why This Pattern Matters
 
-1. **Upstream Precedence**: Parent layers' decisions cannot be overridden by downstream services
-2. **Context Isolation**: Each layer can add context without affecting parent layers
-3. **Predictable Behavior**: Original request context is preserved throughout the pipeline
-4. **Hierarchical Inheritance**: Inner services can access parent context while adding their own
+1. **Context Preservation**: Original request context is preserved throughout the pipeline
+2. **Independent Modifications**: Each layer can modify its own copy without affecting the original
+3. **Predictable Behavior**: Original extensions are always returned in responses
+4. **Flexibility**: Inner services receive all existing context but can add or modify as needed
 
 ##### Examples from Existing Layers
 
@@ -556,11 +533,11 @@ where
 // Extract and preserve original extensions
 let original_extensions = parts.extensions.get::<crate::Extensions>().cloned().unwrap_or_default();
 
-// Create extended layer for inner service
-let extended_extensions = original_extensions.extend();
+// Create cloned extensions for inner service
+let cloned_extensions = original_extensions.clone();
 
 let bytes_req = BytesRequest {
-    extensions: extended_extensions, // Inner service gets extended layer
+    extensions: cloned_extensions, // Inner service gets cloned extensions
     body: body_bytes,
 };
 
@@ -575,11 +552,11 @@ http_resp.extensions_mut().insert(original_extensions);
 // Preserve original extensions from bytes request
 let original_extensions = req.extensions;
 
-// Create extended layer for inner service
-let extended_extensions = original_extensions.extend();
+// Create cloned extensions for inner service
+let cloned_extensions = original_extensions.clone();
 
 let json_req = JsonRequest {
-    extensions: extended_extensions, // Inner service gets extended layer
+    extensions: cloned_extensions, // Inner service gets cloned extensions
     body: json_body,
 };
 
@@ -596,9 +573,9 @@ let bytes_resp = BytesResponse {
 
 When testing layer Extensions handling, verify:
 
-1. **Parent values are accessible** in the inner service
+1. **Original values are accessible** in the inner service
 2. **Original extensions are preserved** in responses
-3. **Inner service modifications are isolated** from original context
+3. **Inner service modifications don't affect** the original context
 
 ```rust
 #[tokio::test]
@@ -611,15 +588,15 @@ async fn test_extensions_passthrough() {
     // ... setup layer and mock service ...
 
     // Verify in mock service:
-    // - Parent values are accessible
-    let parent_string: Option<String> = request.extensions.get();
-    assert_eq!(parent_string, Some("original_value".to_string()));
+    // - Original values are accessible
+    let original_string: Option<String> = request.extensions.get();
+    assert_eq!(original_string, Some("original_value".to_string()));
     
-    let parent_int: Option<i32> = request.extensions.get();
-    assert_eq!(parent_int, Some(42));
+    let original_int: Option<i32> = request.extensions.get();
+    assert_eq!(original_int, Some(42));
     
-    // Add values to extended layer (note: requires &mut access to extended layer)
-    request.extensions.insert(999i32); // Try to override
+    // Add values to cloned extensions (note: requires &mut access to cloned extensions)
+    request.extensions.insert(999i32); // Override existing value
     request.extensions.insert(3.14f64); // Add new type
 
     // ... call layer ...
@@ -629,10 +606,10 @@ async fn test_extensions_passthrough() {
     assert_eq!(response_string, Some("original_value".to_string()));
     
     let response_int: Option<i32> = response.extensions.get();
-    assert_eq!(response_int, Some(42)); // Original value, not 999
+    assert_eq!(response_int, Some(42)); // Original value preserved
     
     let response_float: Option<f64> = response.extensions.get();
-    assert_eq!(response_float, None); // Inner additions not visible
+    assert_eq!(response_float, None); // Inner additions not visible in response
 }
 ```
 

@@ -173,11 +173,11 @@ where
                 extract_graphql_request(&req.body).map_err(|e| Box::new(e) as BoxError)?;
 
             // 2. Create extended extensions for inner services (following hexagonal architecture)
-            let extended_extensions = req.extensions.extend();
+            let cloned_extensions = req.extensions.clone();
 
             // 3. Transform JSON to QueryParse request
             let parse_req = query_parse::Request {
-                extensions: extended_extensions.clone(),
+                extensions: cloned_extensions.clone(),
                 operation_name: operation_name.clone(),
                 query: query_string,
             };
@@ -198,7 +198,7 @@ where
 
             // 6. Transform QueryParse response to QueryPlan request
             let plan_req = query_plan::Request {
-                extensions: extended_extensions,
+                extensions: cloned_extensions,
                 operation_name: operation_name_for_planning,
                 document: parse_resp.query,
             };

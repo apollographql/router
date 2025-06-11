@@ -9,7 +9,7 @@
 //!
 //! - **HTTP Request Construction**: Creates HTTP requests from bytes data
 //! - **Request Type Transformation**: Converts `BytesRequest` to `HttpRequest` for HTTP clients
-//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Extensions Management**: Properly handles Extensions using `clone()` pattern
 //! - **Response Processing**: Converts HTTP responses back to bytes streams
 //! - **HTTP Protocol Handling**: Manages HTTP-specific headers, methods, and status codes
 //!

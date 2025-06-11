@@ -8,7 +8,7 @@
 //!
 //! - **JSON Serialization**: Converts JSON values into bytes representation
 //! - **Request Type Transformation**: Converts `JsonRequest` to `BytesRequest` for client services
-//! - **Extensions Management**: Properly handles Extensions hierarchy using `extend()` pattern
+//! - **Extensions Management**: Properly handles Extensions using `clone()` pattern
 //! - **Error Handling**: Provides detailed error reporting for JSON serialization failures
 //! - **Fail-Fast Design**: Validates JSON serialization synchronously to catch errors early
 //!
@@ -45,7 +45,7 @@
 //! ## Extensions Handling
 //!
 //! This layer follows the standard Extensions pattern:
-//! - Creates an **extended** Extensions layer for the inner service using `extend()`
+//! - Creates a **cloned** Extensions layer for the inner service using `clone()`
 //! - Inner service receives extended Extensions with access to parent context
 //! - Response returns the **original** Extensions from the JSON request
 //! - Parent values always take precedence over inner service values
@@ -166,10 +166,10 @@ where
 
         // Create an extended layer for the inner service
         let original_extensions = req.extensions;
-        let extended_extensions = original_extensions.extend();
+        let cloned_extensions = original_extensions.clone();
 
         let bytes_req = BytesRequest {
-            extensions: extended_extensions,
+            extensions: cloned_extensions,
             body: bytes_body,
         };
 

@@ -32,6 +32,7 @@ pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod connector_service;
+pub(crate) mod core_compat;
 pub mod execution;
 pub(crate) mod external;
 pub(crate) mod fetch;

@@ -1,4 +1,4 @@
-We are working in the apollo-router-core, apollo-router-error-derive and pollo-router-error directories only for now. Ignore all other directories
+We are working in the apollo-router-core, apollo-router-error-derive and apollo-router-error and very rarely apollo-router directories only for now. Ignore all other directories
 Use hexagonal architecture to allow testing and to not expose client details to callers. But don't introduce traits for tower services as Service is already an interface that can have multiple implementations for any request and response.
 Traits and interfaces should generally be in a mod.rs and then implementations should be in sub modules. Submodules should be in their own directories because they will require a test.rs.
 Always separate tests and test helpers out into a separate tests.rs file that are adjacent to a mod.rs

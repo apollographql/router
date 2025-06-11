@@ -96,8 +96,8 @@ async fn test_successful_query_preparation() -> Result<(), Box<dyn std::error::E
     assert_eq!(response.query_variables.get("id"), Some(&json!("123")));
 
     // Verify original extensions are preserved
-    let context: Option<String> = response.extensions.get();
-    assert_eq!(context, Some("test_context".to_string()));
+    let test_value: Option<String> = response.extensions.get();
+    assert_eq!(test_value, Some("test_context".to_string()));
 
     Ok(())
 }
