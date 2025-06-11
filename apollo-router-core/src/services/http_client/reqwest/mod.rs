@@ -1,11 +1,16 @@
 use super::{Error, Request, Response};
-use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
+use futures::stream::TryStreamExt;
+use http_body::Frame;
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, StreamBody};
 use tower::Service;
 
 /// A Tower service that uses reqwest to execute HTTP requests
 ///
 /// This service takes HTTP requests with `UnsyncBoxBody<Bytes, Infallible>` bodies
 /// and executes them using a reqwest client, returning HTTP responses in the same format.
+/// 
+/// This implementation supports streaming of both request and response bodies to avoid
+/// loading large payloads entirely into memory.
 #[derive(Clone)]
 pub struct ReqwestService {
     client: reqwest::Client,
@@ -33,21 +38,24 @@ impl ReqwestService {
         let method = parts.method.clone();
         let uri = parts.uri.to_string();
         
-        // Convert body to bytes
-        let body_bytes = match body.collect().await {
-            Ok(collected) => collected.to_bytes(),
-            Err(err) => {
-                return Err(Error::InvalidRequest {
-                    details: format!("Failed to collect request body: {}", err),
-                });
-            }
-        };
+        // Convert body to streaming reqwest body
+        let body_stream = body
+            .into_data_stream()
+            .map_ok(|bytes| bytes) // bytes are already Bytes, no need to wrap in Frame
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Failed to read request body frame"
+                )
+            });
 
-        // Build reqwest request
+        let reqwest_body = reqwest::Body::wrap_stream(body_stream);
+
+        // Build reqwest request with streaming body
         let mut reqwest_request = self
             .client
             .request(parts.method, uri.clone())
-            .body(body_bytes);
+            .body(reqwest_body);
 
         // Add headers
         for (name, value) in parts.headers {
@@ -66,17 +74,23 @@ impl ReqwestService {
                 method: method.to_string(),
             })?;
 
-        // Convert reqwest::Response to http::Response
+        // Convert reqwest::Response to http::Response with streaming body
         let status = reqwest_response.status();
         let headers = reqwest_response.headers().clone();
         
-        let response_bytes = reqwest_response
-            .bytes()
-            .await
-            .map_err(|err| Error::ResponseProcessingFailed {
-                source: Box::new(err),
-                context: "Failed to read response body".to_string(),
-            })?;
+        // Create streaming response body
+        let bytes_stream = reqwest_response
+            .bytes_stream()
+            .map_ok(|bytes| Frame::data(bytes))
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(Error::ResponseProcessingFailed {
+                    source: Box::new(err),
+                    context: "Failed to read response body stream".to_string(),
+                })
+            });
+
+        let stream_body = StreamBody::new(bytes_stream);
+        let body = UnsyncBoxBody::new(stream_body);
 
         let mut http_response = http::Response::builder()
             .status(status);
@@ -85,8 +99,6 @@ impl ReqwestService {
         for (name, value) in &headers {
             http_response = http_response.header(name, value);
         }
-
-        let body = UnsyncBoxBody::new(Full::new(response_bytes).map_err(|_| unreachable!()));
         
         http_response
             .body(body)
