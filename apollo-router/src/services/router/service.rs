@@ -609,43 +609,21 @@ impl Service<RouterRequest> for RouterService {
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         let self_clone = self.clone();
-        let this = std::mem::replace(self, self_clone);
+        let mut this = std::mem::replace(self, self_clone);
 
         Box::pin(async move { this.call_inner(req).await })
     }
 }
 
 impl RouterService {
-    async fn process_supergraph_request(
-        self,
-        supergraph_request: SupergraphRequest,
-    ) -> Result<router::Response, BoxError> {
-        // self.supergraph_service here is a clone of the service that was readied
-        // in RouterService::poll_ready. Clones are unready by default, so this
-        // self.supergraph_service is actually not ready, which is why we need to
-        // oneshot it here. That technically breaks backpressure, but because we are
-        // still readying the supergraph service before calling into the router
-        // service, backpressure is actually still exerted at that point--there's
-        // just potential for some requests to slip through the cracks and end up
-        // queueing up at this .oneshot() call.
-        //
-        // Not ideal, but an improvement on the situation in Router 1.x.
-        self.supergraph_service.oneshot(supergraph_request).await
-    }
-
-    async fn call_inner(self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
+    async fn call_inner(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
-        let request = self
-            .clone()
-            .get_graphql_request(&context, &parts, body)
-            .await?;
+        let request = Self::get_graphql_request(&context, &parts, body)
+            .await?
+            .and_then(|r| Self::translate_request(&context, parts, r));
 
-        let my_self = self.clone();
-        let supergraph_request = match std::future::ready(request)
-            .and_then(|r| my_self.translate_request(&context, parts, r))
-            .await
-        {
+        let supergraph_request = match request {
             Ok(request) => request,
             Err(err) => {
                 return router::Response::error_builder()
@@ -663,17 +641,10 @@ impl RouterService {
             }
         };
 
-        // FIXME(@goto-bus-stop): This clone should no longer be necessary, because we only have to
-        // call the inner service once
-        self.clone()
-            .process_supergraph_request(supergraph_request)
-            .await
+        self.supergraph_service.call(supergraph_request).await
     }
 
-    async fn translate_query_request(
-        self,
-        parts: &Parts,
-    ) -> Result<graphql::Request, TranslateError> {
+    fn translate_query_request(parts: &Parts) -> Result<graphql::Request, TranslateError> {
         parts.uri.query().map(|q| {
             match graphql::Request::from_urlencoded_query(q.to_string()) {
                 Ok(request) => Ok(request),
@@ -696,17 +667,16 @@ impl RouterService {
         })
     }
 
-    fn translate_bytes_request(&self, bytes: &Bytes) -> Result<graphql::Request, TranslateError> {
+    fn translate_bytes_request(bytes: &Bytes) -> Result<graphql::Request, TranslateError> {
         graphql::Request::deserialize_from_bytes(bytes).map_err(|err| TranslateError {
             status: StatusCode::BAD_REQUEST,
             extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-            extension_details: format!("failed to deserialize the request body from JSON: {err}"),
+            extension_details: format!("failed to deserialize the request body into JSON: {err}"),
         })
     }
 
     // Translate parsed JSON GraphQL requests into supergraph requests.
-    async fn translate_request(
-        self,
+    fn translate_request(
         context: &Context,
         parts: Parts,
         graphql_request: graphql::Request,
@@ -718,13 +688,12 @@ impl RouterService {
     }
 
     async fn get_graphql_request(
-        self,
         context: &Context,
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
         let graphql_request = if parts.method == Method::GET {
-            self.translate_query_request(parts).await
+            Self::translate_query_request(parts)
         } else {
             let bytes = router::body::into_bytes(body)
                 .instrument(tracing::debug_span!("receive_body"))
@@ -771,7 +740,7 @@ impl RouterService {
                 ));
                 log_event(level, "router.request", attrs, "");
             }
-            self.translate_bytes_request(&bytes)
+            Self::translate_bytes_request(&bytes)
         };
         Ok(graphql_request)
     }
