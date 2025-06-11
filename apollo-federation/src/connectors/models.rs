@@ -403,13 +403,9 @@ fn extract_env_references(
     request_references
         .iter()
         .chain(response_references.iter())
-        .flat_map(|var_ref| {
-            if var_ref.namespace.namespace == Namespace::Env {
-                var_ref.selection.keys().cloned().collect()
-            } else {
-                Vec::new()
-            }
-        })
+        .filter(|var_ref| var_ref.namespace.namespace == Namespace::Env)
+        .flat_map(|var_ref| var_ref.selection.keys())
+        .cloned()
         .collect()
 }
 

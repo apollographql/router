@@ -52,7 +52,9 @@ static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     )
 });
 
-static ENV_SHAPE: LazyLock<Shape> = LazyLock::new(|| Shape::dict(Shape::string([]), []));
+fn env_shape() -> Shape {
+    Shape::dict(Shape::string([]), [])
+}
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
