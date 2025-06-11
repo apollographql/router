@@ -68,7 +68,6 @@ use crate::services::bytes_server::{Request as BytesRequest, Response as BytesRe
 use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
 use bytes::Bytes;
 use futures::StreamExt;
-use miette::SourceSpan;
 use std::pin::Pin;
 use tower::BoxError;
 use tower::{Layer, Service};
@@ -86,8 +85,6 @@ pub enum Error {
         json_error: serde_json::Error,
         #[source_code]
         input_data: Option<String>,
-        #[label("Invalid JSON")]
-        error_position: Option<SourceSpan>,
     },
 }
 
@@ -162,7 +159,6 @@ where
                 let error = Error::JsonDeserialization {
                     json_error,
                     input_data: Some(input_data),
-                    error_position: None, // Could be enhanced with actual position parsing
                 };
                 return Box::pin(async move { Err(error.into()) });
             }

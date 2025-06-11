@@ -105,19 +105,6 @@ use tower::{Layer, Service};
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
-    /// Query preparation orchestration failed
-    #[error("Query preparation orchestration failed")]
-    #[diagnostic(
-        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_ORCHESTRATION_ERROR),
-        help("Check that query parsing and planning services are properly configured")
-    )]
-    Orchestration {
-        #[extension("phase")]
-        phase: String,
-        #[extension("details")]
-        details: String,
-    },
-
     /// JSON extraction failed during query preparation
     #[error("JSON extraction failed during query preparation")]
     #[diagnostic(
@@ -129,19 +116,6 @@ pub enum Error {
         missing_field: String,
         #[source_code]
         request_body: Option<String>,
-    },
-
-    /// Query planning service error during preparation
-    #[error("Query planning service error during preparation")]
-    #[diagnostic(
-        code(APOLLO_ROUTER_LAYERS_PREPARE_QUERY_PLAN_SERVICE_ERROR),
-        help("Check that the query plan can be generated from the parsed query")
-    )]
-    QueryPlanService {
-        #[source]
-        plan_error: query_plan::Error,
-        #[extension("context")]
-        context: String,
     },
 }
 

@@ -87,8 +87,6 @@ pub enum Error {
         json_error: serde_json::Error,
         #[source_code]
         json_content: Option<String>,
-        #[extension("serializationContext")]
-        context: String,
     },
 }
 
@@ -161,7 +159,6 @@ where
                 let error = Error::JsonSerialization {
                     json_error,
                     json_content: Some(req.body.to_string()),
-                    context: "Converting JSON request to bytes".to_string(),
                 };
                 return Box::pin(async move { Err(error.into()) });
             }

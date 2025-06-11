@@ -10,20 +10,6 @@ use tower::{Layer, Service};
 use tower::load_shed::error::Overloaded;
 pub type ArcError = Arc<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
-pub enum Error {
-    /// Cache operation failed
-    #[error("Cache operation failed: {message}")]
-    #[diagnostic(
-        code(APOLLO_ROUTER_LAYERS_CACHE_OPERATION_ERROR),
-        help("Check cache configuration and system resources")
-    )]
-    CacheOperationError {
-        #[extension("cacheMessage")]
-        message: String,
-    },
-}
-
 /// A generic caching layer that can cache successful responses and specific error types.
 ///
 /// This layer provides intelligent caching with configurable key extraction and selective

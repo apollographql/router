@@ -11,7 +11,6 @@ pub mod prepare_query;
 
 pub use bytes_client_to_http_client::Error as BytesToHttpError;
 pub use bytes_server_to_json_server::Error as BytesToJsonError;
-pub use cache::Error as CacheError;
 pub use http_server_to_bytes_server::Error as HttpToBytesError;
 pub use json_client_to_bytes_client::Error as JsonToBytesError;
 pub use prepare_query::Error as PrepareQueryError;

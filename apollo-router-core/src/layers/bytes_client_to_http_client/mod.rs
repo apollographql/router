@@ -92,8 +92,6 @@ pub enum Error {
     HttpRequestBuilder {
         #[source]
         http_error: http::Error,
-        #[extension("requestContext")]
-        context: String,
     },
 }
 
@@ -224,7 +222,6 @@ impl<S> BytesToHttpService<S> {
             .body(body)
             .map_err(|http_error| Error::HttpRequestBuilder {
                 http_error,
-                context: "Building HTTP request from bytes".to_string(),
             })?;
 
         Ok(http_req)

@@ -87,8 +87,6 @@ pub enum Error {
     HttpResponseBuilder {
         #[source]
         http_error: http::Error,
-        #[extension("responseContext")]
-        context: String,
     },
 }
 
@@ -195,7 +193,6 @@ where
                 )))
                 .map_err(|http_error| Error::HttpResponseBuilder {
                     http_error,
-                    context: "Building HTTP response from bytes stream".to_string(),
                 })?;
 
             // Convert original Extensions back to http::Extensions
