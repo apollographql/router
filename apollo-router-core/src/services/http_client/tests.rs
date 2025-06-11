@@ -7,8 +7,10 @@ fn test_error_types_debug_and_display() {
     };
     
     let response_processing_error = Error::ResponseProcessingFailed {
-        source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Test error")),
-        context: "Test context".to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test error"
+        )),
     };
     
     // Test that errors can be formatted

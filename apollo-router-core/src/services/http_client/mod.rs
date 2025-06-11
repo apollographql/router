@@ -43,8 +43,6 @@ pub enum Error {
     ResponseProcessingFailed {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
-        #[extension("context")]
-        context: String,
     },
 }
 

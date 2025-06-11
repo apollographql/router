@@ -50,8 +50,8 @@ pub enum Error {
         message: String,
     },
 
-    /// JSON extraction failed: {field} - {message}
-    #[error("JSON extraction failed: {field} - {message}")]
+    /// JSON extraction failed: {field}
+    #[error("JSON extraction failed: {field}")]
     #[diagnostic(
         code(APOLLO_ROUTER_QUERY_PREPARATION_JSON_EXTRACTION_FAILED),
         help("Ensure the JSON request contains the required GraphQL fields")
@@ -59,20 +59,15 @@ pub enum Error {
     JsonExtraction {
         #[extension("jsonField")]
         field: String,
-        #[extension("jsonMessage")]
-        message: String,
     },
 
-    /// Variable extraction failed: {message}
-    #[error("Variable extraction failed: {message}")]
+    /// Variable extraction failed
+    #[error("Variable extraction failed")]
     #[diagnostic(
         code(APOLLO_ROUTER_QUERY_PREPARATION_VARIABLE_EXTRACTION_FAILED),
         help("Check that your GraphQL variables are properly formatted JSON")
     )]
-    VariableExtraction {
-        #[extension("variableMessage")]
-        message: String,
-    },
+    VariableExtraction,
 }
 
 impl From<query_parse::Error> for Error {
@@ -248,7 +243,6 @@ fn extract_graphql_request(
         .map(|s| s.to_string())
         .ok_or_else(|| Error::JsonExtraction {
             field: "query".to_string(),
-            message: "Missing or invalid 'query' field in JSON body".to_string(),
         })?;
 
     // Extract operation name (optional)
@@ -265,9 +259,7 @@ fn extract_graphql_request(
             } else {
                 vars.as_object()
                     .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .ok_or_else(|| Error::VariableExtraction {
-                        message: "Variables must be a JSON object".to_string(),
-                    })?
+                    .ok_or_else(|| Error::VariableExtraction)?
             }
         }
         None => HashMap::new(),

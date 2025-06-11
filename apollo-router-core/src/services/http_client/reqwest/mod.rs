@@ -85,7 +85,6 @@ impl ReqwestService {
             .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(Error::ResponseProcessingFailed {
                     source: Box::new(err),
-                    context: "Failed to read response body stream".to_string(),
                 })
             });
 
@@ -104,7 +103,6 @@ impl ReqwestService {
             .body(body)
             .map_err(|err| Error::ResponseProcessingFailed {
                 source: Box::new(err),
-                context: "Failed to build HTTP response".to_string(),
             })
     }
 }

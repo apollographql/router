@@ -1,11 +1,11 @@
 use crate::Extensions;
 use crate::json::JsonValue;
 use apollo_federation::query_plan::QueryPlan;
+use apollo_router_error::Error as RouterError;
 use futures::Stream;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
-use thiserror::Error;
 use tower::BoxError;
 
 pub struct Request {
@@ -22,19 +22,40 @@ pub struct Response {
     pub responses: ResponseStream,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, RouterError)]
 pub enum Error {
-    /// Query execution failed: {0}
-    #[error("Query execution failed: {0}")]
-    ExecutionError(String),
+    /// Query execution failed: {message}
+    #[error("Query execution failed: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_EXECUTION_EXECUTION_FAILED),
+        help("Check your query execution configuration and subgraph availability")
+    )]
+    ExecutionFailed {
+        #[extension("executionMessage")]
+        message: String,
+    },
 
-    /// Fetch operation failed: {0}
-    #[error("Fetch operation failed: {0}")]
-    FetchError(String),
+    /// Fetch operation failed: {message}
+    #[error("Fetch operation failed: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_EXECUTION_FETCH_FAILED),
+        help("Verify subgraph connectivity and response format")
+    )]
+    FetchFailed {
+        #[extension("fetchMessage")]
+        message: String,
+    },
 
-    /// Planning error: {0}
-    #[error("Planning error: {0}")]
-    PlanningError(String),
+    /// Planning error: {message}
+    #[error("Planning error: {message}")]
+    #[diagnostic(
+        code(APOLLO_ROUTER_QUERY_EXECUTION_PLANNING_FAILED),
+        help("Check your query plan generation and federation configuration")
+    )]
+    PlanningFailed {
+        #[extension("planningMessage")]
+        message: String,
+    },
 }
 
 
