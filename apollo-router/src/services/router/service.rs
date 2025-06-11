@@ -219,9 +219,73 @@ impl Service<RouterRequest> for BatchingService {
                 }
             };
 
-            todo!();
+            // We need to handle cases where a failure is part of a batch and thus must be cancelled.
+            // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
+            // up through here, so we can catch them without having to specially handle batch queries in
+            // other portions of the codebase.
+            let futures = requests.into_iter().map(|request| {
+                let service = service.clone();
+                async move {
+                    // We clone the context here, because if the request results in an Err, the
+                    // response context will no longer exist.
+                    let context = request.context.clone();
+                    let result = service.call_inner_service(request).await;
 
-            service.inner.call(req).await
+                    // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
+                    // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
+                    // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
+                    let batch_query_opt = context
+                        .extensions()
+                        .with_lock(|lock| lock.remove::<BatchQuery>());
+                    if let Some(batch_query) = batch_query_opt {
+                        // Only proceed with signalling cancelled if the batch_query is not finished
+                        if !batch_query.finished() {
+                            tracing::debug!("cancelling batch query in supergraph response");
+                            batch_query
+                                .signal_cancelled("request terminated by user".to_string())
+                                .await?;
+                        }
+                    }
+
+                    result
+                }
+            });
+
+            // Use join_all to preserve ordering of concurrent operations
+            // (Short circuit processing and propagate any errors in the batch)
+            // Note: We use `join_all` here since it awaits all futures before returning, thus allowing us to
+            // handle cancellation logic without fear of the other futures getting killed.
+            let results: Vec<router::Response> = join_all(futures)
+                .await
+                .into_iter()
+                .collect::<Result<Vec<router::Response>, BoxError>>()?;
+
+            // If we detected we are processing a batch, return an array of results even if there is only
+            // one result
+            let mut results_it = results.into_iter();
+            let first = results_it
+                .next()
+                .expect("we should have at least one response");
+            let (parts, body) = first.response.into_parts();
+            let context = first.context;
+            let mut bytes = BytesMut::new();
+            bytes.put_u8(b'[');
+            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
+            for result in results_it {
+                bytes.put(&b", "[..]);
+                bytes.extend_from_slice(
+                    &router::body::into_bytes(result.response.into_body()).await?,
+                );
+            }
+            bytes.put_u8(b']');
+
+            Ok(RouterResponse {
+                response: http::Response::from_parts(
+                    parts,
+                    router::body::from_bytes(bytes.freeze()),
+                ),
+                context,
+            })
         })
     }
 }
@@ -402,6 +466,20 @@ impl BatchingService {
         );
 
         Ok(results)
+    }
+
+    async fn call_inner_service(self, request: RouterRequest) -> Result<RouterResponse, BoxError> {
+        // self.inner here is a clone of the service that was readied
+        // in RouterService::poll_ready. Clones are unready by default, so this
+        // self.inner is actually not ready, which is why we need to
+        // oneshot it here. That technically breaks backpressure, but because we are
+        // still readying the supergraph service before calling into the router
+        // service, backpressure is actually still exerted at that point--there's
+        // just potential for some requests to slip through the cracks and end up
+        // queueing up at this .oneshot() call.
+        //
+        // Not ideal, but an improvement on the situation in Router 1.x.
+        self.inner.oneshot(request).await
     }
 }
 
