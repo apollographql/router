@@ -26,6 +26,7 @@
 )]
 
 mod api_schema;
+pub mod cache_key;
 mod compat;
 pub mod composition;
 pub mod connectors;
@@ -54,6 +55,7 @@ use schema::FederationSchema;
 use strum::IntoEnumIterator;
 
 pub use crate::api_schema::ApiSchemaOptions;
+use crate::cache_key::spec::CacheKeySpec;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::error::MultiTryAll;
@@ -136,6 +138,9 @@ pub(crate) fn validate_supergraph(
     if let Some(connect_link) = metadata.for_identity(&ConnectSpec::identity()) {
         ConnectSpec::try_from(&connect_link.url.version)?;
     }
+    if let Some(cache_key_link) = metadata.for_identity(&CacheKeySpec::identity()) {
+        CacheKeySpec::try_from(&cache_key_link.url.version)?;
+    }
     Ok((
         link_spec_definition,
         join_spec_definition,
@@ -176,7 +181,6 @@ impl Supergraph {
     ) -> Result<Self, FederationError> {
         let schema: Schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
-
         let _ = validate_supergraph_for_query_planning(&schema)?;
 
         if let Some(supported_specs) = supported_specs {
@@ -250,6 +254,7 @@ pub fn router_supported_supergraph_specs() -> Vec<Url> {
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
         .chain(ConnectSpec::iter().map(|s| s.url()))
+        .chain(CacheKeySpec::iter().map(|s| s.url()))
         .collect()
 }
 
