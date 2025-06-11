@@ -11,6 +11,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldArgumentDefinitionPosition; 
@@ -21,6 +22,7 @@ use crate::utils::iter_into_single_item;
 
 pub(crate) fn validate_from_context_directives(
     schema: &FederationSchema,
+    meta: &SubgraphMetadata,
     context_map: &HashMap<String, Vec<Name>>,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
@@ -46,7 +48,7 @@ pub(crate) fn validate_from_context_directives(
 
                 // Apply each validation rule
                 for rule in from_context_rules.iter() {
-                    rule.validate(&from_context.target, schema, &context, &selection, errors)?;
+                    rule.validate(&from_context.target, schema, meta, &context, &selection, errors)?;
                 }
 
                 // after RequireContextExists, we will have errored if either the context or selection is not present
@@ -562,6 +564,7 @@ trait FromContextValidator {
         &self,
         target: &FieldArgumentDefinitionPosition,
         schema: &FederationSchema,
+        meta: &SubgraphMetadata,
         context: &Option<String>,
         selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -582,6 +585,7 @@ impl FromContextValidator for DenyOnAbstractType {
         &self,
         target: &FieldArgumentDefinitionPosition,
         _schema: &FederationSchema,
+        _meta: &SubgraphMetadata,
         _context: &Option<String>,
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -615,6 +619,7 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
         &self,
         target: &FieldArgumentDefinitionPosition,
         schema: &FederationSchema,
+        _meta: &SubgraphMetadata,
         _context: &Option<String>,
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -660,6 +665,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
         &self,
         target: &FieldArgumentDefinitionPosition,
         _schema: &FederationSchema,
+        _meta: &SubgraphMetadata,
         context: &Option<String>,
         selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -716,38 +722,37 @@ impl FromContextValidator for RequireResolvableKey {
         &self,
         target: &FieldArgumentDefinitionPosition,
         schema: &FederationSchema,
+        meta: &SubgraphMetadata,
         _context: &Option<String>,
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
     ) -> Result<(), FederationError> {
         if let FieldArgumentDefinitionPosition::Object(position) = target {
             let parent = position.parent().parent();
-            if let Some(metadata) = &schema.subgraph_metadata {
-                let key_directive = metadata
-                    .federation_spec_definition()
-                    .key_directive_definition(schema)?;
-                if parent
-                    .get_applied_directives(schema, &key_directive.name)
-                    .iter()
-                    .fallible_filter(|application| -> Result<bool, FederationError> {
-                        let arguments = metadata
-                            .federation_spec_definition()
-                            .key_directive_arguments(application)?;
-                        Ok(arguments.resolvable)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-                    .is_empty()
-                {
-                    errors.push(
-                        SingleFederationError::ContextNoResolvableKey {
-                            message: format!(
-                                "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                                target
-                            ),
-                        }
-                        .into(),
-                    );
-                }
+            let key_directive = meta
+                .federation_spec_definition()
+                .key_directive_definition(schema)?;
+            if parent
+                .get_applied_directives(schema, &key_directive.name)
+                .iter()
+                .fallible_filter(|application| -> Result<bool, FederationError> {
+                    let arguments = meta
+                        .federation_spec_definition()
+                        .key_directive_arguments(application)?;
+                    Ok(arguments.resolvable)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .is_empty()
+            {
+                errors.push(
+                    SingleFederationError::ContextNoResolvableKey {
+                        message: format!(
+                            "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
+                            target
+                        ),
+                    }
+                    .into(),
+                );
             }
         }
         Ok(())
@@ -768,6 +773,7 @@ impl FromContextValidator for DenyDefaultValues {
         &self,
         target: &FieldArgumentDefinitionPosition,
         schema: &FederationSchema,
+        _meta: &SubgraphMetadata,
         _context: &Option<String>,
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -819,6 +825,7 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
         &self,
         target: &FieldArgumentDefinitionPosition,
         _schema: &FederationSchema,
+        _meta: &SubgraphMetadata,
         _context: &Option<String>,
         _selection: &Option<String>,
         errors: &mut MultipleFederationErrors,
@@ -973,7 +980,7 @@ mod tests {
         let context_map = HashMap::new();
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type
@@ -1023,7 +1030,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on a field implementing an interface
@@ -1067,7 +1074,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Check for invalid context error
@@ -1118,7 +1125,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the missing resolvable key
@@ -2122,7 +2129,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Should have error for not referencing a context (missing $ prefix)
@@ -2422,7 +2429,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type (interface)
@@ -2567,7 +2574,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Should have error for context name with underscore
@@ -2611,7 +2618,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Should have error for default values on @fromContext arguments
@@ -2656,7 +2663,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
@@ -2700,7 +2707,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
@@ -2751,7 +2758,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed because both Foo and Bar have the same field type
@@ -2802,7 +2809,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed with inline fragments
@@ -2849,7 +2856,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed with interface context
@@ -2897,7 +2904,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // This should succeed with interface context and type condition
@@ -2940,7 +2947,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
             // This should succeed - nullability mismatch is ok if contextual value is non-nullable
@@ -2987,7 +2994,7 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
+        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
         // Should have error for @fromContext on directive definition argument
