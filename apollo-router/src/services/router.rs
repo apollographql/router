@@ -46,6 +46,7 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
+mod batching;
 pub mod body;
 pub(crate) mod pipeline_handle;
 pub(crate) mod service;
