@@ -18,6 +18,7 @@ use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
@@ -235,8 +236,9 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -306,6 +308,10 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)

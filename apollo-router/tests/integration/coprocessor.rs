@@ -320,7 +320,6 @@ mod on_graphql_error_selector {
     use std::sync::Arc;
     use std::sync::RwLock;
 
-    use insta::assert_json_snapshot;
     use serde_json::json;
     use serde_json::value::Value;
     use tower::BoxError;
