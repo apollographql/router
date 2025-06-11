@@ -311,7 +311,10 @@ pub(crate) mod tests {
             options: CompositionOptions::default(),
             names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
             compose_directive_manager: ComposeDirectiveManager::new(),
-            error_reporter: ErrorReporter::new(),
+            error_reporter: ErrorReporter::new(vec![
+                "subgraph1".to_string(),
+                "subgraph2".to_string(),
+            ]),
             merged: schema,
             subgraph_names_to_join_spec_name: [
                 (

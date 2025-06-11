@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -11,6 +12,7 @@ use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -24,10 +26,21 @@ use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::human_readable::human_readable_subgraph_names;
+
+static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
+    [
+        Identity::federation_identity(),
+        Identity::link_identity(),
+        Identity::core_identity(),
+        Identity::connect_identity(),
+    ]
+});
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
@@ -72,7 +85,8 @@ impl Merger {
         subgraphs: Vec<Subgraph<Validated>>,
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
-        let mut error_reporter = ErrorReporter::new();
+        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        let mut error_reporter = ErrorReporter::new(names.clone());
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
         let Some(join_spec) =
@@ -87,7 +101,6 @@ impl Merger {
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
-        let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
         let schema_to_import_to_feature_url = subgraphs
             .iter()
             .map(|s| {
@@ -320,7 +333,125 @@ impl Merger {
     }
 
     fn add_types_shallow(&mut self) {
-        todo!("Implement shallow type addition - create empty type definitions")
+        let mut mismatched_types = HashSet::new();
+        let mut types_with_interface_object = HashSet::new();
+
+        for subgraph in &self.subgraphs {
+            for pos in subgraph.schema().get_types() {
+                if !self.is_merged_type(subgraph, &pos) {
+                    continue;
+                }
+
+                let mut expects_interface = false;
+                if subgraph.is_interface_object_type(&pos) {
+                    expects_interface = true;
+                    types_with_interface_object.insert(pos.clone());
+                }
+                if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
+                    if expects_interface
+                        && !matches!(previous, TypeDefinitionPosition::Interface(_))
+                    {
+                        mismatched_types.insert(pos.clone());
+                    }
+                    if !expects_interface && previous != pos {
+                        mismatched_types.insert(pos.clone());
+                    }
+                } else {
+                    pos.pre_insert(&mut self.merged);
+                    pos.insert_empty(&mut self.merged);
+                }
+            }
+        }
+
+        for mismatched_type in mismatched_types.iter() {
+            self.report_mismatched_type_definitions(mismatched_type, &types_with_interface_object);
+        }
+
+        for type_ in types_with_interface_object.iter() {
+            if mismatched_types.contains(type_) {
+                continue;
+            }
+
+            let mut found_interface = false;
+            let mut subgraphs_with_type = HashSet::new();
+            for subgraph in &self.subgraphs {
+                let type_in_subgraph = subgraph.schema().get_type(type_.type_name().clone());
+                if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
+                    found_interface = true;
+                    break;
+                }
+                if type_in_subgraph.is_ok() {
+                    subgraphs_with_type.insert(subgraph.name.clone());
+                }
+            }
+
+            if !found_interface {
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError { message: format!(
+                    "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
+                    type_.type_name(),
+                    human_readable_subgraph_names(subgraphs_with_type.iter())
+                ) });
+            }
+        }
+    }
+
+    fn is_merged_type(
+        &self,
+        subgraph: &Subgraph<Validated>,
+        type_: &TypeDefinitionPosition,
+    ) -> bool {
+        if type_.is_introspection_type() || FEDERATION_OPERATION_TYPES.contains(type_.type_name()) {
+            return false;
+        }
+
+        let type_feature = subgraph
+            .schema()
+            .metadata()
+            .and_then(|links| links.source_link_of_type(type_.type_name()));
+        let exists_and_is_excluded = type_feature
+            .is_some_and(|link| NON_MERGED_CORE_FEATURES.contains(&link.link.url.identity));
+        !exists_and_is_excluded
+    }
+
+    fn report_mismatched_type_definitions(
+        &mut self,
+        mismatched_type: &TypeDefinitionPosition,
+        types_with_interface_object: &HashSet<TypeDefinitionPosition>,
+    ) {
+        let sources = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, sg)| {
+                (
+                    idx,
+                    sg.schema()
+                        .get_type(mismatched_type.type_name().clone())
+                        .ok(),
+                )
+            })
+            .collect();
+        let type_kind_to_string = |type_def: &TypeDefinitionPosition, _| {
+            let type_kind_description = if types_with_interface_object.contains(type_def) {
+                "Interface Object Type (Object Type with @interfaceObject)".to_string()
+            } else {
+                type_def.kind().replace("Type", " Type")
+            };
+            Some(type_kind_description)
+        };
+        // TODO: Second type param is supposed to be representation of AST nodes
+        self.error_reporter
+            .report_mismatch_error::<TypeDefinitionPosition, ()>(
+                CompositionError::TypeKindMismatch {
+                    message: format!(
+                        "Type \"{}\" has mismatched kind: it is defined as ",
+                        mismatched_type.type_name()
+                    ),
+                },
+                mismatched_type,
+                &sources,
+                type_kind_to_string,
+            );
     }
 
     fn add_directives_shallow(&mut self) {

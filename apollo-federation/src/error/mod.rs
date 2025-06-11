@@ -142,6 +142,8 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    TypeKindMismatch { message: String },
 }
 
 impl CompositionError {
@@ -157,6 +159,38 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+        }
+    }
+
+    pub(crate) fn append_message(self, appendix: impl Display) -> Self {
+        match self {
+            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+                message: format!("{message}{appendix}"),
+            },
+            Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InvalidGraphQL { message } => Self::InvalidGraphQL {
+                message: format!("{message}{appendix}"),
+            },
+            Self::DirectiveDefinitionInvalid { message } => Self::DirectiveDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::TypeDefinitionInvalid { message } => Self::TypeDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            // Remaining errors do not have an obvious way to appending a message, so we just return self.
+            Self::SubgraphError { .. }
+            | Self::InvalidGraphQLName(..)
+            | Self::FromContextParseError { .. }
+            | Self::UnsupportedSpreadDirective { .. } => self,
         }
     }
 }
@@ -361,8 +395,6 @@ pub enum SingleFederationError {
     NoQueries { message: String },
     #[error("{message}")]
     InterfaceFieldNoImplem { message: String },
-    #[error("{message}")]
-    TypeKindMismatch { message: String },
     #[error("{message}")]
     ExternalTypeMismatch { message: String },
     #[error("{message}")]
@@ -575,7 +607,6 @@ impl SingleFederationError {
             SingleFederationError::InterfaceFieldNoImplem { .. } => {
                 ErrorCode::InterfaceFieldNoImplem
             }
-            SingleFederationError::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             SingleFederationError::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
             SingleFederationError::ExternalCollisionWithAnotherDirective { .. } => {
                 ErrorCode::ExternalCollisionWithAnotherDirective
