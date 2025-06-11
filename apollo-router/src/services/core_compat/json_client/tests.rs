@@ -24,7 +24,7 @@ async fn test_core_json_request_to_subgraph_request_conversion() {
             .method("POST")
             .uri("/graphql")
             .body(graphql::Request::default())
-            .expect("building default supergraph request should not fail")
+            .expect("building default supergraph request should not fail"),
     );
 
     let context = Context::new();
@@ -60,7 +60,9 @@ async fn test_core_json_request_to_subgraph_request_conversion() {
     };
 
     // Convert to subgraph request using async function
-    let subgraph_request = core_json_request_to_subgraph_request(core_request).await.unwrap();
+    let subgraph_request = core_json_request_to_subgraph_request(core_request)
+        .await
+        .unwrap();
 
     // Verify the conversion preserved data
     assert_eq!(subgraph_request.operation_kind, OperationKind::Query);
@@ -135,7 +137,9 @@ async fn test_subgraph_request_to_core_json_request_conversion() {
     };
 
     // Convert to core JSON request using async function
-    let core_request = subgraph_request_to_core_json_request(subgraph_request).await.unwrap();
+    let core_request = subgraph_request_to_core_json_request(subgraph_request)
+        .await
+        .unwrap();
 
     // Verify the JSON body contains the GraphQL request
     let query = core_request
@@ -185,7 +189,9 @@ async fn test_subgraph_response_to_core_json_response_conversion() {
     };
 
     // Convert to core JSON response using async function
-    let core_response = subgraph_response_to_core_json_response(subgraph_response).await.unwrap();
+    let core_response = subgraph_response_to_core_json_response(subgraph_response)
+        .await
+        .unwrap();
 
     // Verify subgraph response metadata is preserved in extensions
     let metadata = core_response
@@ -195,7 +201,11 @@ async fn test_subgraph_response_to_core_json_response_conversion() {
     assert_eq!(metadata.subgraph_name, "users-service");
 
     // Verify context is preserved
-    let request_id = metadata.context.get::<_, String>("request_id").unwrap().unwrap();
+    let request_id = metadata
+        .context
+        .get::<_, String>("request_id")
+        .unwrap()
+        .unwrap();
     assert_eq!(request_id, "req-123");
 
     // Verify the response stream contains the serialized GraphQL response
@@ -232,7 +242,7 @@ async fn test_round_trip_request_conversion() {
             .method("POST")
             .uri("/graphql")
             .body(graphql::Request::default())
-            .expect("building default supergraph request should not fail")
+            .expect("building default supergraph request should not fail"),
     );
 
     let context = Context::new();
@@ -285,8 +295,12 @@ async fn test_round_trip_request_conversion() {
         .unwrap();
 
     // Round trip: Core -> Subgraph -> Core
-    let subgraph_request = core_json_request_to_subgraph_request(original_request).await.unwrap();
-    let final_request = subgraph_request_to_core_json_request(subgraph_request).await.unwrap();
+    let subgraph_request = core_json_request_to_subgraph_request(original_request)
+        .await
+        .unwrap();
+    let final_request = subgraph_request_to_core_json_request(subgraph_request)
+        .await
+        .unwrap();
 
     // Verify round trip preserved all properties
     let final_query = final_request.body.get("query").unwrap().as_str().unwrap();
@@ -319,10 +333,15 @@ async fn test_round_trip_request_conversion() {
     assert_eq!(metadata.subgraph_name, "payment-service");
 
     // Verify context is preserved in the metadata
-    let trace_id = metadata.context.get::<_, String>("trace_id").unwrap().unwrap();
+    let trace_id = metadata
+        .context
+        .get::<_, String>("trace_id")
+        .unwrap()
+        .unwrap();
     assert_eq!(trace_id, "trace-xyz");
 
-    let user_roles = metadata.context
+    let user_roles = metadata
+        .context
         .get::<_, Vec<String>>("user_roles")
         .unwrap()
         .unwrap();
@@ -386,8 +405,12 @@ async fn test_round_trip_response_conversion() {
         .unwrap();
 
     // Round trip: Subgraph -> Core -> Subgraph
-    let core_response = subgraph_response_to_core_json_response(original_response).await.unwrap();
-    let final_response = core_json_response_to_subgraph_response(core_response).await.unwrap();
+    let core_response = subgraph_response_to_core_json_response(original_response)
+        .await
+        .unwrap();
+    let final_response = core_json_response_to_subgraph_response(core_response)
+        .await
+        .unwrap();
 
     // Verify HTTP properties are preserved (though some defaults are applied)
     assert_eq!(final_response.response.status(), 200);
@@ -414,5 +437,3 @@ async fn test_round_trip_response_conversion() {
     // that can be preserved, though some HTTP-specific details may be lost due to
     // the different nature of the streaming JSON response format in router core.
 }
-
-

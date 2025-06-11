@@ -1,4 +1,5 @@
 use http_body_util::BodyExt;
+use std::sync::Arc;
 use tower::BoxError;
 
 /// Router core http_client types
@@ -11,112 +12,142 @@ use crate::Context;
 use crate::services::http::{HttpRequest as RouterHttpRequest, HttpResponse as RouterHttpResponse};
 use crate::services::router::body::RouterBody;
 
+/// Metadata for storing HTTP request information in extensions during conversion
+#[derive(Debug)]
+struct RequestMetadata {
+    context: Context,
+}
+
+/// Metadata for storing HTTP response information in extensions during conversion
+#[derive(Debug)]
+struct ResponseMetadata {
+    context: Context,
+}
+
 /// Convert from Router Core Request to Router HttpRequest
-impl From<CoreRequest> for RouterHttpRequest {
-    fn from(mut core_request: CoreRequest) -> Self {
-        // Extract context from extensions if present, otherwise create new
-        let context = core_request
-            .extensions_mut()
-            .remove::<Context>()
-            .expect("context must be set");
+pub(crate) async fn core_request_to_router_request(
+    mut core_request: CoreRequest,
+) -> Result<RouterHttpRequest, BoxError> {
+    // Extract request metadata from extensions
+    let arc_metadata = core_request
+        .extensions_mut()
+        .remove::<Arc<RequestMetadata>>()
+        .expect("RequestMetadata must exist in extensions");
 
-        // Take ownership of all remaining extensions (no cloning)
-        let extensions = std::mem::take(core_request.extensions_mut());
+    // There will be exactly one reference to RequestMetadata. It's a private type no-one else can get it.
+    let metadata = Arc::try_unwrap(arc_metadata)
+        .expect("there must be one reference to request metadata");
 
-        let (parts, core_body) = core_request.into_parts();
+    // Take ownership of all remaining extensions (no cloning)
+    let extensions = std::mem::take(core_request.extensions_mut());
 
-        // Map the body error type from BoxError to AxumError for RouterBody
-        let router_body: RouterBody = core_body.map_err(axum::Error::new).boxed_unsync();
+    let (parts, core_body) = core_request.into_parts();
 
-        let mut http_request = http::Request::from_parts(parts, router_body);
+    // Map the body error type from BoxError to AxumError for RouterBody
+    let router_body: RouterBody = core_body.map_err(axum::Error::new).boxed_unsync();
 
-        // Move extensions to router request (no cloning)
-        *http_request.extensions_mut() = extensions;
+    let mut http_request = http::Request::from_parts(parts, router_body);
 
-        Self {
-            http_request,
-            context,
-        }
-    }
+    // Move extensions to router request (no cloning)
+    *http_request.extensions_mut() = extensions;
+
+    Ok(RouterHttpRequest {
+        http_request,
+        context: metadata.context,
+    })
 }
 
 /// Convert from Router HttpRequest to Router Core Request  
-impl From<RouterHttpRequest> for CoreRequest {
-    fn from(mut router_request: RouterHttpRequest) -> Self {
-        // Take ownership of HTTP extensions from router request (no cloning)
-        let mut extensions = std::mem::take(router_request.http_request.extensions_mut());
+pub(crate) async fn router_request_to_core_request(
+    mut router_request: RouterHttpRequest,
+) -> Result<CoreRequest, BoxError> {
+    // Take ownership of HTTP extensions from router request (no cloning)
+    let mut extensions = std::mem::take(router_request.http_request.extensions_mut());
 
-        let (parts, router_body) = router_request.http_request.into_parts();
+    let (parts, router_body) = router_request.http_request.into_parts();
 
-        // Map the body error type from AxumError to BoxError
-        let core_body = router_body
-            .map_err(|err| -> BoxError { err.into() })
-            .boxed_unsync();
+    // Map the body error type from AxumError to BoxError
+    let core_body = router_body
+        .map_err(|err| -> BoxError { err.into() })
+        .boxed_unsync();
 
-        let mut core_request = http::Request::from_parts(parts, core_body);
+    let mut core_request = http::Request::from_parts(parts, core_body);
 
-        // Add the router context to extensions
-        extensions.insert(router_request.context);
+    // Create request metadata from the router context
+    let metadata = RequestMetadata {
+        context: router_request.context,
+    };
 
-        // Move extensions to core request (no cloning)
-        *core_request.extensions_mut() = extensions;
+    // Store request metadata as an Arc
+    extensions.insert(Arc::new(metadata));
 
-        core_request
-    }
+    // Move extensions to core request (no cloning)
+    *core_request.extensions_mut() = extensions;
+
+    Ok(core_request)
 }
 
 /// Convert from Router Core Response to Router HttpResponse
-impl From<CoreResponse> for RouterHttpResponse {
-    fn from(mut core_response: CoreResponse) -> Self {
-        // Extract context from extensions if present, otherwise create new
-        let context = core_response
-            .extensions_mut()
-            .remove::<Context>()
-            .expect("context must exist");
+pub(crate) async fn core_response_to_router_response(
+    mut core_response: CoreResponse,
+) -> Result<RouterHttpResponse, BoxError> {
+    // Extract response metadata from extensions
+    let arc_metadata = core_response
+        .extensions_mut()
+        .remove::<Arc<ResponseMetadata>>()
+        .expect("ResponseMetadata must exist in extensions");
 
-        // Take ownership of all remaining extensions (no cloning)
-        let extensions = std::mem::take(core_response.extensions_mut());
+    // There will be exactly one reference to ResponseMetadata. It's a private type no-one else can get it.
+    let metadata = Arc::try_unwrap(arc_metadata)
+        .expect("there must be one reference to response metadata");
 
-        let (parts, core_body) = core_response.into_parts();
+    // Take ownership of all remaining extensions (no cloning)
+    let extensions = std::mem::take(core_response.extensions_mut());
 
-        // Map the body error type from BoxError to AxumError for RouterBody
-        let router_body: RouterBody = core_body.map_err(axum::Error::new).boxed_unsync();
+    let (parts, core_body) = core_response.into_parts();
 
-        let mut http_response = http::Response::from_parts(parts, router_body);
+    // Map the body error type from BoxError to AxumError for RouterBody
+    let router_body: RouterBody = core_body.map_err(axum::Error::new).boxed_unsync();
 
-        // Move extensions to router response (no cloning)
-        *http_response.extensions_mut() = extensions;
+    let mut http_response = http::Response::from_parts(parts, router_body);
 
-        Self {
-            http_response,
-            context,
-        }
-    }
+    // Move extensions to router response (no cloning)
+    *http_response.extensions_mut() = extensions;
+
+    Ok(RouterHttpResponse {
+        http_response,
+        context: metadata.context,
+    })
 }
 
 /// Convert from Router HttpResponse to Router Core Response
-impl From<RouterHttpResponse> for CoreResponse {
-    fn from(mut router_response: RouterHttpResponse) -> Self {
-        // Take ownership of HTTP extensions from router response (no cloning)
-        let mut extensions = std::mem::take(router_response.http_response.extensions_mut());
+pub(crate) async fn router_response_to_core_response(
+    mut router_response: RouterHttpResponse,
+) -> Result<CoreResponse, BoxError> {
+    // Take ownership of HTTP extensions from router response (no cloning)
+    let mut extensions = std::mem::take(router_response.http_response.extensions_mut());
 
-        let (parts, router_body) = router_response.http_response.into_parts();
+    let (parts, router_body) = router_response.http_response.into_parts();
 
-        // Map the body error type from AxumError to BoxError
-        let core_body = router_body
-            .map_err(|err| -> BoxError { err.into() })
-            .boxed_unsync();
+    // Map the body error type from AxumError to BoxError
+    let core_body = router_body
+        .map_err(|err| -> BoxError { err.into() })
+        .boxed_unsync();
 
-        let mut core_response = http::Response::from_parts(parts, core_body);
+    let mut core_response = http::Response::from_parts(parts, core_body);
 
-        // Add the router context to extensions
-        extensions.insert(router_response.context);
+    // Create response metadata from the router context
+    let metadata = ResponseMetadata {
+        context: router_response.context,
+    };
 
-        // Move extensions to core response (no cloning)
-        *core_response.extensions_mut() = extensions;
+    // Store response metadata as an Arc
+    extensions.insert(Arc::new(metadata));
 
-        core_response
-    }
+    // Move extensions to core response (no cloning)
+    *core_response.extensions_mut() = extensions;
+
+    Ok(core_response)
 }
 
 #[cfg(test)]

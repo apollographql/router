@@ -2,6 +2,7 @@ use super::*;
 use crate::Context;
 use bytes::Bytes;
 use http_body_util::Full;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_core_request_to_router_request_conversion() {
@@ -11,15 +12,21 @@ async fn test_core_request_to_router_request_conversion() {
         .map_err(|never| -> BoxError { match never {} })
         .boxed_unsync();
 
-    let core_request = http::Request::builder()
+    let mut core_request = http::Request::builder()
         .method("POST")
         .uri("https://example.com/graphql")
         .header("content-type", "application/json")
         .body(core_body)
         .unwrap();
 
-    // Convert to router request using From trait
-    let router_request: RouterHttpRequest = core_request.into();
+    // Add required metadata to extensions
+    let metadata = RequestMetadata {
+        context: Context::new(),
+    };
+    core_request.extensions_mut().insert(Arc::new(metadata));
+
+    // Convert to router request using async function
+    let router_request = core_request_to_router_request(core_request).await.unwrap();
 
     // Verify the conversion preserved headers and method
     assert_eq!(router_request.http_request.method(), "POST");
@@ -64,8 +71,8 @@ async fn test_router_request_to_core_request_conversion() {
         context: Context::new(),
     };
 
-    // Convert to core request using Into trait
-    let core_request: CoreRequest = router_request.into();
+    // Convert to core request using async function
+    let core_request = router_request_to_core_request(router_request).await.unwrap();
 
     // Verify the conversion preserved headers and method
     assert_eq!(core_request.method(), "GET");
@@ -91,15 +98,21 @@ async fn test_core_response_to_router_response_conversion() {
         .map_err(|never| -> BoxError { match never {} })
         .boxed_unsync();
 
-    let core_response = http::Response::builder()
+    let mut core_response = http::Response::builder()
         .status(200)
         .header("content-type", "application/json")
         .header("cache-control", "no-cache")
         .body(core_body)
         .unwrap();
 
-    // Convert to router response using From trait
-    let router_response: RouterHttpResponse = core_response.into();
+    // Add required metadata to extensions
+    let metadata = ResponseMetadata {
+        context: Context::new(),
+    };
+    core_response.extensions_mut().insert(Arc::new(metadata));
+
+    // Convert to router response using async function
+    let router_response = core_response_to_router_response(core_response).await.unwrap();
 
     // Verify the conversion preserved status and headers
     assert_eq!(router_response.http_response.status(), 200);
@@ -147,8 +160,8 @@ async fn test_router_response_to_core_response_conversion() {
         context: Context::new(),
     };
 
-    // Convert to core response using Into trait
-    let core_response: CoreResponse = router_response.into();
+    // Convert to core response using async function
+    let core_response = router_response_to_core_response(router_response).await.unwrap();
 
     // Verify the conversion preserved status and headers
     assert_eq!(core_response.status(), 404);
@@ -164,33 +177,38 @@ async fn test_router_response_to_core_response_conversion() {
 
 #[tokio::test]
 async fn test_round_trip_request_conversion() {
-    // Create original core request
+    // Create original router request (starting from router side to avoid metadata setup)
     let body_data = "round trip test";
-    let original_body = Full::new(Bytes::from(body_data))
-        .map_err(|never| -> BoxError { match never {} })
+    let router_body = Full::new(Bytes::from(body_data))
+        .map_err(|never| axum::Error::new(never))
         .boxed_unsync();
 
-    let original_request = http::Request::builder()
+    let http_request = http::Request::builder()
         .method("PUT")
         .uri("https://example.com/update")
         .header("x-test-header", "test-value")
-        .body(original_body)
+        .body(router_body)
         .unwrap();
 
-    // Round trip: Core -> Router -> Core
-    let router_request: RouterHttpRequest = original_request.into();
-    let final_request: CoreRequest = router_request.into();
+    let original_request = RouterHttpRequest {
+        http_request,
+        context: Context::new(),
+    };
+
+    // Round trip: Router -> Core -> Router
+    let core_request = router_request_to_core_request(original_request).await.unwrap();
+    let final_request = core_request_to_router_request(core_request).await.unwrap();
 
     // Verify round trip preserved all properties
-    assert_eq!(final_request.method(), "PUT");
-    assert_eq!(final_request.uri(), "https://example.com/update");
+    assert_eq!(final_request.http_request.method(), "PUT");
+    assert_eq!(final_request.http_request.uri(), "https://example.com/update");
     assert_eq!(
-        final_request.headers().get("x-test-header").unwrap(),
+        final_request.http_request.headers().get("x-test-header").unwrap(),
         "test-value"
     );
 
     // Verify body integrity
-    let body_bytes = http_body_util::BodyExt::collect(final_request.into_body())
+    let body_bytes = http_body_util::BodyExt::collect(final_request.http_request.into_body())
         .await
         .unwrap()
         .to_bytes();
@@ -201,14 +219,14 @@ async fn test_round_trip_request_conversion() {
 async fn test_round_trip_response_conversion() {
     // Create original router response
     let body_data = "round trip response";
-    let original_body = Full::new(Bytes::from(body_data))
+    let router_body = Full::new(Bytes::from(body_data))
         .map_err(|never| axum::Error::new(never))
         .boxed_unsync();
 
     let http_response = http::Response::builder()
         .status(201)
         .header("location", "/new-resource")
-        .body(original_body)
+        .body(router_body)
         .unwrap();
 
     let original_response = RouterHttpResponse {
@@ -217,8 +235,8 @@ async fn test_round_trip_response_conversion() {
     };
 
     // Round trip: Router -> Core -> Router
-    let core_response: CoreResponse = original_response.into();
-    let final_response: RouterHttpResponse = core_response.into();
+    let core_response = router_response_to_core_response(original_response).await.unwrap();
+    let final_response = core_response_to_router_response(core_response).await.unwrap();
 
     // Verify round trip preserved all properties
     assert_eq!(final_response.http_response.status(), 201);
@@ -253,7 +271,7 @@ async fn test_context_preservation_in_request_round_trip() {
         .body(router_body)
         .unwrap();
 
-    let mut context = Context::new();
+    let context = Context::new();
     context
         .insert("test_key", "test_value".to_string())
         .unwrap();
@@ -277,8 +295,8 @@ async fn test_context_preservation_in_request_round_trip() {
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_request: CoreRequest = original_request.into();
-    let final_request: RouterHttpRequest = core_request.into();
+    let core_request = router_request_to_core_request(original_request).await.unwrap();
+    let final_request = core_request_to_router_request(core_request).await.unwrap();
 
     // Verify context data is preserved
     let final_test_value = final_request
@@ -341,8 +359,8 @@ async fn test_context_preservation_in_response_round_trip() {
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_response: CoreResponse = original_response.into();
-    let final_response: RouterHttpResponse = core_response.into();
+    let core_response = router_response_to_core_response(original_response).await.unwrap();
+    let final_response = core_response_to_router_response(core_response).await.unwrap();
 
     // Verify context data is preserved
     let final_data = final_response
@@ -373,38 +391,44 @@ async fn test_context_preservation_in_response_round_trip() {
 
 #[tokio::test]
 async fn test_http_extensions_preservation_in_request_round_trip() {
-    // Create a core request with HTTP extensions
+    // Create a router request with HTTP extensions (starting from router side)
     let body_data = "extensions test";
-    let core_body = Full::new(Bytes::from(body_data))
-        .map_err(|never| -> BoxError { match never {} })
+    let router_body = Full::new(Bytes::from(body_data))
+        .map_err(|never| axum::Error::new(never))
         .boxed_unsync();
 
-    let mut core_request = http::Request::builder()
+    let mut http_request = http::Request::builder()
         .method("POST")
         .uri("https://example.com/extensions")
-        .body(core_body)
+        .body(router_body)
         .unwrap();
 
     // Add custom data to HTTP extensions
-    core_request
+    http_request
         .extensions_mut()
         .insert("http_ext_string".to_string());
-    core_request.extensions_mut().insert(999u32);
-    core_request.extensions_mut().insert(vec![1, 2, 3, 4, 5]);
+    http_request.extensions_mut().insert(999u32);
+    http_request.extensions_mut().insert(vec![1, 2, 3, 4, 5]);
+
+    let original_request = RouterHttpRequest {
+        http_request,
+        context: Context::new(),
+    };
 
     // Store reference values for comparison
-    let original_string = core_request.extensions().get::<String>().unwrap().clone();
-    let original_number = *core_request.extensions().get::<u32>().unwrap();
-    let original_vec = core_request.extensions().get::<Vec<i32>>().unwrap().clone();
+    let original_string = original_request.http_request.extensions().get::<String>().unwrap().clone();
+    let original_number = *original_request.http_request.extensions().get::<u32>().unwrap();
+    let original_vec = original_request.http_request.extensions().get::<Vec<i32>>().unwrap().clone();
 
-    // Round trip: Core -> Router -> Core
-    let router_request: RouterHttpRequest = core_request.into();
-    let final_request: CoreRequest = router_request.into();
+    // Round trip: Router -> Core -> Router
+    let core_request = router_request_to_core_request(original_request).await.unwrap();
+    let final_request = core_request_to_router_request(core_request).await.unwrap();
 
     // Verify HTTP extensions are preserved
-    let final_string = final_request.extensions().get::<String>().unwrap().clone();
-    let final_number = *final_request.extensions().get::<u32>().unwrap();
+    let final_string = final_request.http_request.extensions().get::<String>().unwrap().clone();
+    let final_number = *final_request.http_request.extensions().get::<u32>().unwrap();
     let final_vec = final_request
+        .http_request
         .extensions()
         .get::<Vec<i32>>()
         .unwrap()
@@ -415,29 +439,29 @@ async fn test_http_extensions_preservation_in_request_round_trip() {
     assert_eq!(original_vec, final_vec);
 
     // Verify HTTP properties are still preserved
-    assert_eq!(final_request.method(), "POST");
-    assert_eq!(final_request.uri(), "https://example.com/extensions");
+    assert_eq!(final_request.http_request.method(), "POST");
+    assert_eq!(final_request.http_request.uri(), "https://example.com/extensions");
 }
 
 #[tokio::test]
 async fn test_http_extensions_preservation_in_response_round_trip() {
-    // Create a core response with HTTP extensions
+    // Create a router response with HTTP extensions
     let body_data = "response extensions test";
-    let core_body = Full::new(Bytes::from(body_data))
-        .map_err(|never| -> BoxError { match never {} })
+    let router_body = Full::new(Bytes::from(body_data))
+        .map_err(|never| axum::Error::new(never))
         .boxed_unsync();
 
-    let mut core_response = http::Response::builder()
+    let mut http_response = http::Response::builder()
         .status(201)
         .header("x-test", "value")
-        .body(core_body)
+        .body(router_body)
         .unwrap();
 
     // Add custom data to HTTP extensions
-    core_response
+    http_response
         .extensions_mut()
         .insert("response_ext_data".to_string());
-    core_response.extensions_mut().insert(777u64);
+    http_response.extensions_mut().insert(777u64);
     #[derive(Debug, Clone, PartialEq)]
     struct CustomData {
         name: String,
@@ -447,25 +471,32 @@ async fn test_http_extensions_preservation_in_response_round_trip() {
         name: "test".to_string(),
         value: 123,
     };
-    core_response.extensions_mut().insert(custom_data.clone());
+    http_response.extensions_mut().insert(custom_data.clone());
+
+    let original_response = RouterHttpResponse {
+        http_response,
+        context: Context::new(),
+    };
 
     // Store reference values for comparison
-    let original_string = core_response.extensions().get::<String>().unwrap().clone();
-    let original_number = *core_response.extensions().get::<u64>().unwrap();
-    let original_custom = core_response
+    let original_string = original_response.http_response.extensions().get::<String>().unwrap().clone();
+    let original_number = *original_response.http_response.extensions().get::<u64>().unwrap();
+    let original_custom = original_response
+        .http_response
         .extensions()
         .get::<CustomData>()
         .unwrap()
         .clone();
 
-    // Round trip: Core -> Router -> Core
-    let router_response: RouterHttpResponse = core_response.into();
-    let final_response: CoreResponse = router_response.into();
+    // Round trip: Router -> Core -> Router
+    let core_response = router_response_to_core_response(original_response).await.unwrap();
+    let final_response = core_response_to_router_response(core_response).await.unwrap();
 
     // Verify HTTP extensions are preserved
-    let final_string = final_response.extensions().get::<String>().unwrap().clone();
-    let final_number = *final_response.extensions().get::<u64>().unwrap();
+    let final_string = final_response.http_response.extensions().get::<String>().unwrap().clone();
+    let final_number = *final_response.http_response.extensions().get::<u64>().unwrap();
     let final_custom = final_response
+        .http_response
         .extensions()
         .get::<CustomData>()
         .unwrap()
@@ -476,8 +507,8 @@ async fn test_http_extensions_preservation_in_response_round_trip() {
     assert_eq!(original_custom, final_custom);
 
     // Verify HTTP properties are still preserved
-    assert_eq!(final_response.status(), 201);
-    assert_eq!(final_response.headers().get("x-test").unwrap(), "value");
+    assert_eq!(final_response.http_response.status(), 201);
+    assert_eq!(final_response.http_response.headers().get("x-test").unwrap(), "value");
 }
 
 #[tokio::test]
@@ -498,46 +529,42 @@ async fn test_mixed_extensions_and_context_preservation() {
     http_request
         .extensions_mut()
         .insert("http_data".to_string());
-    http_request.extensions_mut().insert(555i16);
+    http_request.extensions_mut().insert(555u16);
 
     // Create router context
-    let mut context = Context::new();
+    let context = Context::new();
     context
-        .insert("context_data", "context_value".to_string())
+        .insert("router_data", "context_value".to_string())
         .unwrap();
-    context.insert("context_number", 888u32).unwrap();
+    context.insert("router_number", 777i64).unwrap();
 
     let original_request = RouterHttpRequest {
         http_request,
         context,
     };
 
-    // Store reference values
+    // Store reference values for comparison
     let original_http_string = original_request
         .http_request
         .extensions()
         .get::<String>()
         .unwrap()
         .clone();
-    let original_http_number = *original_request
-        .http_request
-        .extensions()
-        .get::<i16>()
-        .unwrap();
+    let original_http_number = *original_request.http_request.extensions().get::<u16>().unwrap();
     let original_context_string = original_request
         .context
-        .get::<_, String>("context_data")
+        .get::<_, String>("router_data")
         .unwrap()
         .unwrap();
     let original_context_number = original_request
         .context
-        .get::<_, u32>("context_number")
+        .get::<_, i64>("router_number")
         .unwrap()
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_request: CoreRequest = original_request.into();
-    let final_request: RouterHttpRequest = core_request.into();
+    let core_request = router_request_to_core_request(original_request).await.unwrap();
+    let final_request = core_request_to_router_request(core_request).await.unwrap();
 
     // Verify HTTP extensions are preserved
     let final_http_string = final_request
@@ -546,11 +573,7 @@ async fn test_mixed_extensions_and_context_preservation() {
         .get::<String>()
         .unwrap()
         .clone();
-    let final_http_number = *final_request
-        .http_request
-        .extensions()
-        .get::<i16>()
-        .unwrap();
+    let final_http_number = *final_request.http_request.extensions().get::<u16>().unwrap();
 
     assert_eq!(original_http_string, final_http_string);
     assert_eq!(original_http_number, final_http_number);
@@ -558,12 +581,12 @@ async fn test_mixed_extensions_and_context_preservation() {
     // Verify router context is preserved
     let final_context_string = final_request
         .context
-        .get::<_, String>("context_data")
+        .get::<_, String>("router_data")
         .unwrap()
         .unwrap();
     let final_context_number = final_request
         .context
-        .get::<_, u32>("context_number")
+        .get::<_, i64>("router_number")
         .unwrap()
         .unwrap();
 
@@ -572,8 +595,5 @@ async fn test_mixed_extensions_and_context_preservation() {
 
     // Verify HTTP properties are still preserved
     assert_eq!(final_request.http_request.method(), "PUT");
-    assert_eq!(
-        final_request.http_request.uri(),
-        "https://example.com/mixed"
-    );
+    assert_eq!(final_request.http_request.uri(), "https://example.com/mixed");
 }
