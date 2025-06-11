@@ -613,9 +613,7 @@ async fn test_intercept_subgraph_network_requests() {
 }
 
 /// This module should be used in place of the `::tracing_test::traced_test` macro,
-/// which instantiates a global subscriber and causes test failures.
-///
-/// Prefer using this function over the `tracing_test::traced_test` macro.
+/// which instantiates a global subscriber via a `OnceLock`, causing test failures.
 ///
 /// # Examples
 ///
