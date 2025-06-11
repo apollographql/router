@@ -7,7 +7,6 @@ use indexmap::IndexMap;
 use crate::connectors::HeaderSource;
 use crate::connectors::models::Header;
 use crate::connectors::models::HeaderParseError;
-use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::connectors::string_template;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -18,7 +17,7 @@ use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
 
 pub(crate) struct Headers<'schema> {
-    headers: Vec<Header<'schema>>,
+    headers: Vec<Header>,
     coordinate: HttpHeadersCoordinate<'schema>,
 }
 
@@ -30,16 +29,9 @@ impl<'schema> Headers<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let sources = &schema.sources;
         let mut messages = Vec::new();
-        let Some(headers_arg) = get_arg(http_arg) else {
-            return Ok(Self {
-                headers: Vec::new(),
-                coordinate,
-            });
-        };
-
         #[allow(clippy::mutable_key_type)]
         let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
-        for header in Header::from_headers_arg(headers_arg) {
+        for header in Header::from_http_arg(http_arg) {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {
@@ -65,7 +57,7 @@ impl<'schema> Headers<'schema> {
                             node,
                         } => (
                             message,
-                            GraphQLString::new(node, sources)
+                            GraphQLString::new(&node, sources)
                                 .ok()
                                 .and_then(|expression| {
                                     expression.line_col_for_subslice(location, schema)
@@ -89,10 +81,10 @@ impl<'schema> Headers<'schema> {
                         "Duplicate header names are not allowed. The header name '{name}' at {coordinate} is already defined.",
                         name = header.name
                     ),
-                    locations: header.name_node.line_column_range(sources)
+                    locations: header.name_node.as_ref().and_then(|name| name.line_column_range(sources))
                         .into_iter()
                         .chain(
-                            duplicate.name_node.line_column_range(sources)
+                            duplicate.name_node.as_ref().and_then(|name| name.line_column_range(sources))
                         )
                         .collect(),
                 });
@@ -118,7 +110,10 @@ impl<'schema> Headers<'schema> {
             let HeaderSource::Value(header_value) = &header.source else {
                 continue;
             };
-            let Ok(expression) = GraphQLString::new(header.source_node, &schema.sources) else {
+            let Some(node) = header.source_node.as_ref() else {
+                continue;
+            };
+            let Ok(expression) = GraphQLString::new(node, &schema.sources) else {
                 // This should never fail in practice, we convert to GraphQLString only to hack in location data
                 continue;
             };
@@ -153,10 +148,4 @@ impl<'schema> Headers<'schema> {
             Err(messages)
         }
     }
-}
-
-fn get_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
-    http_arg
-        .iter()
-        .find_map(|(key, value)| (*key == HEADERS_ARGUMENT_NAME).then_some(value))
 }

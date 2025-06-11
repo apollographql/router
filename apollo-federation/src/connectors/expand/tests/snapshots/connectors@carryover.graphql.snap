@@ -34,7 +34,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -154,11 +154,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
         response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -238,7 +234,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -362,11 +358,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
         response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -452,7 +444,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -492,11 +484,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
         response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
