@@ -645,7 +645,7 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
     assert_eq!(error_code, "INVALID_GRAPHQL_REQUEST");
     assert_eq!(
         error_details,
-        "failed to deserialize the request body into JSON: expected value at line 1 column 1"
+        "failed to deserialize the request body from JSON: expected value at line 1 column 1"
     );
     assert_eq!(error_message, "Invalid GraphQL request");
     server.shutdown().await
