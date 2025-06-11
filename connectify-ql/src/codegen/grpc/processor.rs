@@ -5,6 +5,7 @@ use crate::codegen::grpc::GrpcCodegenError;
 use crate::codegen::grpc::types::{AvailableType, GraphqlType, GrpcType};
 use crate::sources::Grpc;
 use convert_case::{Boundary, Case, Casing};
+use prost_types::field_descriptor_proto::Label;
 use prost_types::{DescriptorProto, EnumDescriptorProto, ServiceDescriptorProto};
 
 pub fn process_enum_types(
@@ -95,6 +96,7 @@ pub fn process_message_types(
                     &field.name,
                     field.type_name.iter().cloned(),
                     field.r#type,
+                    field.label().as_str_name() == Label::Repeated.as_str_name(),
                     field.proto3_optional(),
                 )
             })
@@ -128,7 +130,9 @@ pub fn process_message_types(
                 name
             )?;
         };
-        for (idx, attribute_name, mut attribute_type_name, attribute_type, is_optional) in values {
+        for (idx, attribute_name, mut attribute_type_name, attribute_type, is_array, is_optional) in
+            values
+        {
             write!(
                 content,
                 "  {}: ",
@@ -155,9 +159,11 @@ pub fn process_message_types(
 
             writeln!(
                 content,
-                "{}{}",
+                "{}{}{}{}",
+                if is_array { "[" } else { "" },
                 field_type,
-                if is_optional { "" } else { "!" }
+                if is_optional { "" } else { "!" },
+                if is_array { "]!" } else { "" },
             )?;
         }
         writeln!(content, "}}\n",)?;

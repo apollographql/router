@@ -20,7 +20,7 @@ type User {
   name: String!
   email_address: String!
   status: Status
-  children: String!
+  children: [String!]!
 }
 
 type Query {
