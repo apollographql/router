@@ -25,28 +25,23 @@ pub(crate) struct SubgraphMetadata {
 }
 
 impl SubgraphMetadata {
-    /// Create SubgraphMetadata from a SubgraphRequest
-    pub(crate) fn from_request(request: &SubgraphRequest) -> Self {
+    /// Create SubgraphMetadata from deconstructed SubgraphRequest parts
+    /// This avoids cloning by consuming the Arc values directly
+    pub(crate) fn from_parts(
+        operation_kind: OperationKind,
+        subgraph_name: String,
+        id: SubgraphRequestId,
+        authorization: Arc<CacheKeyMetadata>,
+        query_hash: Arc<QueryHash>,
+        executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+    ) -> Self {
         Self {
-            operation_kind: request.operation_kind,
-            subgraph_name: request.subgraph_name.clone(),
-            id: request.id.clone(),
-            authorization: Arc::try_unwrap(request.authorization.clone()).ok(),
-            query_hash: Arc::try_unwrap(request.query_hash.clone()).ok(),
-            executable_document: request.executable_document.as_ref()
-                .and_then(|doc| Arc::try_unwrap(doc.clone()).ok()),
-        }
-    }
-
-    /// Create SubgraphMetadata from a SubgraphResponse
-    pub(crate) fn from_response(response: &SubgraphResponse) -> Self {
-        Self {
-            operation_kind: OperationKind::Query, // Default for responses
-            subgraph_name: response.subgraph_name.clone(),
-            id: response.id.clone(),
-            authorization: None,
-            query_hash: None,
-            executable_document: None,
+            operation_kind,
+            subgraph_name,
+            id,
+            authorization: Arc::try_unwrap(authorization).ok(),
+            query_hash: Arc::try_unwrap(query_hash).ok(),
+            executable_document: executable_document.and_then(|doc| Arc::try_unwrap(doc).ok()),
         }
     }
 
@@ -116,18 +111,37 @@ impl From<CoreJsonRequest> for SubgraphRequest {
 // Convert from Router SubgraphRequest to Router Core JsonRequest  
 impl From<SubgraphRequest> for CoreJsonRequest {
     fn from(subgraph_request: SubgraphRequest) -> Self {
+        // Deconstruct the SubgraphRequest into parts without cloning
+        let (
+            http_request,
+            context,
+            operation_kind,
+            subgraph_name,
+            id,
+            authorization,
+            query_hash,
+            executable_document,
+        ) = subgraph_request.into_parts();
+        
         // Serialize the GraphQL request body to JSON
-        let json_body = serde_json::to_value(subgraph_request.subgraph_request.body())
+        let json_body = serde_json::to_value(http_request.body())
             .unwrap_or_default();
         
-        // Create subgraph metadata before moving fields out of the struct
-        let metadata = SubgraphMetadata::from_request(&subgraph_request);
+        // Create subgraph metadata from the deconstructed parts
+        let metadata = SubgraphMetadata::from_parts(
+            operation_kind,
+            subgraph_name,
+            id,
+            authorization,
+            query_hash,
+            executable_document,
+        );
         
         // Create new extensions and populate with data
         let mut extensions = apollo_router_core::Extensions::new();
         
         // Store context
-        extensions.insert(subgraph_request.context);
+        extensions.insert(context);
         
         // Store subgraph metadata as a single struct
         extensions.insert(metadata);
@@ -147,22 +161,22 @@ impl From<CoreJsonResponse> for SubgraphResponse {
             .extensions
             .get::<Context>()
             .unwrap_or_else(Context::new);
-        
+
         // Extract subgraph metadata from extensions
         let metadata = SubgraphMetadata::from_extensions(&core_response.extensions);
-        
+
         // For now, we'll create a default GraphQL response and note that this
         // conversion loses the streaming nature. In a real implementation, you might
         // want to collect all stream items or handle streaming responses differently.
         let graphql_response = graphql::Response::default();
-        
+
         // Create HTTP response wrapper
         let http_response = http::Response::builder()
             .status(200)
             .header("content-type", "application/json")
             .body(graphql_response)
             .expect("building HTTP response should not fail");
-        
+
         SubgraphResponse {
             response: http_response,
             context,
@@ -175,18 +189,28 @@ impl From<CoreJsonResponse> for SubgraphResponse {
 // Convert from Router SubgraphResponse to Router Core JsonResponse
 impl From<SubgraphResponse> for CoreJsonResponse {
     fn from(subgraph_response: SubgraphResponse) -> Self {
+        // Deconstruct the SubgraphResponse into parts without cloning
+        let (http_response, context, subgraph_name, id) = subgraph_response.into_parts();
+        
         // Serialize the GraphQL response to JSON
-        let json_response = serde_json::to_value(subgraph_response.response.body())
+        let json_response = serde_json::to_value(http_response.body())
             .unwrap_or_default();
         
-        // Create subgraph metadata before moving fields out of the struct
-        let metadata = SubgraphMetadata::from_response(&subgraph_response);
+        // Create subgraph metadata from the deconstructed parts
+        let metadata = SubgraphMetadata {
+            operation_kind: OperationKind::Query, // Default for responses
+            subgraph_name,
+            id,
+            authorization: None,
+            query_hash: None,
+            executable_document: None,
+        };
         
         // Create new extensions and populate with data
         let mut extensions = apollo_router_core::Extensions::new();
         
         // Store context
-        extensions.insert(subgraph_response.context);
+        extensions.insert(context);
         
         // Store subgraph metadata as a single struct
         extensions.insert(metadata);
@@ -202,4 +226,4 @@ impl From<SubgraphResponse> for CoreJsonResponse {
 }
 
 #[cfg(test)]
-mod tests; 
+mod tests;
