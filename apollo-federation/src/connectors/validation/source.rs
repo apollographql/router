@@ -1,21 +1,13 @@
 //! Validates `@source` directives
 
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
-use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Value;
 use hashbrown::HashMap;
 
 use super::coordinates::SourceDirectiveCoordinate;
-use super::coordinates::source_name_argument_coordinate;
-use super::coordinates::source_name_value_coordinate;
 use super::errors::ErrorsCoordinate;
 use super::http::UrlProperties;
+use crate::connectors::SourceName;
 use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::connectors::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
@@ -31,7 +23,7 @@ use crate::connectors::validation::parse_url;
 
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
-    pub(crate) name: SourceName<'schema>,
+    pub(crate) name: SourceName,
     directive: &'schema Component<Directive>,
     url: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
@@ -55,9 +47,9 @@ impl<'schema> SourceDirective<'schema> {
         let mut valid_source_names = HashMap::new();
         for directive in &directives {
             valid_source_names
-                .entry(&directive.name.0)
+                .entry(directive.name.as_str())
                 .or_insert_with(Vec::new)
-                .extend(directive.directive.node.line_column_range(&schema.sources))
+                .extend(directive.directive.node.line_column_range(&schema.sources));
         }
         for (name, locations) in valid_source_names {
             if locations.len() > 1 {
@@ -78,13 +70,21 @@ impl<'schema> SourceDirective<'schema> {
         let mut messages = Vec::new();
         let (name, name_messages) = SourceName::from_directive(directive, &schema.sources);
         messages.extend(name_messages);
+        let Some(name) = name else {
+            return (None, messages);
+        };
 
         let coordinate = SourceDirectiveCoordinate {
             directive,
-            name: name.unwrap_or_default(),
+            name: name.clone(),
         };
 
-        let errors = match Errors::parse(ErrorsCoordinate::Source { source: coordinate }, schema) {
+        let errors = match Errors::parse(
+            ErrorsCoordinate::Source {
+                source: coordinate.clone(),
+            },
+            schema,
+        ) {
             Ok(errors) => Some(errors),
             Err(errs) => {
                 messages.extend(errs);
@@ -108,7 +108,7 @@ impl<'schema> SourceDirective<'schema> {
                     .collect(),
             });
             return (
-                name.map(|name| SourceDirective {
+                Some(SourceDirective {
                     name,
                     schema,
                     directive,
@@ -160,7 +160,7 @@ impl<'schema> SourceDirective<'schema> {
         };
 
         (
-            name.map(|name| SourceDirective {
+            Some(SourceDirective {
                 name,
                 directive,
                 url,
@@ -187,110 +187,5 @@ impl<'schema> SourceDirective<'schema> {
             messages.extend(headers.type_check(self.schema).err().into_iter().flatten());
         }
         messages
-    }
-}
-
-/// The `name` argument of a `@source` directive.
-#[derive(Clone, Debug, Copy, Default)]
-pub(super) struct SourceName<'schema>(&'schema str);
-
-impl<'schema> SourceName<'schema> {
-    pub(crate) fn from_directive(
-        directive: &'schema Component<Directive>,
-        sources: &SourceMap,
-    ) -> (Option<Self>, Option<Message>) {
-        let directive_name = directive.name.clone();
-        let Some(arg) = directive
-            .arguments
-            .iter()
-            .find(|arg| arg.name == SOURCE_NAME_ARGUMENT_NAME)
-        else {
-            return (
-                None,
-                Some(Message {
-                    code: Code::GraphQLError,
-                    message: format!(
-                        "The {coordinate} argument is required.",
-                        coordinate = source_name_argument_coordinate(&directive_name)
-                    ),
-                    locations: directive.line_column_range(sources).into_iter().collect(),
-                }),
-            );
-        };
-        let value = &arg.value;
-        let Some(str_value) = value.as_str() else {
-            return (
-                None,
-                Some(Message {
-                    message: format!(
-                        "{coordinate} is invalid; source names must be strings.",
-                        coordinate = source_name_value_coordinate(&directive_name, value)
-                    ),
-                    code: Code::InvalidSourceName,
-                    locations: value.line_column_range(sources).into_iter().collect(),
-                }),
-            );
-        };
-        let name = Some(Self(str_value));
-        let Some(first_char) = str_value.chars().next() else {
-            return (
-                name,
-                Some(Message {
-                    code: Code::EmptySourceName,
-                    message: format!(
-                        "The value for {coordinate} can't be empty.",
-                        coordinate = source_name_argument_coordinate(&directive_name)
-                    ),
-                    locations: arg.value.line_column_range(sources).into_iter().collect(),
-                }),
-            );
-        };
-        let message = if !first_char.is_ascii_alphabetic() {
-            Some(Message {
-                message: format!(
-                    "{coordinate} is invalid; source names must start with an ASCII letter (a-z or A-Z)",
-                    coordinate = source_name_value_coordinate(&directive_name, value)
-                ),
-                code: Code::InvalidSourceName,
-                locations: value.line_column_range(sources).into_iter().collect(),
-            })
-        } else if str_value.len() > 64 {
-            Some(Message {
-                message: format!(
-                    "{coordinate} is invalid; source names must be 64 characters or fewer",
-                    coordinate = source_name_value_coordinate(&directive_name, value)
-                ),
-                code: Code::InvalidSourceName,
-                locations: value.line_column_range(sources).into_iter().collect(),
-            })
-        } else {
-            str_value
-            .chars()
-            .find(|c| !c.is_ascii_alphanumeric() && *c != '_' && *c != '-').map(|unacceptable| Message {
-                message: format!(
-                    "{coordinate} can't contain `{unacceptable}`; only ASCII letters, numbers, underscores, or hyphens are allowed",
-                    coordinate = source_name_value_coordinate(&directive_name, value)
-                ),
-                code: Code::InvalidSourceName,
-                locations: value.line_column_range(sources).into_iter().collect(),
-            })
-        };
-        (name, message)
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        self.0
-    }
-}
-
-impl Display for SourceName<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl PartialEq<Node<Value>> for SourceName<'_> {
-    fn eq(&self, other: &Node<Value>) -> bool {
-        other.as_str().is_some_and(|value| value == self.0)
     }
 }

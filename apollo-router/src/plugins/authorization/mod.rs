@@ -52,15 +52,10 @@ pub(crate) mod authenticated;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
-pub(crate) const DEPRECATED_AUTHENTICATION_REQUIRED_KEY: &str =
-    "apollo_authorization::authenticated::required";
 pub(crate) const AUTHENTICATION_REQUIRED_KEY: &str =
     "apollo::authorization::authentication_required";
 pub(crate) const REQUIRED_SCOPES_KEY: &str = "apollo::authorization::required_scopes";
-pub(crate) const DEPRECATED_REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 pub(crate) const REQUIRED_POLICIES_KEY: &str = "apollo::authorization::required_policies";
-pub(crate) const DEPRECATED_REQUIRED_POLICIES_KEY: &str =
-    "apollo_authorization::policies::required";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
