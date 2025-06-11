@@ -52,6 +52,8 @@ static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     )
 });
 
+static ENV_SHAPE: LazyLock<Shape> = LazyLock::new(|| Shape::dict(Shape::string([]), []));
+
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
 pub(super) struct Context<'schema> {
@@ -84,6 +86,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Env, ENV_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -107,6 +110,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Env, ENV_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -143,6 +147,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Status, Shape::int([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
                     (Namespace::Response, RESPONSE_SHAPE.clone()),
+                    (Namespace::Env, ENV_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -168,6 +173,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Status, Shape::int([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
                     (Namespace::Response, RESPONSE_SHAPE.clone()),
+                    (Namespace::Env, ENV_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -193,6 +199,7 @@ impl<'schema> Context<'schema> {
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
             (Namespace::Request, REQUEST_SHAPE.clone()),
+            (Namespace::Env, ENV_SHAPE.clone()),
         ]
         .into_iter()
         .collect();
@@ -218,6 +225,7 @@ impl<'schema> Context<'schema> {
             (Namespace::Status, Shape::int([])),
             (Namespace::Request, REQUEST_SHAPE.clone()),
             (Namespace::Response, RESPONSE_SHAPE.clone()),
+            (Namespace::Env, ENV_SHAPE.clone()),
         ]
         .into_iter()
         .collect();
