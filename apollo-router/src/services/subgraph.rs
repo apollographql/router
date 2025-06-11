@@ -293,7 +293,7 @@ impl Response {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor's map special-casing
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -327,7 +327,7 @@ impl Response {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor's map special-casing
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -373,49 +373,9 @@ impl Response {
             id,
         )
     }
-
-    /// Deconstruct the SubgraphResponse into its constituent parts without cloning
-    /// This is used for efficient conversion to other response types
-    pub(crate) fn into_parts(self) -> (
-        http::Response<graphql::Response>, // response
-        Context,                           // context
-        String,                            // subgraph_name
-        SubgraphRequestId,                 // id
-    ) {
-        (
-            self.response,
-            self.context,
-            self.subgraph_name,
-            self.id,
-        )
-    }
 }
 
 impl Request {
-    /// Deconstruct the SubgraphRequest into its constituent parts without cloning
-    /// This is used for efficient conversion to other request types
-    pub(crate) fn into_parts(self) -> (
-        http::Request<graphql::Request>, // subgraph_request
-        Context,                         // context
-        OperationKind,                   // operation_kind
-        String,                          // subgraph_name
-        SubgraphRequestId,               // id
-        Arc<CacheKeyMetadata>,           // authorization
-        Arc<QueryHash>,                  // query_hash
-        Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>, // executable_document
-    ) {
-        (
-            self.subgraph_request,
-            self.context,
-            self.operation_kind,
-            self.subgraph_name,
-            self.id,
-            self.authorization,
-            self.query_hash,
-            self.executable_document,
-        )
-    }
-
     pub(crate) fn to_sha256(&self, ignored_headers: &HashSet<String>) -> String {
         let mut hasher = Sha256::new();
         let http_req = &self.subgraph_request;
