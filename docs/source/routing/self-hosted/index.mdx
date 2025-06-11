@@ -1,6 +1,6 @@
 ---
-title: Self-Hosted Router
-subtitle: Host and deploy routers in your own infrastructure
+title: Self-Hosting the Apollo Router
+subtitle: How to deploy the router on your own infrastructure
 description: Distribute operations efficiently across microservices in your federated GraphQL API with the Apollo GraphOS Router or Apollo Router Core. Configure caching, security features, and more.
 ---
 
@@ -19,31 +19,31 @@ flowchart LR;
   class clients secondary;
 ```
 
-<Note>
+For each version of the Apollo Router, Apollo provides:
 
-Self-hosting the GraphOS Router requires a current GraphOS [Enterprise or Free plan](https://www.apollographql.com/pricing).
+- [A Helm chart for Kubernetes](#kubernetes-using-helm)
+- [A binary](#local-binary)
+- [A Docker image](#container)
 
-</Note>
+## Kubernetes using Helm
 
-## Downloading and installing a self-hosted router
+Helm is a package manager for Kubernetes. Apollo provides a Helm chart with each release of Apollo Router in the GitHub Container Registry. Since router v0.14.0, Apollo has released each router Helm chart as an Open Container Initiative (OCI) image in `oci://ghcr.io/apollographql/helm-charts/router`.
 
-Apollo provides the router as both a binary and as images to run in your containerized deployments.
+Follow our [Kubernetes quickstart](/graphos/routing/kubernetes/quickstart) to deploy the router with a Helm chart.
 
-### Router binary
+## Docker
 
-Apollo provides a binary of the router for multiple platforms. You can download the router bundle, extract the router binary, and run it. 
+Apollo provides Docker images for each release of Apollo Router. The images are available via GitHub, downloadable from the `ghcr.io/apollographql/router` and the [router repository](https://github.com/apollographql/router/pkgs/container/router). Both debug and production images are provided.
 
-To learn more, follow the steps in the [self-hosted router installation](/graphos/reference/router/self-hosted-install) reference to run a router binary with a sample supergraph schema.
+For more information on deploying using your container environment:
 
-### Router container image
+- [Docker](/graphos/routing/self-hosted/containerization/docker)
+- [AWS using Elastic Container Service (ECS)](/graphos/routing/self-hosted/containerization/aws)
+- [Azure using Azure Container App](/graphos/routing/self-hosted/containerization/azure)
+- [GCP using Google Cloud Run](/graphos/routing/self-hosted/containerization/gcp)
 
-Apollo provides container images of the router to deploy in self-hosted environments. The router images are hosted on GitHub in its container repository. Each router release includes both production and debug images. 
+## Local binary
 
-To learn more, go to the [containerization overview](/graphos/routing/self-hosted/containerization).
+Running the Apollo Router directly from its binary speeds up local development and enables embedded use cases where containers are unavailable. 
 
-- If running with Docker, go to the [Docker](/graphos/routing/self-hosted/containerization/docker) docs to learn how to run router images.
-- If running with Kubernetes, go to the [Kubernetes](/graphos/routing/self-hosted/containerization/kubernetes) docs to learn to deploy with router Helm charts.
-
-## Next steps
-
-- To prepare your routers for production deployment, follow the guides in [Production Readiness](/graphos/platform/production-readiness/checklist) docs.
+Follow the [quickstart](/graphos/routing/get-started) to run a router binary.
