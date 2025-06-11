@@ -97,13 +97,10 @@ static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService {
-    apq_layer: Arc<APQLayer>,
-    persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: Arc<QueryAnalysisLayer>,
     // Cannot be under Arc. Batching state must be preserved for each RouterService
     // instance
     batching: Batching,
-    supergraph_service: supergraph::BoxCloneService,
+    supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
 }
 
 impl RouterService {
@@ -117,10 +114,14 @@ impl RouterService {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
 
-        RouterService {
-            apq_layer: Arc::new(apq_layer),
+        let supergraph_service = PrepareSupergraphService::new(
+            supergraph_service,
+            Arc::new(apq_layer),
             persisted_query_layer,
-            query_analysis_layer: Arc::new(query_analysis_layer),
+            Arc::new(query_analysis_layer),
+        );
+
+        RouterService {
             batching,
             supergraph_service,
         }
@@ -229,12 +230,9 @@ impl Service<RouterRequest> for RouterService {
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         let self_clone = self.clone();
-
         let this = std::mem::replace(self, self_clone);
 
-        let fut = async move { this.call_inner(req).await };
-
-        Box::pin(fut)
+        Box::pin(async move { this.call_inner(req).await })
     }
 }
 
@@ -243,182 +241,17 @@ impl RouterService {
         self,
         supergraph_request: SupergraphRequest,
     ) -> Result<router::Response, BoxError> {
-        // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
-        // layers with various ifs and matches, but *really*, we are calling each layer in order
-        // and handling short-circuiting.
-        let mut request_res = self
-            .persisted_query_layer
-            .supergraph_request(supergraph_request);
-
-        if let Ok(supergraph_request) = request_res {
-            request_res = self.apq_layer.supergraph_request(supergraph_request).await;
-        }
-
-        let SupergraphResponse { response, context } = match request_res {
-            Err(response) => response,
-            Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
-                Err(response) => response,
-                Ok(request) => match self
-                    .persisted_query_layer
-                    .supergraph_request_with_analyzed_query(request)
-                    .await
-                {
-                    Err(response) => response,
-                    Ok(request) => {
-                        // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are unready by default, so this
-                        // self.supergraph_service is actually not ready, which is why we need to
-                        // oneshot it here. That technically breaks backpressure, but because we are
-                        // still readying the supergraph service before calling into the router
-                        // service, backpressure is actually still exerted at that point--there's
-                        // just potential for some requests to slip through the cracks and end up
-                        // queueing up at this .oneshot() call.
-                        //
-                        // Not ideal, but an improvement on the situation in Router 1.x.
-                        self.supergraph_service.oneshot(request).await?
-                    }
-                },
-            },
-        };
-
-        // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
-        // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
-        // or the other, and absolutely not do it inline here.
-        let ClientRequestAccepts {
-            wildcard: accepts_wildcard,
-            json: accepts_json,
-            multipart_defer: accepts_multipart_defer,
-            multipart_subscription: accepts_multipart_subscription,
-        } = context
-            .extensions()
-            .with_lock(|lock| lock.get().cloned())
-            .unwrap_or_default();
-
-        let (mut parts, mut body) = response.into_parts();
-        process_vary_header(&mut parts.headers);
-
-        if context
-            .extensions()
-            .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
-        {
-            parts.status = StatusCode::from_u16(499)
-                .expect("499 is not a standard status code but common enough");
-        }
-
-        match body.next().await {
-            None => {
-                tracing::error!("router service is not available to process request",);
-                router::Response::error_builder()
-                    .error(
-                        graphql::Error::builder()
-                            .message(String::from(
-                                "router service is not available to process request",
-                            ))
-                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.to_string())
-                            .build(),
-                    )
-                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .context(context)
-                    .build()
-            }
-            Some(response) => {
-                if !response.has_next.unwrap_or(false)
-                    && !response.subscribed.unwrap_or(false)
-                    && (accepts_json || accepts_wildcard)
-                {
-                    let errors = response.errors.clone();
-
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
-                        .in_scope(|| {
-                            let body = serde_json::to_string(&response)?;
-                            Ok(body)
-                        });
-                    let body = body?;
-                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-                    let display_router_response = context
-                        .extensions()
-                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
-
-                    router::Response::http_response_builder()
-                        .response(Response::from_parts(
-                            parts,
-                            router::body::from_bytes(body.clone()),
-                        ))
-                        .and_body_to_stash(if display_router_response {
-                            Some(body)
-                        } else {
-                            None
-                        })
-                        .context(context)
-                        .errors_for_context(errors)
-                        .build()
-                } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    }
-
-                    let errors = response.errors.clone();
-
-                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
-                    parts.headers.insert(
-                        ACCEL_BUFFERING_HEADER_NAME.clone(),
-                        ACCEL_BUFFERING_HEADER_VALUE.clone(),
-                    );
-                    let response = match response.subscribed {
-                        Some(true) => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                body,
-                                ProtocolMode::Subscription,
-                            )),
-                        ),
-                        _ => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                once(ready(response)).chain(body),
-                                ProtocolMode::Defer,
-                            )),
-                        ),
-                    };
-                    RouterResponse::http_response_builder()
-                        .response(response)
-                        .context(context)
-                        .errors_for_context(errors)
-                        .build()
-                } else {
-                    // this should be unreachable due to a previous check, but just to be sure...
-                    Ok(router::Response::error_builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-                                        APPLICATION_JSON.essence_str(),
-                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_ACCEPT,
-                                        MULTIPART_SUBSCRIPTION_ACCEPT,
-                                    ))
-                                    .extension_code("INVALID_ACCEPT_HEADER")
-                                    .build(),
-                            )
-                            .status_code(StatusCode::NOT_ACCEPTABLE)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .context(context)
-                            .build()?)
-                }
-            }
-        }
+        // self.supergraph_service here is a clone of the service that was readied
+        // in RouterService::poll_ready. Clones are unready by default, so this
+        // self.supergraph_service is actually not ready, which is why we need to
+        // oneshot it here. That technically breaks backpressure, but because we are
+        // still readying the supergraph service before calling into the router
+        // service, backpressure is actually still exerted at that point--there's
+        // just potential for some requests to slip through the cracks and end up
+        // queueing up at this .oneshot() call.
+        //
+        // Not ideal, but an improvement on the situation in Router 1.x.
+        self.supergraph_service.oneshot(supergraph_request).await
     }
 
     async fn call_inner(self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
@@ -805,6 +638,227 @@ struct TranslateError {
     status: StatusCode,
     extension_code: String,
     extension_details: String,
+}
+
+/// The portion of the old RouterService that executes _after_ the request has been transformed to
+/// a supergraph request.
+/// This should become a stack of layers in the future.
+///
+/// FIXME(@goto-bus-stop): Ideally I'd want to make this generic over the inner service, but this
+/// results in a hard to understand lifetime error today (involving spooky action at a distance).
+/// Using a concrete BoxCloneService is okay for now and not a regression compared to the previous
+/// situation.
+#[derive(Clone)]
+struct PrepareSupergraphService {
+    inner: supergraph::BoxCloneService,
+    apq_layer: Arc<APQLayer>,
+    persisted_query_layer: Arc<PersistedQueryLayer>,
+    query_analysis_layer: Arc<QueryAnalysisLayer>,
+}
+
+impl PrepareSupergraphService {
+    fn new(
+        inner: supergraph::BoxCloneService,
+        apq_layer: Arc<APQLayer>,
+        persisted_query_layer: Arc<PersistedQueryLayer>,
+        query_analysis_layer: Arc<QueryAnalysisLayer>,
+    ) -> Self {
+        Self {
+            inner,
+            apq_layer,
+            persisted_query_layer,
+            query_analysis_layer,
+        }
+    }
+}
+
+impl Service<SupergraphRequest> for PrepareSupergraphService
+// where
+//     S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Clone + Send + 'static,
+//     S::Future: Send + 'static,
+// S::Error: Into<BoxError> + Send + 'static,
+{
+    // XXX(@goto-bus-stop): as this was a part of the RouterService, it has a weird contract where
+    // it receives a _supergraph_ request but replies with a _router_ response. To solve this we'll
+    // move some code around later.
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+        // Use the readied service for this call, and replace it with an unready clone for the next call.
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        let persisted_query_layer = self.persisted_query_layer.clone();
+        let apq_layer = self.apq_layer.clone();
+        let query_analysis_layer = self.query_analysis_layer.clone();
+
+        Box::pin(async move {
+            // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
+            // layers with various ifs and matches, but *really*, we are calling each layer in order
+            // and handling short-circuiting.
+            let mut request_res = persisted_query_layer.supergraph_request(req);
+
+            if let Ok(req) = request_res {
+                request_res = apq_layer.supergraph_request(req).await;
+            }
+
+            let SupergraphResponse { response, context } = match request_res {
+                Err(response) => response,
+                Ok(request) => match query_analysis_layer.supergraph_request(request).await {
+                    Err(response) => response,
+                    Ok(request) => match persisted_query_layer
+                        .supergraph_request_with_analyzed_query(request)
+                        .await
+                    {
+                        Err(response) => response,
+                        Ok(request) => inner.call(request).await?,
+                    },
+                },
+            };
+
+            // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
+            // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
+            // or the other, and absolutely not do it inline here.
+            let ClientRequestAccepts {
+                wildcard: accepts_wildcard,
+                json: accepts_json,
+                multipart_defer: accepts_multipart_defer,
+                multipart_subscription: accepts_multipart_subscription,
+            } = context
+                .extensions()
+                .with_lock(|lock| lock.get().cloned())
+                .unwrap_or_default();
+
+            let (mut parts, mut body) = response.into_parts();
+            process_vary_header(&mut parts.headers);
+
+            if context
+                .extensions()
+                .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
+            {
+                parts.status = StatusCode::from_u16(499)
+                    .expect("499 is not a standard status code but common enough");
+            }
+
+            match body.next().await {
+                None => {
+                    tracing::error!("router service is not available to process request",);
+                    Ok(router::Response {
+                        response: http::Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .body(router::body::from_bytes(
+                                "router service is not available to process request",
+                            ))
+                            .expect("cannot fail"),
+                        context,
+                    })
+                }
+                Some(response) => {
+                    if !response.has_next.unwrap_or(false)
+                        && !response.subscribed.unwrap_or(false)
+                        && (accepts_json || accepts_wildcard)
+                    {
+                        let errors = response.errors.clone();
+
+                        parts
+                            .headers
+                            .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                        let body: Result<String, BoxError> =
+                            tracing::trace_span!("serialize_response").in_scope(|| {
+                                let body = serde_json::to_string(&response)?;
+                                Ok(body)
+                            });
+                        let body = body?;
+                        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                        let display_router_response = context
+                            .extensions()
+                            .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
+
+                        router::Response::http_response_builder()
+                            .response(Response::from_parts(
+                                parts,
+                                router::body::from_bytes(body.clone()),
+                            ))
+                            .and_body_to_stash(if display_router_response {
+                                Some(body)
+                            } else {
+                                None
+                            })
+                            .context(context)
+                            .errors_for_context(errors)
+                            .build()
+                    } else if accepts_multipart_defer || accepts_multipart_subscription {
+                        let errors = response.errors.clone();
+
+                        if accepts_multipart_defer {
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
+                            );
+                        } else if accepts_multipart_subscription {
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
+                            );
+                        }
+                        // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                        parts.headers.insert(
+                            ACCEL_BUFFERING_HEADER_NAME.clone(),
+                            ACCEL_BUFFERING_HEADER_VALUE.clone(),
+                        );
+
+                        let response = match response.subscribed {
+                            Some(true) => http::Response::from_parts(
+                                parts,
+                                router::body::from_result_stream(Multipart::new(
+                                    body,
+                                    ProtocolMode::Subscription,
+                                )),
+                            ),
+                            _ => http::Response::from_parts(
+                                parts,
+                                router::body::from_result_stream(Multipart::new(
+                                    once(ready(response)).chain(body),
+                                    ProtocolMode::Defer,
+                                )),
+                            ),
+                        };
+
+                        router::Response::http_response_builder()
+                            .response(response)
+                            .context(context)
+                            .errors_for_context(errors)
+                            .build()
+                    } else {
+                        // this should be unreachable due to a previous check, but just to be sure...
+                        Ok(router::Response::error_builder()
+                            .error(
+                                graphql::Error::builder()
+                                    .message(format!(
+                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
+                                        APPLICATION_JSON.essence_str(),
+                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                        MULTIPART_DEFER_ACCEPT,
+                                        MULTIPART_SUBSCRIPTION_ACCEPT,
+                                    ))
+                                    .extension_code("INVALID_ACCEPT_HEADER")
+                                    .build(),
+                            )
+                            .status_code(StatusCode::NOT_ACCEPTABLE)
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .context(context)
+                            .build()?)
+                    }
+                }
+            }
+        })
+    }
 }
 
 // Process the headers to make sure that `VARY` is set correctly
