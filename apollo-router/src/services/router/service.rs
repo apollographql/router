@@ -7,7 +7,6 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
-use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::future::join_all;
 use futures::future::ready;
@@ -87,12 +86,9 @@ static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-acce
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
 
 /// Containing [`Service`] in the request lifecyle.
-#[derive(Clone)]
 pub(crate) struct RouterService {
-    // Cannot be under Arc. Batching state must be preserved for each RouterService
-    // instance
-    batching: Batching,
-    supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
+    // A service stack for the actual implementation of the router service.
+    service: router::BoxService,
 }
 
 impl RouterService {
@@ -116,13 +112,12 @@ impl RouterService {
         );
 
         let service = ServiceBuilder::new()
-            .service(supergraph_service.clone())
+            .layer(BatchingLayer::new(batching))
+            .layer(RouterToSupergraphRequestLayer)
+            .service(supergraph_service)
             .boxed();
 
-        RouterService {
-            batching,
-            supergraph_service,
-        }
+        RouterService { service }
     }
 }
 
@@ -137,10 +132,10 @@ impl BatchingLayer {
 }
 
 // TODO(@goto-bus-stop): genericise
-impl tower::Layer<crate::services::router::BoxCloneService> for BatchingLayer {
+impl tower::Layer<RouterToSupergraphRequestService> for BatchingLayer {
     type Service = BatchingService;
 
-    fn layer(&self, inner: crate::services::router::BoxCloneService) -> Self::Service {
+    fn layer(&self, inner: RouterToSupergraphRequestService) -> Self::Service {
         BatchingService {
             inner,
             config: self.config.clone(),
@@ -151,7 +146,7 @@ impl tower::Layer<crate::services::router::BoxCloneService> for BatchingLayer {
 #[derive(Clone)]
 struct BatchingService {
     // TODO(@goto-bus-stop): genericise
-    inner: crate::services::router::BoxCloneService,
+    inner: RouterToSupergraphRequestService,
     config: Batching,
 }
 impl Service<RouterRequest> for BatchingService {
@@ -604,6 +599,42 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
+        self.service.call(req)
+    }
+}
+
+/// A layer that translates router requests (streaming http bodies) into supergraph requests
+/// (JSON bodies in the GraphQL spec format).
+struct RouterToSupergraphRequestLayer;
+
+// TODO(@goto-bus-stop): genericise
+impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
+    type Service = RouterToSupergraphRequestService;
+
+    fn layer(&self, inner: PrepareSupergraphService) -> Self::Service {
+        RouterToSupergraphRequestService {
+            supergraph_service: inner,
+        }
+    }
+}
+
+/// A service that translates router requests (streaming http bodies) into supergraph requests
+/// (JSON bodies in the GraphQL spec format).
+#[derive(Clone)]
+struct RouterToSupergraphRequestService {
+    supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
+}
+
+impl Service<RouterRequest> for RouterToSupergraphRequestService {
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.supergraph_service.poll_ready(cx)
     }
 
@@ -615,7 +646,7 @@ impl Service<RouterRequest> for RouterService {
     }
 }
 
-impl RouterService {
+impl RouterToSupergraphRequestService {
     async fn call_inner(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
@@ -1068,12 +1099,6 @@ impl RouterCreator {
             configuration.batching.clone(),
             TelemetryConfig::apollo(&configuration),
         );
-
-        // FIXME(@goto-bus-stop): This is temporary, the BatchingLayer should happen _inside_ the
-        // RouterService, but for that the RouterService needs to be split up further
-        let router_service = ServiceBuilder::new()
-            .layer(BatchingLayer::new(configuration.batching.clone()))
-            .service(router_service.boxed_clone());
 
         // NOTE: This is the start of the router pipeline (router_service)
         let sb = Buffer::new(
