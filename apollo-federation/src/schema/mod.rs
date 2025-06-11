@@ -68,6 +68,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
 pub(crate) mod definitions;
+pub(crate) mod directive_location;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;

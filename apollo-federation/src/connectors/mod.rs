@@ -45,6 +45,7 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
+pub use models::Header;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
@@ -57,6 +58,7 @@ pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
 pub use self::models::MakeUriError;
+pub use self::models::SourceName;
 pub use self::spec::schema::ConnectBatchArguments;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -66,7 +68,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
-    pub source_name: Option<String>,
+    pub source_name: Option<SourceName>,
     pub(crate) directive: ConnectorPosition,
 }
 
@@ -81,8 +83,12 @@ impl ConnectId {
     }
 
     pub fn subgraph_source(&self) -> String {
-        let source = format!(".{}", self.source_name.as_deref().unwrap_or(""));
-        format!("{}{}", self.subgraph_name, source)
+        let source = self
+            .source_name
+            .as_ref()
+            .map(SourceName::as_str)
+            .unwrap_or_default();
+        format!("{}.{}", self.subgraph_name, source)
     }
 
     pub fn coordinate(&self) -> String {
@@ -115,7 +121,7 @@ impl ConnectId {
     /// Intended for tests in apollo-router
     pub fn new(
         subgraph_name: String,
-        source_name: Option<String>,
+        source_name: Option<SourceName>,
         type_name: Name,
         field_name: Name,
         index: usize,
@@ -141,7 +147,7 @@ impl ConnectId {
     /// Intended for tests in apollo-router
     pub fn new_on_object(
         subgraph_name: String,
-        source_name: Option<String>,
+        source_name: Option<SourceName>,
         type_name: Name,
         index: usize,
         label: &str,
