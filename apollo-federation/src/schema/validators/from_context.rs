@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use apollo_compiler::ast::Type;
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use regex::Regex;
@@ -12,7 +13,7 @@ use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldArgumentDefinitionPosition;
+use crate::schema::position::FieldArgumentDefinitionPosition; 
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
@@ -185,7 +186,7 @@ fn validate_selection_format(
             SingleFederationError::ContextSelectionInvalid {
                 message: format!(
                     "Context \"{}\" is used in \"{}\" but the selection is invalid: no selection is made",
-                    context, as_coordinate(from_context_parent)
+                    context, from_context_parent
                 ),
             }
             .into(),
@@ -211,7 +212,7 @@ fn validate_selection_format(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "Context \"{}\" is used in \"{}\" but the selection is invalid: inline fragments must have type conditions",
-                        context, as_coordinate(from_context_parent)
+                        context, from_context_parent
                     ),
                 }
                 .into(),
@@ -259,60 +260,6 @@ fn selection_set_has_alias(selection_set: &SelectionSet) -> bool {
     })
 }
 
-/// Check if one type is a valid implementation of another (following GraphQL interface rules)
-/// Port note: Ported from JS isValidImplementationFieldType in federation.ts
-/// Implementation of spec https://spec.graphql.org/draft/#IsValidImplementationFieldType()
-#[allow(dead_code)]
-fn is_valid_implementation_field_type(
-    field_type: &apollo_compiler::schema::Type,
-    implemented_field_type: &apollo_compiler::schema::Type,
-) -> bool {
-    // If field_type is NonNull
-    if field_type.is_non_null() {
-        if implemented_field_type.is_non_null() {
-            // Both are NonNull, check their inner types
-            return is_valid_implementation_field_type(
-                field_type.item_type(),
-                implemented_field_type.item_type(),
-            );
-        } else {
-            // field_type is NonNull but implemented_field_type is nullable
-            // This is valid - NonNull can implement nullable
-            return is_valid_implementation_field_type(
-                field_type.item_type(),
-                implemented_field_type,
-            );
-        }
-    }
-
-    // If both are List types
-    if field_type.is_list() && implemented_field_type.is_list() {
-        return is_valid_implementation_field_type(
-            field_type.item_type(),
-            implemented_field_type.item_type(),
-        );
-    }
-
-    // Both should be named types (not wrapped) and have the same name
-    !field_type.is_list()
-        && !field_type.is_non_null()
-        && !implemented_field_type.is_list()
-        && !implemented_field_type.is_non_null()
-        && field_type.inner_named_type() == implemented_field_type.inner_named_type()
-}
-
-/// Helper function that compares types by name (for backward compatibility)
-/// This version works with the current validation infrastructure that only passes type names
-fn is_valid_implementation_field_type_by_name(
-    field_type_name: &Name,
-    implemented_field_type_name: &Name,
-) -> bool {
-    // For now, we do simple name comparison since we only have the inner names
-    // The full type compatibility checking happens at a higher level in validate_field_value
-    // where we have access to the complete type information
-    field_type_name == implemented_field_type_name
-}
-
 #[allow(dead_code)]
 fn validate_field_value(
     context: &str,
@@ -325,11 +272,11 @@ fn validate_field_value(
     // Get the expected type from the target argument
     let expected_type = match target {
         FieldArgumentDefinitionPosition::Object(pos) => match pos.get(schema.schema()) {
-            Ok(arg_def) => arg_def.ty.inner_named_type(),
+            Ok(arg_def) => arg_def.ty.item_type(),
             Err(_) => return Ok(()),
         },
         FieldArgumentDefinitionPosition::Interface(pos) => match pos.get(schema.schema()) {
-            Ok(arg_def) => arg_def.ty.inner_named_type(),
+            Ok(arg_def) => arg_def.ty.item_type(),
             Err(_) => return Ok(()),
         },
     };
@@ -337,6 +284,7 @@ fn validate_field_value(
     // Validate the selection format
     let selection_type = validate_selection_format(context, selection, target, errors);
 
+    // if there was an error, just return, we've already added it to the errorCollector
     if selection_type == SelectionType::Error {
         return Ok(());
     }
@@ -355,7 +303,7 @@ fn validate_field_value(
             continue;
         };
 
-        // TODO: Eliminate this clone
+        // TODO [FED-660]: Eliminate this clone
         let valid_schema = match crate::schema::ValidFederationSchema::new_assume_valid(
             schema.clone(),
         ) {
@@ -365,7 +313,7 @@ fn validate_field_value(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
                             "Context \"{}\" is used in \"{}\" but the selection is invalid: schema is not valid",
-                            context, as_coordinate(target)
+                            context, target
                         ),
                     }
                     .into(),
@@ -393,7 +341,7 @@ fn validate_field_value(
                             SingleFederationError::ContextSelectionInvalid {
                                 message: format!(
                                     "Context \"{}\" is used in \"{}\" but the selection is invalid for type {}",
-                                    context, as_coordinate(target), location_name
+                                    context, target, location_name
                                 ),
                             }
                             .into(),
@@ -407,7 +355,7 @@ fn validate_field_value(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
                             "Context \"{}\" is used in \"{}\" but the selection is invalid for type {}",
-                            context, as_coordinate(target), location_name
+                            context, target, location_name
                         ),
                     }
                     .into(),
@@ -422,7 +370,7 @@ fn validate_field_value(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "Context \"{}\" is used in \"{}\" but the selection is invalid: directives are not allowed in the selection",
-                        context, as_coordinate(target)
+                        context, target
                     ),
                 }
                 .into(),
@@ -434,7 +382,7 @@ fn validate_field_value(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "Context \"{}\" is used in \"{}\" but the selection is invalid: aliases are not allowed in the selection",
-                        context, as_coordinate(target)
+                        context, target
                     ),
                 }
                 .into(),
@@ -447,7 +395,7 @@ fn validate_field_value(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
-                        context, as_coordinate(target)
+                        context, target
                     ),
                 }
                 .into(),
@@ -467,25 +415,24 @@ fn validate_field_value(
                     errors,
                 )?;
 
-                if let Some(resolved_type) = resolved_type {
-                    if !is_valid_implementation_field_type_by_name(&resolved_type, expected_type) {
-                        errors.push(
-                            SingleFederationError::ContextSelectionInvalid {
-                                message: format!(
-                                    "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
-                                    context, as_coordinate(target), resolved_type, expected_type
-                                ),
-                            }
-                            .into(),
-                        );
-                        return Ok(());
-                    }
-                } else {
+                let Some(resolved_type) = resolved_type else {
                     errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
-                                context, as_coordinate(target), expected_type
+                                context, target, expected_type
+                            ),
+                        }
+                        .into(),
+                    );
+                    return Ok(());
+                };
+                if !resolved_type.is_assignable_to(&expected_type) {
+                    errors.push(
+                        SingleFederationError::ContextSelectionInvalid {
+                            message: format!(
+                                "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
+                                context, target, resolved_type, expected_type
                             ),
                         }
                         .into(),
@@ -525,15 +472,12 @@ fn validate_field_value(
                             ) {
                                 // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
                                 // This matches the TypeScript behavior
-                                if !is_valid_implementation_field_type_by_name(
-                                    &resolved_type,
-                                    expected_type,
-                                ) {
+                                if !expected_type.is_assignable_to(resolved_type) {
                                     errors.push(
                                         SingleFederationError::ContextSelectionInvalid {
                                             message: format!(
                                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
-                                                context, as_coordinate(target), resolved_type, expected_type
+                                                context, target, resolved_type, expected_type
                                             ),
                                         }
                                         .into(),
@@ -545,7 +489,7 @@ fn validate_field_value(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
                                             "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
-                                            context, as_coordinate(target), expected_type
+                                            context, target, expected_type
                                         ),
                                     }
                                     .into(),
@@ -581,7 +525,7 @@ fn validate_field_value(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: no type condition matches the location \"{}\"",
-                                context, as_coordinate(target), context_locations_str
+                                context, target, context_locations_str
                             ),
                         }
                         .into(),
@@ -600,7 +544,7 @@ fn validate_field_value(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
                             "Context \"{}\" is used in \"{}\" but the selection is invalid: type condition \"{}\" is never used",
-                            context, as_coordinate(target), type_condition
+                            context, target, type_condition
                         ),
                     }
                     .into(),
@@ -647,7 +591,7 @@ impl FromContextValidator for DenyOnAbstractType {
             SingleFederationError::ContextNotSet {
                 message: format!(
                     "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
-                    as_coordinate(target)
+                    target
                 ),
                 }
                 .into(),
@@ -688,7 +632,7 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                         SingleFederationError::ContextNotSet {
                             message: format!(
                                 "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
-                                as_coordinate(target)
+                                target
                             ),
                         }
                         .into(),
@@ -738,7 +682,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
                     message: format!(
                         "Context \"{}\" is used at location \"{}\" but is never set.",
                         context,
-                        as_coordinate(target)
+                        target
                     ),
                 }
                 .into(),
@@ -748,7 +692,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
                 SingleFederationError::NoSelectionForContext {
                     message: format!(
                         "@fromContext directive in field \"{}\" has no selection",
-                        as_coordinate(target)
+                        target
                     ),
                 }
                 .into(),
@@ -798,7 +742,7 @@ impl FromContextValidator for RequireResolvableKey {
                         SingleFederationError::ContextNoResolvableKey {
                             message: format!(
                                 "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                                as_coordinate(target)
+                                target
                             ),
                         }
                         .into(),
@@ -851,7 +795,7 @@ impl FromContextValidator for DenyDefaultValues {
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "@fromContext arguments may not have a default value: \"{}\".",
-                        as_coordinate(target)
+                        target
                     ),
                 }
                 .into(),
@@ -885,7 +829,7 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
 
         // For now, we can detect this by checking if the field name pattern suggests it's a directive
         // This is not a perfect solution but should work for the test case
-        let coordinate = as_coordinate(target);
+        let coordinate = target.to_string();
 
         // In the test case, we have a directive @testDirective with argument contextArg
         // The coordinate would be something like "testDirective.contextArg" or similar
@@ -910,63 +854,66 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
     }
 }
 
-fn as_coordinate(target: &FieldArgumentDefinitionPosition) -> String {
-    match target {
-        FieldArgumentDefinitionPosition::Object(position) => {
-            format!("{}.{}", position.type_name, position.field_name)
-        }
-        FieldArgumentDefinitionPosition::Interface(position) => {
-            format!("{}.{}", position.type_name, position.field_name)
-        }
-    }
-}
-
 #[allow(dead_code, clippy::only_used_in_recursion)]
-fn validate_field_value_type_inner(
-    selection_set: &SelectionSet,
-    schema: &FederationSchema,
-    from_context_parent: &FieldArgumentDefinitionPosition,
+fn validate_field_value_type_inner<'a>(
+    selection_set: &'a SelectionSet,
+    schema: &'a FederationSchema,
+    from_context_parent: &'a FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
-) -> Option<Name> {
-    let types_array = selection_set
-        .selections
-        .values()
-        .map(|selection| -> Option<Name> {
-            if let Selection::Field(field) = selection {
-                if let Some(field_selection_set) = &field.selection_set {
-                    return validate_field_value_type_inner(
-                        field_selection_set,
-                        schema,
-                        from_context_parent,
-                        errors,
-                    );
+) -> Option<&'a Type> {
+    let mut types_array = Vec::new();
+    
+    for selection in selection_set.selections.values() {
+        if let Selection::Field(field) = selection {
+            if let Some(field_selection_set) = &field.selection_set {
+                if let Some(nested_type) = validate_field_value_type_inner(
+                    field_selection_set,
+                    schema,
+                    from_context_parent,
+                    errors,
+                ) {
+                    types_array.push(nested_type);
                 }
-
+            } else {
                 // Get the actual field definition to extract its type
                 if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
                     // Get the base type name (strip wrappers like NonNull, List)
-                    let base_type_name = field_def.ty.inner_named_type();
-                    return Some(base_type_name.clone());
+                    let base_type = field_def.ty.item_type();
+                    types_array.push(base_type);
                 }
             }
-            None
-        })
-        .collect::<Vec<_>>();
+        }
+    }
 
-    types_array
-        .into_iter()
-        .reduce(|acc, curr| if acc == curr { acc } else { None })
-        .flatten()
+    if types_array.is_empty() {
+        return None;
+    }
+    types_array.into_iter().map(|item| Some(item)).reduce(|acc, item| {
+        match (acc, item) {
+            (Some(acc), Some(item)) => {
+                if acc == item {
+                    Some(acc)
+                } else if acc.is_assignable_to(item) {
+                    Some(item)
+                } else if item.is_assignable_to(acc) {
+                    Some(acc)
+                } else {
+                    None
+                }
+            },
+            _ => None,
+        }
+    }).flatten()
 }
 
 #[allow(dead_code)]
-fn validate_field_value_type(
+fn validate_field_value_type<'a>(
     current_type: &TypeDefinitionPosition,
-    selection_set: &SelectionSet,
-    schema: &FederationSchema,
-    from_context_parent: &FieldArgumentDefinitionPosition,
+    selection_set: &'a SelectionSet,
+    schema: &'a FederationSchema,
+    from_context_parent: &'a FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
-) -> Result<Option<Name>, FederationError> {
+) -> Result<Option<&'a Type>, FederationError> {
     if let Some(metadata) = &schema.subgraph_metadata {
         if let Some(interface_object_directive) = metadata
             .federation_spec_definition()
@@ -975,7 +922,7 @@ fn validate_field_value_type(
             if current_type.has_applied_directive(schema, &interface_object_directive.name) {
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
-                        message: format!("Context is used in \"{}\" but the selection is invalid: One of the types in the selection is an interface Object: \"{}\".", as_coordinate(from_context_parent), current_type.type_name())
+                        message: format!("Context is used in \"{}\" but the selection is invalid: One of the types in the selection is an interface Object: \"{}\".", from_context_parent, current_type.type_name())
                     }
                     .into(),
                 );
@@ -1332,7 +1279,7 @@ mod tests {
             result.is_some(),
             "Should return a type for single field selection"
         );
-        assert_eq!(result.unwrap().as_str(), "ID", "Should return ID type");
+        assert_eq!(result.unwrap().inner_named_type().as_str(), "ID", "Should return ID type");
         assert!(
             errors.errors.is_empty(),
             "Should not have validation errors"
@@ -1402,7 +1349,7 @@ mod tests {
             "Should return a type for consistent field types"
         );
         assert_eq!(
-            result.unwrap().as_str(),
+            result.unwrap().inner_named_type().as_str(),
             "ID",
             "Should return common ID type"
         );
@@ -1547,7 +1494,7 @@ mod tests {
             "Should return a type for nested consistent selections"
         );
         assert_eq!(
-            result.unwrap().as_str(),
+            result.unwrap().inner_named_type().as_str(),
             "ID",
             "Should return ID type from nested selection"
         );
@@ -1772,7 +1719,7 @@ mod tests {
             "Should return a type for wrapped types with same base"
         );
         assert_eq!(
-            result.unwrap().as_str(),
+            result.unwrap().inner_named_type().as_str(),
             "ID",
             "Should return common base type ID"
         );
@@ -1851,7 +1798,7 @@ mod tests {
             "Should return a type for deeply nested selection"
         );
         assert_eq!(
-            result.unwrap().as_str(),
+            result.unwrap().inner_named_type().as_str(),
             "ID",
             "Should return the deeply nested field type"
         );
@@ -1879,7 +1826,7 @@ mod tests {
 
             type Target @key(fields: "targetId") {
                 targetId: ID!
-                value(contextArg: String! @fromContext(field: "$userContext name")): String
+                value(contextArg: String @fromContext(field: "$userContext name")): String
             }
         "#;
 
@@ -1904,7 +1851,6 @@ mod tests {
             subgraph.schema(),
             &mut errors,
         );
-
         assert!(result.is_ok(), "Should validate successfully");
         assert!(
             errors.errors.is_empty(),
@@ -2997,7 +2943,7 @@ mod tests {
         validate_from_context_directives(subgraph.schema(), &context_map, &mut errors)
             .expect("validates fromContext directives");
 
-        // This should succeed - nullability mismatch is ok if contextual value is non-nullable
+            // This should succeed - nullability mismatch is ok if contextual value is non-nullable
         assert!(
             errors.errors.is_empty(),
             "Should not have validation errors for nullability mismatch when contextual value is non-nullable"
