@@ -6,12 +6,10 @@ use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 
-use crate::CONTEXT_VERSIONS;
 use crate::JoinSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::link::spec::Identity;
 use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -41,7 +39,8 @@ impl ValidationContext {
         // TODO: Avoid this clone by holding `FederationSchema` directly in `Merged` struct.
         let supergraph_schema =
             FederationSchema::new(supergraph.state.schema().clone().into_inner())?;
-        let (_, join_spec, _) = validate_supergraph_for_query_planning(&supergraph_schema)?;
+        let (_, join_spec, context_spec) =
+            validate_supergraph_for_query_planning(&supergraph_schema)?;
         let join_type_directive = join_spec
             .type_directive_definition(&supergraph_schema)?
             .clone();
@@ -53,13 +52,7 @@ impl ValidationContext {
         let Some(links_metadata) = supergraph_schema.metadata() else {
             bail!("Supergraph schema should have links metadata");
         };
-        if let Some(context_link) = links_metadata.for_identity(&Identity::context_identity()) {
-            let Some(context_spec) = CONTEXT_VERSIONS.find(&context_link.url.version) else {
-                bail!(
-                    "Unexpected context spec version {}",
-                    context_link.url.version
-                );
-            };
+        if let Some(context_spec) = context_spec {
             let context_directive =
                 context_spec.context_directive_definition(&supergraph_schema)?;
             let context_applications =
