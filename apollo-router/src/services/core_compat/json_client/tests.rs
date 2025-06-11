@@ -8,8 +8,17 @@ use crate::Context;
 async fn test_core_json_request_to_subgraph_request_conversion() {
     // Create a router core JSON request
     let mut extensions = apollo_router_core::Extensions::new();
-    extensions.insert(OperationKind::Query);
-    extensions.insert("test-subgraph".to_string());
+    
+    // Create and store subgraph metadata
+    let metadata = SubgraphMetadata {
+        operation_kind: OperationKind::Query,
+        subgraph_name: "test-subgraph".to_string(),
+        id: SubgraphRequestId::new(),
+        authorization: None,
+        query_hash: None,
+        executable_document: None,
+    };
+    extensions.insert(metadata);
     
     let mut context = Context::new();
     context.insert("test_key", "test_value".to_string()).unwrap();
@@ -96,12 +105,10 @@ async fn test_subgraph_request_to_core_json_request_conversion() {
     let user_id = context.get::<_, String>("user_id").unwrap().unwrap();
     assert_eq!(user_id, "123");
     
-    // Verify other fields are preserved in extensions
-    let operation_kind = core_request.extensions.get::<OperationKind>().unwrap();
-    assert_eq!(operation_kind, OperationKind::Query);
-    
-    let subgraph_name = core_request.extensions.get::<String>().unwrap();
-    assert_eq!(subgraph_name, "users-service");
+    // Verify subgraph metadata is preserved in extensions
+    let metadata = core_request.extensions.get::<SubgraphMetadata>().unwrap();
+    assert_eq!(metadata.operation_kind, OperationKind::Query);
+    assert_eq!(metadata.subgraph_name, "users-service");
 }
 
 #[tokio::test]
@@ -135,9 +142,9 @@ async fn test_subgraph_response_to_core_json_response_conversion() {
     let request_id = context.get::<_, String>("request_id").unwrap().unwrap();
     assert_eq!(request_id, "req-123");
     
-    // Verify subgraph name is preserved
-    let subgraph_name = core_response.extensions.get::<String>().unwrap();
-    assert_eq!(subgraph_name, "users-service");
+    // Verify subgraph metadata is preserved in extensions
+    let metadata = core_response.extensions.get::<SubgraphMetadata>().unwrap();
+    assert_eq!(metadata.subgraph_name, "users-service");
     
     // Verify the response stream contains the serialized GraphQL response
     let mut stream = core_response.responses;
@@ -150,10 +157,18 @@ async fn test_subgraph_response_to_core_json_response_conversion() {
 
 #[tokio::test]
 async fn test_round_trip_request_conversion() {
-    // Create original core JSON request
+    // Create original core JSON request with subgraph metadata
     let mut extensions = apollo_router_core::Extensions::new();
-    extensions.insert(OperationKind::Mutation);
-    extensions.insert("payment-service".to_string());
+    
+    let metadata = SubgraphMetadata {
+        operation_kind: OperationKind::Mutation,
+        subgraph_name: "payment-service".to_string(),
+        id: SubgraphRequestId::new(),
+        authorization: None,
+        query_hash: None,
+        executable_document: None,
+    };
+    extensions.insert(metadata);
     
     let mut context = Context::new();
     context.insert("trace_id", "trace-xyz".to_string()).unwrap();
@@ -197,13 +212,10 @@ async fn test_round_trip_request_conversion() {
     let user_roles = context.get::<_, Vec<String>>("user_roles").unwrap().unwrap();
     assert_eq!(user_roles, vec!["admin".to_string(), "user".to_string()]);
     
-    // Verify operation kind is preserved
-    let operation_kind = final_request.extensions.get::<OperationKind>().unwrap();
-    assert_eq!(operation_kind, OperationKind::Mutation);
-    
-    // Verify subgraph name is preserved
-    let subgraph_name = final_request.extensions.get::<String>().unwrap();
-    assert_eq!(subgraph_name, "payment-service");
+    // Verify subgraph metadata is preserved
+    let metadata = final_request.extensions.get::<SubgraphMetadata>().unwrap();
+    assert_eq!(metadata.operation_kind, OperationKind::Mutation);
+    assert_eq!(metadata.subgraph_name, "payment-service");
 }
 
 #[tokio::test]
@@ -267,4 +279,17 @@ async fn test_round_trip_response_conversion() {
     // Note: This test demonstrates that the round-trip conversion works for the data
     // that can be preserved, though some HTTP-specific details may be lost due to
     // the different nature of the streaming JSON response format in router core.
+}
+
+#[tokio::test]
+async fn test_subgraph_metadata_default_extraction() {
+    // Test that SubgraphMetadata provides reasonable defaults when not present in extensions
+    let extensions = apollo_router_core::Extensions::new();
+    let metadata = SubgraphMetadata::from_extensions(&extensions);
+    
+    assert_eq!(metadata.operation_kind, OperationKind::Query);
+    assert_eq!(metadata.subgraph_name, "unknown");
+    assert!(metadata.authorization.is_none());
+    assert!(metadata.query_hash.is_none());
+    assert!(metadata.executable_document.is_none());
 } 

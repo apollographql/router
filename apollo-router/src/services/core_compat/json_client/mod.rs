@@ -8,6 +8,60 @@ pub(super) use apollo_router_core::services::json_client::{Request as CoreJsonRe
 use crate::services::subgraph::{Request as SubgraphRequest, Response as SubgraphResponse, SubgraphRequestId};
 use crate::{Context, graphql};
 use crate::query_planner::fetch::OperationKind;
+use crate::plugins::authorization::CacheKeyMetadata;
+use crate::spec::QueryHash;
+use apollo_compiler::validation::Valid;
+
+/// Metadata container for subgraph request/response information
+/// Used to store and retrieve subgraph-specific data in extensions
+#[derive(Debug, Clone)]
+pub(crate) struct SubgraphMetadata {
+    pub operation_kind: OperationKind,
+    pub subgraph_name: String,
+    pub id: SubgraphRequestId,
+    pub authorization: Option<CacheKeyMetadata>,
+    pub query_hash: Option<QueryHash>,
+    pub executable_document: Option<Valid<apollo_compiler::ExecutableDocument>>,
+}
+
+impl SubgraphMetadata {
+    /// Create SubgraphMetadata from a SubgraphRequest
+    pub(crate) fn from_request(request: &SubgraphRequest) -> Self {
+        Self {
+            operation_kind: request.operation_kind,
+            subgraph_name: request.subgraph_name.clone(),
+            id: request.id.clone(),
+            authorization: Arc::try_unwrap(request.authorization.clone()).ok(),
+            query_hash: Arc::try_unwrap(request.query_hash.clone()).ok(),
+            executable_document: request.executable_document.as_ref()
+                .and_then(|doc| Arc::try_unwrap(doc.clone()).ok()),
+        }
+    }
+
+    /// Create SubgraphMetadata from a SubgraphResponse
+    pub(crate) fn from_response(response: &SubgraphResponse) -> Self {
+        Self {
+            operation_kind: OperationKind::Query, // Default for responses
+            subgraph_name: response.subgraph_name.clone(),
+            id: response.id.clone(),
+            authorization: None,
+            query_hash: None,
+            executable_document: None,
+        }
+    }
+
+    /// Extract SubgraphMetadata from extensions, providing reasonable defaults
+    pub(crate) fn from_extensions(extensions: &apollo_router_core::Extensions) -> Self {
+        extensions.get::<SubgraphMetadata>().unwrap_or_else(|| Self {
+            operation_kind: OperationKind::Query,
+            subgraph_name: "unknown".to_string(),
+            id: SubgraphRequestId::default(),
+            authorization: None,
+            query_hash: None,
+            executable_document: None,
+        })
+    }
+}
 
 // Convert from Router Core JsonRequest to Router SubgraphRequest
 impl From<CoreJsonRequest> for SubgraphRequest {
@@ -17,6 +71,9 @@ impl From<CoreJsonRequest> for SubgraphRequest {
             .extensions
             .get::<Context>()
             .unwrap_or_else(Context::new);
+        
+        // Extract subgraph metadata from extensions
+        let metadata = SubgraphMetadata::from_extensions(&core_request.extensions);
         
         // Try to deserialize the JSON body as a GraphQL request
         let graphql_request = serde_json::from_value::<graphql::Request>(core_request.body)
@@ -29,19 +86,6 @@ impl From<CoreJsonRequest> for SubgraphRequest {
             .header("content-type", "application/json")
             .body(graphql_request.clone())
             .expect("building HTTP request should not fail");
-        
-        // Extract additional fields from extensions or use defaults
-        let operation_kind = core_request.extensions
-            .get::<OperationKind>()
-            .unwrap_or(OperationKind::Query);
-        
-        let subgraph_name = core_request.extensions
-            .get::<String>()
-            .unwrap_or_else(|| "unknown".to_string());
-        
-        let request_id = core_request.extensions
-            .get::<SubgraphRequestId>()
-            .unwrap_or_default();
         
         // Create the supergraph request (required field) - use the same GraphQL request
         let supergraph_request = Arc::new(
@@ -56,15 +100,15 @@ impl From<CoreJsonRequest> for SubgraphRequest {
         SubgraphRequest {
             supergraph_request,
             subgraph_request,
-            operation_kind,
+            operation_kind: metadata.operation_kind,
             context,
-            subgraph_name,
+            subgraph_name: metadata.subgraph_name,
             subscription_stream: None,
             connection_closed_signal: None,
-            query_hash: Default::default(),
-            authorization: Default::default(),
-            executable_document: None,
-            id: request_id,
+            query_hash: metadata.query_hash.map(Arc::new).unwrap_or_default(),
+            authorization: metadata.authorization.map(Arc::new).unwrap_or_default(),
+            executable_document: metadata.executable_document.map(Arc::new),
+            id: metadata.id,
         }
     }
 }
@@ -76,30 +120,17 @@ impl From<SubgraphRequest> for CoreJsonRequest {
         let json_body = serde_json::to_value(subgraph_request.subgraph_request.body())
             .unwrap_or_default();
         
-        // Create new extensions and populate with subgraph request data
+        // Create subgraph metadata before moving fields out of the struct
+        let metadata = SubgraphMetadata::from_request(&subgraph_request);
+        
+        // Create new extensions and populate with data
         let mut extensions = apollo_router_core::Extensions::new();
         
         // Store context
         extensions.insert(subgraph_request.context);
         
-        // Store additional fields that might be needed for round-trip conversion
-        extensions.insert(subgraph_request.operation_kind);
-        extensions.insert(subgraph_request.subgraph_name);
-        extensions.insert(subgraph_request.id);
-        
-        if let Some(auth) = Arc::try_unwrap(subgraph_request.authorization).ok() {
-            extensions.insert(auth);
-        }
-        
-        if let Some(query_hash) = Arc::try_unwrap(subgraph_request.query_hash).ok() {
-            extensions.insert(query_hash);
-        }
-        
-        if let Some(doc) = subgraph_request.executable_document {
-            if let Ok(doc) = Arc::try_unwrap(doc) {
-                extensions.insert(doc);
-            }
-        }
+        // Store subgraph metadata as a single struct
+        extensions.insert(metadata);
         
         CoreJsonRequest {
             extensions,
@@ -117,15 +148,8 @@ impl From<CoreJsonResponse> for SubgraphResponse {
             .get::<Context>()
             .unwrap_or_else(Context::new);
         
-        // Extract subgraph name from extensions or use default
-        let subgraph_name = core_response.extensions
-            .get::<String>()
-            .unwrap_or_else(|| "unknown".to_string());
-        
-        // Extract request ID from extensions or use default
-        let id = core_response.extensions
-            .get::<SubgraphRequestId>()
-            .unwrap_or_default();
+        // Extract subgraph metadata from extensions
+        let metadata = SubgraphMetadata::from_extensions(&core_response.extensions);
         
         // For now, we'll create a default GraphQL response and note that this
         // conversion loses the streaming nature. In a real implementation, you might
@@ -142,8 +166,8 @@ impl From<CoreJsonResponse> for SubgraphResponse {
         SubgraphResponse {
             response: http_response,
             context,
-            subgraph_name,
-            id,
+            subgraph_name: metadata.subgraph_name,
+            id: metadata.id,
         }
     }
 }
@@ -155,15 +179,17 @@ impl From<SubgraphResponse> for CoreJsonResponse {
         let json_response = serde_json::to_value(subgraph_response.response.body())
             .unwrap_or_default();
         
-        // Create new extensions and populate with subgraph response data
+        // Create subgraph metadata before moving fields out of the struct
+        let metadata = SubgraphMetadata::from_response(&subgraph_response);
+        
+        // Create new extensions and populate with data
         let mut extensions = apollo_router_core::Extensions::new();
         
         // Store context
         extensions.insert(subgraph_response.context);
         
-        // Store additional fields for round-trip conversion
-        extensions.insert(subgraph_response.subgraph_name);
-        extensions.insert(subgraph_response.id);
+        // Store subgraph metadata as a single struct
+        extensions.insert(metadata);
         
         // Create a stream with just this one response
         let response_stream = stream::once(async move { Ok(json_response) });
