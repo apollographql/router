@@ -326,14 +326,14 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         // Layer logic here - always follow Extensions pattern:
         // 1. Preserve original Extensions
-        // 2. Create extended Extensions for inner service
+        // 2. Create cloned Extensions for inner service
         // 3. Return original Extensions in response
         let original_extensions = req.extensions;
-        let extended_extensions = original_extensions.extend();
+        let cloned_extensions = original_extensions.clone();
         
-        // Transform request with extended Extensions
+        // Transform request with cloned Extensions
         let inner_req = InnerRequest {
-            extensions: extended_extensions,
+            extensions: cloned_extensions,
             // ... other fields
         };
         
@@ -785,7 +785,7 @@ This pattern ensures that error information flows correctly through the service 
 - Avoid mocking when possible; prefer `mry` over `mockall` when mocking is necessary
 - Externalize test fixtures using `include_str!` and prefer YAML format
 - Write tests that exercise real implementations, not just mocks
-- **Extensions Testing**: Always test that layers properly extend and return original Extensions
+- **Extensions Testing**: Always test that layers properly clone and return original Extensions
 
 #### TowerTest Guidelines
 
@@ -1102,39 +1102,39 @@ let service = ServiceBuilder::new()
 
 ## Request/Response Flow
 
-Each service in the pipeline transforms requests and responses, with Extensions providing hierarchical context. Stream-based responses contain error streams that enable error handling layers to process failures:
+Each service in the pipeline transforms requests and responses, with Extensions providing context through simple cloning. Stream-based responses contain error streams that enable error handling layers to process failures:
 
 ```
-HTTP Request (Extensions Layer 0)
+HTTP Request (Original Extensions)
     ↓ http_server_to_bytes_server layer
-    ↓ extends() → Extensions Layer 1
-Bytes Request (Extensions Layer 1)
+    ↓ clone() → Cloned Extensions for inner service
+Bytes Request (Cloned Extensions)
     ↓ bytes_server_to_json_server layer  
-    ↓ extends() → Extensions Layer 2
-JSON Request (Extensions Layer 2)
+    ↓ clone() → Cloned Extensions for inner service
+JSON Request (Cloned Extensions)
     ↓ prepare_query layer (Composite Layer)
-    ↓ extends() → Extensions Layer 3
-    │   Query Parse Request (Extensions Layer 3)
+    ↓ clone() → Cloned Extensions for inner service
+    │   Query Parse Request (Cloned Extensions)
     │       ↓ query_parse service
     │   Query Parse Response 
     │       ↓ query_plan service
     │   Query Plan Response
     │       ↓ combined into ExecutionRequest
-Execution Request (Extensions Layer 3) [same layer as prepare_query input]
+Execution Request (Cloned Extensions)
     ↓ (query_execution service) [produces Stream<Result<Item, Error>>]
     ↓ [Error Handling Layers can intercept stream errors]
-    ↓ extends() → Extensions Layer 4
-Request Dispatcher Request (Extensions Layer 4)
+    ↓ clone() → Cloned Extensions for inner service
+Request Dispatcher Request (Cloned Extensions)
     ↓ (request_dispatcher service)
-HTTP Response (Returns Layer 0 - Original Extensions)
+HTTP Response (Returns Original Extensions)
 ```
 
 **Extensions Flow Rules:**
-- Each layer transformation uses `extensions.extend()` 
-- Inner services receive extended Extensions with access to parent context
+- Each layer transformation uses `extensions.clone()` 
+- Inner services receive cloned Extensions with all existing context
 - Response transformations return the **original** Extensions from the request
-- Parent values always take precedence over child values
-- **Composite Services**: Internal sub-service calls within composite services (like QueryPreparation) maintain the same Extensions layer - they don't create additional extension layers
+- Original Extensions are preserved throughout the pipeline
+- **Composite Services**: Internal sub-service calls within composite services (like QueryPreparation) use the same cloned Extensions
 
 **Error Stream Flow:**
 - Streaming services return `Stream<Result<T, E>>` instead of `Stream<T>`
@@ -1163,8 +1163,8 @@ The architecture provides several extension points:
 ## Performance Considerations
 
 - **Extensions Cloning**: Values are cloned when retrieved; wrap expensive types in `Arc`
-- **Extensions Hierarchy**: The `extend()` method creates lightweight Arc references to parent Extensions
-- **Extensions Memory**: Each layer adds minimal overhead; parent layers are shared via Arc, not copied
+- **Extensions Simplicity**: Each Extensions is independent with no hierarchy overhead
+- **Extensions Memory**: Cloning Extensions creates independent copies; use `Arc` for shared expensive data
 - **http::Extensions Compatibility**: Built on standard http::Extensions for maximum ecosystem compatibility
 - **Service Composition**: Tower's zero-cost abstractions minimize overhead
 - **Async Efficiency**: Native async/await provides optimal performance
