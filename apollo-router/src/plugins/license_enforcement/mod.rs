@@ -102,9 +102,17 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
+    use serde_json::Value;
+    use tower_service::Service;
+    use tracing_subscriber::filter::FilterExt;
     use super::*;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::test::PluginTestHarness;
+    use crate::plugin::test::MockRouterService;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::test::{FakeDefault, PluginTestHarness};
+    use crate::services::supergraph;
+    use crate::TestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -180,25 +188,67 @@ mod test {
                 }),
             };
 
-            let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
-                .license(license)
-                .build()
-                .await
-                .expect("test harness");
-
-            let service = test_harness.router_service(|_req| async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                Ok(router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
-                    .header("x-custom-header", "test-value")
+            let license_plugin = LicenseEnforcement::new(
+                PluginInit::fake_builder()
+                    .config(LicenseEnforcementConfig {})
+                    .license(license)
                     .build()
-                    .unwrap())
-            });
+            ).await.expect("license plugin");
+
+            let full_config = serde_yaml::from_str::<Value>(r#"
+            telemetry:
+              apollo:
+                endpoint: "http://example.com"
+                client_name_header: "name_header"
+                client_version_header: "version_header"
+                buffer_size: 10000
+                schema_id: "schema_sha"
+            "#).unwrap();
+
+            let telemetry_config = full_config
+                .as_object()
+                .expect("must be an object")
+                .get("telemetry")
+                .expect("telemetry must be a root key");
+
+            let init = PluginInit::fake_builder()
+                .config(telemetry_config.clone())
+                .full_config(full_config)
+                .build()
+                .with_deserialized_config()
+                .expect("unable to deserialize telemetry config");
+            let mut telemetry_plugin = Telemetry::new(init)
+                .await
+                .expect("telemetry plugin");
+
+            let mut router_service = MockRouterService::new();
+            router_service.expect_clone().return_once(move || {
+                let mut mock_service = test::MockRouterService::new();
+                mock_service.expect_call()
+                .times(2)
+                .returning(move |_| {
+                    // TODO do we need the async wait?
+                    Ok(router::Response::fake_builder()
+                        .data(serde_json::json!({"data": {"field": "value"}}))
+                        .header("x-custom-header", "test-value")
+                        .build()
+                        .unwrap())
+                });
+            mock_service
+        });
+
+            let mut test_harness = TestHarness::builder()
+                .extra_private_plugin(telemetry_plugin)
+                .extra_private_plugin(license_plugin)
+                .router_hook(move |_| router_service.clone().boxed())
+                .build_router()
+                .await
+                .unwrap();
 
             // WHEN
             // * two reqs happen
-            let _ = service.call_default().await;
-            let _ = service.call_default().await;
+            let _ = test_harness.call(router::Request::default()).await;
+            let _ = test_harness.call(router::Request::default()).await;
 
             // THEN
             // * we get a metric saying the tps limit was enforced
