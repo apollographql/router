@@ -722,6 +722,7 @@ mod test {
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;
     use super::jwt_expires_in;
+    use crate::test_harness::tracing_test_logs_contain;
     use crate::test_harness::tracing_test_subscriber;
 
     #[test]
@@ -742,8 +743,7 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(tracing_test::internal::logs_with_scope_contain(
-            "apollo_router",
+        assert!(tracing_test_logs_contain(
             "expected JWT claims to be an object"
         ));
     }
@@ -764,8 +764,7 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(tracing_test::internal::logs_with_scope_contain(
-            "apollo_router",
+        assert!(tracing_test_logs_contain(
             "expected JWT 'exp' (expiry) claim to be an integer"
         ));
     }

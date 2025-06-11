@@ -616,3 +616,8 @@ pub(crate) fn tracing_test_subscriber() -> tracing_core::Dispatch {
     let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     tracing_test::internal::get_subscriber(mock_writer, "apollo_router=trace")
 }
+
+#[cfg(test)]
+pub(crate) fn tracing_test_logs_contain(value: &str) -> bool {
+    tracing_test::internal::logs_with_scope_contain("apollo_router", value)
+}
