@@ -13,7 +13,12 @@ async fn test_env_var() {
         .mount(&mock_server)
         .await;
 
-    unsafe { std::env::set_var("CONNECTORS_ENV_VAR_TESTING", "environment variable value") };
+    unsafe {
+        std::env::set_var(
+            "CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR", // unique to this test
+            "environment variable value",
+        )
+    };
 
     let response = super::execute(
         &include_str!("../testdata/env-var.graphql")
@@ -37,5 +42,5 @@ async fn test_env_var() {
     }
     "###);
 
-    unsafe { std::env::remove_var("CONNECTORS_ENV_VAR_TESTING") };
+    unsafe { std::env::remove_var("CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR") };
 }

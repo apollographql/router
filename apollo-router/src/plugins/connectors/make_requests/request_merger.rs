@@ -175,11 +175,12 @@ impl MappingContextMerger<'_> {
 
     pub(crate) fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
         if self.variables_used.contains(&Namespace::Env) {
-            let env_vars: Map<ByteString, Value> = std::env::vars()
-                .filter_map(|(key, value)| {
-                    env_vars_used
-                        .contains(&key)
-                        .then_some((key.into(), Value::String(value.into())))
+            let env_vars: Map<ByteString, Value> = env_vars_used
+                .iter()
+                .flat_map(|key| {
+                    std::env::var(key)
+                        .ok()
+                        .map(|value| (key.as_str().into(), Value::String(value.into())))
                 })
                 .collect();
             self.env = Some(Value::Object(env_vars));

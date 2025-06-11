@@ -88,7 +88,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
-                    (Namespace::Env, ENV_SHAPE.clone()),
+                    (Namespace::Env, env_shape()),
                 ]
                 .into_iter()
                 .collect();
@@ -112,7 +112,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
-                    (Namespace::Env, ENV_SHAPE.clone()),
+                    (Namespace::Env, env_shape()),
                 ]
                 .into_iter()
                 .collect();
@@ -149,7 +149,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Status, Shape::int([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
                     (Namespace::Response, RESPONSE_SHAPE.clone()),
-                    (Namespace::Env, ENV_SHAPE.clone()),
+                    (Namespace::Env, env_shape()),
                 ]
                 .into_iter()
                 .collect();
@@ -175,7 +175,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Status, Shape::int([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
                     (Namespace::Response, RESPONSE_SHAPE.clone()),
-                    (Namespace::Env, ENV_SHAPE.clone()),
+                    (Namespace::Env, env_shape()),
                 ]
                 .into_iter()
                 .collect();
@@ -201,7 +201,7 @@ impl<'schema> Context<'schema> {
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
             (Namespace::Request, REQUEST_SHAPE.clone()),
-            (Namespace::Env, ENV_SHAPE.clone()),
+            (Namespace::Env, env_shape()),
         ]
         .into_iter()
         .collect();
@@ -227,7 +227,7 @@ impl<'schema> Context<'schema> {
             (Namespace::Status, Shape::int([])),
             (Namespace::Request, REQUEST_SHAPE.clone()),
             (Namespace::Response, RESPONSE_SHAPE.clone()),
-            (Namespace::Env, ENV_SHAPE.clone()),
+            (Namespace::Env, env_shape()),
         ]
         .into_iter()
         .collect();
