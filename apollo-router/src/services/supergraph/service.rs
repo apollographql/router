@@ -8,7 +8,9 @@ use std::time::Instant;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
+use futures::future::ready;
 use futures::stream::StreamExt;
+use futures::stream::once;
 use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -417,6 +419,14 @@ async fn service_call(
                         inserted = true;
                     }
                 });
+
+                // make sure to resolve the first part of the stream - that way we know context
+                // variables (`FIRST_EVENT_CONTEXT_KEY`, `CONTAINS_GRAPHQL_ERROR`) have been set
+                let (first, remaining) = StreamExt::into_future(response_stream).await;
+                let response_stream = once(ready(first.unwrap_or_default()))
+                    .chain(remaining)
+                    .boxed();
+
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
