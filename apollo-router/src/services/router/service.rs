@@ -7,6 +7,7 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use futures::future::join_all;
 use futures::future::ready;
@@ -121,6 +122,9 @@ impl RouterService {
     }
 }
 
+/// When the batching layer receives a batch query (a POST request with a JSON array in the body),
+/// it splits the requests into multiple requests that flow separately through the rest of the
+/// pipeline, and reassembles the responses into a single JSON array response.
 struct BatchingLayer {
     config: Batching,
 }
@@ -131,11 +135,10 @@ impl BatchingLayer {
     }
 }
 
-// TODO(@goto-bus-stop): genericise
-impl tower::Layer<RouterToSupergraphRequestService> for BatchingLayer {
-    type Service = BatchingService;
+impl<S> tower::Layer<S> for BatchingLayer {
+    type Service = BatchingService<S>;
 
-    fn layer(&self, inner: RouterToSupergraphRequestService) -> Self::Service {
+    fn layer(&self, inner: S) -> Self::Service {
         BatchingService {
             inner,
             config: self.config.clone(),
@@ -144,12 +147,15 @@ impl tower::Layer<RouterToSupergraphRequestService> for BatchingLayer {
 }
 
 #[derive(Clone)]
-struct BatchingService {
-    // TODO(@goto-bus-stop): genericise
-    inner: RouterToSupergraphRequestService,
+struct BatchingService<S> {
+    inner: S,
     config: Batching,
 }
-impl Service<RouterRequest> for BatchingService {
+impl<S> Service<RouterRequest> for BatchingService<S>
+where
+    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -164,7 +170,7 @@ impl Service<RouterRequest> for BatchingService {
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         // Batching is not supported for GET requests
         if req.router_request.method() == Method::GET {
-            return self.inner.call(req);
+            return self.inner.call(req).boxed();
         }
 
         let service = self.clone();
@@ -306,7 +312,10 @@ impl Service<RouterRequest> for BatchingService {
     }
 }
 
-impl BatchingService {
+impl<S> BatchingService<S>
+where
+    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone,
+{
     fn parse_batch_request(
         &self,
         bytes: &Bytes,
@@ -611,7 +620,6 @@ impl Service<RouterRequest> for RouterService {
 /// (JSON bodies in the GraphQL spec format).
 struct RouterToSupergraphRequestLayer;
 
-// TODO(@goto-bus-stop): genericise
 impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
     type Service = RouterToSupergraphRequestService;
 
@@ -626,6 +634,9 @@ impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
 /// (JSON bodies in the GraphQL spec format).
 #[derive(Clone)]
 struct RouterToSupergraphRequestService {
+    // FIXME(@goto-bus-stop): The inner layer is hardcoded because it has a weird contract:
+    // it receives *supergraph* requests, but returns *router* responses. Let's genericise this
+    // layer once that's fixed.
     supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
 }
 
