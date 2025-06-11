@@ -12,6 +12,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
     created: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]

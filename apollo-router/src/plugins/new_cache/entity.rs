@@ -731,7 +731,8 @@ impl CacheService {
                                             root_fields: root_operation_fields,
                                         },
                                         subgraph_name: self.name.clone(),
-                                        subraph_request: debug_subgraph_request.unwrap_or_default(),
+                                        subgraph_request: debug_subgraph_request
+                                            .unwrap_or_default(),
                                         status: CacheKeyStatus::New,
                                         cache_control: cache_control.clone(),
                                         data: serde_json_bytes::to_value(
@@ -833,7 +834,7 @@ impl CacheService {
                                     entity_key: ir.entity_key.clone(),
                                 },
                                 subgraph_name: self.name.clone(),
-                                subraph_request: request.subgraph_request.body().clone(),
+                                subgraph_request: request.subgraph_request.body().clone(),
                                 status: CacheKeyStatus::Cached,
                                 cache_control: cache_entry.control.clone(),
                                 data: serde_json_bytes::to_value(cache_entry.data.clone())
@@ -1023,7 +1024,7 @@ async fn cache_lookup_root(
                                     root_fields: root_operation_fields,
                                 },
                                 subgraph_name: request.subgraph_name.clone(),
-                                subraph_request: request.subgraph_request.body().clone(),
+                                subgraph_request: request.subgraph_request.body().clone(),
                                 status: CacheKeyStatus::Cached,
                                 cache_control: value.control.clone(),
                                 data: value.data.clone(),
@@ -1258,7 +1259,7 @@ async fn cache_lookup_entities(
                         entity_key: ir.entity_key.clone(),
                     },
                     subgraph_name: name.clone(),
-                    subraph_request: request.subgraph_request.body().clone(),
+                    subgraph_request: request.subgraph_request.body().clone(),
                     status: CacheKeyStatus::Cached,
                     cache_control: cache_entry.control.clone(),
                     data: serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default(),
@@ -2118,7 +2119,7 @@ async fn insert_entities_in_result(
                             entity_key: entity_key.clone(),
                         },
                         subgraph_name: subgraph_name.to_string(),
-                        subraph_request: subgraph_request.clone(),
+                        subgraph_request: subgraph_request.clone(),
                         status: CacheKeyStatus::New,
                         cache_control: cache_control.clone(),
                         data: value.clone(),
@@ -2200,12 +2201,13 @@ fn assemble_response_from_errors(
 pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CacheKeyContext {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     // TODO: it should be optional when it's a cached entity it doesn't make sense to have it
-    pub(super) subraph_request: graphql::Request,
+    pub(super) subgraph_request: graphql::Request,
     pub(super) status: CacheKeyStatus,
     pub(super) cache_control: CacheControl,
     pub(super) data: serde_json_bytes::Value,
@@ -2213,20 +2215,22 @@ pub(crate) struct CacheKeyContext {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "snake_case", untagged)]
+#[serde(rename_all = "camelCase", untagged)]
 pub(crate) enum CacheEntryKind {
     Entity {
         typename: String,
+        #[serde(rename = "entityKey")]
         entity_key: Object,
     },
     RootFields {
+        #[serde(rename = "rootFields")]
         root_fields: Vec<String>,
     },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum CacheKeyStatus {
     /// New cache key inserted in the cache
     New,
