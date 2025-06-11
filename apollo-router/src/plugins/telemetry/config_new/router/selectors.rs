@@ -290,13 +290,12 @@ impl Selector for RouterSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    == Some(serde_json_bytes::Value::Bool(true))
-                {
-                    Some(opentelemetry::Value::Bool(true))
-                } else {
-                    None
-                }
+                let contains_error = response
+                    .context
+                    .get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or_default();
+                Some(opentelemetry::Value::Bool(contains_error))
             }
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
