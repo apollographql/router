@@ -82,6 +82,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -226,6 +227,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -418,6 +420,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

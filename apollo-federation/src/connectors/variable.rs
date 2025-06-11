@@ -47,6 +47,7 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::This,
                     Namespace::Request,
                     Namespace::Response,
+                    Namespace::Env,
                 ]
             }
         }
@@ -95,6 +96,7 @@ pub enum Namespace {
     Batch,
     Request,
     Response,
+    Env,
 }
 
 impl Namespace {
@@ -108,6 +110,7 @@ impl Namespace {
             Self::Batch => "$batch",
             Self::Request => "$request",
             Self::Response => "$response",
+            Self::Env => "$env",
         }
     }
 }
@@ -125,6 +128,7 @@ impl FromStr for Namespace {
             "$batch" => Ok(Self::Batch),
             "$request" => Ok(Self::Request),
             "$response" => Ok(Self::Response),
+            "$env" => Ok(Self::Env),
             _ => Err(()),
         }
     }
