@@ -44,7 +44,7 @@ impl AuthenticatedSpecDefinition {
                 DirectiveLocation::Enum,
             ],
             true, // composes
-            Some(&|v| AUTHENTICATED_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| AUTHENTICATED_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

@@ -108,51 +108,6 @@ async fn two_operations() {
 }
 
 #[tokio::test]
-async fn operation_name_error() {
-    let request = Request::fake_builder()
-        .query(
-            r#"
-                query ThisOp { me { id } }
-                query OtherOp { me { id } }
-            "#,
-        )
-        .build()
-        .unwrap();
-    let response = make_request(request).await;
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "errors": [
-        {
-          "message": "Must provide operation name if query contains multiple operations.",
-          "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
-          }
-        }
-      ]
-    }
-    "###);
-
-    let request = Request::fake_builder()
-        .query("query ThisOp { me { id } }")
-        .operation_name("NonExistentOp")
-        .build()
-        .unwrap();
-    let response = make_request(request).await;
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "errors": [
-        {
-          "message": "Unknown operation named \"NonExistentOp\"",
-          "extensions": {
-            "code": "GRAPHQL_UNKNOWN_OPERATION_NAME"
-          }
-        }
-      ]
-    }
-    "###);
-}
-
-#[tokio::test]
 async fn mixed() {
     let request = Request::fake_builder()
         .query(

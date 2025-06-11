@@ -129,12 +129,13 @@ mod tests {
     use std::str::FromStr;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderValue;
     use tracing::instrument::WithSubscriber;
 
@@ -172,7 +173,7 @@ mod tests {
             let connector = Connector {
                 id: ConnectId::new(
                     "subgraph".into(),
-                    Some("source".into()),
+                    Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
                     0,
@@ -258,7 +259,7 @@ mod tests {
             let connector = Connector {
                 id: ConnectId::new(
                     "subgraph".into(),
-                    Some("source".into()),
+                    Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
                     0,

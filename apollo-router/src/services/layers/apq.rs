@@ -19,9 +19,7 @@ use crate::services::SupergraphResponse;
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 static DONT_CACHE_HEADER_VALUE: HeaderValue = HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE);
 pub(crate) const PERSISTED_QUERY_CACHE_HIT: &str = "apollo::apq::cache_hit";
-pub(crate) const DEPRECATED_PERSISTED_QUERY_CACHE_HIT: &str = "persisted_query_hit";
 pub(crate) const PERSISTED_QUERY_REGISTERED: &str = "apollo::apq::registered";
-pub(crate) const DEPRECATED_PERSISTED_QUERY_REGISTERED: &str = "persisted_query_register";
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]

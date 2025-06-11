@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/entity_false_on_type.graphql
+---
+[
+    Message {
+        code: ConnectOnTypeMustBeEntity,
+        message: "`@connect(entity: false)` on `User` is invalid. `entity` can't be false for connectors on types.",
+        locations: [
+            7:5..7:18,
+        ],
+    },
+]

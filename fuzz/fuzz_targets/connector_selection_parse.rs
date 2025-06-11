@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use apollo_federation::sources::connect::JSONSelection;
+use apollo_federation::connectors::JSONSelection;
 use bnf::Grammar;
 use libfuzzer_sys::arbitrary;
 use libfuzzer_sys::arbitrary::Arbitrary;

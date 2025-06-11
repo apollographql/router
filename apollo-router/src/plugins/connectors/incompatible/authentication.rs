@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::connectors::expand::Connectors;
 use itertools::Itertools;
 
 use super::ConfiguredSubgraphs;
@@ -90,7 +90,8 @@ impl IncompatiblePlugin for AuthIncompatPlugin {
                     connector
                         .id
                         .source_name
-                        .clone()
+                        .as_ref()
+                        .map(|name| name.to_string())
                         .unwrap_or(format!("<anonymous source for {}>", connector.id)),
                 )
             })

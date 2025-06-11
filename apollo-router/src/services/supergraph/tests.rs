@@ -974,7 +974,7 @@ async fn root_typename_with_defer() {
 async fn subscription_with_callback() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let subgraphs = MockedSubgraphs([
@@ -1055,7 +1055,7 @@ async fn subscription_with_callback() {
 async fn subscription_callback_schema_reload() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let orga_subgraph = MockSubgraph::builder().with_json(
@@ -1144,7 +1144,7 @@ async fn subscription_callback_schema_reload() {
 async fn subscription_with_callback_with_limit() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let subgraphs = MockedSubgraphs([
@@ -1276,7 +1276,7 @@ async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "{ ... on Query { currentUser { activeOrganization { __typename id } } } }",
+                "query": "{ ... { currentUser { activeOrganization { __typename id } } } }",
             }},
             serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
         ).build()),
@@ -3634,10 +3634,15 @@ const ENUM_SCHEMA: &str = r#"schema
     B
   }"#;
 
+// Companion test: services::router::tests::invalid_input_enum
 #[tokio::test]
 async fn invalid_input_enum() {
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
+        }))
         .unwrap()
         .schema(ENUM_SCHEMA)
         //.extra_plugin(subgraphs)
@@ -3646,29 +3651,13 @@ async fn invalid_input_enum() {
         .unwrap();
 
     let request = supergraph::Request::fake_builder()
-        .query("query { test(input: C) }")
-        .context(defer_context())
-        // Request building here
-        .build()
-        .unwrap();
-    let response = service
-        .clone()
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    insta::assert_json_snapshot!(response);
-
-    let request = supergraph::Request::fake_builder()
         .query("query($input: InputEnum) { test(input: $input) }")
         .variable("input", "INVALID")
         .context(defer_context())
         // Request building here
         .build()
         .unwrap();
+
     let response = service
         .oneshot(request)
         .await

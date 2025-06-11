@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/unrelated_keys.graphql
+---
+[
+    Message {
+        code: MissingEntityConnector,
+        message: "Entity resolution for `@key(fields: \"id\")` on `Store` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
+        locations: [
+            21:12..21:30,
+        ],
+    },
+]

@@ -28,10 +28,10 @@ macro_rules! subgraphs {
 #[test]
 fn test_steel_thread() {
     let subgraphs = subgraphs! {
-      "connector_Query_users_0" => "../sources/connect/expand/merge/connector_Query_users_0.graphql",
-      "connector_Query_user_0" => "../sources/connect/expand/merge/connector_Query_user_0.graphql",
-      "connector_User_d_1" => "../sources/connect/expand/merge/connector_User_d_1.graphql",
-      "graphql" => "../sources/connect/expand/merge/graphql.graphql",
+      "connector_Query_users_0" => "../connectors/expand/merge/connector_Query_users_0.graphql",
+      "connector_Query_user_0" => "../connectors/expand/merge/connector_Query_user_0.graphql",
+      "connector_User_d_1" => "../connectors/expand/merge/connector_User_d_1.graphql",
+      "graphql" => "../connectors/expand/merge/graphql.graphql",
     };
 
     let result = merge_federation_subgraphs(subgraphs).unwrap();
@@ -46,8 +46,8 @@ fn test_steel_thread() {
 #[test]
 fn test_basic() {
     let subgraphs = subgraphs! {
-      "basic_1" => "../sources/connect/expand/merge/basic_1.graphql",
-      "basic_2" => "../sources/connect/expand/merge/basic_2.graphql",
+      "basic_1" => "../connectors/expand/merge/basic_1.graphql",
+      "basic_2" => "../connectors/expand/merge/basic_2.graphql",
     };
 
     let result = merge_federation_subgraphs(subgraphs).unwrap();
@@ -62,8 +62,8 @@ fn test_basic() {
 #[test]
 fn test_inaccessible() {
     let subgraphs = subgraphs! {
-      "inaccessible" => "../sources/connect/expand/merge/inaccessible.graphql",
-      "inaccessible_2" => "../sources/connect/expand/merge/inaccessible_2.graphql",
+      "inaccessible" => "../connectors/expand/merge/inaccessible.graphql",
+      "inaccessible_2" => "../connectors/expand/merge/inaccessible_2.graphql",
     };
 
     let result = merge_federation_subgraphs(subgraphs).unwrap();

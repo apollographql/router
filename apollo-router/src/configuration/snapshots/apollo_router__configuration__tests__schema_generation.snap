@@ -1526,8 +1526,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
@@ -1568,6 +1570,10 @@ expression: "&schema"
           "default": "/metrics",
           "description": "The path where prometheus will be exposed",
           "type": "string"
+        },
+        "resource_selector": {
+          "$ref": "#/definitions/ResourceSelectorConfig",
+          "description": "#/definitions/ResourceSelectorConfig"
         }
       },
       "type": "object"
@@ -5233,6 +5239,24 @@ expression: "&schema"
         "header_name"
       ],
       "type": "object"
+    },
+    "ResourceSelectorConfig": {
+      "oneOf": [
+        {
+          "description": "Export all resource attributes with every metrics.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Do not export any resource attributes with every metrics.",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ResponseStatus": {
       "oneOf": [

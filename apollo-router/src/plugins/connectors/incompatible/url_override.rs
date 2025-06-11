@@ -39,7 +39,7 @@ impl IncompatiblePlugin for UrlOverrideIncompatPlugin {
     fn inform_incompatibilities(
         &self,
         subgraphs: HashSet<&String>,
-        _connectors: &apollo_federation::sources::connect::expand::Connectors,
+        _connectors: &apollo_federation::connectors::expand::Connectors,
     ) {
         for subgraph in subgraphs {
             tracing::warn!(
