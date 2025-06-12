@@ -67,9 +67,9 @@ use crate::spec::TYPENAME;
 pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
-pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
 /// Context key to enable support of debugger
-pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::entity_cache::debug_cached_keys";
+pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
 
 register_plugin!("apollo", "preview_cache", SubgraphCache);
 
@@ -2261,8 +2261,8 @@ impl Ord for CacheKeyStatus {
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
-//     use crate::plugins::subgraph_cache::tests::MockStore;
-//     use crate::plugins::subgraph_cache::tests::SCHEMA;
+//     use crate::plugins::response_cache::tests::MockStore;
+//     use crate::plugins::response_cache::tests::SCHEMA;
 
 //     #[tokio::test]
 //     async fn test_subgraph_enabled() {

@@ -19,7 +19,7 @@ use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
-use crate::plugins::subgraph_cache::invalidation::InvalidationRequest;
+use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
@@ -249,8 +249,8 @@ fn valid_shared_key(
 
 //     use super::*;
 //     use crate::cache::redis::RedisCacheStorage;
-//     use crate::plugins::subgraph_cache::entity::Storage;
-//     use crate::plugins::subgraph_cache::tests::MockStore;
+//     use crate::plugins::response_cache::entity::Storage;
+//     use crate::plugins::response_cache::tests::MockStore;
 
 //     #[tokio::test]
 //     async fn test_invalidation_service_bad_shared_key() {
