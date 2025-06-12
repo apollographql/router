@@ -665,10 +665,10 @@ where
                 // so we execute it in a task that can continue even after the request was canceled and
                 // the join handle was dropped. That way, the next similar query will use the cache instead
                 // of restarting the query planner until another timeout
-                tokio::task::spawn(async move { planning_task.await }).await
+                tokio::task::spawn(planning_task).await
             }
-            .map(|res| {
-                match &res {
+            .inspect(|res| {
+                match res {
                     Ok(_) => {
                         tracing::Span::current().record("outcome", "success");
                     }
@@ -686,7 +686,6 @@ where
                         tracing::Span::current().record("outcome", "batching_error");
                     }
                 };
-                res
             })
             .map_err(convert_join_error)?
         } else {
