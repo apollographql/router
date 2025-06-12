@@ -211,12 +211,11 @@ impl
     ) -> Self {
         let headers = transport.headers.iter().fold(
             HashMap::new(),
-            |mut acc: HashMap<OriginatingDirective, Vec<(String, String)>>,
-             (name, (source, directive))| {
-                if let HeaderSource::Value(value) = source {
-                    acc.entry(*directive)
+            |mut acc: HashMap<OriginatingDirective, Vec<(String, String)>>, header| {
+                if let HeaderSource::Value(value) = &header.source {
+                    acc.entry(header.originating_directive)
                         .or_default()
-                        .push((name.to_string(), value.to_string()));
+                        .push((header.name.to_string(), value.to_string()));
                 }
                 acc
             },

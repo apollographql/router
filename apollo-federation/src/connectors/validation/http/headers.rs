@@ -5,6 +5,7 @@ use http::HeaderName;
 use indexmap::IndexMap;
 
 use crate::connectors::HeaderSource;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::models::Header;
 use crate::connectors::models::HeaderParseError;
 use crate::connectors::string_template;
@@ -29,9 +30,13 @@ impl<'schema> Headers<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let sources = &schema.sources;
         let mut messages = Vec::new();
+        let originating_directive = match coordinate {
+            HttpHeadersCoordinate::Source { .. } => OriginatingDirective::Source,
+            HttpHeadersCoordinate::Connect { .. } => OriginatingDirective::Connect,
+        };
         #[allow(clippy::mutable_key_type)]
         let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
-        for header in Header::from_http_arg(http_arg) {
+        for header in Header::from_http_arg(http_arg, originating_directive) {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {

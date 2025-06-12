@@ -156,6 +156,10 @@ fn add_headers(
     let mut warnings = Vec::new();
 
     for header in config {
+        println!(
+            "header: {}, originating_directive: {:?}",
+            header.name, header.originating_directive
+        );
         match &header.source {
             HeaderSource::From(from) => {
                 let values = incoming_supergraph_headers.get_all(from);
@@ -170,14 +174,13 @@ fn add_headers(
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
                 Ok((value, apply_to_errors)) => {
-                    request = request.header(header_name, value.clone());
                     warnings.extend(
                         apply_to_errors
                             .iter()
                             .cloned()
                             .map(|e| {
                                 (
-                                    match originating_directive {
+                                    match header.originating_directive {
                                         OriginatingDirective::Source => {
                                             ProblemLocation::SourceHeaders
                                         }
@@ -191,7 +194,7 @@ fn add_headers(
                             .collect::<Vec<_>>(),
                     );
 
-                    if header_name == CONTENT_TYPE {
+                    if header.name == CONTENT_TYPE {
                         content_type = Some(value.clone());
                     }
 
@@ -279,10 +282,12 @@ mod tests {
             Header::from_values(
                 "x-new-name".parse().unwrap(),
                 HeaderSource::From("x-rename".parse().unwrap()),
+                OriginatingDirective::Source,
             ),
             Header::from_values(
                 "x-insert".parse().unwrap(),
                 HeaderSource::Value("inserted".parse().unwrap()),
+                OriginatingDirective::Connect,
             ),
         ];
 
@@ -366,6 +371,7 @@ mod tests {
         let headers = vec![Header::from_values(
             "content-type".parse().unwrap(),
             HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
+            OriginatingDirective::Connect,
         )];
 
         let req = super::make_request(

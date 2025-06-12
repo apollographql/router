@@ -26,6 +26,7 @@ use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
@@ -193,7 +194,7 @@ impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
 
     fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
         let mut base_url = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Source)
             .into_iter()
             .try_collect()
             .map_err(|err| internal!(err.to_string()))?;
@@ -372,7 +373,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Connect)
             .into_iter()
             .try_collect()
             .map_err(|err| internal!(err.to_string()))?;

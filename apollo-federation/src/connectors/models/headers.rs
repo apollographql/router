@@ -21,18 +21,26 @@ use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::connectors::string_template;
 
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+pub enum OriginatingDirective {
+    Source,
+    Connect,
+}
+
 #[derive(Clone)]
 pub struct Header {
     pub name: HeaderName,
     pub(crate) name_node: Option<Node<Value>>,
     pub source: HeaderSource,
     pub(crate) source_node: Option<Node<Value>>,
+    pub originating_directive: OriginatingDirective,
 }
 
 impl Header {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_http_arg(
         http_arg: &[(Name, Node<Value>)],
+        originating_directive: OriginatingDirective,
     ) -> Vec<Result<Self, HeaderParseError>> {
         let Some(headers_arg) = http_arg
             .iter()
@@ -41,9 +49,12 @@ impl Header {
             return Vec::new();
         };
         if let Some(values) = headers_arg.as_list() {
-            values.iter().map(Self::from_single).collect()
+            values
+                .iter()
+                .map(|n| Self::from_single(n, originating_directive))
+                .collect()
         } else if headers_arg.as_object().is_some() {
-            vec![Self::from_single(headers_arg)]
+            vec![Self::from_single(headers_arg, originating_directive)]
         } else {
             vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
@@ -53,17 +64,25 @@ impl Header {
     }
 
     /// Create a single `Header` directly, not from schema. Mostly useful for testing.
-    pub fn from_values(name: HeaderName, source: HeaderSource) -> Self {
+    pub fn from_values(
+        name: HeaderName,
+        source: HeaderSource,
+        originating_directive: OriginatingDirective,
+    ) -> Self {
         Self {
             name,
             name_node: None,
             source,
             source_node: None,
+            originating_directive,
         }
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &Node<Value>) -> Result<Self, HeaderParseError> {
+    fn from_single(
+        node: &Node<Value>,
+        originating_directive: OriginatingDirective,
+    ) -> Result<Self, HeaderParseError> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
             node: node.clone(),
@@ -125,6 +144,7 @@ impl Header {
                         name_node: Some(name_node.clone()),
                         source: HeaderSource::From(from),
                         source_node: Some(from_node.clone()),
+                        originating_directive
                     })
                     .map_err(|message| HeaderParseError::Other{ message, node: from_node.clone()})
             }
@@ -145,6 +165,7 @@ impl Header {
                         name_node: Some(name_node.clone()),
                         source: HeaderSource::Value(value),
                         source_node: Some(value_node.clone()),
+                        originating_directive
                     })
             }
             (None, None) => {
