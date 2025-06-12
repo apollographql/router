@@ -237,6 +237,7 @@ async fn test_top_level_response_failure() -> Result<(), BoxError> {
     .await?;
     let errors = response.get("errors").expect("errors should be present");
     assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 1);
 
     Ok(())
 }
@@ -256,7 +257,8 @@ async fn test_top_level_response_failure_malformed() -> Result<(), BoxError> {
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors); // PASSES, but path = []
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 1);
 
     Ok(())
 }
@@ -276,8 +278,8 @@ async fn test_second_level_response_failure() -> Result<(), BoxError> {
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
     assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 1);
 
     Ok(())
 }
@@ -299,8 +301,8 @@ async fn test_second_level_response_failure_malformed() -> Result<(), BoxError> 
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@")]
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 2);
 
     Ok(())
 }
@@ -322,8 +324,8 @@ async fn test_second_level_response_failure_empty_path() -> Result<(), BoxError>
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@")]
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 2);
 
     Ok(())
 }
@@ -343,8 +345,8 @@ async fn test_nested_response_failure() -> Result<(), BoxError> {
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 2);
 
     Ok(())
 }
@@ -364,8 +366,8 @@ async fn test_nested_response_failure_malformed() -> Result<(), BoxError> {
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 3);
 
     Ok(())
 }
@@ -385,8 +387,8 @@ async fn test_nested_response_failure_404() -> Result<(), BoxError> {
     )
     .await?;
     let errors = response.get("errors").expect("errors should be present");
-    eprintln!("{response:?}");
-    assert_no_at_in_path(errors); // FAILS: [String("topProducts"), String("@"), String("reviews"), String("@"), String("author")]
+    assert_no_at_in_path(errors);
+    assert_eq!(errors.as_array().unwrap().len(), 6);
 
     Ok(())
 }
