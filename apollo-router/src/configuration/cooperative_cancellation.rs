@@ -10,11 +10,13 @@ impl CooperativeCancellation {
         self.inner().and_then(|it| it.timeout_in_seconds())
     }
 
+    #[cfg(test)]
     /// Create a new `CooperativeCancellation` config in enforcement mode.
     pub(crate) fn enabled() -> Self {
         Self::Enforce(Config::Enabled)
     }
 
+    #[cfg(test)]
     /// Create a new `CooperativeCancellation` config in enforcement mode with a timeout.
     pub(crate) fn enabled_with_timeout_in_seconds(timeout: f64) -> Self {
         Self::Enforce(Config::EnabledWithTimeoutInSeconds(timeout))
@@ -27,6 +29,7 @@ impl CooperativeCancellation {
 /// their connection. Additionally, when enabled with a timeout, the query planning will be
 /// cancelled if it takes longer than the specified timeout.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Config {
     /// Enables cooperative cancellation of query planning, but does not set a timeout.
     #[default]

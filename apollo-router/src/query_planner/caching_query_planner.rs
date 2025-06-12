@@ -1,7 +1,6 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task;
 use std::time::Duration;
 
@@ -611,17 +610,12 @@ where
                         if self.cooperative_cancellation.is_enforce_mode() {
                             // Abort is a no-op if the task has already completed.
                             abort_handle.abort();
+                            tracing::Span::current().record("outcome", "cancelled");
                         } else if self.cooperative_cancellation.is_measure_mode() {
                             // This is always going to get dropped so we have to make sure we're
                             // only measuring when the task would be cancelled.
                             if !abort_handle.is_finished() {
-                                u64_counter_with_unit!(
-                                    "apollo.router.operations.cooperative_cancellations",
-                                    "The number of times cooperative cancellation was triggered but not enforced",
-                                    "cancellations",
-                                    1
-                                );
-                                tracing::debug!("Cooperative cancellation is enabled, but not enforced. Clients dropped but task will not be cancelled.");
+                                tracing::Span::current().record("outcome", "cancelled");
                             }
                         }
                     });
@@ -651,13 +645,7 @@ where
                             // gets cancelled and no log will be emitted.
                             let timeout_task = tokio::task::spawn(async move {
                                 tokio::time::sleep(timeout).await;
-                                u64_counter_with_unit!(
-                                    "apollo.router.operations.cooperative_cancellations",
-                                    "The number of times cooperative cancellation was triggered but not enforced",
-                                    "cancellations",
-                                    1
-                                );
-                                tracing::debug!("Cooperative cancellation is enabled, but not enforced. Timeout elapsed but task will not be cancelled.");
+                                tracing::Span::current().record("outcome", "timeout");
                             });
                             let _dropped_timeout_guard = scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
                                 abort_handle.abort();
@@ -680,6 +668,25 @@ where
                 }).await
 
             }
+            .map(|res| {
+                match &res {
+                    Ok(_) => {tracing::Span::current().record("outcome", "success");},
+                    Err(CacheResolverError::RetrievalError(e)) => {
+                        if matches!(e.as_ref(), QueryPlannerError::Timeout(_)) {
+                            tracing::Span::current().record("outcome", "timeout");
+                        } else {
+                            tracing::Span::current().record("outcome", "error");
+                        };
+                    },
+                    Err(CacheResolverError::Backpressure(_)) => {
+                        tracing::Span::current().record("outcome", "backpressure");
+                    }
+                    Err(CacheResolverError::BatchingError(_)) => {
+                        tracing::Span::current().record("outcome", "batching_error");
+                    }
+                };
+                res
+            })
             .map_err(convert_join_error)?
         } else {
             let res = entry.get().await.map_err(|e| match e {

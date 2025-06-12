@@ -76,7 +76,7 @@ pub struct QueryPlannerConfig {
     // Side-note: implemented as an object instead of single boolean because we expect to add more
     // to this soon enough. In particular, once defer-passthrough to subgraphs is implemented, the
     // idea would be to add a new `passthrough_subgraphs` option that is the list of subgraphs to
-    // which we can pass-through some @defer (and it would be empty by default). Similarly, once we
+    // which we can pass through some @defer (and it would be empty by default). Similarly, once we
     // support @stream, grouping the options here will make sense too.
     pub incremental_delivery: QueryPlanIncrementalDeliveryConfig,
 
