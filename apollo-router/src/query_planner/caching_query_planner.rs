@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::task;
 use std::time::Duration;
 
@@ -50,6 +51,14 @@ use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
+
+#[repr(u8)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum Outcome {
+    None = 0,
+    Timeout = 1,
+    Cancelled = 2,
+}
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -603,19 +612,28 @@ where
             // When cooperative cancellation is enabled, we want to cancel the query planner
             // task if the request is canceled.
             if self.cooperative_cancellation.is_enabled() {
+                let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
                 let planning_task = tokio::task::spawn(planning_task);
+                let outcome_recorded_for_abort = outcome_recorded.clone();
+                let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
+                let measure_mode = self.cooperative_cancellation.is_measure_mode();
                 let _abort_guard =
-                    scopeguard::guard(planning_task.abort_handle(), |abort_handle| {
-                        if self.cooperative_cancellation.is_enforce_mode() {
-                            // Abort is a no-op if the task has already completed.
-                            abort_handle.abort();
-                            tracing::Span::current().record("outcome", "cancelled");
-                        } else if self.cooperative_cancellation.is_measure_mode() {
-                            // This is always going to get dropped so we have to make sure we're
-                            // only measuring when the task would be cancelled.
-                            if !abort_handle.is_finished() {
-                                tracing::Span::current().record("outcome", "cancelled");
+                    scopeguard::guard(planning_task.abort_handle(), move |abort_handle| {
+                        // Client drop handler
+                        // Only record outcome if not already recorded, and only if timeout hasn't already been recorded
+                        if outcome_recorded_for_abort
+                            .compare_exchange(
+                                Outcome::None as u8,
+                                Outcome::Cancelled as u8,
+                                Ordering::SeqCst,
+                                Ordering::SeqCst,
+                            )
+                            .is_ok()
+                        {
+                            if enforce_mode {
+                                abort_handle.abort();
                             }
+                            tracing::Span::current().record("outcome", "cancelled");
                         }
                     });
 
@@ -625,7 +643,7 @@ where
                     .map(Duration::from_secs_f64)
                 {
                     Some(timeout) => {
-                        if self.cooperative_cancellation.is_enforce_mode() {
+                        if enforce_mode {
                             fn convert_timeout_error(
                                 e: impl std::fmt::Display,
                             ) -> CacheResolverError {
@@ -634,23 +652,44 @@ where
                                 ))
                             }
 
-                            let res = planning_task.timeout(timeout).await;
-
+                            let outcome_recorded_for_timeout = outcome_recorded.clone();
+                            let planning_task_with_timeout = planning_task.timeout(timeout);
+                            let res = planning_task_with_timeout.await;
+                            // If timeout occurred, record outcome if not already recorded
+                            if res.is_err()
+                                && outcome_recorded_for_timeout
+                                    .compare_exchange(
+                                        Outcome::None as u8,
+                                        Outcome::Timeout as u8,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
+                                    .is_ok()
+                            {
+                                tracing::Span::current().record("outcome", "timeout");
+                            }
                             res.map_err(convert_timeout_error)?
-                        } else if self.cooperative_cancellation.is_measure_mode() {
-                            // When in measure mode, we want to spawn a timeout task, but we don't
-                            // want to race it against the planning task. If it happens to finish
-                            // first, we emit a log. Otherwise, the scopeguard will ensure that it
-                            // gets cancelled and no log will be emitted.
+                        } else if measure_mode {
+                            // In measure mode, spawn a timeout task that only records outcome
+                            let outcome_recorded_for_timeout = outcome_recorded.clone();
                             let timeout_task = tokio::task::spawn(async move {
                                 tokio::time::sleep(timeout).await;
-                                tracing::Span::current().record("outcome", "timeout");
+                                if outcome_recorded_for_timeout
+                                    .compare_exchange(
+                                        Outcome::None as u8,
+                                        Outcome::Timeout as u8,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
+                                    .is_ok()
+                                {
+                                    tracing::Span::current().record("outcome", "timeout");
+                                }
                             });
                             let _dropped_timeout_guard =
                                 scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
                                     abort_handle.abort();
                                 });
-
                             planning_task.await
                         } else {
                             unreachable!(
@@ -812,11 +851,6 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 mod tests {
     use std::time::Duration;
 
-    use mockall::mock;
-    use serde_json_bytes::json;
-    use test_log::test;
-    use tower::Service;
-
     use super::*;
     use crate::Configuration;
     use crate::Context;
@@ -827,6 +861,67 @@ mod tests {
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
+    use mockall::mock;
+    use parking_lot::Mutex;
+    use serde_json_bytes::json;
+    use std::collections::HashMap;
+    use test_log::test;
+    use tower::Service;
+    use tracing::Subscriber;
+    use tracing_core::Field;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{Layer, Registry, layer::Context as TracingContext};
+
+    // Custom layer that records any field updates on spans.
+    #[derive(Default, Clone)]
+    struct RecordingLayer {
+        values: Arc<Mutex<HashMap<String, String>>>,
+    }
+
+    impl RecordingLayer {
+        fn get(&self, key: &str) -> Option<String> {
+            self.values.lock().get(key).cloned()
+        }
+    }
+
+    impl<S> Layer<S> for RecordingLayer
+    where
+        S: Subscriber,
+    {
+        fn on_record(
+            &self,
+            _span: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            _ctx: TracingContext<'_, S>,
+        ) {
+            let mut guard = self.values.lock();
+            struct Visitor<'a> {
+                map: &'a mut HashMap<String, String>,
+            }
+
+            impl<'a> tracing_core::field::Visit for Visitor<'a> {
+                fn record_str(&mut self, field: &Field, value: &str) {
+                    self.map.insert(field.name().to_string(), value.to_string());
+                }
+
+                fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                    self.map
+                        .insert(field.name().to_string(), format!("{:?}", value));
+                }
+            }
+
+            let mut visitor = Visitor { map: &mut guard };
+            values.record(&mut visitor);
+        }
+    }
+
+    // Helper function to set up tracing for tests
+    fn setup_tracing() -> (RecordingLayer, tracing::subscriber::DefaultGuard) {
+        let layer = RecordingLayer::default();
+        let subscriber = Registry::default().with(layer.clone());
+        let guard = tracing::subscriber::set_default(subscriber);
+        (layer, guard)
+    }
 
     mock! {
         #[derive(Debug)]
@@ -942,6 +1037,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_timeout() {
+        let (layer, _guard) = setup_tracing();
+
         #[derive(Clone)]
         struct SlowQueryPlanner;
 
@@ -1005,20 +1102,34 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
-        match planner
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // Instrument the call to ensure span context is propagated
+        let result = planner
             .call(query_planner::CachingRequest::new(
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
             ))
-            .await
-        {
+            .await;
+
+        match result {
             Ok(_) => panic!("Expected an error, but got a response"),
             Err(e) => {
                 assert!(matches!(e, CacheResolverError::RetrievalError(_)));
                 assert!(e.to_string().contains("timed out"));
             }
         }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
     #[test(tokio::test)]
@@ -1183,7 +1294,7 @@ mod tests {
         .await
         .unwrap();
 
-        let context = Context::new();
+        let context = crate::Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));

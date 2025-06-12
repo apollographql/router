@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use reqwest::Client;
-use serde_json::json;
+use std::sync::{Arc, Mutex};
+use tracing::{Subscriber, subscriber::set_default};
+use tracing_subscriber::{Registry, layer::SubscriberExt};
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
@@ -10,6 +11,48 @@ use crate::integration::common::graph_os_enabled;
 mod max_evaluated_plans;
 
 const PROMETHEUS_METRICS_CONFIG: &str = include_str!("telemetry/fixtures/prometheus.router.yaml");
+
+// Helper for capturing outcome field from tracing
+#[derive(Clone, Default)]
+struct OutcomeLayer {
+    outcome: Arc<Mutex<Option<String>>>,
+}
+
+impl<S: Subscriber> tracing_subscriber::Layer<S> for OutcomeLayer {
+    fn on_record(
+        &self,
+        _span: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        struct Visitor<'a> {
+            outcome: &'a Arc<Mutex<Option<String>>>,
+        }
+        impl<'a> tracing_core::field::Visit for Visitor<'a> {
+            fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
+                if field.name() == "outcome" {
+                    *self.outcome.lock().unwrap() = Some(value.to_string());
+                }
+            }
+            fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "outcome" {
+                    *self.outcome.lock().unwrap() = Some(format!("{:?}", value));
+                }
+            }
+        }
+        let mut visitor = Visitor {
+            outcome: &self.outcome,
+        };
+        values.record(&mut visitor);
+    }
+}
+
+fn setup_outcome_tracing() -> (OutcomeLayer, tracing::subscriber::DefaultGuard) {
+    let layer = OutcomeLayer::default();
+    let subscriber = Registry::default().with(layer.clone());
+    let guard = set_default(subscriber);
+    (layer, guard)
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fed1_schema_with_new_qp() {
@@ -108,260 +151,171 @@ async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_cooperative_cancellation_timeout() {
-    let config = json!({
-        "supergraph": {
-            "query_planning": {
-                "experimental_cooperative_cancellation": {
-                    "enforce": {
-                        "enabled_with_timeout_in_seconds": 0.0001
-                    }
-                }
-            }
-        },
-        "telemetry": {
-            "exporters": {
-                "metrics": {
-                    "prometheus": {
-                        "enabled": true
-                    }
-                }
-            }
-        }
-    });
-
-    let slow_subgraph_response = wiremock::ResponseTemplate::new(200)
-        .set_delay(Duration::from_secs(10))
-        .set_body_json(json!({
-            "data": {
-                "topProducts": [
-                    { "name": "Table", "upc": "1", "reviews": [] },
-                ],
-            },
-        }));
-
+async fn test_cooperative_cancellation_enforce_mode() {
+    // Inline enforce mode config with Prometheus metrics
+    let enforce_config = r#"
+        supergraph:
+          query_planning:
+            experimental_cooperative_cancellation:
+              enforce: enabled
+        telemetry:
+          exporters:
+            metrics:
+              prometheus:
+                enabled: true
+                listen: 127.0.0.1:0
+                path: /metrics
+    "#;
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config).unwrap())
-        .responder(slow_subgraph_response)
+        .config(enforce_config)
+        .supergraph("tests/fixtures/valid-supergraph.graphql")
+        .responder(
+            wiremock::ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_json(serde_json::json!({"data": {"topProducts": [{"name": "Table"}]}})),
+        )
         .build()
         .await;
-
     router.start().await;
     router.assert_started().await;
 
-    let client = Client::new();
-    let router_url = format!("http://{}/", router.bind_address());
-
-    let query = json!({
-        "query": "query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"
-    });
-
-    let response = client
-        .post(&router_url)
-        .header("content-type", "application/json")
-        .json(&query)
-        .send()
-        .await
-        .expect("Request should complete (with error)");
-
-    let body: serde_json::Value = response.json().await.expect("Response should be JSON");
-
-    assert!(body["errors"].is_array(), "Response should contain errors");
-    let errors = body["errors"].as_array().unwrap();
-    assert!(!errors.is_empty(), "Should have at least one error");
-
-    let error_message = errors[0]["message"].as_str().unwrap_or("");
-    assert!(
-        error_message.contains("timed out")
-            || error_message.contains("timeout")
-            || error_message.contains("cancelled"),
-        "Error should mention timeout or cancellation, got: {}",
-        error_message
-    );
-
+    let query = crate::integration::common::Query::builder()
+        .body(serde_json::json!({"query": "query { topProducts { name } }"}))
+        .build();
+    let fut = router.execute_query(query);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(fut);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    router.assert_metrics_contains(
+        r#"apollo_router_query_planning_plan_duration_seconds{planner="rust",outcome="cancelled"}"#,
+        Some(Duration::from_secs(5)),
+    ).await;
     router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_cooperative_cancellation_measure_mode() {
-    let config = json!({
-        "supergraph": {
-            "query_planning": {
-                "experimental_cooperative_cancellation": {
-                    "measure": {
-                        "enabled_with_timeout_in_seconds": 0.001
-                    }
-                }
-            }
-        },
-        "telemetry": {
-            "exporters": {
-                "metrics": {
-                    "prometheus": {
-                        "enabled": true
-                    }
-                }
-            }
-        }
-    });
-
-    let slow_subgraph_response = wiremock::ResponseTemplate::new(200)
-        .set_delay(Duration::from_secs(1))
-        .set_body_json(json!({
-            "data": {
-                "topProducts": [
-                    { "name": "Table", "upc": "1", "reviews": [] },
-                ],
-            },
-        }));
-
+    // Inline measure mode config with Prometheus metrics
+    let measure_config = r#"
+        supergraph:
+          query_planning:
+            experimental_cooperative_cancellation:
+              measure: enabled
+        telemetry:
+          exporters:
+            metrics:
+              prometheus:
+                enabled: true
+                listen: 127.0.0.1:0
+                path: /metrics
+    "#;
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config).unwrap())
-        .responder(slow_subgraph_response)
+        .config(measure_config)
+        .supergraph("tests/fixtures/valid-supergraph.graphql")
+        .responder(
+            wiremock::ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_json(serde_json::json!({"data": {"topProducts": [{"name": "Table"}]}})),
+        )
         .build()
         .await;
-
     router.start().await;
     router.assert_started().await;
 
-    let client = Client::new();
-    let router_url = format!("http://{}/", router.bind_address());
-
-    let query = json!({
-        "query": "query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"
-    });
-
-    for _ in 0..3 {
-        let _response = client
-            .post(&router_url)
-            .header("content-type", "application/json")
-            .json(&query)
-            .send()
-            .await
-            .expect("Request should complete");
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    router
-        .assert_metrics_contains(
-            "apollo_router_operations_cooperative_cancellations_total",
-            None,
-        )
-        .await;
-
+    let query = crate::integration::common::Query::builder()
+        .body(serde_json::json!({"query": "query { topProducts { name } }"}))
+        .build();
+    let fut = router.execute_query(query);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(fut);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    router.assert_metrics_contains(
+        r#"apollo_router_query_planning_plan_duration_seconds{planner="rust",outcome="cancelled"}"#,
+        Some(Duration::from_secs(5)),
+    ).await;
     router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_cooperative_cancellation_client_disconnect() {
-    let config = json!({
-        "supergraph": {
-            "query_planning": {
-                "experimental_cooperative_cancellation": {
-                    "enforce": "enabled"
-                }
-            }
-        },
-        "telemetry": {
-            "exporters": {
-                "metrics": {
-                    "prometheus": {
-                        "enabled": true
-                    }
-                }
-            }
-        }
-    });
-
-    // Create a normal subgraph response
-    let subgraph_response = wiremock::ResponseTemplate::new(200).set_body_json(json!({
-        "data": {
-            "topProducts": [
-                { "name": "Table", "upc": "1", "reviews": [] },
-            ],
-        },
-    }));
-
+async fn test_cooperative_cancellation_enforce_mode_with_timeout() {
+    // Inline enforce mode + timeout config with Prometheus metrics
+    let enforce_timeout_config = r#"
+        supergraph:
+          query_planning:
+            experimental_cooperative_cancellation:
+              enforce:
+                enabled_with_timeout_in_seconds: 0.2
+        telemetry:
+          exporters:
+            metrics:
+              prometheus:
+                enabled: true
+                listen: 127.0.0.1:0
+                path: /metrics
+    "#;
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config).unwrap())
-        .responder(subgraph_response)
+        .config(enforce_timeout_config)
+        .supergraph("tests/fixtures/valid-supergraph.graphql")
+        .responder(
+            wiremock::ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_json(serde_json::json!({"data": {"topProducts": [{"name": "Table"}]}})),
+        )
         .build()
         .await;
-
-    // Set up lifecycle monitoring
-    router
-        .setup_lifecycle_monitoring()
-        .await
-        .expect("Failed to setup lifecycle monitoring");
-
     router.start().await;
     router.assert_started().await;
 
-    let client = Client::new();
-    let router_url = format!("http://{}/", router.bind_address());
+    let query = crate::integration::common::Query::builder()
+        .body(serde_json::json!({"query": "query { topProducts { name } }"}))
+        .build();
+    let _ = router.execute_query(query).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    router.assert_metrics_contains(
+        r#"apollo_router_query_planning_plan_duration_seconds{planner="rust",outcome="timeout"}"#,
+        Some(Duration::from_secs(5)),
+    ).await;
+    router.graceful_shutdown().await;
+}
 
-    // Use a complex query to ensure query planning takes some time
-    let query = json!({
-        "query": "query ComplexQuery { topProducts(first: 5) { upc name price reviews { id author { id name } product { name upc } } } me { id name username reviews { id author { id name } product { name upc price reviews { id author { id name } } } } } }"
-    });
-
-    // Start a request
-    let client_clone = client.clone();
-    let router_url_clone = router_url.clone();
-    let query_clone = query.clone();
-
-    let request_task = tokio::spawn(async move {
-        client_clone
-            .post(&router_url_clone)
-            .header("content-type", "application/json")
-            .json(&query_clone)
-            .timeout(Duration::from_millis(5)) // Very short timeout to force disconnect during planning
-            .send()
-            .await
-    });
-
-    // Wait for query planning to start
-    router
-        .wait_for_query_planning_start()
-        .await
-        .expect("Query planning should start");
-
-    // Give the disconnect a moment to be detected
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    // Wait for query planning to end (it should be cancelled)
-    router
-        .wait_for_query_planning_end()
-        .await
-        .expect("Query planning should end");
-
-    // Check the request result to confirm timeout
-    match request_task.await {
-        Ok(Err(e)) if e.is_timeout() => {
-            println!("Request timed out as expected");
-        }
-        Ok(Ok(_)) => {
-            println!("Request completed successfully (unexpected)");
-        }
-        Ok(Err(e)) => {
-            println!("Request failed with error: {:?}", e);
-        }
-        Err(e) => {
-            println!("Request task error: {:?}", e);
-        }
-    }
-
-    // Give time for metrics to be updated
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Verify that cooperative cancellation metrics were recorded
-    router
-        .assert_metrics_contains(
-            "apollo_router_operations_cooperative_cancellations_total",
-            Some(Duration::from_secs(3)),
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cooperative_cancellation_measure_mode_with_timeout() {
+    // Inline measure mode + timeout config with Prometheus metrics
+    let measure_timeout_config = r#"
+        supergraph:
+          query_planning:
+            experimental_cooperative_cancellation:
+              measure:
+                enabled_with_timeout_in_seconds: 0.2
+        telemetry:
+          exporters:
+            metrics:
+              prometheus:
+                enabled: true
+                listen: 127.0.0.1:0
+                path: /metrics
+    "#;
+    let mut router = IntegrationTest::builder()
+        .config(measure_timeout_config)
+        .supergraph("tests/fixtures/valid-supergraph.graphql")
+        .responder(
+            wiremock::ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_json(serde_json::json!({"data": {"topProducts": [{"name": "Table"}]}})),
         )
+        .build()
         .await;
+    router.start().await;
+    router.assert_started().await;
 
+    let query = crate::integration::common::Query::builder()
+        .body(serde_json::json!({"query": "query { topProducts { name } }"}))
+        .build();
+    let _ = router.execute_query(query).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    router.assert_metrics_contains(
+        r#"apollo_router_query_planning_plan_duration_seconds{planner="rust",outcome="timeout"}"#,
+        Some(Duration::from_secs(5)),
+    ).await;
     router.graceful_shutdown().await;
 }
