@@ -72,6 +72,12 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
+                            u64_counter!( // TODO TEMP REMOVE
+                                "apollo.router.graphql_error",
+                                "Number of GraphQL error responses returned by the router",
+                                1,
+                                code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
+                            );
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
                                 .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
@@ -102,7 +108,7 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
-    use serde_json::Value;
+    use serde_json::{json, Value};
     use tower_service::Service;
     use tracing_subscriber::filter::FilterExt;
     use super::*;
@@ -110,9 +116,9 @@ mod test {
     use crate::plugin::test::MockRouterService;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::test::{FakeDefault, PluginTestHarness};
+    use crate::plugins::test::{FakeDefault, PluginTestHarness, RequestTestExt};
     use crate::services::supergraph;
-    use crate::TestHarness;
+    use crate::{Context, TestHarness};
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -217,7 +223,7 @@ mod test {
                 .build()
                 .with_deserialized_config()
                 .expect("unable to deserialize telemetry config");
-            let mut telemetry_plugin = Telemetry::new(init)
+            let telemetry_plugin = Telemetry::new(init)
                 .await
                 .expect("telemetry plugin");
 
@@ -238,8 +244,8 @@ mod test {
         });
 
             let mut test_harness = TestHarness::builder()
-                .extra_private_plugin(telemetry_plugin)
                 .extra_private_plugin(license_plugin)
+                .extra_private_plugin(telemetry_plugin)
                 .router_hook(move |_| router_service.clone().boxed())
                 .build_router()
                 .await
@@ -247,11 +253,38 @@ mod test {
 
             // WHEN
             // * two reqs happen
-            let _ = test_harness.call(router::Request::default()).await;
-            let _ = test_harness.call(router::Request::default()).await;
+            let _first_response = test_harness
+                .ready()
+                .await
+                .unwrap()
+                .call(router::Request::fake_builder()
+                    .header("content-type", "application/json")
+                    .build()
+                    .unwrap()
+                )
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+            let _second_response = test_harness
+                .ready()
+                .await
+                .unwrap()
+                .call(router::Request::fake_builder()
+                    .header("content-type", "application/json")
+                    .build()
+                    .unwrap()
+                )
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
 
             // THEN
-            // * we get a metric saying the tps limit was enforced
+            // * we get a metric from the telemetry plugin saying the tps limit was enforced
             assert_counter!(
                 "apollo.router.graphql_error",
                 1,
