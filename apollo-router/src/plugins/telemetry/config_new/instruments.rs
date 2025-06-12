@@ -2444,6 +2444,7 @@ mod tests {
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
+    use apollo_federation::connectors::runtime::problem::Problem;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -2477,7 +2478,6 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;

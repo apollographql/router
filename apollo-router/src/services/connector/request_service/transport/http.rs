@@ -1,5 +1,6 @@
 //! HTTP transport for Apollo Connectors
-use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
+
+use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 
 /// Request to an HTTP transport
 #[derive(Debug)]

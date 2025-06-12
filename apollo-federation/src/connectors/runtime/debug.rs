@@ -3,16 +3,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 
-use crate::plugins::connectors::mapping::Problem;
+use crate::connectors::runtime::problem::Problem;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct ConnectorContext {
+pub struct ConnectorContext {
     requests: Vec<ConnectorDebugHttpRequest>,
     responses: Vec<ConnectorDebugHttpResponse>,
 }
 
 impl ConnectorContext {
-    pub(crate) fn push_response(
+    pub fn push_response(
         &mut self,
         request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
@@ -30,7 +30,7 @@ impl ConnectorContext {
         }
     }
 
-    pub(crate) fn push_invalid_response(
+    pub fn push_invalid_response(
         &mut self,
         request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
@@ -63,7 +63,7 @@ impl ConnectorContext {
         }
     }
 
-    pub(super) fn serialize(self) -> serde_json_bytes::Value {
+    pub fn serialize(self) -> serde_json_bytes::Value {
         json!(
             self.requests
                 .into_iter()
@@ -80,24 +80,24 @@ impl ConnectorContext {
 /// JSONSelection Request / Response Data
 ///
 /// Contains all needed info and responses from the application of a JSONSelection
-pub(crate) struct SelectionData {
+pub struct SelectionData {
     /// The original [`JSONSelection`] to resolve
-    pub(crate) source: String,
+    pub source: String,
 
     /// A mapping of the original selection, taking into account renames and other
     /// transformations requested by the client
     ///
     /// Refer to [`Self::source`] for the original, schema-supplied selection.
-    pub(crate) transformed: String,
+    pub transformed: String,
 
     /// The result of applying the selection to JSON. An empty value
     /// here can potentially mean that errors were encountered.
     ///
     /// Refer to [`Self::errors`] for any errors found during evaluation
-    pub(crate) result: Option<serde_json_bytes::Value>,
+    pub result: Option<serde_json_bytes::Value>,
 
     /// A list of mapping problems encountered during evaluation.
-    pub(crate) errors: Vec<Problem>,
+    pub errors: Vec<Problem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +108,7 @@ struct ConnectorDebugBody {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ConnectorDebugHttpRequest {
+pub struct ConnectorDebugHttpRequest {
     url: String,
     method: String,
     headers: Vec<(String, String)>,
@@ -123,7 +123,7 @@ struct ConnectorDebugSelection {
     errors: Vec<Problem>,
 }
 
-pub(crate) fn serialize_request(
+pub fn serialize_request(
     req: &http::Request<String>,
     kind: String,
     json_body: Option<&serde_json_bytes::Value>,

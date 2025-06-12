@@ -263,6 +263,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_federation::connectors::runtime::problem::Problem;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -285,7 +286,6 @@ mod tests {
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;

@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_federation::connectors::runtime::debug::serialize_request;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::debug::SelectionData;
+use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
+use apollo_federation::connectors::runtime::problem::Problem;
 use apollo_federation::connectors::HTTPMethod;
 use apollo_federation::connectors::Header;
 use apollo_federation::connectors::HeaderSource;
@@ -16,11 +21,6 @@ use serde_json_bytes::json;
 use thiserror::Error;
 
 use super::form_encoding::encode_json_as_form;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::SelectionData;
-use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;

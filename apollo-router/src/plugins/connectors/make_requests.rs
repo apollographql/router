@@ -5,6 +5,7 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::JSONSelection;
@@ -20,7 +21,6 @@ use super::http_json_transport::make_request;
 use crate::Context;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
 

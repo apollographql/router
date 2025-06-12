@@ -2,22 +2,21 @@
 
 use std::collections::HashMap;
 
-use apollo_federation::connectors::ApplyToError;
+use crate::connectors::ApplyToError;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
 /// A mapping problem
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub(crate) struct Problem {
-    pub(crate) message: String,
-    pub(crate) path: String,
-    pub(crate) count: usize,
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Problem {
+    pub message: String,
+    pub path: String,
+    pub count: usize,
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem)
-pub(crate) fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<Problem> {
+pub fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<Problem> {
     errors
         .iter()
         .fold(

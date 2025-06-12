@@ -35,6 +35,7 @@ pub(crate) mod spec;
 mod string_template;
 pub mod validation;
 pub(crate) mod variable;
+pub mod runtime;
 
 use apollo_compiler::name;
 use id::ConnectorPosition;
@@ -93,6 +94,79 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+
+    pub fn on_type(&self, type_name: &str) -> bool {
+        match &self.directive {
+            ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
+                type_name: directive_type_name,
+                ..
+            }) => directive_type_name == type_name,
+            _ => false,
+        }
+    }
+
+    pub fn on_field(&self, type_name: &str, field_name: &str) -> bool {
+        match &self.directive {
+            ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                field:
+                    ObjectOrInterfaceFieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+                        type_name: directive_type_name,
+                        field_name: directive_field_name,
+                        ..
+                    }),
+                ..
+            }) => directive_type_name == type_name && directive_field_name == field_name,
+            _ => false,
+        }
+    }
+
+    pub fn on_directive(&self, type_name: &str, field_name: &str, directive_name: &str) -> bool {
+        match &self.directive {
+            ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                field:
+                    ObjectOrInterfaceFieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+                        type_name: directive_type_name,
+                        field_name: directive_field_name,
+                        ..
+                    }),
+                directive_name: directive_directive_name,
+                ..
+            }) => {
+                directive_type_name == type_name
+                    && directive_field_name == field_name
+                    && directive_directive_name == directive_name
+            }
+            _ => false,
+        }
+    }
+
+    pub fn on_directive_application(
+        &self,
+        type_name: &str,
+        field_name: &str,
+        directive_name: &str,
+        index: usize,
+    ) -> bool {
+        match &self.directive {
+            ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                field:
+                    ObjectOrInterfaceFieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+                        type_name: directive_type_name,
+                        field_name: directive_field_name,
+                        ..
+                    }),
+                directive_name: directive_directive_name,
+                directive_index,
+                ..
+            }) => {
+                directive_type_name == type_name
+                    && directive_field_name == field_name
+                    && directive_directive_name == directive_name
+                    && *directive_index == index
+            }
+            _ => false,
+        }
     }
 }
 

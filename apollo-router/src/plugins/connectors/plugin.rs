@@ -1,10 +1,8 @@
-pub(crate) mod debug;
-
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use debug::ConnectorContext;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
