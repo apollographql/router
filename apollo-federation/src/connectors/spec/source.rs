@@ -13,6 +13,7 @@ use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ErrorsArguments;
 use crate::connectors::Header;
 use crate::connectors::JSONSelection;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
@@ -122,7 +123,7 @@ impl TryFrom<(&[(Name, Node<Value>)], &Name)> for SourceHTTPArguments {
         (values, directive_name): (&[(Name, Node<Value>)], &Name),
     ) -> Result<Self, FederationError> {
         let mut base_url = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Source)
             .into_iter()
             .try_collect()
             .map_err(|err| FederationError::internal(err.to_string()))?;
