@@ -2260,8 +2260,8 @@ impl Ord for CacheKeyStatus {
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
-//     use crate::plugins::new_cache::tests::MockStore;
-//     use crate::plugins::new_cache::tests::SCHEMA;
+//     use crate::plugins::subgraph_cache::tests::MockStore;
+//     use crate::plugins::subgraph_cache::tests::SCHEMA;
 
 //     #[tokio::test]
 //     async fn test_subgraph_enabled() {

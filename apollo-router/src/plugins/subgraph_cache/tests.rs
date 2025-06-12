@@ -19,14 +19,14 @@
 // use crate::Context;
 // use crate::MockedSubgraphs;
 // use crate::TestHarness;
-// use crate::new_cache::redis::RedisCacheStorage;
+// use crate::subgraph_cache::redis::RedisCacheStorage;
 // use crate::plugin::test::MockSubgraph;
 // use crate::plugin::test::MockSubgraphService;
-// use crate::plugins::new_cache::entity::CONTEXT_CACHE_KEYS;
-// use crate::plugins::new_cache::entity::CacheKeyContext;
-// use crate::plugins::new_cache::entity::CacheKeysContext;
-// use crate::plugins::new_cache::entity::Subgraph;
-// use crate::plugins::new_cache::entity::hash_representation;
+// use crate::plugins::subgraph_cache::entity::CONTEXT_CACHE_KEYS;
+// use crate::plugins::subgraph_cache::entity::CacheKeyContext;
+// use crate::plugins::subgraph_cache::entity::CacheKeysContext;
+// use crate::plugins::subgraph_cache::entity::Subgraph;
+// use crate::plugins::subgraph_cache::entity::hash_representation;
 // use crate::services::subgraph;
 // use crate::services::supergraph;
 
