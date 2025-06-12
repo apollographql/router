@@ -237,10 +237,10 @@ impl RouterToSupergraphRequestLayer {
     }
 }
 
-impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
-    type Service = RouterToSupergraphRequestService;
+impl<S> tower::Layer<S> for RouterToSupergraphRequestLayer {
+    type Service = RouterToSupergraphRequestService<S>;
 
-    fn layer(&self, inner: PrepareSupergraphService) -> Self::Service {
+    fn layer(&self, inner: S) -> Self::Service {
         RouterToSupergraphRequestService {
             supergraph_service: inner,
             apollo_telemetry_config: self.apollo_telemetry_config.clone(),
@@ -251,12 +251,19 @@ impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
 /// A service that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
 #[derive(Clone)]
-struct RouterToSupergraphRequestService {
-    supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
+struct RouterToSupergraphRequestService<S> {
+    supergraph_service: S, // <supergraph::BoxCloneService>,
     apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
 }
 
-impl Service<RouterRequest> for RouterToSupergraphRequestService {
+impl<S> Service<RouterRequest> for RouterToSupergraphRequestService<S>
+where
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -273,7 +280,11 @@ impl Service<RouterRequest> for RouterToSupergraphRequestService {
     }
 }
 
-impl RouterToSupergraphRequestService {
+impl<S> RouterToSupergraphRequestService<S>
+where
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send + 'static,
+    S::Future: Send + 'static,
+{
     async fn call_inner(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
