@@ -573,7 +573,6 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -587,7 +586,6 @@ mod test {
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
     use http::HeaderMap;
-    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -777,7 +775,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/api").ok(),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

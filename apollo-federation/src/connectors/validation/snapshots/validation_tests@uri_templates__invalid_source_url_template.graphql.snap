@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid_source_url_template.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "`@source(baseURL)` url templates should contain only `$config` and `$env` variables. Found references to: [\"$args\", \"$request\"].",
+        locations: [
+            6:40..6:77,
+        ],
+    },
+]

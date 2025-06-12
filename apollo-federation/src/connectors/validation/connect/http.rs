@@ -428,19 +428,6 @@ fn validate_absolute_connect_url(
         });
     }
 
-    // Evaluate the template, replacing all dynamic expressions with empty strings. This should result in a valid
-    // URL because of the URL building logic in `interpolate_uri`, even if the result is illogical with missing values.
-    let (url, _) = url
-        .interpolate_uri(&Default::default())
-        .map_err(|err| Message {
-            message: format!("In {coordinate}: {err}"),
-            code: Code::InvalidUrl,
-            locations: value
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
-
     validate_url_scheme(&url, coordinate, value, schema)?;
 
     Ok(())

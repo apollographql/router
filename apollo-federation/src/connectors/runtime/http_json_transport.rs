@@ -328,7 +328,7 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_url: None,
+                source_template: None,
                 connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
@@ -381,7 +381,7 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_url: None,
+                source_template: None,
                 connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers,

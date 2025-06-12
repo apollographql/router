@@ -181,7 +181,7 @@ mod tests {
                     "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
+                    source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },
@@ -268,7 +268,7 @@ mod tests {
                     "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
+                    source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },

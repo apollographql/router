@@ -123,7 +123,7 @@ impl<'schema> SourceDirective<'schema> {
         match BaseUrl::parse(http_arg, &directive.name, &schema.sources) {
             Ok(base_url) => messages.extend(
                 validate_url_scheme(
-                    &base_url.url,
+                    &base_url.template,
                     BaseUrlCoordinate {
                         source_directive_name: &directive.name,
                     },
