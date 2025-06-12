@@ -67,6 +67,7 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::core_compat;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
@@ -104,11 +105,31 @@ impl RouterService {
         let apq_layer = Arc::new(apq_layer);
         let query_analysis_layer = Arc::new(query_analysis_layer);
 
+        let router_to_core_http = core_compat::ConvertLayer::new(
+            core_compat::http_server::router_request_to_core_request,
+            core_compat::http_server::core_response_to_router_response,
+        );
+        let core_json_to_supergraph = core_compat::ConvertLayer::new(
+            core_compat::json_server::core_json_request_to_supergraph_request,
+            core_compat::json_server::supergraph_response_to_core_json_response,
+        );
+
         let service = ServiceBuilder::new()
             .layer(BatchingLayer::new(batching))
-            .layer(RouterToSupergraphRequestLayer::new(Arc::new(
-                apollo_telemetry_config,
-            )))
+
+            // FIXME(@goto-bus-stop) We lose the Arc<RequestMetadata> context somewhere in here.
+            .layer(router_to_core_http)
+            .layer(apollo_router_core::layers::http_server_to_bytes_server::HttpToBytesLayer)
+            .layer(apollo_router_core::layers::bytes_server_to_json_server::BytesToJsonLayer)
+            .layer(core_json_to_supergraph)
+
+            // FIXME(@goto-bus-stop): the conversion layers don't do everything that the
+            // RouterToSupergraphRequestLayer does, so we'll need to split that thing up a bit.
+            // Error counting, defer/subscription accept/content-type handling, and some other
+            // headers stuff
+            // .layer(RouterToSupergraphRequestLayer::new(Arc::new(
+            //     apollo_telemetry_config,
+            // )))
             .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
             .layer(APQCachingLayer::new(apq_layer))
             .layer(ParseQueryLayer::new(query_analysis_layer))
