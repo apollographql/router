@@ -2,3 +2,4 @@ pub mod debug;
 pub mod problem;
 pub mod form_encoding;
 pub mod http;
+pub mod http_json_transport;

@@ -6,6 +6,7 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::make_request;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::JSONSelection;
@@ -16,8 +17,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
-use super::http_json_transport::HttpJsonTransportError;
-use super::http_json_transport::make_request;
 use crate::Context;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
@@ -286,7 +285,7 @@ pub(crate) enum MakeRequestError {
     InvalidRepresentations(String),
 
     /// Cannot create HTTP request: {0}
-    TransportError(#[from] HttpJsonTransportError),
+    TransportError(#[from] apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError),
 }
 
 // --- ROOT FIELDS -------------------------------------------------------------

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
+use crate::connectors::HTTPMethod;
+use crate::connectors::Header;
+use crate::connectors::HeaderSource;
+use crate::connectors::HttpJsonTransport;
+use crate::connectors::MakeUriError;
+use crate::connectors::runtime::debug::ConnectorContext;
+use crate::connectors::runtime::debug::SelectionData;
+use crate::connectors::runtime::debug::serialize_request;
+use crate::connectors::runtime::form_encoding::encode_json_as_form;
+use crate::connectors::runtime::http::HttpRequest;
+use crate::connectors::runtime::http::TransportRequest;
+use crate::connectors::runtime::problem::Problem;
+use crate::connectors::runtime::problem::aggregate_apply_to_errors;
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::connectors::runtime::debug::serialize_request;
-use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::debug::SelectionData;
-use apollo_federation::connectors::runtime::form_encoding::encode_json_as_form;
-use apollo_federation::connectors::runtime::http::HttpRequest;
-use apollo_federation::connectors::runtime::http::TransportRequest;
-use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
-use apollo_federation::connectors::runtime::problem::Problem;
-use apollo_federation::connectors::HTTPMethod;
-use apollo_federation::connectors::Header;
-use apollo_federation::connectors::HeaderSource;
-use apollo_federation::connectors::HttpJsonTransport;
-use apollo_federation::connectors::MakeUriError;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
@@ -23,7 +23,7 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
-pub(crate) fn make_request(
+pub fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     original_headers: &HeaderMap<HeaderValue>,
@@ -37,12 +37,8 @@ pub(crate) fn make_request(
         .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
-    let (mut request, content_type) = add_headers(
-        request,
-        original_headers,
-        &transport.headers,
-        &inputs,
-    );
+    let (mut request, content_type) =
+        add_headers(request, original_headers, &transport.headers, &inputs);
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
@@ -90,9 +86,7 @@ pub(crate) fn make_request(
             Box::new(serialize_request(
                 &request,
                 "form-urlencoded".to_string(),
-                form_body
-                    .map(|s| serde_json_bytes::Value::String(s.clone().into()))
-                    .as_ref(),
+                form_body.map(|s| Value::String(s.clone().into())).as_ref(),
                 transport.body.as_ref().map(|body| SelectionData {
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
@@ -167,7 +161,7 @@ fn add_headers(
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HttpJsonTransportError {
+pub enum HttpJsonTransportError {
     #[error("Could not generate HTTP request: {0}")]
     InvalidNewRequest(#[source] http::Error),
     #[error("Could not serialize body: {0}")]
@@ -182,10 +176,10 @@ pub(crate) enum HttpJsonTransportError {
 mod tests {
     use std::str::FromStr;
 
-    use apollo_federation::connectors::HTTPMethod;
-    use apollo_federation::connectors::HeaderSource;
-    use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::StringTemplate;
+    use crate::connectors::HTTPMethod;
+    use crate::connectors::HeaderSource;
+    use crate::connectors::JSONSelection;
+    use crate::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;
@@ -211,7 +205,9 @@ mod tests {
             &[],
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap();
+        let request = request
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
+            .unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -244,15 +240,17 @@ mod tests {
             &config,
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap();
+        let request = request
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
+            .unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn make_request() {
+    #[test]
+    fn make_request() {
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
 
@@ -296,8 +294,8 @@ mod tests {
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn make_request_form_encoded() {
+    #[test]
+    fn make_request_form_encoded() {
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
         let headers = vec![Header::from_values(
