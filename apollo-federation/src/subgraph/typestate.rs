@@ -234,6 +234,37 @@ impl Subgraph<Initial> {
             state: Expanded { schema, metadata },
         })
     }
+
+    pub fn schema_diff_expanded_from_initial(
+        schema_str: String,
+    ) -> Result<String, FederationError> {
+        // Parse schema string as Schema
+        let initial_schema = Schema::parse(schema_str, "")?;
+
+        // Initialize and expand subgraph, without validation
+        let initial_subgraph = Self::new("S", "http://S", initial_schema.clone());
+        let expanded_subgraph = initial_subgraph.expand_links()?;
+
+        // Build string of missing directives and types from initial to expanded
+        let mut diff = String::new();
+
+        // Push newly added directives onto diff
+        for (dir_name, dir_def) in &expanded_subgraph.schema().schema().directive_definitions {
+            if !initial_schema.directive_definitions.contains_key(dir_name) {
+                diff.push_str(&dir_def.to_string());
+                diff.push('\n');
+            }
+        }
+
+        // Push newly added types onto diff
+        for (named_ty, extended_ty) in &expanded_subgraph.schema().schema().types {
+            if !initial_schema.types.contains_key(named_ty) {
+                diff.push_str(&extended_ty.to_string());
+            }
+        }
+
+        Ok(diff)
+    }
 }
 
 impl Subgraph<Expanded> {
@@ -835,6 +866,8 @@ impl FederationSchema {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
 
@@ -1011,6 +1044,183 @@ mod tests {
                 name!("specifiedBy"),
             ]
         );
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_1_0() {
+        let schema_string = String::from_str(
+            r#"
+                type Query {
+                    s: String
+                }"#,
+        )
+        .unwrap();
+
+        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @core(feature: String, as: String, for: core__Purpose) repeatable on SCHEMA
+directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @extends on OBJECT | INTERFACE
+enum core__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar core__Import
+scalar _FieldSet
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_0() {
+        let schema_string = String::from_str(
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .unwrap();
+
+        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_4() {
+        let schema_string = String::from_str(
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.4")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .unwrap();
+
+        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
+directive @federation__composeDirective(name: String!) repeatable on SCHEMA
+directive @federation__interfaceObject on OBJECT
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_9() {
+        let schema_string = String::from_str(
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .unwrap();
+
+        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
+directive @federation__composeDirective(name: String!) repeatable on SCHEMA
+directive @federation__interfaceObject on OBJECT
+directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar federation__Scope
+scalar federation__Policy
+scalar federation__ContextFieldValue
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
     }
 
     #[test]
