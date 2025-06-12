@@ -1,4 +1,4 @@
-//! This file is to load test subscriptions and should be launched manually, not in our CI
+//! This file is to load-test subscriptions and should be launched manually, not in our CI
 use futures::StreamExt;
 use http::HeaderValue;
 use serde_json::json;

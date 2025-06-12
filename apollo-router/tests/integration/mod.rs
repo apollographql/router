@@ -12,6 +12,7 @@ mod entity_cache;
 mod file_upload;
 mod introspection;
 mod lifecycle;
+mod mock_subgraphs;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
@@ -23,7 +24,7 @@ mod typename;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
 mod rhai;
-mod subscription;
+mod subscription_load_test;
 mod telemetry;
 mod validation;
 

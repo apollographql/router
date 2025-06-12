@@ -110,7 +110,7 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
             .and_then(|a| a.key(CONNECTOR_SOURCE_NAME))
         {
             if let Some(ref source_name) = request.connector.id.source_name {
-                attrs.push(KeyValue::new(key, source_name.clone()));
+                attrs.push(KeyValue::new(key, source_name.value.clone()));
             }
         }
         if let Some(key) = self

@@ -1526,8 +1526,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
@@ -6401,7 +6403,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntitySurrogateKeys\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6425,7 +6427,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloSurrogateKeys\"]` array.",
           "type": "object"
         }
       },
