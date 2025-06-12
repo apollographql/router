@@ -33,15 +33,16 @@ expression: "&connectors"
                 ],
             },
             method: Get,
-            headers: {
-                "authtoken": (
-                    From(
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
                         "x-auth-token",
                     ),
-                    Source,
-                ),
-                "user-agent": (
-                    Value(
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
                         HeaderValue(
                             StringTemplate {
                                 parts: [
@@ -55,9 +56,8 @@ expression: "&connectors"
                             },
                         ),
                     ),
-                    Source,
-                ),
-            },
+                },
+            ],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -117,6 +117,7 @@ expression: "&connectors"
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -154,15 +155,16 @@ expression: "&connectors"
                 ],
             },
             method: Post,
-            headers: {
-                "authtoken": (
-                    From(
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
                         "x-auth-token",
                     ),
-                    Source,
-                ),
-                "user-agent": (
-                    Value(
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
                         HeaderValue(
                             StringTemplate {
                                 parts: [
@@ -176,9 +178,8 @@ expression: "&connectors"
                             },
                         ),
                     ),
-                    Source,
-                ),
-            },
+                },
+            ],
             body: Some(
                 Named(
                     SubSelection {
@@ -306,6 +307,7 @@ expression: "&connectors"
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

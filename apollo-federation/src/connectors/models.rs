@@ -1,3 +1,4 @@
+mod headers;
 mod http_json_transport;
 mod keys;
 mod problem_location;
@@ -14,10 +15,10 @@ use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
+pub use self::headers::Header;
+pub(crate) use self::headers::HeaderParseError;
+pub use self::headers::HeaderSource;
 pub use self::http_json_transport::HTTPMethod;
-pub(crate) use self::http_json_transport::Header;
-pub(crate) use self::http_json_transport::HeaderParseError;
-pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
 pub use self::http_json_transport::OriginatingDirective;
@@ -63,6 +64,8 @@ pub struct Connector {
     pub request_headers: HashSet<String>,
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
+    /// The environment variables referenced in the connector
+    pub env: HashSet<String>,
 
     pub batch_settings: Option<ConnectBatchArguments>,
 
@@ -198,7 +201,7 @@ impl Connector {
             .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let request_headers = extract_header_references(request_references);
+        let request_headers = extract_header_references(&request_references);
 
         // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
         let response_references: HashSet<VariableReference<Namespace>> = connect
@@ -210,7 +213,9 @@ impl Connector {
             .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let response_headers = extract_header_references(response_references);
+        let response_headers = extract_header_references(&response_references);
+
+        let env = extract_env_references(&request_references, &response_references);
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(
@@ -243,6 +248,7 @@ impl Connector {
             response_variables,
             request_headers,
             response_headers,
+            env,
             batch_settings,
             error_settings,
         })
@@ -372,7 +378,7 @@ fn determine_entity_resolver(
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
 fn extract_header_references(
-    variable_references: HashSet<VariableReference<Namespace>>,
+    variable_references: &HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     variable_references
         .iter()
@@ -389,6 +395,20 @@ fn extract_header_references(
                     .unwrap_or_default()
             }
         })
+        .collect()
+}
+
+/// Get any env vars referenced in the variable references.
+fn extract_env_references(
+    request_references: &HashSet<VariableReference<Namespace>>,
+    response_references: &HashSet<VariableReference<Namespace>>,
+) -> HashSet<String> {
+    request_references
+        .iter()
+        .chain(response_references.iter())
+        .filter(|var_ref| var_ref.namespace.namespace == Namespace::Env)
+        .flat_map(|var_ref| var_ref.selection.keys())
+        .cloned()
         .collect()
 }
 
@@ -418,7 +438,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         [
             Connector {
                 id: ConnectId {
@@ -450,15 +470,16 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": (
-                            From(
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
                                 "x-auth-token",
                             ),
-                            Source,
-                        ),
-                        "user-agent": (
-                            Value(
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
                                 HeaderValue(
                                     StringTemplate {
                                         parts: [
@@ -472,9 +493,8 @@ mod tests {
                                     },
                                 ),
                             ),
-                            Source,
-                        ),
-                    },
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,
@@ -522,6 +542,7 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                env: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
@@ -559,15 +580,16 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": (
-                            From(
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
                                 "x-auth-token",
                             ),
-                            Source,
-                        ),
-                        "user-agent": (
-                            Value(
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
                                 HeaderValue(
                                     StringTemplate {
                                         parts: [
@@ -581,9 +603,8 @@ mod tests {
                                     },
                                 ),
                             ),
-                            Source,
-                        ),
-                    },
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,
@@ -643,6 +664,7 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                env: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
@@ -651,7 +673,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]

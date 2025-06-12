@@ -560,6 +560,24 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,

@@ -23,6 +23,7 @@ pub(crate) struct MappingContextMerger<'merger> {
     pub(super) status: Option<Value>,
     pub(super) request: Option<Value>,
     pub(super) response: Option<Value>,
+    pub(super) env: Option<Value>,
 }
 
 impl MappingContextMerger<'_> {
@@ -73,6 +74,9 @@ impl MappingContextMerger<'_> {
             map.insert(Namespace::Response.as_str().into(), response.to_owned());
         }
 
+        if let Some(env) = self.env.iter().next() {
+            map.insert(Namespace::Env.as_str().into(), env.to_owned());
+        }
         map
     }
 
@@ -166,6 +170,21 @@ impl MappingContextMerger<'_> {
                 "headers": Value::Object(new_headers)
             });
             self.response = Some(response_object);
+        }
+        self
+    }
+
+    pub(crate) fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
+        if self.variables_used.contains(&Namespace::Env) {
+            let env_vars: Map<ByteString, Value> = env_vars_used
+                .iter()
+                .flat_map(|key| {
+                    std::env::var(key)
+                        .ok()
+                        .map(|value| (key.as_str().into(), Value::String(value.into())))
+                })
+                .collect();
+            self.env = Some(Value::Object(env_vars));
         }
         self
     }

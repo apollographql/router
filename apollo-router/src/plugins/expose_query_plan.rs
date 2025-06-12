@@ -25,13 +25,9 @@ use crate::services::supergraph;
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
 pub(crate) const QUERY_PLAN_CONTEXT_KEY: &str = "apollo::expose_query_plan::plan";
-pub(crate) const DEPRECATED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
 pub(crate) const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str =
     "apollo::expose_query_plan::formatted_plan";
-pub(crate) const DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str =
-    "experimental::expose_query_plan.formatted_plan";
 pub(crate) const ENABLED_CONTEXT_KEY: &str = "apollo::expose_query_plan::enabled";
-pub(crate) const DEPRECATED_ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
 
 #[derive(Debug, Clone)]
 struct ExposeQueryPlan {

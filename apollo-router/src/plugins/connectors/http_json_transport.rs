@@ -3,13 +3,13 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::connectors::ApplyToError;
 use apollo_federation::connectors::HTTPMethod;
+use apollo_federation::connectors::Header;
 use apollo_federation::connectors::HeaderSource;
 use apollo_federation::connectors::HttpJsonTransport;
 use apollo_federation::connectors::MakeUriError;
 use apollo_federation::connectors::OriginatingDirective;
 use apollo_federation::connectors::ProblemLocation;
 use http::HeaderMap;
-use http::HeaderName;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
@@ -142,11 +142,10 @@ pub(crate) fn make_request(
     ))
 }
 
-#[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
 fn add_headers(
     mut request: http::request::Builder,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
-    config: &IndexMap<HeaderName, (HeaderSource, OriginatingDirective)>,
+    config: &[Header],
     inputs: &IndexMap<String, Value>,
 ) -> (
     http::request::Builder,
@@ -156,17 +155,17 @@ fn add_headers(
     let mut content_type = None;
     let mut warnings = Vec::new();
 
-    for (header_name, (header_source, originating_directive)) in config {
-        match header_source {
+    for header in config {
+        match &header.source {
             HeaderSource::From(from) => {
                 let values = incoming_supergraph_headers.get_all(from);
                 let mut propagated = false;
                 for value in values {
-                    request = request.header(header_name.clone(), value.clone());
+                    request = request.header(header.name.clone(), value.clone());
                     propagated = true;
                 }
                 if !propagated {
-                    tracing::warn!("Header '{}' not found in incoming request", header_name);
+                    tracing::warn!("Header '{}' not found in incoming request", header.name);
                 }
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
@@ -195,6 +194,8 @@ fn add_headers(
                     if header_name == CONTENT_TYPE {
                         content_type = Some(value.clone());
                     }
+
+                    request = request.header(header.name.clone(), value);
                 }
                 Err(err) => {
                     tracing::error!("Unable to interpolate header value: {:?}", err);
@@ -256,7 +257,7 @@ mod tests {
         let (request, ..) = add_headers(
             request,
             &incoming_supergraph_headers,
-            &IndexMap::with_hasher(Default::default()),
+            &[],
             &IndexMap::with_hasher(Default::default()),
         );
         let request = request.body(body::empty()).unwrap();
@@ -274,22 +275,16 @@ mod tests {
         .into_iter()
         .collect();
 
-        #[allow(clippy::mutable_key_type)]
-        let mut config = IndexMap::with_hasher(Default::default());
-        config.insert(
-            "x-new-name".parse().unwrap(),
-            (
+        let config = vec![
+            Header::from_values(
+                "x-new-name".parse().unwrap(),
                 HeaderSource::From("x-rename".parse().unwrap()),
-                OriginatingDirective::Source,
             ),
-        );
-        config.insert(
-            "x-insert".parse().unwrap(),
-            (
+            Header::from_values(
+                "x-insert".parse().unwrap(),
                 HeaderSource::Value("inserted".parse().unwrap()),
-                OriginatingDirective::Connect,
             ),
-        );
+        ];
 
         let request = http::Request::builder();
         let (request, ..) = add_headers(
@@ -368,14 +363,10 @@ mod tests {
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
-        let mut headers = IndexMap::default();
-        headers.insert(
+        let headers = vec![Header::from_values(
             "content-type".parse().unwrap(),
-            (
-                HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
-                OriginatingDirective::Connect,
-            ),
-        );
+            HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
+        )];
 
         let req = super::make_request(
             &HttpJsonTransport {
