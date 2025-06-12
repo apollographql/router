@@ -10,15 +10,10 @@ mod link;
 mod schema;
 mod source;
 
-use std::fmt::Display;
 use std::ops::Range;
-use std::str::FromStr;
 
-use ::http::Uri;
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
@@ -161,30 +156,6 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
-
-fn parse_url<Coordinate: Display + Copy>(
-    value: &Node<Value>,
-    coordinate: Coordinate,
-    schema: &SchemaInfo,
-) -> Result<(), Message> {
-    let str_value = value.as_str().ok_or_else(|| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    let url = Uri::from_str(str_value).map_err(|inner| Message {
-        code: Code::InvalidUrl,
-        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    http::url::validate_url_scheme(&url, coordinate, value, schema)
-}
 
 type DirectiveName = Name;
 
