@@ -62,7 +62,7 @@ pub use self::models::HttpJsonTransport;
 pub use self::models::MakeUriError;
 pub use self::models::OriginatingDirective;
 pub use self::models::SourceName;
-pub use self::spec::schema::ConnectBatchArguments;
+pub use self::spec::connect::ConnectBatchArguments;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;

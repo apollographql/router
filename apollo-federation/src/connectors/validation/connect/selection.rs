@@ -25,7 +25,7 @@ use crate::connectors::id::ConnectedElement;
 use crate::connectors::json_selection::ExternalVarPaths;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::Ranged;
-use crate::connectors::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::coordinates::SelectionCoordinate;
 use crate::connectors::validation::expression::MappingArgument;
