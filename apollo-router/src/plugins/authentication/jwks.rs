@@ -722,6 +722,7 @@ mod test {
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;
     use super::jwt_expires_in;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn test_exp_defaults_to_max_when_no_jwt_claims_present() {
@@ -731,20 +732,24 @@ mod test {
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_jwt_claims_not_object() {
+        let _guard = tracing_test::dispatcher_guard();
+
         let context = Context::new();
         context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!("not an object"));
 
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain("expected JWT claims to be an object"));
+        assert!(tracing_test::logs_contain(
+            "expected JWT claims to be an object"
+        ));
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_not_integer() {
+        let _guard = tracing_test::dispatcher_guard();
+
         let context = Context::new();
         context.insert_json_value(
             APOLLO_AUTHENTICATION_JWT_CLAIMS,
@@ -756,13 +761,12 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain(
+        assert!(tracing_test::logs_contain(
             "expected JWT 'exp' (expiry) claim to be an integer"
         ));
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_is_valid_but_expired() {
         let context = Context::new();
         context.insert_json_value(
@@ -777,7 +781,6 @@ mod test {
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_is_valid() {
         let context = Context::new();
         let exp = UNIX_EPOCH.elapsed().unwrap().as_secs() + 3600;

@@ -117,6 +117,7 @@ expression: "&connectors"
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -306,6 +307,7 @@ expression: "&connectors"
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        env: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
