@@ -1,6 +1,8 @@
-use crate::configuration::mode::Mode;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::configuration::mode::Mode;
 
 pub(crate) type CooperativeCancellation = Mode<Config>;
 

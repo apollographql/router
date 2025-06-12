@@ -626,15 +626,15 @@ where
                 {
                     Some(timeout) => {
                         if self.cooperative_cancellation.is_enforce_mode() {
-                            fn convert_timeout_error(e: impl std::fmt::Display) -> CacheResolverError {
+                            fn convert_timeout_error(
+                                e: impl std::fmt::Display,
+                            ) -> CacheResolverError {
                                 CacheResolverError::RetrievalError(Arc::new(
                                     QueryPlannerError::Timeout(e.to_string()),
                                 ))
                             }
 
-                            let res = planning_task
-                                .timeout(timeout)
-                                .await;
+                            let res = planning_task.timeout(timeout).await;
 
                             res.map_err(convert_timeout_error)?
                         } else if self.cooperative_cancellation.is_measure_mode() {
@@ -646,13 +646,16 @@ where
                                 tokio::time::sleep(timeout).await;
                                 tracing::Span::current().record("outcome", "timeout");
                             });
-                            let _dropped_timeout_guard = scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
-                                abort_handle.abort();
-                            });
+                            let _dropped_timeout_guard =
+                                scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
+                                    abort_handle.abort();
+                                });
 
                             planning_task.await
                         } else {
-                            unreachable!("Can't set a timeout without enabling cooperative cancellation");
+                            unreachable!(
+                                "Can't set a timeout without enabling cooperative cancellation"
+                            );
                         }
                     }
                     None => planning_task.await,
@@ -662,21 +665,20 @@ where
                 // so we execute it in a task that can continue even after the request was canceled and
                 // the join handle was dropped. That way, the next similar query will use the cache instead
                 // of restarting the query planner until another timeout
-                tokio::task::spawn(async move {
-                    planning_task.await
-                }).await
-
+                tokio::task::spawn(async move { planning_task.await }).await
             }
             .map(|res| {
                 match &res {
-                    Ok(_) => {tracing::Span::current().record("outcome", "success");},
+                    Ok(_) => {
+                        tracing::Span::current().record("outcome", "success");
+                    }
                     Err(CacheResolverError::RetrievalError(e)) => {
                         if matches!(e.as_ref(), QueryPlannerError::Timeout(_)) {
                             tracing::Span::current().record("outcome", "timeout");
                         } else {
                             tracing::Span::current().record("outcome", "error");
                         };
-                    },
+                    }
                     Err(CacheResolverError::Backpressure(_)) => {
                         tracing::Span::current().record("outcome", "backpressure");
                     }
@@ -1023,6 +1025,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_client_drop() {
         use std::sync::Arc;
+
         use tokio::sync::Barrier;
 
         let barrier = Arc::new(Barrier::new(2));
