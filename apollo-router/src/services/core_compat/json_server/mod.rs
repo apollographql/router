@@ -26,7 +26,7 @@ struct ResponseMetadata {
 }
 
 /// Convert from Router Core json_server Request to Router SupergraphRequest
-pub(crate) async fn core_json_request_to_supergraph_request(
+pub(crate) fn core_json_request_to_supergraph_request(
     mut core_request: CoreJsonRequest,
 ) -> Result<SupergraphRequest, BoxError> {
     // Extract request metadata from extensions
@@ -36,8 +36,8 @@ pub(crate) async fn core_json_request_to_supergraph_request(
         .expect("RequestMetadata must exist in extensions");
 
     // There will be exactly one reference to RequestMetadata. It's a private type no-one else can get it.
-    let metadata = Arc::try_unwrap(arc_metadata)
-        .expect("there must be one reference to request metadata");
+    let metadata =
+        Arc::try_unwrap(arc_metadata).expect("there must be one reference to request metadata");
 
     // Take ownership of all remaining extensions (no cloning)
     let extensions = std::mem::take(&mut core_request.extensions);
@@ -58,7 +58,7 @@ pub(crate) async fn core_json_request_to_supergraph_request(
 }
 
 /// Convert from Router SupergraphRequest to Router Core json_server Request
-pub(crate) async fn supergraph_request_to_core_json_request(
+pub(crate) fn supergraph_request_to_core_json_request(
     mut supergraph_request: SupergraphRequest,
 ) -> Result<CoreJsonRequest, BoxError> {
     // Take ownership of HTTP extensions from supergraph request (no cloning)
@@ -85,7 +85,7 @@ pub(crate) async fn supergraph_request_to_core_json_request(
 }
 
 /// Convert from Router Core json_server Response to Router SupergraphResponse
-pub(crate) async fn core_json_response_to_supergraph_response(
+pub(crate) fn core_json_response_to_supergraph_response(
     mut core_response: CoreJsonResponse,
 ) -> Result<SupergraphResponse, BoxError> {
     // Extract response metadata from extensions
@@ -95,8 +95,8 @@ pub(crate) async fn core_json_response_to_supergraph_response(
         .expect("ResponseMetadata must exist in extensions");
 
     // There will be exactly one reference to ResponseMetadata. It's a private type no-one else can get it.
-    let metadata = Arc::try_unwrap(arc_metadata)
-        .expect("there must be one reference to response metadata");
+    let metadata =
+        Arc::try_unwrap(arc_metadata).expect("there must be one reference to response metadata");
 
     // Take ownership of all remaining extensions (no cloning)
     let extensions = std::mem::take(&mut core_response.extensions);
@@ -135,7 +135,7 @@ pub(crate) async fn core_json_response_to_supergraph_response(
 }
 
 /// Convert from Router SupergraphResponse to Router Core json_server Response
-pub(crate) async fn supergraph_response_to_core_json_response(
+pub(crate) fn supergraph_response_to_core_json_response(
     mut supergraph_response: SupergraphResponse,
 ) -> Result<CoreJsonResponse, BoxError> {
     // Take ownership of HTTP extensions from supergraph response (no cloning)
@@ -146,8 +146,7 @@ pub(crate) async fn supergraph_response_to_core_json_response(
     // Convert GraphQL response stream to JSON stream
     let json_stream = graphql_stream
         .map(|graphql_response| {
-            serde_json::to_value(&graphql_response)
-                .map_err(|err| -> BoxError { err.into() })
+            serde_json::to_value(&graphql_response).map_err(|err| -> BoxError { err.into() })
         })
         .boxed();
 
@@ -167,4 +166,4 @@ pub(crate) async fn supergraph_response_to_core_json_response(
 }
 
 #[cfg(test)]
-mod tests; 
+mod tests;

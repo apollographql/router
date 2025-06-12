@@ -25,7 +25,7 @@ struct ResponseMetadata {
 }
 
 /// Convert from Router Core Request to Router HttpRequest
-pub(crate) async fn core_request_to_router_request(
+pub(crate) fn core_request_to_router_request(
     mut core_request: CoreRequest,
 ) -> Result<RouterHttpRequest, BoxError> {
     // Extract request metadata from extensions
@@ -35,8 +35,8 @@ pub(crate) async fn core_request_to_router_request(
         .expect("RequestMetadata must exist in extensions");
 
     // There will be exactly one reference to RequestMetadata. It's a private type no-one else can get it.
-    let metadata = Arc::try_unwrap(arc_metadata)
-        .expect("there must be one reference to request metadata");
+    let metadata =
+        Arc::try_unwrap(arc_metadata).expect("there must be one reference to request metadata");
 
     // Take ownership of all remaining extensions (no cloning)
     let extensions = std::mem::take(core_request.extensions_mut());
@@ -58,7 +58,7 @@ pub(crate) async fn core_request_to_router_request(
 }
 
 /// Convert from Router HttpRequest to Router Core Request  
-pub(crate) async fn router_request_to_core_request(
+pub(crate) fn router_request_to_core_request(
     mut router_request: RouterHttpRequest,
 ) -> Result<CoreRequest, BoxError> {
     // Take ownership of HTTP extensions from router request (no cloning)
@@ -88,7 +88,7 @@ pub(crate) async fn router_request_to_core_request(
 }
 
 /// Convert from Router Core Response to Router HttpResponse
-pub(crate) async fn core_response_to_router_response(
+pub(crate) fn core_response_to_router_response(
     mut core_response: CoreResponse,
 ) -> Result<RouterHttpResponse, BoxError> {
     // Extract response metadata from extensions
@@ -98,8 +98,8 @@ pub(crate) async fn core_response_to_router_response(
         .expect("ResponseMetadata must exist in extensions");
 
     // There will be exactly one reference to ResponseMetadata. It's a private type no-one else can get it.
-    let metadata = Arc::try_unwrap(arc_metadata)
-        .expect("there must be one reference to response metadata");
+    let metadata =
+        Arc::try_unwrap(arc_metadata).expect("there must be one reference to response metadata");
 
     // Take ownership of all remaining extensions (no cloning)
     let extensions = std::mem::take(core_response.extensions_mut());
@@ -121,7 +121,7 @@ pub(crate) async fn core_response_to_router_response(
 }
 
 /// Convert from Router HttpResponse to Router Core Response
-pub(crate) async fn router_response_to_core_response(
+pub(crate) fn router_response_to_core_response(
     mut router_response: RouterHttpResponse,
 ) -> Result<CoreResponse, BoxError> {
     // Take ownership of HTTP extensions from router response (no cloning)

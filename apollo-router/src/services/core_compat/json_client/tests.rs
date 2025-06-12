@@ -60,9 +60,7 @@ async fn test_core_json_request_to_subgraph_request_conversion() {
     };
 
     // Convert to subgraph request using async function
-    let subgraph_request = core_json_request_to_subgraph_request(core_request)
-        .await
-        .unwrap();
+    let subgraph_request = core_json_request_to_subgraph_request(core_request).unwrap();
 
     // Verify the conversion preserved data
     assert_eq!(subgraph_request.operation_kind, OperationKind::Query);
@@ -137,9 +135,7 @@ async fn test_subgraph_request_to_core_json_request_conversion() {
     };
 
     // Convert to core JSON request using async function
-    let core_request = subgraph_request_to_core_json_request(subgraph_request)
-        .await
-        .unwrap();
+    let core_request = subgraph_request_to_core_json_request(subgraph_request).unwrap();
 
     // Verify the JSON body contains the GraphQL request
     let query = core_request
@@ -189,9 +185,7 @@ async fn test_subgraph_response_to_core_json_response_conversion() {
     };
 
     // Convert to core JSON response using async function
-    let core_response = subgraph_response_to_core_json_response(subgraph_response)
-        .await
-        .unwrap();
+    let core_response = subgraph_response_to_core_json_response(subgraph_response).unwrap();
 
     // Verify subgraph response metadata is preserved in extensions
     let metadata = core_response
@@ -295,12 +289,8 @@ async fn test_round_trip_request_conversion() {
         .unwrap();
 
     // Round trip: Core -> Subgraph -> Core
-    let subgraph_request = core_json_request_to_subgraph_request(original_request)
-        .await
-        .unwrap();
-    let final_request = subgraph_request_to_core_json_request(subgraph_request)
-        .await
-        .unwrap();
+    let subgraph_request = core_json_request_to_subgraph_request(original_request).unwrap();
+    let final_request = subgraph_request_to_core_json_request(subgraph_request).unwrap();
 
     // Verify round trip preserved all properties
     let final_query = final_request.body.get("query").unwrap().as_str().unwrap();
@@ -405,9 +395,7 @@ async fn test_round_trip_response_conversion() {
         .unwrap();
 
     // Round trip: Subgraph -> Core -> Subgraph
-    let core_response = subgraph_response_to_core_json_response(original_response)
-        .await
-        .unwrap();
+    let core_response = subgraph_response_to_core_json_response(original_response).unwrap();
     let final_response = core_json_response_to_subgraph_response(core_response)
         .await
         .unwrap();

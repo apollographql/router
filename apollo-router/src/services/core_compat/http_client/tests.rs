@@ -26,7 +26,7 @@ async fn test_core_request_to_router_request_conversion() {
     core_request.extensions_mut().insert(Arc::new(metadata));
 
     // Convert to router request using async function
-    let router_request = core_request_to_router_request(core_request).await.unwrap();
+    let router_request = core_request_to_router_request(core_request).unwrap();
 
     // Verify the conversion preserved headers and method
     assert_eq!(router_request.http_request.method(), "POST");
@@ -72,7 +72,7 @@ async fn test_router_request_to_core_request_conversion() {
     };
 
     // Convert to core request using async function
-    let core_request = router_request_to_core_request(router_request).await.unwrap();
+    let core_request = router_request_to_core_request(router_request).unwrap();
 
     // Verify the conversion preserved headers and method
     assert_eq!(core_request.method(), "GET");
@@ -112,7 +112,7 @@ async fn test_core_response_to_router_response_conversion() {
     core_response.extensions_mut().insert(Arc::new(metadata));
 
     // Convert to router response using async function
-    let router_response = core_response_to_router_response(core_response).await.unwrap();
+    let router_response = core_response_to_router_response(core_response).unwrap();
 
     // Verify the conversion preserved status and headers
     assert_eq!(router_response.http_response.status(), 200);
@@ -161,7 +161,7 @@ async fn test_router_response_to_core_response_conversion() {
     };
 
     // Convert to core response using async function
-    let core_response = router_response_to_core_response(router_response).await.unwrap();
+    let core_response = router_response_to_core_response(router_response).unwrap();
 
     // Verify the conversion preserved status and headers
     assert_eq!(core_response.status(), 404);
@@ -196,14 +196,21 @@ async fn test_round_trip_request_conversion() {
     };
 
     // Round trip: Router -> Core -> Router
-    let core_request = router_request_to_core_request(original_request).await.unwrap();
-    let final_request = core_request_to_router_request(core_request).await.unwrap();
+    let core_request = router_request_to_core_request(original_request).unwrap();
+    let final_request = core_request_to_router_request(core_request).unwrap();
 
     // Verify round trip preserved all properties
     assert_eq!(final_request.http_request.method(), "PUT");
-    assert_eq!(final_request.http_request.uri(), "https://example.com/update");
     assert_eq!(
-        final_request.http_request.headers().get("x-test-header").unwrap(),
+        final_request.http_request.uri(),
+        "https://example.com/update"
+    );
+    assert_eq!(
+        final_request
+            .http_request
+            .headers()
+            .get("x-test-header")
+            .unwrap(),
         "test-value"
     );
 
@@ -235,8 +242,8 @@ async fn test_round_trip_response_conversion() {
     };
 
     // Round trip: Router -> Core -> Router
-    let core_response = router_response_to_core_response(original_response).await.unwrap();
-    let final_response = core_response_to_router_response(core_response).await.unwrap();
+    let core_response = router_response_to_core_response(original_response).unwrap();
+    let final_response = core_response_to_router_response(core_response).unwrap();
 
     // Verify round trip preserved all properties
     assert_eq!(final_response.http_response.status(), 201);
@@ -295,8 +302,8 @@ async fn test_context_preservation_in_request_round_trip() {
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_request = router_request_to_core_request(original_request).await.unwrap();
-    let final_request = core_request_to_router_request(core_request).await.unwrap();
+    let core_request = router_request_to_core_request(original_request).unwrap();
+    let final_request = core_request_to_router_request(core_request).unwrap();
 
     // Verify context data is preserved
     let final_test_value = final_request
@@ -359,8 +366,8 @@ async fn test_context_preservation_in_response_round_trip() {
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_response = router_response_to_core_response(original_response).await.unwrap();
-    let final_response = core_response_to_router_response(core_response).await.unwrap();
+    let core_response = router_response_to_core_response(original_response).unwrap();
+    let final_response = core_response_to_router_response(core_response).unwrap();
 
     // Verify context data is preserved
     let final_data = final_response
@@ -416,17 +423,40 @@ async fn test_http_extensions_preservation_in_request_round_trip() {
     };
 
     // Store reference values for comparison
-    let original_string = original_request.http_request.extensions().get::<String>().unwrap().clone();
-    let original_number = *original_request.http_request.extensions().get::<u32>().unwrap();
-    let original_vec = original_request.http_request.extensions().get::<Vec<i32>>().unwrap().clone();
+    let original_string = original_request
+        .http_request
+        .extensions()
+        .get::<String>()
+        .unwrap()
+        .clone();
+    let original_number = *original_request
+        .http_request
+        .extensions()
+        .get::<u32>()
+        .unwrap();
+    let original_vec = original_request
+        .http_request
+        .extensions()
+        .get::<Vec<i32>>()
+        .unwrap()
+        .clone();
 
     // Round trip: Router -> Core -> Router
-    let core_request = router_request_to_core_request(original_request).await.unwrap();
-    let final_request = core_request_to_router_request(core_request).await.unwrap();
+    let core_request = router_request_to_core_request(original_request).unwrap();
+    let final_request = core_request_to_router_request(core_request).unwrap();
 
     // Verify HTTP extensions are preserved
-    let final_string = final_request.http_request.extensions().get::<String>().unwrap().clone();
-    let final_number = *final_request.http_request.extensions().get::<u32>().unwrap();
+    let final_string = final_request
+        .http_request
+        .extensions()
+        .get::<String>()
+        .unwrap()
+        .clone();
+    let final_number = *final_request
+        .http_request
+        .extensions()
+        .get::<u32>()
+        .unwrap();
     let final_vec = final_request
         .http_request
         .extensions()
@@ -440,7 +470,10 @@ async fn test_http_extensions_preservation_in_request_round_trip() {
 
     // Verify HTTP properties are still preserved
     assert_eq!(final_request.http_request.method(), "POST");
-    assert_eq!(final_request.http_request.uri(), "https://example.com/extensions");
+    assert_eq!(
+        final_request.http_request.uri(),
+        "https://example.com/extensions"
+    );
 }
 
 #[tokio::test]
@@ -479,8 +512,17 @@ async fn test_http_extensions_preservation_in_response_round_trip() {
     };
 
     // Store reference values for comparison
-    let original_string = original_response.http_response.extensions().get::<String>().unwrap().clone();
-    let original_number = *original_response.http_response.extensions().get::<u64>().unwrap();
+    let original_string = original_response
+        .http_response
+        .extensions()
+        .get::<String>()
+        .unwrap()
+        .clone();
+    let original_number = *original_response
+        .http_response
+        .extensions()
+        .get::<u64>()
+        .unwrap();
     let original_custom = original_response
         .http_response
         .extensions()
@@ -489,12 +531,21 @@ async fn test_http_extensions_preservation_in_response_round_trip() {
         .clone();
 
     // Round trip: Router -> Core -> Router
-    let core_response = router_response_to_core_response(original_response).await.unwrap();
-    let final_response = core_response_to_router_response(core_response).await.unwrap();
+    let core_response = router_response_to_core_response(original_response).unwrap();
+    let final_response = core_response_to_router_response(core_response).unwrap();
 
     // Verify HTTP extensions are preserved
-    let final_string = final_response.http_response.extensions().get::<String>().unwrap().clone();
-    let final_number = *final_response.http_response.extensions().get::<u64>().unwrap();
+    let final_string = final_response
+        .http_response
+        .extensions()
+        .get::<String>()
+        .unwrap()
+        .clone();
+    let final_number = *final_response
+        .http_response
+        .extensions()
+        .get::<u64>()
+        .unwrap();
     let final_custom = final_response
         .http_response
         .extensions()
@@ -508,7 +559,14 @@ async fn test_http_extensions_preservation_in_response_round_trip() {
 
     // Verify HTTP properties are still preserved
     assert_eq!(final_response.http_response.status(), 201);
-    assert_eq!(final_response.http_response.headers().get("x-test").unwrap(), "value");
+    assert_eq!(
+        final_response
+            .http_response
+            .headers()
+            .get("x-test")
+            .unwrap(),
+        "value"
+    );
 }
 
 #[tokio::test]
@@ -550,7 +608,11 @@ async fn test_mixed_extensions_and_context_preservation() {
         .get::<String>()
         .unwrap()
         .clone();
-    let original_http_number = *original_request.http_request.extensions().get::<u16>().unwrap();
+    let original_http_number = *original_request
+        .http_request
+        .extensions()
+        .get::<u16>()
+        .unwrap();
     let original_context_string = original_request
         .context
         .get::<_, String>("router_data")
@@ -563,8 +625,8 @@ async fn test_mixed_extensions_and_context_preservation() {
         .unwrap();
 
     // Round trip: Router -> Core -> Router
-    let core_request = router_request_to_core_request(original_request).await.unwrap();
-    let final_request = core_request_to_router_request(core_request).await.unwrap();
+    let core_request = router_request_to_core_request(original_request).unwrap();
+    let final_request = core_request_to_router_request(core_request).unwrap();
 
     // Verify HTTP extensions are preserved
     let final_http_string = final_request
@@ -573,7 +635,11 @@ async fn test_mixed_extensions_and_context_preservation() {
         .get::<String>()
         .unwrap()
         .clone();
-    let final_http_number = *final_request.http_request.extensions().get::<u16>().unwrap();
+    let final_http_number = *final_request
+        .http_request
+        .extensions()
+        .get::<u16>()
+        .unwrap();
 
     assert_eq!(original_http_string, final_http_string);
     assert_eq!(original_http_number, final_http_number);
@@ -595,5 +661,8 @@ async fn test_mixed_extensions_and_context_preservation() {
 
     // Verify HTTP properties are still preserved
     assert_eq!(final_request.http_request.method(), "PUT");
-    assert_eq!(final_request.http_request.uri(), "https://example.com/mixed");
+    assert_eq!(
+        final_request.http_request.uri(),
+        "https://example.com/mixed"
+    );
 }

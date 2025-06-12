@@ -44,7 +44,7 @@ struct ResponseMetadata {
 }
 
 /// Convert from Router Core JsonRequest to Router SubgraphRequest
-pub(crate) async fn core_json_request_to_subgraph_request(
+pub(crate) fn core_json_request_to_subgraph_request(
     mut core_request: CoreJsonRequest,
 ) -> Result<SubgraphRequest, BoxError> {
     // Extract context from extensions if present, otherwise create new
@@ -81,7 +81,7 @@ pub(crate) async fn core_json_request_to_subgraph_request(
 }
 
 /// Convert from Router SubgraphRequest to Router Core JsonRequest
-pub(crate) async fn subgraph_request_to_core_json_request(
+pub(crate) fn subgraph_request_to_core_json_request(
     mut subgraph_request: SubgraphRequest,
 ) -> Result<CoreJsonRequest, BoxError> {
     // Extract the extensions so that we can store the data in it.
@@ -159,7 +159,7 @@ pub(crate) async fn core_json_response_to_subgraph_response(
 }
 
 /// Convert from Router SubgraphResponse to Router Core JsonResponse
-pub(crate) async fn subgraph_response_to_core_json_response(
+pub(crate) fn subgraph_response_to_core_json_response(
     mut subgraph_response: SubgraphResponse,
 ) -> Result<CoreJsonResponse, BoxError> {
     // Extract the extensions so that we can store the data in it.
