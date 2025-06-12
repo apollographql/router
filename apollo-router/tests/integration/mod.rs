@@ -7,6 +7,7 @@ mod connectors;
 mod content_negotiation;
 mod coprocessor;
 mod docs;
+// In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod entity_cache;
 mod file_upload;
@@ -15,6 +16,7 @@ mod lifecycle;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
+// In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod subgraph_cache;
 mod subgraph_response;
@@ -22,6 +24,7 @@ mod supergraph;
 mod traffic_shaping;
 mod typename;
 
+// In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
 mod rhai;
