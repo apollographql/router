@@ -103,12 +103,13 @@ impl RouterService {
             Arc::new(apq_layer),
             persisted_query_layer,
             Arc::new(query_analysis_layer),
-            Arc::new(apollo_telemetry_config),
         );
 
         let service = ServiceBuilder::new()
             .layer(BatchingLayer::new(batching))
-            .layer(RouterToSupergraphRequestLayer)
+            .layer(RouterToSupergraphRequestLayer::new(Arc::new(
+                apollo_telemetry_config,
+            )))
             .service(supergraph_service)
             .boxed();
 
@@ -223,7 +224,18 @@ impl Service<RouterRequest> for RouterService {
 
 /// A layer that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
-struct RouterToSupergraphRequestLayer;
+struct RouterToSupergraphRequestLayer {
+    apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
+}
+
+impl RouterToSupergraphRequestLayer {
+    /// Telemetry config must be provided for error counting.
+    fn new(apollo_telemetry_config: Arc<ApolloTelemetryConfig>) -> Self {
+        Self {
+            apollo_telemetry_config,
+        }
+    }
+}
 
 impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
     type Service = RouterToSupergraphRequestService;
@@ -231,6 +243,7 @@ impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
     fn layer(&self, inner: PrepareSupergraphService) -> Self::Service {
         RouterToSupergraphRequestService {
             supergraph_service: inner,
+            apollo_telemetry_config: self.apollo_telemetry_config.clone(),
         }
     }
 }
@@ -239,10 +252,8 @@ impl tower::Layer<PrepareSupergraphService> for RouterToSupergraphRequestLayer {
 /// (JSON bodies in the GraphQL spec format).
 #[derive(Clone)]
 struct RouterToSupergraphRequestService {
-    // FIXME(@goto-bus-stop): The inner layer is hardcoded because it has a weird contract:
-    // it receives *supergraph* requests, but returns *router* responses. Let's genericise this
-    // layer once that's fixed.
     supergraph_service: PrepareSupergraphService, // <supergraph::BoxCloneService>,
+    apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
 }
 
 impl Service<RouterRequest> for RouterToSupergraphRequestService {
@@ -288,7 +299,143 @@ impl RouterToSupergraphRequestService {
             }
         };
 
-        self.supergraph_service.call(supergraph_request).await
+        let SupergraphResponse { context, response } =
+            self.supergraph_service.call(supergraph_request).await?;
+
+        // XXX(@goto-bus-stop): Error counting should be extracted to its own layer.
+        // The rest of this we can probably keep for the time being.
+
+        let ClientRequestAccepts {
+            wildcard: accepts_wildcard,
+            json: accepts_json,
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
+        } = context
+            .extensions()
+            .with_lock(|lock| lock.get().cloned())
+            .unwrap_or_default();
+
+        let (mut parts, mut body) = response.into_parts();
+
+        if context
+            .extensions()
+            .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
+        {
+            parts.status = StatusCode::from_u16(499)
+                .expect("499 is not a standard status code but common enough");
+        }
+
+        match body.next().await {
+            None => {
+                tracing::error!("router service is not available to process request",);
+                Ok(router::Response {
+                    response: http::Response::builder()
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .body(router::body::from_bytes(
+                            "router service is not available to process request",
+                        ))
+                        .expect("cannot fail"),
+                    context,
+                })
+            }
+            Some(response) => {
+                if !response.has_next.unwrap_or(false)
+                    && !response.subscribed.unwrap_or(false)
+                    && (accepts_json || accepts_wildcard)
+                {
+                    if !response.errors.is_empty() {
+                        count_operation_errors(
+                            &response.errors,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
+                    }
+                    if let Some(value_completion) =
+                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
+                    {
+                        Self::count_value_completion_errors(
+                            value_completion,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
+                    }
+
+                    let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
+                        .in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            Ok(body)
+                        });
+                    let body = body?;
+                    // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
+                    let display_router_response = context
+                        .extensions()
+                        .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
+
+                    let mut res = router::Response {
+                        response: Response::from_parts(
+                            parts,
+                            router::body::from_bytes(body.clone()),
+                        ),
+                        context,
+                    };
+
+                    if display_router_response {
+                        res.stash_the_body_in_extensions(body);
+                    }
+
+                    Ok(res)
+                } else if accepts_multipart_defer || accepts_multipart_subscription {
+                    if !response.errors.is_empty() {
+                        count_operation_errors(
+                            &response.errors,
+                            &context,
+                            &self.apollo_telemetry_config.errors,
+                        );
+                    }
+
+                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                    parts.headers.insert(
+                        ACCEL_BUFFERING_HEADER_NAME.clone(),
+                        ACCEL_BUFFERING_HEADER_VALUE.clone(),
+                    );
+
+                    // NB: here is where we decide what kind of streaming response we're going to
+                    //  send. insert it into the extensions so that the content negotiation plugin
+                    //  can read it.
+                    let protocol_mode = if matches!(response.subscribed, Some(true)) {
+                        ProtocolMode::Subscription
+                    } else {
+                        ProtocolMode::Defer
+                    };
+                    context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(protocol_mode));
+
+                    let response_multipart = match protocol_mode {
+                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
+                        ProtocolMode::Defer => {
+                            Multipart::new(once(ready(response)).chain(body), protocol_mode)
+                        }
+                    };
+
+                    let response = http::Response::from_parts(
+                        parts,
+                        router::body::from_result_stream(response_multipart),
+                    );
+
+                    Ok(RouterResponse { response, context })
+                } else {
+                    count_operation_error_codes(
+                        &["INVALID_ACCEPT_HEADER"],
+                        &context,
+                        &self.apollo_telemetry_config.errors,
+                    );
+
+                    // this should be unreachable due to a previous check, but just to be sure...
+                    Ok(invalid_accept_header_response().into())
+                }
+            }
+        }
     }
 
     fn translate_query_request(parts: &Parts) -> Result<graphql::Request, TranslateError> {
@@ -391,6 +538,20 @@ impl RouterToSupergraphRequestService {
         };
         Ok(graphql_request)
     }
+
+    fn count_value_completion_errors(
+        value_completion: &Value,
+        context: &Context,
+        errors_config: &ErrorsConfiguration,
+    ) {
+        if let Some(vc_array) = value_completion.as_array() {
+            let errors: Vec<graphql::Error> = vc_array
+                .iter()
+                .filter_map(graphql::Error::from_value_completion_value)
+                .collect();
+            count_operation_errors(&errors, context, errors_config);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -414,7 +575,6 @@ struct PrepareSupergraphService {
     apq_layer: Arc<APQLayer>,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: Arc<QueryAnalysisLayer>,
-    apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
 }
 
 impl PrepareSupergraphService {
@@ -423,28 +583,12 @@ impl PrepareSupergraphService {
         apq_layer: Arc<APQLayer>,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: Arc<QueryAnalysisLayer>,
-        apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
     ) -> Self {
         Self {
             inner,
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
-            apollo_telemetry_config,
-        }
-    }
-
-    fn count_value_completion_errors(
-        value_completion: &Value,
-        context: &Context,
-        errors_config: &ErrorsConfiguration,
-    ) {
-        if let Some(vc_array) = value_completion.as_array() {
-            let errors: Vec<graphql::Error> = vc_array
-                .iter()
-                .filter_map(graphql::Error::from_value_completion_value)
-                .collect();
-            count_operation_errors(&errors, context, errors_config);
         }
     }
 }
@@ -455,10 +599,7 @@ impl Service<SupergraphRequest> for PrepareSupergraphService
 //     S::Future: Send + 'static,
 //     S::Error: Into<BoxError> + Send + 'static,
 {
-    // XXX(@goto-bus-stop): as this was a part of the RouterService, it has a weird contract where
-    // it receives a _supergraph_ request but replies with a _router_ response. To solve this we'll
-    // move some code around later.
-    type Response = RouterResponse;
+    type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -474,7 +615,6 @@ impl Service<SupergraphRequest> for PrepareSupergraphService
         let persisted_query_layer = self.persisted_query_layer.clone();
         let apq_layer = self.apq_layer.clone();
         let query_analysis_layer = self.query_analysis_layer.clone();
-        let apollo_telemetry_config = self.apollo_telemetry_config.clone();
 
         Box::pin(async move {
             // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
@@ -486,7 +626,7 @@ impl Service<SupergraphRequest> for PrepareSupergraphService
                 request_res = apq_layer.supergraph_request(req).await;
             }
 
-            let SupergraphResponse { response, context } = match request_res {
+            let response = match request_res {
                 Err(response) => response,
                 Ok(request) => match query_analysis_layer.supergraph_request(request).await {
                     Err(response) => response,
@@ -500,137 +640,7 @@ impl Service<SupergraphRequest> for PrepareSupergraphService
                 },
             };
 
-            let ClientRequestAccepts {
-                wildcard: accepts_wildcard,
-                json: accepts_json,
-                multipart_defer: accepts_multipart_defer,
-                multipart_subscription: accepts_multipart_subscription,
-            } = context
-                .extensions()
-                .with_lock(|lock| lock.get().cloned())
-                .unwrap_or_default();
-
-            let (mut parts, mut body) = response.into_parts();
-
-            if context
-                .extensions()
-                .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
-            {
-                parts.status = StatusCode::from_u16(499)
-                    .expect("499 is not a standard status code but common enough");
-            }
-
-            match body.next().await {
-                None => {
-                    tracing::error!("router service is not available to process request",);
-                    Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::SERVICE_UNAVAILABLE)
-                            .body(router::body::from_bytes(
-                                "router service is not available to process request",
-                            ))
-                            .expect("cannot fail"),
-                        context,
-                    })
-                }
-                Some(response) => {
-                    if !response.has_next.unwrap_or(false)
-                        && !response.subscribed.unwrap_or(false)
-                        && (accepts_json || accepts_wildcard)
-                    {
-                        if !response.errors.is_empty() {
-                            count_operation_errors(
-                                &response.errors,
-                                &context,
-                                &apollo_telemetry_config.errors,
-                            );
-                        }
-                        if let Some(value_completion) =
-                            response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
-                        {
-                            Self::count_value_completion_errors(
-                                value_completion,
-                                &context,
-                                &apollo_telemetry_config.errors,
-                            );
-                        }
-
-                        let body: Result<String, BoxError> =
-                            tracing::trace_span!("serialize_response").in_scope(|| {
-                                let body = serde_json::to_string(&response)?;
-                                Ok(body)
-                            });
-                        let body = body?;
-                        // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-                        let display_router_response = context
-                            .extensions()
-                            .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
-
-                        let mut res = router::Response {
-                            response: Response::from_parts(
-                                parts,
-                                router::body::from_bytes(body.clone()),
-                            ),
-                            context,
-                        };
-
-                        if display_router_response {
-                            res.stash_the_body_in_extensions(body);
-                        }
-
-                        Ok(res)
-                    } else if accepts_multipart_defer || accepts_multipart_subscription {
-                        if !response.errors.is_empty() {
-                            count_operation_errors(
-                                &response.errors,
-                                &context,
-                                &apollo_telemetry_config.errors,
-                            );
-                        }
-
-                        // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
-                        parts.headers.insert(
-                            ACCEL_BUFFERING_HEADER_NAME.clone(),
-                            ACCEL_BUFFERING_HEADER_VALUE.clone(),
-                        );
-
-                        // NB: here is where we decide what kind of streaming response we're going to
-                        //  send. insert it into the extensions so that the content negotiation plugin
-                        //  can read it.
-                        let protocol_mode = if matches!(response.subscribed, Some(true)) {
-                            ProtocolMode::Subscription
-                        } else {
-                            ProtocolMode::Defer
-                        };
-                        context
-                            .extensions()
-                            .with_lock(|lock| lock.insert(protocol_mode));
-
-                        let response_multipart = match protocol_mode {
-                            ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
-                            ProtocolMode::Defer => {
-                                Multipart::new(once(ready(response)).chain(body), protocol_mode)
-                            }
-                        };
-
-                        let response = http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(response_multipart),
-                        );
-
-                        Ok(RouterResponse { response, context })
-                    } else {
-                        count_operation_error_codes(
-                            &["INVALID_ACCEPT_HEADER"],
-                            &context,
-                            &apollo_telemetry_config.errors,
-                        );
-
-                        // this should be unreachable due to a previous check, but just to be sure...
-                        Ok(invalid_accept_header_response().into())
-                    }
-                }
-            }
+            Ok(response)
         })
     }
 }
