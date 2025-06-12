@@ -632,7 +632,7 @@ impl ApplyToInternal for WithRange<PathList> {
             PathList::Question(tail) => {
                 // Universal null check for any operation after ?
                 if data.is_null() {
-                    (Some(JSON::Null), vec![])
+                    (None, vec![])
                 } else {
                     tail.apply_to_path(data, vars, input_path)
                 }
