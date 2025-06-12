@@ -27,7 +27,7 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
       - image: cimg/redis:7.4.3
-      - image: cimg/postgres:14.0
+      - image: cimg/postgres:17.0
         environment:
           POSTGRES_USER: root
           POSTGRES_DB: root
