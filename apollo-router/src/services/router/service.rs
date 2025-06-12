@@ -92,16 +92,15 @@ pub(crate) struct RouterService {
 
 impl RouterService {
     fn new(
-        sgb: supergraph::BoxService,
+        supergraph_service: supergraph::BoxService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
         apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
-
+        // Some of the layers in the stack are wrapping previous implementations that are called
+        // layers, but are not tower layers at all.
         let apq_layer = Arc::new(apq_layer);
         let query_analysis_layer = Arc::new(query_analysis_layer);
 
@@ -114,10 +113,25 @@ impl RouterService {
             .layer(APQCachingLayer::new(apq_layer))
             .layer(ParseQueryLayer::new(query_analysis_layer))
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
+            .buffered() // Makes the supergraph service cloneable
             .service(supergraph_service)
             .boxed();
 
         RouterService { service }
+    }
+}
+
+impl Service<RouterRequest> for RouterService {
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
+        self.service.call(req)
     }
 }
 
@@ -210,20 +224,6 @@ pub(crate) async fn empty() -> impl Service<
     .await
     .unwrap()
     .make()
-}
-
-impl Service<RouterRequest> for RouterService {
-    type Response = RouterResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: RouterRequest) -> Self::Future {
-        self.service.call(req)
-    }
 }
 
 /// A layer that translates router requests (streaming http bodies) into supergraph requests
