@@ -5,6 +5,8 @@ use apollo_compiler::collections::HashMap;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use apollo_federation::connectors::runtime::debug::SelectionData;
+use apollo_federation::connectors::runtime::http::HttpResponse;
+use apollo_federation::connectors::runtime::http::TransportResponse;
 use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
 use apollo_federation::connectors::runtime::problem::Problem;
 use apollo_federation::connectors::Connector;
@@ -39,8 +41,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::connector::request_service::Error;
-use crate::services::connector::request_service::TransportResponse;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
 

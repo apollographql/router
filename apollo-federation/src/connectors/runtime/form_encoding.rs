@@ -1,6 +1,6 @@
 use serde_json_bytes::Value;
 
-pub(super) fn encode_json_as_form(value: &Value) -> Result<String, &'static str> {
+pub fn encode_json_as_form(value: &Value) -> Result<String, &'static str> {
     if value.as_object().is_none() {
         return Err("Expected URL-encoded forms to be objects");
     }

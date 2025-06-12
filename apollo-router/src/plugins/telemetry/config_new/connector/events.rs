@@ -129,6 +129,9 @@ mod tests {
     use std::str::FromStr;
 
     use apollo_compiler::name;
+    use apollo_federation::connectors::runtime::http::HttpResponse;
+    use apollo_federation::connectors::runtime::http::TransportRequest;
+    use apollo_federation::connectors::runtime::http::TransportResponse;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -147,9 +150,6 @@ mod tests {
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::services::router::body;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -166,7 +166,7 @@ mod tests {
             http_request
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
-            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+            let transport_request = TransportRequest::Http(apollo_federation::connectors::runtime::http::HttpRequest {
                 inner: http_request,
                 debug: None,
             });
@@ -215,7 +215,7 @@ mod tests {
                 .call_connector_request_service(connector_request, |request| Response {
                     context: request.context.clone(),
                     connector: request.connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-request", HeaderValue::from_static("log"))
@@ -253,7 +253,7 @@ mod tests {
             http_request
                 .headers_mut()
                 .insert("x-log-response", HeaderValue::from_static("log"));
-            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+            let transport_request = TransportRequest::Http(apollo_federation::connectors::runtime::http::HttpRequest {
                 inner: http_request,
                 debug: None,
             });
@@ -302,7 +302,7 @@ mod tests {
                 .call_connector_request_service(connector_request, |request| Response {
                     context: request.context.clone(),
                     connector: request.connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))

@@ -1,5 +1,4 @@
 pub(crate) mod configuration;
-mod form_encoding;
 pub(crate) mod handle_responses;
 pub(crate) mod http_json_transport;
 pub(crate) mod incompatible;

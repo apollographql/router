@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::http::TransportRequest;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -42,7 +43,6 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
-use crate::services::connector::request_service::TransportRequest;
 use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
@@ -633,7 +633,6 @@ mod test {
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
 
     #[test]
     fn test_subgraph_config() {
@@ -1719,7 +1718,7 @@ mod test {
             )
             .unwrap();
 
-        let http_request = HttpRequest {
+        let http_request = apollo_federation::connectors::runtime::http::HttpRequest {
             inner: request,
             debug: None,
         };

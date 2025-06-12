@@ -7,6 +7,9 @@ use std::task::Poll;
 
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::http::HttpResponse;
+use apollo_federation::connectors::runtime::http::TransportRequest;
+use apollo_federation::connectors::runtime::http::TransportResponse;
 use apollo_federation::connectors::runtime::problem::Problem;
 use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
@@ -41,12 +44,8 @@ use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequ
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::services::Plugins;
-use crate::services::connector::request_service::transport::http::HttpRequest;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
-
-pub(crate) mod transport;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
@@ -161,34 +160,6 @@ impl Response {
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
-    }
-}
-
-/// Request to an underlying transport
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) enum TransportRequest {
-    /// A request to an HTTP transport
-    Http(HttpRequest),
-}
-
-/// Response from an underlying transport
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) enum TransportResponse {
-    /// A response from an HTTP transport
-    Http(HttpResponse),
-}
-
-impl From<HttpRequest> for TransportRequest {
-    fn from(value: HttpRequest) -> Self {
-        Self::Http(value)
-    }
-}
-
-impl From<HttpResponse> for TransportResponse {
-    fn from(value: HttpResponse) -> Self {
-        Self::Http(value)
     }
 }
 

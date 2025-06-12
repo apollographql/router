@@ -251,7 +251,7 @@ fn request_params_to_requests(
                     &original_request.supergraph_request,
                 )
                 .merge(),
-            &original_request,
+            original_request.supergraph_request.headers(),
             debug,
         )?;
 
@@ -709,6 +709,7 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
+    use apollo_federation::connectors::runtime::http::TransportRequest;
     use apollo_federation::connectors::ConnectBatchArguments;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -721,7 +722,6 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
-    use crate::services::connector::request_service::TransportRequest;
 
     #[test]
     fn test_root_fields_simple() {

@@ -4,6 +4,9 @@ use apollo_compiler::collections::IndexMap;
 use apollo_federation::connectors::runtime::debug::serialize_request;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::SelectionData;
+use apollo_federation::connectors::runtime::form_encoding::encode_json_as_form;
+use apollo_federation::connectors::runtime::http::HttpRequest;
+use apollo_federation::connectors::runtime::http::TransportRequest;
 use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
 use apollo_federation::connectors::runtime::problem::Problem;
 use apollo_federation::connectors::HTTPMethod;
@@ -20,15 +23,10 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
-use super::form_encoding::encode_json_as_form;
-use crate::services::connect;
-use crate::services::connector::request_service::TransportRequest;
-use crate::services::connector::request_service::transport::http::HttpRequest;
-
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
-    original_request: &connect::Request,
+    original_headers: &HeaderMap<HeaderValue>,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let uri = transport.make_uri(&inputs)?;
@@ -41,7 +39,7 @@ pub(crate) fn make_request(
     // add the headers and if content-type is specified, we'll check that when constructing the body
     let (mut request, content_type) = add_headers(
         request,
-        original_request.supergraph_request.headers(),
+        original_headers,
         &transport.headers,
         &inputs,
     );
@@ -184,8 +182,6 @@ pub(crate) enum HttpJsonTransportError {
 mod tests {
     use std::str::FromStr;
 
-    use apollo_compiler::ExecutableDocument;
-    use apollo_compiler::Schema;
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HeaderSource;
     use apollo_federation::connectors::JSONSelection;
@@ -196,8 +192,6 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::Context;
-    use crate::services::router::body;
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -217,7 +211,7 @@ mod tests {
             &[],
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(body::empty()).unwrap();
+        let request = request.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -250,7 +244,7 @@ mod tests {
             &config,
             &IndexMap::with_hasher(Default::default()),
         );
-        let request = request.body(body::empty()).unwrap();
+        let request = request.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
@@ -259,8 +253,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn make_request() {
-        let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
-        let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
 
@@ -273,14 +265,7 @@ mod tests {
                 ..Default::default()
             },
             vars,
-            &connect::Request {
-                service_name: Arc::from("service"),
-                context: Context::default(),
-                operation: Arc::from(doc),
-                supergraph_request: Arc::from(http::Request::default()),
-                variables: Default::default(),
-                keys: Default::default(),
-            },
+            &Default::default(),
             &None,
         )
         .unwrap();
@@ -307,14 +292,12 @@ mod tests {
         "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
-        let body = body::into_string(req.into_body()).await.unwrap();
+        let body = req.into_body();
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn make_request_form_encoded() {
-        let schema = Schema::parse_and_validate("type Query { f(a: Int): String }", "").unwrap();
-        let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
         let headers = vec![Header::from_values(
@@ -332,14 +315,7 @@ mod tests {
                 ..Default::default()
             },
             vars,
-            &connect::Request {
-                service_name: Arc::from("service"),
-                context: Context::default(),
-                operation: Arc::from(doc),
-                supergraph_request: Arc::from(http::Request::default()),
-                variables: Default::default(),
-                keys: Default::default(),
-            },
+            &Default::default(),
             &None,
         )
         .unwrap();
@@ -366,7 +342,7 @@ mod tests {
         "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
-        let body = body::into_string(req.into_body()).await.unwrap();
+        let body = req.into_body();
         insta::assert_snapshot!(body, @r#"a=42"#);
     }
 }
