@@ -1,3 +1,5 @@
+### AUTO GENERATE - DON'T EDIT ###
+
 type Google_Protobuf_Empty {
 }
 
@@ -14,3 +16,7 @@ type Query {
   timeSince(input: Google_Protobuf_Timestamp!): Google_Protobuf_Timestamp!
 }
 
+
+schema {
+  query: Query
+}

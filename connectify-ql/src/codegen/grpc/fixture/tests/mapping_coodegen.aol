@@ -1,0 +1,2 @@
+use user.UserService::GetUser as Query::GetUser;
+use user.UserService::CreateUser as Mutation::CreateUser;

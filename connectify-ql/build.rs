@@ -1,3 +1,3 @@
 fn main() {
-    // lelwel::build("src/connectors.llw");
+    lelwel::build("src/connectors.llw");
 }

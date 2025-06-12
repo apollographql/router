@@ -2,6 +2,8 @@
 source: connectify-ql/src/codegen/grpc/mod.rs
 expression: graphql
 ---
+### AUTO GENERATE - DON'T EDIT ###
+
 type Google_Protobuf_Empty {
 }
 
@@ -16,4 +18,9 @@ type CustomEmpty {
 type Query {
   check
   timeSince(input: Google_Protobuf_Timestamp!): Google_Protobuf_Timestamp!
+}
+
+
+schema {
+  query: Query
 }

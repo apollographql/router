@@ -1,0 +1,6 @@
+---
+source: connectify-ql/src/codegen/grpc/mapping_layer.rs
+expression: aol
+---
+use user.UserService::GetUser as Query::GetUser;
+use user.UserService::CreateUser as Mutation::CreateUser;

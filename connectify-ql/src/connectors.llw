@@ -1,0 +1,21 @@
+// Keywords
+token Use='use' As='as' Mutation='Mutation' Query='Query';
+// separator tokens
+token Endline=';' Dot='.' Specifier='::';
+token Name='<string>';
+token Whitespace Newline Comment;
+
+skip Whitespace Newline Comment;
+
+start aol;
+
+aol: (rpc value)+;
+
+value^:
+  mutation
+| query
+;
+
+rpc: 'use' Name '.' Name '::' Name 'as';
+mutation: Mutation '::' Name Endline ;
+query: Query '::' Name Endline ;

@@ -2,6 +2,8 @@
 source: connectify-ql/src/codegen/grpc/mod.rs
 expression: graphql
 ---
+### AUTO GENERATE - DON'T EDIT ###
+
 enum Status {
   ACTIVE
   INACTIVE
@@ -33,4 +35,10 @@ type Query {
 
 type Mutation {
   createUser(input: User!): CreatedUserResponse!
+}
+
+
+schema {
+  query: Query
+  mutation: Mutation
 }

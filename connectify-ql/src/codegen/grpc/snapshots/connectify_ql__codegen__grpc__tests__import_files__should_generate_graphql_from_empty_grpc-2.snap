@@ -1,2 +1,6 @@
+---
+source: connectify-ql/src/codegen/grpc/mod.rs
+expression: aol
+---
 use src/codegen/grpc/fixture/check.CheckService::Check as Query::Check;
 use src/codegen/grpc/fixture/check.CheckService::time_since as Query::time_since;

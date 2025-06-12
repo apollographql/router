@@ -1,2 +1,6 @@
+---
+source: connectify-ql/src/codegen/grpc/mod.rs
+expression: aol
+---
 use src/codegen/grpc/fixture/user.UserService::GetUser as Query::GetUser;
 use src/codegen/grpc/fixture/user.UserService::CreateUser as Mutation::CreateUser;

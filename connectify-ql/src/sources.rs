@@ -22,6 +22,12 @@ pub struct Sources {
 }
 
 impl Sources {
+    pub fn iter(&self) -> indexmap::map::Iter<'_, std::string::String, Source> {
+        self.sources.iter()
+    }
+}
+
+impl Sources {
     pub fn load(source: &str) -> Result<Self, SourceError> {
         let mut value = toml_span::parse(source)?;
         Ok(Sources::deserialize(&mut value)?)

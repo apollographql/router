@@ -1,0 +1,20 @@
+---
+source: connectify-ql/tests/lib.rs
+expression: "format!(\"{map:#?}\")"
+---
+{
+    Mutation(
+        "check",
+    ): GrpcKey {
+        source: "check",
+        service: "CheckService",
+        rpc: "Check",
+    },
+    Query(
+        "timeSince",
+    ): GrpcKey {
+        source: "check",
+        service: "CheckService",
+        rpc: "time_since",
+    },
+}

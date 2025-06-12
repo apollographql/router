@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use crate::codegen::grpc::GrpcCodegenError;
+use crate::codegen::grpc::mapping_layer::{GraphQLValue, GrpcKey};
 use crate::codegen::grpc::types::{AvailableType, GraphqlType, GrpcType};
 use crate::sources::Grpc;
 use convert_case::{Boundary, Case, Casing};
+use indexmap::IndexMap;
 use prost_types::field_descriptor_proto::Label;
 use prost_types::{DescriptorProto, EnumDescriptorProto, ServiceDescriptorProto};
 
@@ -177,7 +179,7 @@ pub fn process_service(
     grpc: &Grpc,
     available_types: &[AvailableType],
     dependencies: BTreeSet<String>,
-) -> Result<(), GrpcCodegenError> {
+) -> Result<IndexMap<GrpcKey, GraphQLValue>, GrpcCodegenError> {
     let default_naming = grpc.service.split('.').last().unwrap_or("GrpcService");
     let registered_mutations = grpc.mutations.as_slice();
 
@@ -190,7 +192,7 @@ pub fn process_service(
 
     let mut queries: Vec<Method> = Vec::new();
     let mut mutations: Vec<Method> = Vec::new();
-
+    let mut map_layer = IndexMap::new();
     if let Some(service) = services
         .iter()
         .find(|service| service.name() == default_naming)
@@ -221,12 +223,28 @@ pub fn process_service(
                     });
 
             if registered_mutations.contains(&method_name) {
+                map_layer.insert(
+                    GrpcKey {
+                        source: grpc.file.clone(),
+                        service: service.name().to_string(),
+                        rpc: method_name.clone(),
+                    },
+                    GraphQLValue::Mutation(method_name.clone()),
+                );
                 mutations.push(Method {
                     name: method_name,
                     input,
                     output,
                 });
             } else {
+                map_layer.insert(
+                    GrpcKey {
+                        source: grpc.file.clone(),
+                        service: service.name().to_string(),
+                        rpc: method_name.clone(),
+                    },
+                    GraphQLValue::Query(method_name.clone()),
+                );
                 queries.push(Method {
                     name: method_name,
                     input,
@@ -288,7 +306,7 @@ pub fn process_service(
         }
     };
 
-    Ok(())
+    Ok(map_layer)
 }
 
 #[cfg(test)]

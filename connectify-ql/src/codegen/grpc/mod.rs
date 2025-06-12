@@ -1,14 +1,17 @@
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::prelude::*;
-use std::{path::PathBuf, str::FromStr};
+use std::{fmt::Write as _, path::PathBuf, str::FromStr};
 
+use crate::codegen::grpc::mapping_layer::write_mapping_directives;
 use crate::codegen::grpc::processor::{process_enum_types, process_message_types, process_service};
 use crate::codegen::grpc::types::{AvailableType, GraphqlType, GrpcType};
 use crate::sources::Grpc;
+use indexmap::IndexMap;
 use prost_types::FileDescriptorSet;
 use protox::Error as ProtoxError;
 
+pub mod mapping_layer;
 pub mod processor;
 pub mod types;
 
@@ -32,11 +35,13 @@ fn proto_ast(grpc: &Grpc) -> Result<FileDescriptorSet, GrpcCodegenError> {
     Ok(protox::compile([&grpc.file], ["."])?)
 }
 
-pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
+pub fn generate(grpc: &Grpc) -> Result<(PathBuf, PathBuf), GrpcCodegenError> {
     let proto_ast = proto_ast(grpc)?;
     let graphql_file = grpc.file.replace(".proto", ".graphql");
-    let mut graphql_content = String::new();
+    let aol_file = grpc.file.replace(".proto", ".aol");
+    let mut graphql_content = String::from("### AUTO GENERATE - DON'T EDIT ###\n\n");
     let default_service = grpc.service.split('.').last().unwrap_or("GrpcService");
+
     if !proto_ast
         .file
         .iter()
@@ -88,6 +93,7 @@ pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
         });
     let available_types = available_types?;
 
+    let mut map_layer = IndexMap::new();
     // process all services
     for file in &proto_ast.file {
         let dependencies = file
@@ -96,20 +102,50 @@ pub fn generate(grpc: &Grpc) -> Result<PathBuf, GrpcCodegenError> {
             .filter_map(|proto| proto.strip_suffix(".proto"))
             .map(|proto| proto.replace('/', "."))
             .collect::<BTreeSet<String>>();
-        process_service(
+        let mut map = process_service(
             &mut graphql_content,
             &file.service,
             grpc,
             &available_types,
             dependencies,
         )?;
+        map_layer.append(&mut map);
     }
+
+    default_schema(grpc, &mut graphql_content)?;
 
     let mut file = File::create(&graphql_file)?;
     file.write_all(graphql_content.as_bytes())?;
 
+    write_mapping_directives(map_layer, &aol_file)?;
+
     // Infallible error
-    Ok(PathBuf::from_str(&graphql_file).unwrap())
+    Ok((
+        PathBuf::from_str(&graphql_file).unwrap(),
+        PathBuf::from_str(&aol_file).unwrap(),
+    ))
+}
+
+fn default_schema(grpc: &Grpc, graphql_content: &mut String) -> Result<(), GrpcCodegenError> {
+    if grpc.mutations.is_empty() {
+        writeln!(
+            graphql_content,
+            "
+schema {{
+  query: Query
+}}"
+        )?;
+    } else {
+        writeln!(
+            graphql_content,
+            "
+schema {{
+  query: Query
+  mutation: Mutation
+}}\n"
+        )?;
+    };
+    Ok(())
 }
 
 #[cfg(test)]
@@ -138,9 +174,11 @@ mod tests {
     #[test]
     fn should_generate_graphql_from_grpc() {
         let grpc = grpc();
-        let path = generate(&grpc).unwrap();
+        let (path, aol_path) = generate(&grpc).unwrap();
         let graphql: String = std::fs::read_to_string(path).unwrap();
+        let aol: String = std::fs::read_to_string(aol_path).unwrap();
         assert_snapshot!(graphql);
+        assert_snapshot!(aol);
     }
 
     fn grpc() -> Grpc {
@@ -165,9 +203,11 @@ mod tests {
         #[test]
         fn should_generate_graphql_from_empty_grpc() {
             let grpc = null_grpc();
-            let path = generate(&grpc).unwrap();
+            let (path, aol_path) = generate(&grpc).unwrap();
             let graphql: String = std::fs::read_to_string(path).unwrap();
+            let aol: String = std::fs::read_to_string(aol_path).unwrap();
             assert_snapshot!(graphql);
+            assert_snapshot!(aol);
         }
 
         fn null_grpc() -> Grpc {
