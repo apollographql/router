@@ -364,6 +364,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         }
     }

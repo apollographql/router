@@ -792,6 +792,7 @@ mod test {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
         let key = ResponseKey::RootField {

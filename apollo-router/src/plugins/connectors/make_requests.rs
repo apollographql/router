@@ -63,7 +63,7 @@ fn request_params_to_requests(
                 .clone()
                 .merger(&connector.request_variables)
                 .config(connector.config.as_ref())
-                .context(original_request.context.iter().map(|r| (r.key().as_str().into(), r.value().clone())).collect()) // TODO don't aggressively clone the context
+                .context(&connector.context, context)
                 .request(
                     &connector.request_headers,
                     original_request.supergraph_request.headers(),
@@ -595,6 +595,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -681,6 +682,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -793,6 +795,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -917,6 +920,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1040,6 +1044,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1144,6 +1149,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1270,6 +1276,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1431,6 +1438,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1589,6 +1597,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1718,6 +1727,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1834,6 +1844,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1955,6 +1966,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2080,6 +2092,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2159,6 +2172,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         };
 

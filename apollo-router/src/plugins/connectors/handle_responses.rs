@@ -101,12 +101,7 @@ impl RawResponse {
                     .clone()
                     .merger(&connector.response_variables)
                     .config(connector.config.as_ref())
-                    .context(
-                        context
-                            .iter()
-                            .map(|r| (r.key().as_str().into(), r.value().clone()))
-                            .collect(),
-                    ) // TODO don't aggressively clone the context
+                    .context(&connector.context, context)
                     .status(parts.status.as_u16())
                     .request(&connector.response_headers, supergraph_request.headers())
                     .response(&connector.response_headers, Some(&parts))
@@ -173,12 +168,7 @@ impl RawResponse {
                         .clone()
                         .merger(&connector.response_variables)
                         .config(connector.config.as_ref())
-                        .context(
-                            context
-                                .iter()
-                                .map(|r| (r.key().as_str().into(), r.value().clone()))
-                                .collect(),
-                        )
+                        .context(&connector.context, context)
                         .status(parts.status.as_u16())
                         .request(&connector.response_headers, supergraph_request.headers())
                         .response(&connector.response_headers, Some(&parts))
@@ -845,6 +835,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -956,6 +947,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1074,6 +1066,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1199,6 +1192,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1326,6 +1320,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1590,6 +1585,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             env: Default::default(),
+context: Default::default(),
             error_settings: Default::default(),
         });
 

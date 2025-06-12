@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
+use crate::connectors::runtime::context::ContextReader;
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
@@ -131,12 +132,23 @@ impl MappingContextMerger<'_> {
         map
     }
 
-    pub fn context(mut self, context: Map<ByteString, Value>) -> Self {
-        // $context could be a large object, so we only convert it to JSON
-        // if it's used. It can also be mutated between requests, so we have
-        // to convert it each time.
+    pub fn context(
+        mut self,
+        variables_used: &HashSet<String>,
+        context: impl ContextReader,
+    ) -> Self {
         if self.variables_used.contains(&Namespace::Context) {
-            self.context = Some(Value::Object(context));
+            let env_vars: Map<ByteString, Value> = variables_used
+                .iter()
+                .flat_map(|key| {
+                    if let Some(value) = context.get_key(key) {
+                        Some((key.as_str().into(), value.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            self.env = Some(Value::Object(env_vars));
         }
         self
     }

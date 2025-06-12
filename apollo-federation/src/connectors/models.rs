@@ -63,6 +63,8 @@ pub struct Connector {
     pub response_headers: HashSet<String>,
     /// The environment variables referenced in the connector
     pub env: HashSet<String>,
+    /// The context variables referenced in the connector
+    pub context: HashSet<String>,
 
     pub batch_settings: Option<ConnectBatchArguments>,
 
@@ -213,6 +215,7 @@ impl Connector {
         let response_headers = extract_header_references(&response_references);
 
         let env = extract_env_references(&request_references, &response_references);
+        let context = extract_context_references(&request_references, &response_references);
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(
@@ -246,6 +249,7 @@ impl Connector {
             request_headers,
             response_headers,
             env,
+            context,
             batch_settings,
             error_settings,
         })
@@ -404,6 +408,20 @@ fn extract_env_references(
         .iter()
         .chain(response_references.iter())
         .filter(|var_ref| var_ref.namespace.namespace == Namespace::Env)
+        .flat_map(|var_ref| var_ref.selection.keys())
+        .cloned()
+        .collect()
+}
+
+/// Get any env vars referenced in the variable references.
+fn extract_context_references(
+    request_references: &HashSet<VariableReference<Namespace>>,
+    response_references: &HashSet<VariableReference<Namespace>>,
+) -> HashSet<String> {
+    request_references
+        .iter()
+        .chain(response_references.iter())
+        .filter(|var_ref| var_ref.namespace.namespace == Namespace::Context)
         .flat_map(|var_ref| var_ref.selection.keys())
         .cloned()
         .collect()
