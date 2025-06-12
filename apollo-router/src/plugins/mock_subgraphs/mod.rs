@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,10 +36,12 @@ register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsP
 ///     query:
 ///       rootField:
 ///         subField: "value"
+///         __surrogateKeys: ["rootField"]
 ///     entities:
 ///       - __typename: Something
 ///         id: 4
 ///         field: [42, 7]
+///         __surrogateKeys: ["something-4"]
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
@@ -52,15 +55,28 @@ struct SubgraphConfig {
     #[serde(default)]
     #[schemars(with = "HashMap<String, String>")]
     headers: HeaderMap,
+
     /// Data for `query` operations (excluding the special `_entities` field)
+    ///
+    /// In maps nested in this one (but not at the top level), the `__surrogateKeys` key is special.
+    /// Instead of representing a field that can be selected, when its parent field is selected
+    /// its value is expected to be an array which is appended
+    /// to the `response.extensions["apolloSurrogateKeys"]` array.
     #[serde(default)]
     #[schemars(with = "OtherJsonMap")]
     query: JsonMap,
+
     /// Data for `mutation` operations
     #[serde(default)]
     #[schemars(with = "Option<OtherJsonMap>")]
     mutation: Option<JsonMap>,
+
     /// Entities that can be queried through Federation’s special `_entities` field
+    ///
+    /// In maps directly in the top-level `Vec` (but not in other maps nested deeper),
+    /// the `__surrogateKeys` key is special.
+    /// Instead of representing a field that can be selected, when its parent entity is selected
+    /// its contents are added to the `response.extensions["apolloEntitySurrogateKeys"]` array.
     #[serde(default)]
     #[schemars(with = "Vec<OtherJsonMap>")]
     entities: Vec<JsonMap>,
@@ -128,6 +144,16 @@ impl PluginPrivate for MockSubgraphsPlugin {
     }
 }
 
+/// Entry point for testing this mock
+pub fn testing_subgraph_call(
+    config: JsonValue,
+    subgraph_schema: &Valid<Schema>,
+    request: &graphql::Request,
+) -> Result<graphql::Response, Vec<GraphQLError>> {
+    let config = serde_json_bytes::from_value(config).unwrap();
+    subgraph_call(&config, subgraph_schema, request)
+}
+
 fn subgraph_call(
     config: &SubgraphConfig,
     subgraph_schema: &Valid<Schema>,
@@ -163,12 +189,14 @@ fn subgraph_call(
         entities: &config.entities,
     };
     let mut errors = Vec::new();
+    let response_extensions = RefCell::new(JsonMap::new());
     let path = None;
     let data = match execution::engine::execute_selection_set(
         subgraph_schema,
         &doc,
         &variable_values,
         &mut errors,
+        &response_extensions,
         path,
         mode,
         root_operation_object_type_def,
@@ -181,7 +209,7 @@ fn subgraph_call(
     Ok(graphql::Response::builder()
         .data(data)
         .errors(errors.into_iter().map(Into::into).collect())
-        .extensions(JsonMap::new())
+        .extensions(response_extensions.into_inner())
         .build())
 }
 
@@ -191,6 +219,7 @@ struct RootResolver<'a> {
 }
 
 struct MockResolver<'a> {
+    in_entity: bool,
     mocks: &'a JsonMap,
 }
 
@@ -211,24 +240,44 @@ impl execution::resolver::Resolver for RootResolver<'_> {
 
     fn resolve_field<'a>(
         &'a self,
+        response_extensions: &'a RefCell<JsonMap>,
         field_name: &'a str,
         arguments: &'a JsonMap,
     ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
         if field_name != "_entities" {
-            return resolve_normal_field(self.root_mocks, field_name, arguments);
+            let in_entity = false;
+            return resolve_normal_field(
+                response_extensions,
+                in_entity,
+                self.root_mocks,
+                field_name,
+                arguments,
+            );
         }
         let entities = arguments["representations"]
             .as_array()
             .ok_or("expected array `representations`")?
             .iter()
-            .map(|representation| {
+            .map(move |representation| {
                 let representation = representation
                     .as_object()
                     .ok_or("expected object `representations[n]`")?;
                 let entity = self.find_entities(representation).ok_or_else(|| {
                     format!("no mocked entity found for representation {representation:?}")
                 })?;
-                Ok(ResolvedValue::object(MockResolver { mocks: entity }))
+                if let Some(keys) = entity.get("__surrogateKeys") {
+                    response_extensions
+                        .borrow_mut()
+                        .entry("apolloEntitySurrogateKeys")
+                        .or_insert_with(|| JsonValue::Array(Vec::new()))
+                        .as_array_mut()
+                        .unwrap()
+                        .push(keys.clone());
+                }
+                Ok(ResolvedValue::object(MockResolver {
+                    in_entity: true,
+                    mocks: entity,
+                }))
             });
         Ok(ResolvedValue::list(entities))
     }
@@ -245,14 +294,23 @@ impl execution::resolver::Resolver for MockResolver<'_> {
 
     fn resolve_field<'a>(
         &'a self,
+        response_extensions: &'a RefCell<JsonMap>,
         field_name: &'a str,
         arguments: &'a JsonMap,
     ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
-        resolve_normal_field(self.mocks, field_name, arguments)
+        resolve_normal_field(
+            response_extensions,
+            self.in_entity,
+            self.mocks,
+            field_name,
+            arguments,
+        )
     }
 }
 
 fn resolve_normal_field<'a>(
+    response_extensions: &'a RefCell<JsonMap>,
+    in_entity: bool,
     mocks: &'a JsonMap,
     field_name: &'a str,
     arguments: &'a JsonMap,
@@ -260,14 +318,38 @@ fn resolve_normal_field<'a>(
     let _ignored = arguments; // TODO: find some way to vary response based on arguments?
     let mock = mocks
         .get(field_name)
-        .ok_or("field not found in mocked data")?;
-    resolve_value(mock)
+        .ok_or_else(|| format!("field '{field_name}' not found in mocked data"))?;
+    resolve_value(response_extensions, in_entity, mock)
 }
 
-fn resolve_value(mock: &JsonValue) -> Result<ResolvedValue<'_>, String> {
+fn resolve_value<'a>(
+    response_extensions: &'a RefCell<JsonMap>,
+    in_entity: bool,
+    mock: &'a JsonValue,
+) -> Result<ResolvedValue<'a>, String> {
     match mock {
-        JsonValue::Object(map) => Ok(ResolvedValue::object(MockResolver { mocks: map })),
-        JsonValue::Array(values) => Ok(ResolvedValue::list(values.iter().map(resolve_value))),
+        JsonValue::Object(map) => {
+            if !in_entity {
+                if let Some(keys) = map.get("__surrogateKeys") {
+                    response_extensions
+                        .borrow_mut()
+                        .entry("apolloSurrogateKeys")
+                        .or_insert_with(|| JsonValue::Array(Vec::new()))
+                        .as_array_mut()
+                        .unwrap()
+                        .extend_from_slice(keys.as_array().unwrap());
+                };
+            }
+            Ok(ResolvedValue::object(MockResolver {
+                in_entity,
+                mocks: map,
+            }))
+        }
+        JsonValue::Array(values) => {
+            Ok(ResolvedValue::list(values.iter().map(move |x| {
+                resolve_value(response_extensions, in_entity, x)
+            })))
+        }
         json => Ok(ResolvedValue::leaf(json.clone())),
     }
 }

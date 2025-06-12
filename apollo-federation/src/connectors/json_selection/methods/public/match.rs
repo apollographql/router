@@ -42,19 +42,21 @@ fn match_method(
     if let Some(MethodArgs { args, .. }) = method_args {
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
-                if pair.len() == 2 {
-                    let (candidate_opt, candidate_errors) =
-                        pair[0].apply_to_path(data, vars, input_path);
-                    errors.extend(candidate_errors);
+                let (pattern, value) = match pair.as_slice() {
+                    [pattern, value] => (pattern, value),
+                    _ => continue,
+                };
+                let (candidate_opt, candidate_errors) =
+                    pattern.apply_to_path(data, vars, input_path);
+                errors.extend(candidate_errors);
 
-                    if let Some(candidate) = candidate_opt {
-                        if candidate == *data {
-                            return pair[1]
-                                .apply_to_path(data, vars, input_path)
-                                .prepend_errors(errors);
-                        }
-                    };
-                }
+                if let Some(candidate) = candidate_opt {
+                    if candidate == *data {
+                        return value
+                            .apply_to_path(data, vars, input_path)
+                            .prepend_errors(errors);
+                    }
+                };
             }
         }
     }
@@ -92,23 +94,25 @@ pub(crate) fn match_shape(
 
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
-                if pair.len() == 2 {
-                    if let LitExpr::Path(path) = pair[0].as_ref() {
-                        if let PathList::Var(known_var, _tail) = path.path.as_ref() {
-                            if known_var.as_ref() == &KnownVariable::AtSign {
-                                has_infallible_case = true;
-                            }
+                let (pattern, value) = match pair.as_slice() {
+                    [pattern, value] => (pattern, value),
+                    _ => continue,
+                };
+                if let LitExpr::Path(path) = pattern.as_ref() {
+                    if let PathList::Var(known_var, _tail) = path.path.as_ref() {
+                        if known_var.as_ref() == &KnownVariable::AtSign {
+                            has_infallible_case = true;
                         }
-                    };
+                    }
+                };
 
-                    let value_shape = pair[1].compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    );
-                    result_union.push(value_shape);
-                }
+                let value_shape = value.compute_output_shape(
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                    source_id,
+                );
+                result_union.push(value_shape);
             }
         }
 

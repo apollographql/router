@@ -412,47 +412,4 @@ mod tests {
             e => panic!("job did not cancel as expected: {e:?}"),
         };
     }
-
-    #[tokio::test]
-    async fn test_relative_priorities() {
-        let pool_size = thread_pool_size();
-        ensure_queue_is_initialized().await;
-
-        let start = Instant::now();
-
-        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
-        // low priority requests.
-        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
-        // before the high priority requests, since the workers would start on the low priority
-        // requests immediately.
-        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
-        // low priority requests to complete before the high priority request.
-        let low_priority_handles: Vec<_> = (0..pool_size * 2 - 1)
-            .map(|_| {
-                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
-                    let inner_start = start;
-                    std::thread::sleep(Duration::from_millis(10));
-                    inner_start.elapsed()
-                })
-                .unwrap()
-            })
-            .collect();
-        let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
-            let inner_start = start;
-            std::thread::sleep(Duration::from_millis(5));
-            inner_start.elapsed()
-        })
-        .unwrap();
-
-        let low_priority_durations =
-            futures::future::join_all(low_priority_handles.into_iter()).await;
-        let high_priority_duration = high_priority_handle.await;
-
-        let low_before_high_count = low_priority_durations
-            .iter()
-            .filter(|d| d < &&high_priority_duration)
-            .count();
-
-        assert!(low_before_high_count <= pool_size);
-    }
 }

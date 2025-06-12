@@ -38,7 +38,7 @@ pub(crate) mod healthcheck;
 mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
 pub(crate) mod limits;
-mod mock_subgraphs;
+pub(crate) mod mock_subgraphs;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
