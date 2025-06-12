@@ -18,7 +18,7 @@ mod operation_name;
 mod query_planner;
 // In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-mod subgraph_cache;
+mod response_cache;
 mod subgraph_response;
 mod supergraph;
 mod traffic_shaping;
