@@ -16,11 +16,11 @@ impl_arrow_method!(GteMethod, gte_method, gte_shape);
 /// Returns true if the applied to value is greater than or equal to the argument value.
 /// Simple examples:
 ///
-/// $->echo(3)->gte(3)       results in true
-/// $->echo(4)->gte(3)       results in true
-/// $->echo(2)->gte(3)       results in false
-/// $->echo("a")->gte("b")   results in false
-/// $->echo("c")->gte("b")   results in true
+/// $(3)->gte(3)       results in true
+/// $(4)->gte(3)       results in true
+/// $(2)->gte(3)       results in false
+/// $("a")->gte("b")   results in false
+/// $("c")->gte("b")   results in true
 fn gte_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -28,29 +28,27 @@ fn gte_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            // We have to do this because Value doesn't implement PartialOrd
-            let matches = value_opt.is_some_and(|value| {
-                match (data, &value) {
-                    // Number comparisons
-                    (JSON::Number(left), JSON::Number(right)) => {
-                        left.as_f64().unwrap_or(0.0) >= right.as_f64().unwrap_or(0.0)
-                    }
-                    // String comparisons
-                    (JSON::String(left), JSON::String(right)) => left >= right,
-                    // Boolean comparisons
-                    (JSON::Bool(left), JSON::Bool(right)) => left >= right,
-                    // Null comparisons (null == null)
-                    (JSON::Null, JSON::Null) => true,
-                    // Mixed types or uncomparable types (including arrays and objects) return false
-                    _ => false,
+    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
+        let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+        // We have to do this because Value doesn't implement PartialOrd
+        let matches = value_opt.is_some_and(|value| {
+            match (data, &value) {
+                // Number comparisons
+                (JSON::Number(left), JSON::Number(right)) => {
+                    left.as_f64().unwrap_or(0.0) >= right.as_f64().unwrap_or(0.0)
                 }
-            });
+                // String comparisons
+                (JSON::String(left), JSON::String(right)) => left >= right,
+                // Boolean comparisons
+                (JSON::Bool(left), JSON::Bool(right)) => left >= right,
+                // Null comparisons (null == null)
+                (JSON::Null, JSON::Null) => true,
+                // Mixed types or uncomparable types (including arrays and objects) return false
+                _ => false,
+            }
+        });
 
-            return (Some(JSON::Bool(matches)), arg_errors);
-        }
+        return (Some(JSON::Bool(matches)), arg_errors);
     }
     (
         None,
