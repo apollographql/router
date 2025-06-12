@@ -716,9 +716,10 @@ impl CacheService {
                                     self.subgraph_ttl.into(),
                                 )?
                             } else {
-                                let mut c = CacheControl::default();
-                                c.no_store = true;
-                                c
+                                CacheControl {
+                                    no_store: true,
+                                    ..Default::default()
+                                }
                             };
                         if self.debug {
                             response.context.upsert::<_, CacheKeysContext>(
