@@ -8,4 +8,4 @@ debug = true
 
 [env]
 # Unset this if you want to change sql queries for caching
-SQLX_OFFLINE = "true"
+# SQLX_OFFLINE = "true"

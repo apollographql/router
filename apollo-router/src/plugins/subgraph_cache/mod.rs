@@ -4,5 +4,5 @@ pub(crate) mod invalidation;
 pub(crate) mod invalidation_endpoint;
 pub(crate) mod metrics;
 pub(crate) mod postgres;
-// #[cfg(test)]
-// pub(crate) mod tests;
+#[cfg(test)]
+pub(crate) mod tests;

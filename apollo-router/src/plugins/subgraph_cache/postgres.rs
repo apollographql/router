@@ -74,17 +74,20 @@ pub(crate) struct PostgresCacheConfig {
     #[serde(default = "default_batch_size")]
     /// The size of batch when inserting cache entries in PG (default: 100)
     pub(crate) batch_size: usize,
+    /// Useful when running tests in parallel to avoid conflicts
+    #[cfg(test)]
+    pub(crate) namespace: String,
 }
 
-fn default_required_to_start() -> bool {
+pub(super) const fn default_required_to_start() -> bool {
     false
 }
 
-fn default_pool_size() -> u32 {
+pub(super) const fn default_pool_size() -> u32 {
     5
 }
 
-const fn default_batch_size() -> usize {
+pub(super) const fn default_batch_size() -> usize {
     100
 }
 
@@ -108,6 +111,8 @@ impl TryFrom<CacheEntryRow> for CacheEntry {
 pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
+    #[cfg(test)]
+    namespace: String,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -127,7 +132,12 @@ impl PostgresCacheStorage {
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size })
+                #[cfg(test)]
+                let res = Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() });
+                #[cfg(not(test))]
+                let res = Ok(Self { pg_pool, batch_size: conf.batch_size });
+
+                res
             }
             (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
                 "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
@@ -154,7 +164,12 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size })
+                #[cfg(test)]
+                let res = Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() });
+                #[cfg(not(test))]
+                let res = Ok(Self { pg_pool, batch_size: conf.batch_size });
+
+                res
             }
         }
     }
@@ -182,6 +197,18 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) async fn truncate_namespace(&self) -> anyhow::Result<()> {
+        sqlx::query!(
+            "DELETE FROM cache WHERE cache_key LIKE $1",
+            format!("{}%", self.namespace)
+        )
+        .execute(&self.pg_pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub(crate) async fn insert(
         &self,
         cache_key: &str,
@@ -198,6 +225,8 @@ impl PostgresCacheStorage {
         let expired_at = Utc::now() + expire;
         let value_str = serde_json::to_string(&value)?;
         let control_str = serde_json::to_string(&control)?;
+        #[cfg(test)]
+        let cache_key = format!("{}-{cache_key}", self.namespace);
         let rec = sqlx::query!(
             r#"
         INSERT INTO cache ( cache_key, data, control, expires_at )
@@ -214,6 +243,8 @@ impl PostgresCacheStorage {
         .await?;
 
         for invalidation_key in invalidation_keys {
+            #[cfg(test)]
+            let invalidation_key = format!("{}-{invalidation_key}", self.namespace);
             sqlx::query!(
                 r#"INSERT into invalidation_key (cache_key_id, invalidation_key, subgraph_name) VALUES ($1, $2, $3) ON CONFLICT (cache_key_id, invalidation_key, subgraph_name) DO NOTHING"#,
                 rec.id,
@@ -242,7 +273,14 @@ impl PostgresCacheStorage {
             let tx = &mut transaction;
             let cache_keys = batch_docs
                 .iter()
-                .map(|b| b.cache_key.clone())
+                .map(|b| {
+                    #[cfg(test)]
+                    let r = format!("{}-{}", self.namespace, b.cache_key);
+                    #[cfg(not(test))]
+                    let r = b.cache_key.clone();
+
+                    r
+                })
                 .collect::<Vec<String>>();
 
             let data = batch_docs
@@ -295,9 +333,15 @@ impl PostgresCacheStorage {
             let subgraph_names: Vec<String> = (0..invalidation_keys.len())
                 .map(|_| subgraph_name.to_string())
                 .collect();
+            #[cfg(not(test))]
             let invalidation_keys: Vec<String> = invalidation_keys
                 .into_iter()
                 .map(|(_, invalidation_key)| invalidation_key)
+                .collect();
+            #[cfg(test)]
+            let invalidation_keys: Vec<String> = invalidation_keys
+                .into_iter()
+                .map(|(_, invalidation_key)| format!("{}-{invalidation_key}", self.namespace))
                 .collect();
             sqlx::query!(
                 r#"
@@ -322,6 +366,8 @@ impl PostgresCacheStorage {
     }
 
     pub(crate) async fn get(&self, cache_key: &str) -> anyhow::Result<CacheEntry> {
+        #[cfg(test)]
+        let cache_key = format!("{}-{cache_key}", self.namespace);
         let resp = sqlx::query_as!(
             CacheEntryRow,
             "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
@@ -339,6 +385,11 @@ impl PostgresCacheStorage {
         &self,
         cache_keys: &[String],
     ) -> anyhow::Result<Vec<Option<CacheEntry>>> {
+        #[cfg(test)]
+        let cache_keys: Vec<String> = cache_keys
+            .iter()
+            .map(|ck| format!("{}-{ck}", self.namespace))
+            .collect();
         let resp = sqlx::query_as!(
             CacheEntryRow,
             "SELECT * FROM cache WHERE cache.cache_key = ANY($1::VARCHAR(1024)[]) AND expires_at >= NOW()",
@@ -374,9 +425,9 @@ impl PostgresCacheStorage {
             (DELETE
                 FROM cache
                 USING invalidation_key
-                WHERE invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($1::text[]) RETURNING cache.cache_key
+                WHERE invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($1::text[]) RETURNING cache.cache_key, cache.expires_at
             )
-        SELECT COUNT(*) AS count FROM deleted"#,
+        SELECT COUNT(*) AS count FROM deleted WHERE deleted.expires_at >= NOW()"#,
             &subgraph_names
         )
         .fetch_one(&self.pg_pool)
@@ -392,6 +443,11 @@ impl PostgresCacheStorage {
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> anyhow::Result<u64> {
+        #[cfg(test)]
+        let invalidation_keys: Vec<String> = invalidation_keys
+            .into_iter()
+            .map(|ck| format!("{}-{ck}", self.namespace))
+            .collect();
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
