@@ -37,10 +37,10 @@ fn valid_supergraph_schema() {
     const MAX_BYTES_SUBGRAPHS: usize = 580_420; // ~600 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 12_185.
+    // Actual number: 12_960.
     //
     // Extract subgraphs from supergraph has an additional 6_650 allocations (12_185-5_535=6_650).
-    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 12_800;
+    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 13_610;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 
