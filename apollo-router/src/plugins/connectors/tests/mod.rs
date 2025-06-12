@@ -48,6 +48,7 @@ mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
+mod variables;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");

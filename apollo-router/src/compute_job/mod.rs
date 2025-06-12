@@ -317,9 +317,6 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    use futures::FutureExt;
-    use futures::StreamExt;
-    use futures::stream::FuturesUnordered;
     use tracing_futures::WithSubscriber;
 
     use super::*;
@@ -414,48 +411,5 @@ mod tests {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
         };
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_relative_priorities() {
-        let pool_size = thread_pool_size();
-        ensure_queue_is_initialized().await;
-
-        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
-        // low priority requests.
-        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
-        // before the high priority requests, since the workers would start on the low priority
-        // requests immediately.
-        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
-        // low priority requests to complete before the high priority request.
-        let mut handles: FuturesUnordered<_> = (0..pool_size * 2 - 1)
-            .map(|_| {
-                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
-                    std::thread::sleep(Duration::from_millis(10));
-                    0
-                })
-                .unwrap()
-                .boxed()
-            })
-            .collect();
-        handles.push(
-            execute(ComputeJobType::QueryPlanning, move |_| {
-                std::thread::sleep(Duration::from_millis(5));
-                1
-            })
-            .unwrap()
-            .boxed(),
-        );
-
-        let mut results = vec![];
-        while let Some(result) = handles.next().await {
-            results.push(result);
-        }
-
-        // `results` is ordered by completion.  Our `low_before_high_count` is calculated using
-        // the finishing position of our high priority request.
-        let low_before_high_count = results.iter().position(|&d| d == 1).unwrap();
-
-        assert!(low_before_high_count <= pool_size);
     }
 }

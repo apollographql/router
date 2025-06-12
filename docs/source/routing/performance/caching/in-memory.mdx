@@ -87,11 +87,9 @@ then look at `apollo.router.schema.load.duration` and `apollo.router.query_plann
 
 If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 
-<MinVersion version="1.61.0">
-
 #### Cache warm-up with headers
 
-</MinVersion>
+<MinVersionBadge version="Router v1.61.0" />
 
 With router v1.61.0+  and v2.x+, if you have enabled exposing query plans via `--dev` mode or `plugins.experimental.expose_query_plan: true`, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
 
