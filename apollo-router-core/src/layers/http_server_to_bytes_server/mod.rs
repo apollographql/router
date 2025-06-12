@@ -43,11 +43,7 @@
 //!
 //! ## Extensions Handling
 //!
-//! This layer follows the standard Extensions pattern:
-//! - Creates a **cloned** Extensions layer for the inner service using `clone()`
-//! - Inner service receives extended Extensions with access to parent context
-//! - Response returns the **original** Extensions from the HTTP request
-//! - Parent values always take precedence over inner service values
+//! This layer propagates Extensions without cloning, as there is only one inner request.
 //!
 //! ## Error Handling
 //!
@@ -166,13 +162,10 @@ where
             let body_bytes = body.collect().await?.to_bytes();
 
             // Convert http::Extensions directly to our Extensions
-            let original_extensions: crate::Extensions = parts.extensions.into();
-
-            // Create an extended layer for the inner service
-            let cloned_extensions = original_extensions.clone();
+            let extensions: crate::Extensions = parts.extensions.into();
 
             let bytes_req = BytesRequest {
-                extensions: cloned_extensions,
+                extensions,
                 body: body_bytes,
             };
 
@@ -195,9 +188,7 @@ where
                     http_error,
                 })?;
 
-            // Convert original Extensions back to http::Extensions
-            let http_extensions: http::Extensions = original_extensions.into();
-            *http_resp.extensions_mut() = http_extensions;
+            *http_resp.extensions_mut() = bytes_resp.extensions.into();
 
             Ok(http_resp)
         })

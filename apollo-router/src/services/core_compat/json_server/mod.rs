@@ -7,23 +7,10 @@ pub(super) use apollo_router_core::services::json_server::{
     Request as CoreJsonRequest, Response as CoreJsonResponse,
 };
 
-use crate::Context;
 use crate::graphql;
 use crate::services::supergraph::{Request as SupergraphRequest, Response as SupergraphResponse};
-
-/// Metadata for storing supergraph request information in extensions during conversion
-#[derive(Debug)]
-struct RequestMetadata {
-    http_parts: http::request::Parts,
-    context: Context,
-}
-
-/// Metadata for storing supergraph response information in extensions during conversion
-#[derive(Debug)]
-struct ResponseMetadata {
-    http_parts: http::response::Parts,
-    context: Context,
-}
+use super::RequestMetadata;
+use super::ResponseMetadata;
 
 /// Convert from Router Core json_server Request to Router SupergraphRequest
 pub(crate) fn core_json_request_to_supergraph_request(

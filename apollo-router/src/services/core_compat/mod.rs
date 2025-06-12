@@ -5,10 +5,26 @@ use futures::future::FutureExt as _;
 use futures::future::TryFutureExt as _;
 use tower::BoxError;
 
+use crate::Context;
+
 pub(crate) mod http_client;
 pub(crate) mod http_server;
 pub(crate) mod json_client;
 pub(crate) mod json_server;
+
+/// Metadata for storing legacy request information in extensions during conversion
+#[derive(Debug)]
+struct RequestMetadata {
+    http_parts: http::request::Parts,
+    context: Context,
+}
+
+/// Metadata for storing legacy response information in extensions during conversion
+#[derive(Debug)]
+struct ResponseMetadata {
+    http_parts: http::response::Parts,
+    context: Context,
+}
 
 /// Convert request and response types. Provide functions from `core_compat` submodules
 /// for request and response transformation.

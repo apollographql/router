@@ -13,6 +13,14 @@ use bytes::Bytes;
 use http::StatusCode;
 use http_body_util::BodyExt;
 
+fn empty_request_parts() -> http::request::Parts {
+    http::Request::new(()).into_parts().0
+}
+
+fn empty_response_parts() -> http::response::Parts {
+    http::Response::new(()).into_parts().0
+}
+
 #[tokio::test]
 async fn test_core_request_to_router_request() {
     let context = Context::new();
@@ -21,6 +29,7 @@ async fn test_core_request_to_router_request() {
         .unwrap();
 
     let metadata = RequestMetadata {
+        http_parts: empty_request_parts(), // Not here, only for opposite conversion
         context: context.clone(),
     };
 
@@ -113,6 +122,7 @@ async fn test_core_response_to_router_response() {
         .unwrap();
 
     let metadata = ResponseMetadata {
+        http_parts: empty_response_parts(), // Not used here, only for opposite conversion
         context: context.clone(),
     };
 

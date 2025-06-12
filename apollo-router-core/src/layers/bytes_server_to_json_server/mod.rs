@@ -44,11 +44,7 @@
 //!
 //! ## Extensions Handling
 //!
-//! This layer follows the standard Extensions pattern:
-//! - Creates a **cloned** Extensions layer for the inner service using `clone()`
-//! - Inner service receives extended Extensions with access to parent context
-//! - Response returns the **original** Extensions from the bytes request
-//! - Parent values always take precedence over inner service values
+//! This layer propagates Extensions without cloning, as there is only one inner request.
 //!
 //! ## Error Handling
 //!
@@ -164,12 +160,8 @@ where
             }
         };
 
-        // Create an extended layer for the inner service
-        let original_extensions = req.extensions;
-        let cloned_extensions = original_extensions.clone();
-
         let json_req = JsonRequest {
-            extensions: cloned_extensions,
+            extensions: req.extensions,
             body: json_body,
         };
 
@@ -195,7 +187,7 @@ where
             });
 
             let bytes_resp = BytesResponse {
-                extensions: original_extensions,
+                extensions: json_resp.extensions,
                 responses: Box::pin(bytes_stream),
             };
 

@@ -7,21 +7,10 @@ pub(super) use apollo_router_core::services::http_server::{
     Request as CoreRequest, Response as CoreResponse,
 };
 
-use crate::Context;
 use crate::services::router::body::RouterBody;
 use crate::services::router::{Request as RouterRequest, Response as RouterResponse};
-
-/// Metadata for storing router request information in extensions during conversion
-#[derive(Debug)]
-struct RequestMetadata {
-    context: Context,
-}
-
-/// Metadata for storing router response information in extensions during conversion
-#[derive(Debug)]
-struct ResponseMetadata {
-    context: Context,
-}
+use super::RequestMetadata;
+use super::ResponseMetadata;
 
 /// Convert from Router Core http_server Request to Router Request
 pub(crate) fn core_request_to_router_request(
@@ -34,8 +23,10 @@ pub(crate) fn core_request_to_router_request(
         .expect("RequestMetadata must exist in extensions");
 
     // There will be exactly one reference to RequestMetadata. It's a private type no-one else can get it.
-    let metadata =
-        Arc::try_unwrap(arc_metadata).expect("there must be one reference to request metadata");
+    let RequestMetadata {
+        context,
+        http_parts: _, // Not used, as CoreRequest's http parts are leading.
+    } = Arc::try_unwrap(arc_metadata).expect("there must be one reference to request metadata");
 
     // Take ownership of all remaining extensions (no cloning)
     let extensions = std::mem::take(core_request.extensions_mut());
@@ -52,7 +43,7 @@ pub(crate) fn core_request_to_router_request(
 
     Ok(RouterRequest {
         router_request,
-        context: metadata.context,
+        context,
     })
 }
 
@@ -70,15 +61,13 @@ pub(crate) fn router_request_to_core_request(
         .map_err(|err| -> BoxError { err.into() })
         .boxed_unsync();
 
-    let mut core_request = http::Request::from_parts(parts, core_body);
-
-    // Create request metadata from the router context
-    let metadata = RequestMetadata {
+    // Store request metadata required to convert back to a legacy request
+    extensions.insert(Arc::new(RequestMetadata {
         context: router_request.context,
-    };
+        http_parts: parts.clone(),
+    }));
 
-    // Store request metadata as an Arc
-    extensions.insert(Arc::new(metadata));
+    let mut core_request = http::Request::from_parts(parts, core_body);
 
     // Move extensions to core request (no cloning)
     *core_request.extensions_mut() = extensions;
@@ -133,15 +122,13 @@ pub(crate) fn router_response_to_core_response(
         .map_err(|err| -> BoxError { err.into() })
         .boxed_unsync();
 
-    let mut core_response = http::Response::from_parts(parts, core_body);
-
-    // Create response metadata from the router context
-    let metadata = ResponseMetadata {
+    // Store response metadata required to convert back to a legacy response
+    extensions.insert(Arc::new(ResponseMetadata {
         context: router_response.context,
-    };
+        http_parts: parts.clone(),
+    }));
 
-    // Store response metadata as an Arc
-    extensions.insert(Arc::new(metadata));
+    let mut core_response = http::Response::from_parts(parts, core_body);
 
     // Move extensions to core response (no cloning)
     *core_response.extensions_mut() = extensions;
