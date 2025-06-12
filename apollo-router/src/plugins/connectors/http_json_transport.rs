@@ -156,10 +156,6 @@ fn add_headers(
     let mut warnings = Vec::new();
 
     for header in config {
-        println!(
-            "header: {}, originating_directive: {:?}",
-            header.name, header.originating_directive
-        );
         match &header.source {
             HeaderSource::From(from) => {
                 let values = incoming_supergraph_headers.get_all(from);
