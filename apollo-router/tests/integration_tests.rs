@@ -1451,7 +1451,6 @@ async fn all_stock_router_example_yamls_are_valid() {
 }
 
 #[tokio::test]
-#[tracing_test::traced_test]
 async fn test_starstuff_supergraph_is_valid() {
     let schema = include_str!("../../examples/graphql/supergraph.graphql");
     apollo_router::TestHarness::builder()
@@ -1470,7 +1469,6 @@ Make sure it is accessible, and the configuration is working with the router."#,
 // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
 // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
 #[tokio::test(flavor = "multi_thread")]
-#[tracing_test::traced_test]
 async fn test_telemetry_doesnt_hang_with_invalid_schema() {
     create_test_service_factory_from_yaml(
         include_str!("../src/testdata/invalid_supergraph.graphql"),

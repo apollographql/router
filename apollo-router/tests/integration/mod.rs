@@ -13,6 +13,7 @@ mod entity_cache;
 mod file_upload;
 mod introspection;
 mod lifecycle;
+mod mock_subgraphs;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
