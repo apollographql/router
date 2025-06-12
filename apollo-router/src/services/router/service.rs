@@ -27,6 +27,8 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::Body;
+use super::tower_compat::APQCachingLayer;
+use super::tower_compat::ParseQueryLayer;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
@@ -66,6 +68,8 @@ use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQLayer;
+use crate::services::layers::persisted_queries::EnforceSafelistLayer;
+use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
@@ -98,18 +102,18 @@ impl RouterService {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
 
-        let supergraph_service = PrepareSupergraphService::new(
-            supergraph_service,
-            Arc::new(apq_layer),
-            persisted_query_layer,
-            Arc::new(query_analysis_layer),
-        );
+        let apq_layer = Arc::new(apq_layer);
+        let query_analysis_layer = Arc::new(query_analysis_layer);
 
         let service = ServiceBuilder::new()
             .layer(BatchingLayer::new(batching))
             .layer(RouterToSupergraphRequestLayer::new(Arc::new(
                 apollo_telemetry_config,
             )))
+            .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
+            .layer(APQCachingLayer::new(apq_layer))
+            .layer(ParseQueryLayer::new(query_analysis_layer))
+            .layer(EnforceSafelistLayer::new(persisted_query_layer))
             .service(supergraph_service)
             .boxed();
 
@@ -570,90 +574,6 @@ struct TranslateError {
     status: StatusCode,
     extension_code: String,
     extension_details: String,
-}
-
-/// The portion of the old RouterService that executes _after_ the request has been transformed to
-/// a supergraph request.
-/// This should become a stack of layers in the future.
-///
-/// FIXME(@goto-bus-stop): Ideally I'd want to make this generic over the inner service, but this
-/// results in a hard to understand lifetime error today (involving spooky action at a distance).
-/// Using a concrete BoxCloneService is okay for now and not a regression compared to the previous
-/// situation.
-#[derive(Clone)]
-struct PrepareSupergraphService {
-    inner: supergraph::BoxCloneService,
-    apq_layer: Arc<APQLayer>,
-    persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: Arc<QueryAnalysisLayer>,
-}
-
-impl PrepareSupergraphService {
-    fn new(
-        inner: supergraph::BoxCloneService,
-        apq_layer: Arc<APQLayer>,
-        persisted_query_layer: Arc<PersistedQueryLayer>,
-        query_analysis_layer: Arc<QueryAnalysisLayer>,
-    ) -> Self {
-        Self {
-            inner,
-            apq_layer,
-            persisted_query_layer,
-            query_analysis_layer,
-        }
-    }
-}
-
-impl Service<SupergraphRequest> for PrepareSupergraphService
-// where
-//     S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Clone + Send + 'static,
-//     S::Future: Send + 'static,
-//     S::Error: Into<BoxError> + Send + 'static,
-{
-    type Response = SupergraphResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
-    }
-
-    fn call(&mut self, req: SupergraphRequest) -> Self::Future {
-        // Use the readied service for this call, and replace it with an unready clone for the next call.
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
-
-        let persisted_query_layer = self.persisted_query_layer.clone();
-        let apq_layer = self.apq_layer.clone();
-        let query_analysis_layer = self.query_analysis_layer.clone();
-
-        Box::pin(async move {
-            // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
-            // layers with various ifs and matches, but *really*, we are calling each layer in order
-            // and handling short-circuiting.
-            let mut request_res = persisted_query_layer.supergraph_request(req);
-
-            if let Ok(req) = request_res {
-                request_res = apq_layer.supergraph_request(req).await;
-            }
-
-            let response = match request_res {
-                Err(response) => response,
-                Ok(request) => match query_analysis_layer.supergraph_request(request).await {
-                    Err(response) => response,
-                    Ok(request) => match persisted_query_layer
-                        .supergraph_request_with_analyzed_query(request)
-                        .await
-                    {
-                        Err(response) => response,
-                        Ok(request) => inner.call(request).await?,
-                    },
-                },
-            };
-
-            Ok(response)
-        })
-    }
 }
 
 /// A collection of services and data which may be used to create a "router".
