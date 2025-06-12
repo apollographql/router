@@ -2,15 +2,16 @@ use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::JSONSelection;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::http::HttpResponse;
 use apollo_federation::connectors::runtime::http::TransportResponse;
-use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
 use apollo_federation::connectors::runtime::problem::Problem;
-use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::runtime::problem::aggregate_apply_to_errors;
+use apollo_federation::connectors::runtime::request_merger::ResponseKey;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -27,7 +28,6 @@ use tracing::Span;
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
-use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -101,9 +101,14 @@ impl RawResponse {
                     .clone()
                     .merger(&connector.response_variables)
                     .config(connector.config.as_ref())
-                    .context(context)
+                    .context(
+                        context
+                            .iter()
+                            .map(|r| (r.key().as_str().into(), r.value().clone()))
+                            .collect(),
+                    ) // TODO don't aggressively clone the context
                     .status(parts.status.as_u16())
-                    .request(&connector.response_headers, &supergraph_request)
+                    .request(&connector.response_headers, supergraph_request.headers())
                     .response(&connector.response_headers, Some(&parts))
                     .env(&connector.env)
                     .merge();
@@ -168,9 +173,14 @@ impl RawResponse {
                         .clone()
                         .merger(&connector.response_variables)
                         .config(connector.config.as_ref())
-                        .context(context)
+                        .context(
+                            context
+                                .iter()
+                                .map(|r| (r.key().as_str().into(), r.value().clone()))
+                                .collect(),
+                        )
                         .status(parts.status.as_u16())
-                        .request(&connector.response_headers, &supergraph_request)
+                        .request(&connector.response_headers, supergraph_request.headers())
                         .response(&connector.response_headers, Some(&parts))
                         .merge()
                 });
@@ -191,7 +201,7 @@ impl RawResponse {
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
                 let mut error = graphql::Error::builder()
                     .message(message)
-                    .path::<Path>((&key).into());
+                    .path::<Path>(response_key_to_path(&key));
 
                 // First, we will apply defaults... these may get overwritten below by user configured extensions
                 error = error
@@ -454,7 +464,7 @@ pub(crate) async fn process_response<T: HttpBody>(
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             let raw = RawResponse::Error {
-                error: error.to_graphql_error(connector.clone(), Some((&response_key).into())),
+                error: error.to_graphql_error(connector.clone(), Some(response_key_to_path(&response_key))),
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -601,7 +611,7 @@ async fn deserialize_response<T: HttpBody>(
             .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
-    let path: Path = response_key.into();
+    let path: Path = response_key_to_path(response_key);
     let body = &router::body::into_bytes(body)
         .await
         .map_err(|_| make_err(path.clone()))?;
@@ -750,6 +760,38 @@ async fn deserialize_response<T: HttpBody>(
     }
 }
 
+use crate::json_ext::PathElement;
+
+/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
+/// the behavior of a GraphQL subgraph, including the `_entities` field. When
+/// the path gets to [`FetchNode::response_at_path`], it will be amended and
+/// appended to a parent path to create the full path to the field. For ex:
+///
+/// - parent path: `["posts", @, "user"]
+/// - path from key: `["_entities", 0, "user", "profile"]`
+/// - result: `["posts", 1, "user", "profile"]`
+fn response_key_to_path(key: &ResponseKey) -> Path {
+    match key {
+        ResponseKey::RootField { name, .. } => {
+            Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
+        }
+        ResponseKey::Entity { index, .. } => Path::from_iter(vec![
+            PathElement::Key("_entities".to_string(), None),
+            PathElement::Index(*index),
+        ]),
+        ResponseKey::EntityField {
+            index, field_name, ..
+        } => Path::from_iter(vec![
+            PathElement::Key("_entities".to_string(), None),
+            PathElement::Index(*index),
+            PathElement::Key(field_name.clone(), None),
+        ]),
+        ResponseKey::BatchEntity { .. } => {
+            Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -764,6 +806,8 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::request_merger::RequestInputs;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
@@ -771,8 +815,6 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
-    use crate::plugins::connectors::make_requests::RequestInputs;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 

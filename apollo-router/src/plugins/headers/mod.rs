@@ -612,6 +612,7 @@ mod test {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -628,7 +629,6 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;

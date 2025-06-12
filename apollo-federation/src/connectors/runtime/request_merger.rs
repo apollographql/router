@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::connectors::JSONSelection;
+use crate::connectors::Namespace;
+use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::connectors::Namespace;
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::validation::Valid;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::response::Parts;
 use serde_json::Value as JsonValue;
 use serde_json_bytes::ByteString;
@@ -11,11 +17,56 @@ use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 
-use crate::Context;
-use crate::plugins::connectors::make_requests::RequestInputs;
-use crate::services::external::externalize_header_map;
+fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
+}
 
-pub(crate) struct MappingContextMerger<'merger> {
+#[derive(Clone, Default)]
+pub struct RequestInputs {
+    pub args: Map<ByteString, Value>,
+    pub this: Map<ByteString, Value>,
+    pub batch: Vec<Map<ByteString, Value>>,
+}
+
+impl RequestInputs {
+    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
+    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
+    /// are actually referenced in the expressions for URLs, headers, body, or selection.
+    pub fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
+        MappingContextMerger {
+            inputs: self,
+            variables_used,
+            config: None,
+            context: None,
+            status: None,
+            request: None,
+            response: None,
+            env: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for RequestInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RequestInputs {{\n    args: {},\n    this: {},\n    batch: {}\n}}",
+            serde_json::to_string(&self.args).unwrap_or("<invalid JSON>".to_string()),
+            serde_json::to_string(&self.this).unwrap_or("<invalid JSON>".to_string()),
+            serde_json::to_string(&self.batch).unwrap_or("<invalid JSON>".to_string()),
+        )
+    }
+}
+
+pub struct MappingContextMerger<'merger> {
     pub(super) inputs: RequestInputs,
     pub(super) variables_used: &'merger HashSet<Namespace>,
     pub(super) config: Option<Value>,
@@ -27,7 +78,7 @@ pub(crate) struct MappingContextMerger<'merger> {
 }
 
 impl MappingContextMerger<'_> {
-    pub(crate) fn merge(self) -> IndexMap<String, Value> {
+    pub fn merge(self) -> IndexMap<String, Value> {
         let mut map =
             IndexMap::with_capacity_and_hasher(self.variables_used.len(), Default::default());
         // Not all connectors reference $args
@@ -80,21 +131,17 @@ impl MappingContextMerger<'_> {
         map
     }
 
-    pub(crate) fn context(mut self, context: &Context) -> Self {
+    pub fn context(mut self, context: Map<ByteString, Value>) -> Self {
         // $context could be a large object, so we only convert it to JSON
         // if it's used. It can also be mutated between requests, so we have
         // to convert it each time.
         if self.variables_used.contains(&Namespace::Context) {
-            let context: Map<ByteString, Value> = context
-                .iter()
-                .map(|r| (r.key().as_str().into(), r.value().clone()))
-                .collect();
             self.context = Some(Value::Object(context));
         }
         self
     }
 
-    pub(crate) fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
+    pub fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
         if let (true, Some(config)) = (self.variables_used.contains(&Namespace::Config), config) {
@@ -103,7 +150,7 @@ impl MappingContextMerger<'_> {
         self
     }
 
-    pub(crate) fn status(mut self, status: u16) -> Self {
+    pub fn status(mut self, status: u16) -> Self {
         // $status is available only for response mapping
         if self.variables_used.contains(&Namespace::Status) {
             self.status = Some(Value::Number(status.into()));
@@ -111,15 +158,15 @@ impl MappingContextMerger<'_> {
         self
     }
 
-    pub(crate) fn request(
+    pub fn request(
         mut self,
         headers_used: &HashSet<String>,
-        supergraph_request: &Arc<http::Request<crate::graphql::Request>>,
+        headers: &HeaderMap<HeaderValue>,
     ) -> Self {
         // Add headers from the original router request.
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if self.variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
+            let new_headers = externalize_header_map(headers)
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|(key, value)| {
@@ -140,7 +187,7 @@ impl MappingContextMerger<'_> {
         self
     }
 
-    pub(crate) fn response(
+    pub fn response(
         mut self,
         headers_used: &HashSet<String>,
         response_parts: Option<&Parts>,
@@ -173,7 +220,7 @@ impl MappingContextMerger<'_> {
         self
     }
 
-    pub(crate) fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
+    pub fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
         if self.variables_used.contains(&Namespace::Env) {
             let env_vars: Map<ByteString, Value> = env_vars_used
                 .iter()
@@ -186,5 +233,105 @@ impl MappingContextMerger<'_> {
             self.env = Some(Value::Object(env_vars));
         }
         self
+    }
+}
+
+#[derive(Clone)]
+pub enum ResponseKey {
+    RootField {
+        name: String,
+        selection: Arc<JSONSelection>,
+        inputs: RequestInputs,
+    },
+    Entity {
+        index: usize,
+        selection: Arc<JSONSelection>,
+        inputs: RequestInputs,
+    },
+    EntityField {
+        index: usize,
+        field_name: String,
+        /// Is Some only if the output type is a concrete object type. If it's
+        /// an interface, it's treated as an interface object and we can't emit
+        /// a __typename in the response.
+        typename: Option<Name>,
+        selection: Arc<JSONSelection>,
+        inputs: RequestInputs,
+    },
+    BatchEntity {
+        selection: Arc<JSONSelection>,
+        keys: Valid<FieldSet>,
+        inputs: RequestInputs,
+    },
+}
+
+impl ResponseKey {
+    pub fn selection(&self) -> &JSONSelection {
+        match self {
+            ResponseKey::RootField { selection, .. } => selection,
+            ResponseKey::Entity { selection, .. } => selection,
+            ResponseKey::EntityField { selection, .. } => selection,
+            ResponseKey::BatchEntity { selection, .. } => selection,
+        }
+    }
+
+    pub fn inputs(&self) -> &RequestInputs {
+        match self {
+            ResponseKey::RootField { inputs, .. } => inputs,
+            ResponseKey::Entity { inputs, .. } => inputs,
+            ResponseKey::EntityField { inputs, .. } => inputs,
+            ResponseKey::BatchEntity { inputs, .. } => inputs,
+        }
+    }
+}
+
+impl std::fmt::Debug for ResponseKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RootField {
+                name,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("RootField")
+                .field("name", name)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::Entity {
+                index,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("Entity")
+                .field("index", index)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::EntityField {
+                index,
+                field_name,
+                typename,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("EntityField")
+                .field("index", index)
+                .field("field_name", field_name)
+                .field("typename", typename)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::BatchEntity {
+                selection,
+                keys,
+                inputs,
+            } => f
+                .debug_struct("BatchEntity")
+                .field("selection", &selection.to_string())
+                .field("key_selection", &keys.serialize().no_indent().to_string())
+                .field("inputs", inputs)
+                .finish(),
+        }
     }
 }

@@ -2449,6 +2449,7 @@ mod tests {
     use apollo_federation::connectors::runtime::http::TransportRequest;
     use apollo_federation::connectors::runtime::http::TransportResponse;
     use apollo_federation::connectors::runtime::problem::Problem;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -2481,7 +2482,6 @@ mod tests {
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;

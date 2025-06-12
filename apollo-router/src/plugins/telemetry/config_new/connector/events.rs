@@ -132,6 +132,7 @@ mod tests {
     use apollo_federation::connectors::runtime::http::HttpResponse;
     use apollo_federation::connectors::runtime::http::TransportRequest;
     use apollo_federation::connectors::runtime::http::TransportResponse;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -145,7 +146,6 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
     use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::Request;

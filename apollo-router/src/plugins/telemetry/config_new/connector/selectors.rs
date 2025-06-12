@@ -302,6 +302,7 @@ mod tests {
     use apollo_federation::connectors::runtime::http::TransportRequest;
     use apollo_federation::connectors::runtime::http::TransportResponse;
     use apollo_federation::connectors::runtime::problem::Problem;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -320,7 +321,6 @@ mod tests {
     use super::MappingProblems;
     use crate::Context;
     use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;

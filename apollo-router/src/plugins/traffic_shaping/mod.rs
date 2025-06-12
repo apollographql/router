@@ -579,6 +579,7 @@ mod test {
     use apollo_compiler::name;
     use apollo_federation::connectors::runtime::http::HttpRequest;
     use apollo_federation::connectors::runtime::http::TransportRequest;
+    use apollo_federation::connectors::runtime::request_merger::ResponseKey;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -603,7 +604,6 @@ mod test {
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::HasSchema;

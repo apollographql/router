@@ -1,202 +1,21 @@
 use std::sync::Arc;
 
-use apollo_compiler::Name;
-use apollo_compiler::collections::HashSet;
-use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::http_json_transport::make_request;
+use apollo_federation::connectors::runtime::request_merger::RequestInputs;
+use apollo_federation::connectors::runtime::request_merger::ResponseKey;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
-use apollo_federation::connectors::JSONSelection;
-use apollo_federation::connectors::Namespace;
 use parking_lot::Mutex;
-use request_merger::MappingContextMerger;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 
 use crate::Context;
-use crate::json_ext::Path;
-use crate::json_ext::PathElement;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-
-pub(crate) mod request_merger;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
-
-#[derive(Clone, Default)]
-pub(crate) struct RequestInputs {
-    args: Map<ByteString, Value>,
-    this: Map<ByteString, Value>,
-    pub(crate) batch: Vec<Map<ByteString, Value>>,
-}
-
-impl RequestInputs {
-    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
-    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
-    /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
-        MappingContextMerger {
-            inputs: self,
-            variables_used,
-            config: None,
-            context: None,
-            status: None,
-            request: None,
-            response: None,
-            env: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for RequestInputs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RequestInputs {{\n    args: {},\n    this: {},\n    batch: {}\n}}",
-            serde_json::to_string(&self.args).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.this).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.batch).unwrap_or("<invalid JSON>".to_string()),
-        )
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum ResponseKey {
-    RootField {
-        name: String,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    Entity {
-        index: usize,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    EntityField {
-        index: usize,
-        field_name: String,
-        /// Is Some only if the output type is a concrete object type. If it's
-        /// an interface, it's treated as an interface object and we can't emit
-        /// a __typename in the response.
-        typename: Option<Name>,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    BatchEntity {
-        selection: Arc<JSONSelection>,
-        keys: Valid<FieldSet>,
-        inputs: RequestInputs,
-    },
-}
-
-impl ResponseKey {
-    pub(crate) fn selection(&self) -> &JSONSelection {
-        match self {
-            ResponseKey::RootField { selection, .. } => selection,
-            ResponseKey::Entity { selection, .. } => selection,
-            ResponseKey::EntityField { selection, .. } => selection,
-            ResponseKey::BatchEntity { selection, .. } => selection,
-        }
-    }
-
-    pub(crate) fn inputs(&self) -> &RequestInputs {
-        match self {
-            ResponseKey::RootField { inputs, .. } => inputs,
-            ResponseKey::Entity { inputs, .. } => inputs,
-            ResponseKey::EntityField { inputs, .. } => inputs,
-            ResponseKey::BatchEntity { inputs, .. } => inputs,
-        }
-    }
-}
-
-/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
-/// the behavior of a GraphQL subgraph, including the `_entities` field. When
-/// the path gets to [`FetchNode::response_at_path`], it will be amended and
-/// appended to a parent path to create the full path to the field. For ex:
-///
-/// - parent path: `["posts", @, "user"]
-/// - path from key: `["_entities", 0, "user", "profile"]`
-/// - result: `["posts", 1, "user", "profile"]`
-impl From<&ResponseKey> for Path {
-    fn from(key: &ResponseKey) -> Self {
-        match key {
-            ResponseKey::RootField { name, .. } => {
-                Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
-            }
-            ResponseKey::Entity { index, .. } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-            ]),
-            ResponseKey::EntityField {
-                index, field_name, ..
-            } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-                PathElement::Key(field_name.clone(), None),
-            ]),
-            ResponseKey::BatchEntity { .. } => {
-                Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
-            }
-        }
-    }
-}
-
-impl std::fmt::Debug for ResponseKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RootField {
-                name,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("RootField")
-                .field("name", name)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::Entity {
-                index,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("Entity")
-                .field("index", index)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::EntityField {
-                index,
-                field_name,
-                typename,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("EntityField")
-                .field("index", index)
-                .field("field_name", field_name)
-                .field("typename", typename)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::BatchEntity {
-                selection,
-                keys,
-                inputs,
-            } => f
-                .debug_struct("BatchEntity")
-                .field("selection", &selection.to_string())
-                .field("key_selection", &keys.serialize().no_indent().to_string())
-                .field("inputs", inputs)
-                .finish(),
-        }
-    }
-}
 
 pub(crate) fn make_requests(
     request: connect::Request,
@@ -244,10 +63,10 @@ fn request_params_to_requests(
                 .clone()
                 .merger(&connector.request_variables)
                 .config(connector.config.as_ref())
-                .context(&original_request.context)
+                .context(original_request.context.iter().map(|r| (r.key().as_str().into(), r.value().clone())).collect()) // TODO don't aggressively clone the context
                 .request(
                     &connector.request_headers,
-                    &original_request.supergraph_request,
+                    original_request.supergraph_request.headers(),
                 )
                 .merge(),
             original_request.supergraph_request.headers(),
