@@ -11,10 +11,10 @@ use super::DirectiveName;
 use crate::connectors::HTTPMethod;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::source::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
