@@ -4,6 +4,7 @@ mod freeform_graphql_behavior;
 mod id_extractor;
 mod manifest;
 mod manifest_poller;
+mod tower_compat;
 
 #[cfg(test)]
 use std::sync::Arc;
@@ -17,6 +18,7 @@ pub use manifest::ManifestOperation;
 pub use manifest::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
+pub(crate) use tower_compat::*;
 
 use super::query_analysis::ParsedDocument;
 use crate::Configuration;
