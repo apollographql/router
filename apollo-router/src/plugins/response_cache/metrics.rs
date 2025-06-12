@@ -201,7 +201,7 @@ impl CacheCounter {
 
     fn make_filter() -> Bloom<CacheKey> {
         // the filter is around 4kB in size (can be calculated with `Bloom::compute_bitmap_size`)
-        Bloom::new_for_fp_rate(10000, 0.2)
+        Bloom::new_for_fp_rate(10000, 0.2).expect("no OS source of randomness, that's a bit much")
     }
 
     pub(crate) fn record(
