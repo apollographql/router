@@ -290,8 +290,6 @@ impl PlanNode {
                         ) {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
-                                let flattened_paths: Vec<Path> =
-                                    paths.clone().into_iter().flatten().collect();
                                 let service = parameters.service_factory.create();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
@@ -318,7 +316,7 @@ impl PlanNode {
                                             .iter()
                                             .any(|elem| matches!(elem, PathElement::Flatten(_)))
                                         {
-                                            for path in flattened_paths.iter() {
+                                            for path in paths.iter().flatten() {
                                                 let mut err = err.clone();
                                                 err.path = Some(path.clone());
                                                 errors.push(err);
