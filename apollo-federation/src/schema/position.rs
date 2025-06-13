@@ -689,18 +689,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             )),
         }
     }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
-                let _ = type_.remove(schema);
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
-                let _ = type_.remove(schema);
-            }
-        }
-        Ok(())
-    }
 }
 
 fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
@@ -879,13 +867,6 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
-    }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.remove(schema),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.remove(schema),
-        }
     }
 
     pub(crate) fn insert_directive(

@@ -115,15 +115,6 @@ pub(crate) struct InterfaceTypeReferencers {
     pub(crate) interface_fields: IndexSet<InterfaceFieldDefinitionPosition>,
 }
 
-impl InterfaceTypeReferencers {
-    pub(crate) fn len(&self) -> usize {
-        self.object_types.len()
-            + self.object_fields.len()
-            + self.interface_types.len()
-            + self.interface_fields.len()
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UnionTypeReferencers {
     pub(crate) object_fields: IndexSet<ObjectFieldDefinitionPosition>,

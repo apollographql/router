@@ -17,6 +17,7 @@ use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
+use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -25,8 +26,6 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SubgraphMetadata;
-use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -702,11 +701,11 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let mut error = MultipleFederationErrors::new();
-        let mut fields_to_remove: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
-            HashSet::new();
-        let mut types_to_remove: HashSet<ObjectOrInterfaceTypeDefinitionPosition> = HashSet::new();
+        let mut fields_to_remove: HashSet<ObjectFieldDefinitionPosition> = HashSet::new();
+        let mut types_to_remove: HashSet<ObjectTypeDefinitionPosition> = HashSet::new();
         for type_ in schema.get_types() {
-            if let Ok(pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_) {
+            // @external is already removed from interfaces so we only need to process objects
+            if let Ok(pos) = ObjectTypeDefinitionPosition::try_from(type_) {
                 let mut has_fields = false;
                 for field in pos.fields(schema.schema())? {
                     has_fields = true;
@@ -718,23 +717,16 @@ impl SchemaUpgrader {
                     }
                 }
                 if !has_fields {
-                    let is_referenced = match &pos {
-                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj_pos) => schema
-                            .referencers()
-                            .object_types
-                            .get(&obj_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf_pos) => schema
-                            .referencers()
-                            .interface_types
-                            .get(&itf_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                    };
+                    let is_referenced = schema
+                        .referencers
+                        .object_types
+                        .get(&pos.type_name)
+                        .is_some_and(|r| r.len() > 0);
                     if is_referenced {
                         error
                             .errors
                             .push(SingleFederationError::TypeWithOnlyUnusedExternal {
-                                type_name: pos.type_name().clone(),
+                                type_name: pos.type_name.clone(),
                             });
                     } else {
                         types_to_remove.insert(pos);
