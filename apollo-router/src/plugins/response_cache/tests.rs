@@ -75,7 +75,6 @@ async fn insert() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -103,6 +102,7 @@ async fn insert() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -309,7 +309,6 @@ async fn insert_with_requires() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "products".to_string(),
@@ -337,6 +336,7 @@ async fn insert_with_requires() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -502,7 +502,6 @@ async fn insert_with_nested_field_set() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "products".to_string(),
@@ -530,6 +529,7 @@ async fn insert_with_nested_field_set() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -701,11 +701,11 @@ async fn no_cache_control() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let entity_cache =
         SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -818,7 +818,6 @@ async fn private() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -846,6 +845,7 @@ async fn private() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1214,7 +1214,6 @@ async fn missing_entities() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1242,6 +1241,7 @@ async fn missing_entities() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1371,7 +1371,6 @@ async fn invalidate() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1399,6 +1398,7 @@ async fn invalidate() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
     let invalidation = entity_cache.invalidation.clone();
 
     let service = TestHarness::builder()
