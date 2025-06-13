@@ -159,6 +159,7 @@ impl ExecutionService {
                 req.source_stream_value,
             )
             .await;
+
         let query = req.query_plan.query.clone();
         let stream = if (is_deferred || is_subscription) && !has_initial_data {
             let stream_mode = if is_deferred {
@@ -461,6 +462,11 @@ impl ExecutionService {
         let incremental = sub_responses
             .into_iter()
             .filter_map(move |(path, data)| {
+                let mut path_needle = path.clone();
+                if matches!(path_needle.last(), Some(PathElement::Index(_))) {
+                    path_needle.pop();
+                }
+
                 // filter errors that match the path of this incremental response
                 let errors = response
                     .errors
@@ -468,8 +474,17 @@ impl ExecutionService {
                     .filter(|error| match &error.path {
                         None => false,
                         Some(error_path) => {
-                            query.contains_error_path(&response.label, error_path, variables_set)
-                                && error_path.starts_with(&path)
+
+                            let contains_error_path = query.contains_error_path(
+                                &response.label,
+                                error_path,
+                                variables_set,
+                            );
+                            let starts_with = error_path.starts_with(&path_needle);
+                            let custom_starts_with_res =
+                                custom_starts_with(&error_path, &path_needle);
+                            // TODO: treat flatmap as index?
+                            contains_error_path && custom_starts_with_res
                         }
                     })
                     .cloned()
@@ -491,7 +506,7 @@ impl ExecutionService {
                                                     serde_json_bytes::from_value::<Path>(v.clone())
                                                         .ok()
                                                 })
-                                                .map(|ext_path| ext_path.starts_with(&path))
+                                                .map(|ext_path| ext_path.starts_with(&path_needle))
                                                 .unwrap_or(false)
                                         })
                                         .cloned()
@@ -670,4 +685,24 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
             )
             .boxed()
     }
+}
+
+fn custom_starts_with(path: &Path, needle: &Path) -> bool {
+    if needle.len() > path.len() {
+        return false;
+    }
+
+    for (path_element, needle_element) in path.iter().zip(needle.iter()) {
+        if matches!(path_element, PathElement::Flatten(_))
+            && matches!(needle_element, PathElement::Index(_))
+        {
+            continue;
+        }
+
+        if path_element != needle_element {
+            return false;
+        }
+    }
+
+    true
 }

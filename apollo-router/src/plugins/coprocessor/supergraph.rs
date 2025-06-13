@@ -357,68 +357,79 @@ where
         BoxError::from("Coprocessor cannot convert body into future due to problem with first part")
     })?;
 
-    // Now we process our first chunk of response
-    // Encode headers, body, status, context, sdl to create a payload
-    let headers_to_send = response_config
-        .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
-    let body_to_send = response_config
-        .body
-        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
-    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable::supergraph_builder()
-        .stage(PipelineStep::SupergraphResponse)
-        .id(response.context.id.clone())
-        .and_headers(headers_to_send)
-        .and_body(body_to_send)
-        .and_context(context_to_send)
-        .and_status_code(status_to_send)
-        .and_sdl(sdl_to_send.clone())
-        .and_has_next(first.has_next)
-        .build();
+    // TODO: refactor to share more code with execution on deferred response?
+    // Now we process our first chunk of response
+    let new_body = if response_config
+        .condition
+        .evaluate_event_response(&first, &response.context)
+    {
+        // Encode headers, body, status, context, sdl to create a payload
+        let headers_to_send = response_config
+            .headers
+            .then(|| externalize_header_map(&parts.headers))
+            .transpose()?;
+        let body_to_send = response_config
+            .body
+            .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
+        let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+        let context_to_send = response_config.context.get_context(&response.context);
 
-    // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+        let payload = Externalizable::supergraph_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .id(response.context.id.clone())
+            .and_headers(headers_to_send)
+            .and_body(body_to_send)
+            .and_context(context_to_send)
+            .and_status_code(status_to_send)
+            .and_sdl(sdl_to_send.clone())
+            .and_has_next(first.has_next)
+            .build();
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+        // Second, call our co-processor and get a reply.
+        tracing::debug!(?payload, "externalized output");
+        let start = Instant::now();
+        let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+        let duration = start.elapsed();
+        record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
-    validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
+        tracing::debug!(?co_processor_result, "co-processor returned");
+        let co_processor_output = co_processor_result?;
 
-    // Third, process our reply and act on the contents. Our processing logic is
-    // that we replace "bits" of our incoming response with the updated bits if they
-    // are present in our co_processor_output. If they aren't present, just use the
-    // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(first, co_processor_output.body)?;
+        validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
 
-    if let Some(control) = co_processor_output.control {
-        parts.status = control.get_http_status()?
-    }
+        // Third, process our reply and act on the contents. Our processing logic is
+        // that we replace "bits" of our incoming response with the updated bits if they
+        // are present in our co_processor_output. If they aren't present, just use the
+        // bits that we sent to the co_processor.
+        let new_body = handle_graphql_response(first, co_processor_output.body)?;
 
-    if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
+        if let Some(control) = co_processor_output.control {
+            parts.status = control.get_http_status()?
         }
-    }
 
-    if let Some(headers) = co_processor_output.headers {
-        parts.headers = internalize_header_map(headers)?;
-    }
+        if let Some(context) = co_processor_output.context {
+            for (mut key, value) in context.try_into_iter()? {
+                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                    &response_config.context
+                {
+                    key = context_key_from_deprecated(key);
+                }
+                response
+                    .context
+                    .upsert_json_value(key, move |_current| value);
+            }
+        }
+
+        if let Some(headers) = co_processor_output.headers {
+            parts.headers = internalize_header_map(headers)?;
+        }
+
+        new_body
+    } else {
+        first
+    };
 
     // Clone all the bits we need
     let context = response.context.clone();

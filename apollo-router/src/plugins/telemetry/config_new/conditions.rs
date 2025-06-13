@@ -307,11 +307,11 @@ where
                     .map(AttributeValue::from);
                 left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
-            Condition::Lt(gt) => {
-                let left_att = gt[0]
+            Condition::Lt(lt) => {
+                let left_att = lt[0]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
-                let right_att = gt[1]
+                let right_att = lt[1]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
                 left_att.zip(right_att).is_some_and(|(l, r)| l < r)

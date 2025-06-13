@@ -7,7 +7,6 @@ use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use crate::Context;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
@@ -371,13 +370,12 @@ impl Selector for SupergraphSelector {
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    == Some(serde_json_bytes::Value::Bool(true))
-                {
-                    Some(opentelemetry::Value::Bool(true))
-                } else {
-                    None
-                }
+                // Always return `true` for `on_graphql_error` on the `response` selector.
+                // Each chunk of a response (if a stream) or the full request should also be checked
+                // with `on_response_event`.
+                // TODO: this could well be a terrible idea but it's currently my only idea for how
+                //  to do error handling on deferred errors
+                Some(opentelemetry::Value::Bool(true))
             }
             SupergraphSelector::OperationName {
                 operation_name,
@@ -464,8 +462,8 @@ impl Selector for SupergraphSelector {
                     .map(opentelemetry::Value::from),
             },
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    == Some(serde_json_bytes::Value::Bool(true))
+                if !response.errors.is_empty()
+                    || response.incremental.iter().any(|r| !r.errors.is_empty())
                 {
                     Some(opentelemetry::Value::Bool(true))
                 } else {
