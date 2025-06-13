@@ -5,14 +5,16 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::responses::MappedResponse;
+use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::error::RawError;
 use apollo_federation::connectors::runtime::http::HttpResponse;
 use apollo_federation::connectors::runtime::http::TransportRequest;
 use apollo_federation::connectors::runtime::http::TransportResponse;
 use apollo_federation::connectors::runtime::problem::Problem;
 use apollo_federation::connectors::runtime::request_merger::ResponseKey;
-use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -32,7 +34,6 @@ use crate::graphql;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Path;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -112,13 +113,13 @@ impl Response {
         message: String,
         response_key: ResponseKey,
     ) -> Self {
-        let graphql_error = graphql::Error::builder()
-            .message(message)
-            .extension_code(error.extension_code())
-            .build();
-
         let mapped_response = MappedResponse::Error {
-            error: graphql_error,
+            error: RawError {
+                message,
+                code: Some(error.extension_code().into()),
+                extensions: Default::default(),
+                path: None,
+            },
             key: response_key,
         };
 
@@ -190,32 +191,61 @@ impl Clone for Error {
 }
 
 impl Error {
-    /// Create a GraphQL error from this error.
-    #[must_use]
-    pub(crate) fn to_graphql_error(
-        &self,
-        connector: Arc<Connector>,
-        path: Option<Path>,
-    ) -> crate::error::Error {
+    pub(crate) fn to_raw_error(&self, connector: &Connector, path: Option<Path>) -> RawError {
         use serde_json_bytes::*;
 
-        let builder = graphql::Error::builder()
-            .message(self.to_string())
-            .extension_code(self.extension_code())
-            .extension("service", connector.id.subgraph_name.clone())
-            .extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(connector.id.coordinate().into()),
-                )])),
-            );
-        if let Some(path) = path {
-            builder.path(path).build()
-        } else {
-            builder.build()
-        }
+        let raw_error = RawError {
+            message: self.to_string(),
+            code: Some(self.extension_code().into()),
+            extensions: Map::from_iter([
+                (
+                    "service".into(),
+                    Value::String(connector.id.subgraph_name.clone().into()),
+                ),
+                (
+                    "connector".into(),
+                    Value::Object(Map::from_iter([(
+                        "coordinate".into(),
+                        Value::String(connector.id.coordinate().into()),
+                    )])),
+                ),
+            ]),
+            path: path.map(|p| {
+                serde_json::to_string(&p)
+                    .expect("path is serializable")
+                    .into()
+            }),
+        };
+
+        raw_error
     }
+
+    // /// Create a GraphQL error from this error.
+    // #[must_use]
+    // pub(crate) fn to_graphql_error(
+    //     &self,
+    //     connector: Arc<Connector>,
+    //     path: Option<Path>,
+    // ) -> crate::error::Error {
+    //     use serde_json_bytes::*;
+
+    //     let builder = graphql::Error::builder()
+    //         .message(self.to_string())
+    //         .extension_code(self.extension_code())
+    //         .extension("service", connector.id.subgraph_name.clone())
+    //         .extension(
+    //             "connector",
+    //             Value::Object(Map::from_iter([(
+    //                 "coordinate".into(),
+    //                 Value::String(connector.id.coordinate().into()),
+    //             )])),
+    //         );
+    //     if let Some(path) = path {
+    //         builder.path(path).build()
+    //     } else {
+    //         builder.build()
+    //     }
+    // }
 }
 
 impl ErrorExtension for Error {

@@ -289,7 +289,7 @@ mod tests {
 
     use super::*;
     use crate::graphql;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;

@@ -5,3 +5,5 @@ pub mod http;
 pub mod http_json_transport;
 pub mod request_merger;
 pub mod context;
+pub mod error;
+pub mod responses;

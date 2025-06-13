@@ -9,7 +9,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
-use crate::plugins::connectors::handle_responses::MappedResponse;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
@@ -320,7 +320,7 @@ mod tests {
     use super::ConnectorSource;
     use super::MappingProblems;
     use crate::Context;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
