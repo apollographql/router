@@ -165,7 +165,7 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UsageReportingOperationDetails {
+pub struct UsageReportingOperationDetails {
     /// The operation name, or None if there is no operation name
     operation_name: Option<String>,
     /// The normalized operation signature, or None if there is no valid signature
@@ -201,7 +201,7 @@ impl UsageReportingOperationDetails {
 /// UsageReporting fields, that will be used to send stats to uplink/studio
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum UsageReporting {
+pub enum UsageReporting {
     Operation(UsageReportingOperationDetails),
     PersistedQuery {
         operation_details: UsageReportingOperationDetails,
