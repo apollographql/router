@@ -373,6 +373,8 @@ impl FetchNode {
                                             .message(error.message.clone())
                                             .and_extension_code(error.extension_code())
                                             .extensions(error.extensions.clone())
+                                            // re-use the original ID so we don't double count this error
+                                            .apollo_id(error.apollo_id())
                                             .build(),
                                     )
                                 }
