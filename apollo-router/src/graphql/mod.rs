@@ -230,12 +230,8 @@ impl Error {
                 });
 
         Some(Self::new(
-            message,
-            locations,
-            path,
-            None,
-            extensions,
-            None // apollo_id is not serialized, so it will never exist in a serialized vc error
+            message, locations, path, None, extensions,
+            None, // apollo_id is not serialized, so it will never exist in a serialized vc error
         ))
     }
 

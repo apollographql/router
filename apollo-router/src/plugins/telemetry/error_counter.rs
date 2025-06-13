@@ -15,7 +15,6 @@ use crate::context::OPERATION_NAME;
 use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::graphql::Error;
-use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;

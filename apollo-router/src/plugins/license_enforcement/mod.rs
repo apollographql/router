@@ -108,17 +108,15 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
-    use serde_json::{json, Value};
+    use serde_json::Value;
     use tower_service::Service;
-    use tracing_subscriber::filter::FilterExt;
+
     use super::*;
-    use crate::metrics::{meter_provider, FutureMetricsExt};
+    use crate::TestHarness;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockRouterService;
-    use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::test::{FakeDefault, PluginTestHarness, RequestTestExt};
-    use crate::services::supergraph;
-    use crate::{Context, TestHarness, _private};
+    use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -198,10 +196,13 @@ mod test {
                 PluginInit::fake_builder()
                     .config(LicenseEnforcementConfig {})
                     .license(license)
-                    .build()
-            ).await.expect("license plugin");
+                    .build(),
+            )
+            .await
+            .expect("license plugin");
 
-            let full_config = serde_yaml::from_str::<Value>(r#"
+            let full_config = serde_yaml::from_str::<Value>(
+                r#"
             telemetry:
               apollo:
                 endpoint: "http://example.com"
@@ -209,7 +210,9 @@ mod test {
                 client_version_header: "version_header"
                 buffer_size: 10000
                 schema_id: "schema_sha"
-            "#).unwrap();
+            "#,
+            )
+            .unwrap();
 
             let telemetry_config = full_config
                 .as_object()
@@ -223,16 +226,12 @@ mod test {
                 .build()
                 .with_deserialized_config()
                 .expect("unable to deserialize telemetry config");
-            let telemetry_plugin = Telemetry::new(init)
-                .await
-                .expect("telemetry plugin");
+            let telemetry_plugin = Telemetry::new(init).await.expect("telemetry plugin");
 
             let mut router_service = MockRouterService::new();
             router_service.expect_clone().return_once(move || {
                 let mut mock_service = test::MockRouterService::new();
-                mock_service.expect_call()
-                .times(2)
-                .returning(move |_| {
+                mock_service.expect_call().times(2).returning(move |_| {
                     // TODO do we need the async wait?
                     Ok(router::Response::fake_builder()
                         .data(serde_json::json!({"data": {"field": "value"}}))
@@ -240,8 +239,8 @@ mod test {
                         .build()
                         .unwrap())
                 });
-            mock_service
-        });
+                mock_service
+            });
 
             let mut router_service = TestHarness::builder()
                 .extra_private_plugin(license_plugin)
@@ -257,10 +256,11 @@ mod test {
                 .ready()
                 .await
                 .unwrap()
-                .call(router::Request::fake_builder()
-                    .header("content-type", "application/json")
-                    .build()
-                    .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .header("content-type", "application/json")
+                        .build()
+                        .unwrap(),
                 )
                 .await
                 .unwrap()
@@ -271,17 +271,17 @@ mod test {
                 .ready()
                 .await
                 .unwrap()
-                .call(router::Request::fake_builder()
-                    .header("content-type", "application/json")
-                    .build()
-                    .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .header("content-type", "application/json")
+                        .build()
+                        .unwrap(),
                 )
                 .await
                 .unwrap()
                 .next_response()
                 .await
                 .unwrap();
-
 
             // THEN
             // * we get a metric from the telemetry plugin saying the tps limit was enforced

@@ -1815,7 +1815,7 @@ mod test {
                 async move {
                     u64_counter!("apollo.router.test", "metric", 2);
                 }
-                    .with_current_meter_provider(),
+                .with_current_meter_provider(),
             );
 
             // Wait for the spawned task to complete
@@ -1824,7 +1824,7 @@ mod test {
             // The metric should now be 3 since both tasks contributed
             assert_counter!("apollo.router.test", 3);
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 }

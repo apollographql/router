@@ -2046,9 +2046,11 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use axum_extra::headers::HeaderName;
-    use http::{HeaderMap, Method, Uri};
+    use http::HeaderMap;
     use http::HeaderValue;
+    use http::Method;
     use http::StatusCode;
+    use http::Uri;
     use http::header::CONTENT_TYPE;
     use insta::assert_snapshot;
     use itertools::Itertools;
@@ -2069,18 +2071,23 @@ mod tests {
     use tower::ServiceExt;
     use tower::util::BoxService;
 
-    use super::{CustomTraceIdPropagator, CLIENT_NAME, CLIENT_VERSION};
+    use super::CLIENT_NAME;
+    use super::CLIENT_VERSION;
+    use super::CustomTraceIdPropagator;
     use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
+    use crate::Context;
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
     use crate::error::FetchError;
-    use crate::{graphql, Configuration, Context, TestHarness};
-    use crate::context::{OPERATION_KIND, OPERATION_NAME};
+    use crate::graphql;
     use crate::graphql::Error;
     use crate::graphql::IntoGraphQLErrors;
     use crate::graphql::Request;
     use crate::http_ext;
-    use crate::json_ext::{Object, Path};
+    use crate::json_ext::Object;
+    use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::PluginInit;
@@ -2096,14 +2103,14 @@ mod tests {
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::APOLLO_OPERATION_ID;
-    use crate::services::{supergraph, RouterRequest};
+    use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
-    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
+    use crate::services::supergraph;
     use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
     macro_rules! assert_prometheus_metrics {
@@ -3405,7 +3412,8 @@ mod tests {
                         }
                     }
                 }
-            }).to_string();
+            })
+            .to_string();
 
             let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
                 .config(&config)
@@ -3413,9 +3421,8 @@ mod tests {
                 .await
                 .expect("test harness");
 
-            let router_service = test_harness
-                .supergraph_service(|req| async {
-                    let example_response = graphql::Response::builder()
+            let router_service = test_harness.supergraph_service(|req| async {
+                let example_response = graphql::Response::builder()
                         .data(json!({"data": null}))
                         .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
                         "message": "Cannot return null for non-nullable field SomeType.someField",
@@ -3442,11 +3449,11 @@ mod tests {
                                 .build(),
                         ])
                         .build();
-                    Ok(SupergraphResponse::new_from_graphql_response(
-                        example_response,
-                        req.context,
-                    ))
-                });
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    req.context,
+                ))
+            });
 
             let context = Context::new();
             context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -3455,87 +3462,86 @@ mod tests {
             context.insert_json_value(CLIENT_NAME, client_name.into());
             context.insert_json_value(CLIENT_VERSION, client_version.into());
 
-            let post_request = supergraph::Request::builder()
-                .query(query)
-                .operation_name(operation_name)
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .uri(Uri::from_static("/"))
-                .method(Method::POST)
-                .context(context)
-                .build()
-                .unwrap();
-
             router_service
-                .call(post_request.try_into().unwrap())
+                .call(
+                    supergraph::Request::builder()
+                        .query(query)
+                        .operation_name(operation_name)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .uri(Uri::from_static("/"))
+                        .method(Method::POST)
+                        .context(context)
+                        .build()
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
 
             assert_counter!(
-            "apollo.router.operations.error",
-            1,
-            &[
-                KeyValue::new("apollo.operation.id", operation_id),
-                KeyValue::new("graphql.operation.name", operation_name),
-                KeyValue::new("graphql.operation.type", operation_type),
-                KeyValue::new("apollo.client.name", client_name),
-                KeyValue::new("apollo.client.version", client_version),
-                KeyValue::new("graphql.error.extensions.code", "SOME_ERROR_CODE"),
-                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
-                KeyValue::new("graphql.error.path", "/obj/field"),
-                KeyValue::new("apollo.router.error.service", "mySubgraph"),
-            ]
-        );
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/field"),
+                    KeyValue::new("apollo.router.error.service", "mySubgraph"),
+                ]
+            );
             assert_counter!(
-            "apollo.router.operations.error",
-            1,
-            &[
-                KeyValue::new("apollo.operation.id", operation_id),
-                KeyValue::new("graphql.operation.name", operation_name),
-                KeyValue::new("graphql.operation.type", operation_type),
-                KeyValue::new("apollo.client.name", client_name),
-                KeyValue::new("apollo.client.version", client_version),
-                KeyValue::new("graphql.error.extensions.code", "SOME_OTHER_ERROR_CODE"),
-                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
-                KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
-                KeyValue::new("apollo.router.error.service", "myOtherSubgraph"),
-            ]
-        );
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_OTHER_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                    KeyValue::new("apollo.router.error.service", "myOtherSubgraph"),
+                ]
+            );
             assert_counter!(
-            "apollo.router.operations.error",
-            1,
-            &[
-                KeyValue::new("apollo.operation.id", operation_id),
-                KeyValue::new("graphql.operation.name", operation_name),
-                KeyValue::new("graphql.operation.type", operation_type),
-                KeyValue::new("apollo.client.name", client_name),
-                KeyValue::new("apollo.client.version", client_version),
-                KeyValue::new(
-                    "graphql.error.extensions.code",
-                    "RESPONSE_VALIDATION_FAILED"
-                ),
-                KeyValue::new("graphql.error.extensions.severity", "WARN"),
-                KeyValue::new("graphql.error.path", "/someType/someField"),
-                KeyValue::new("apollo.router.error.service", ""),
-            ]
-        );
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new(
+                        "graphql.error.extensions.code",
+                        "RESPONSE_VALIDATION_FAILED"
+                    ),
+                    KeyValue::new("graphql.error.extensions.severity", "WARN"),
+                    KeyValue::new("graphql.error.path", "/someType/someField"),
+                    KeyValue::new("apollo.router.error.service", ""),
+                ]
+            );
             assert_counter_not_exists!(
-            "apollo.router.operations.error",
-            u64,
-            &[
-                KeyValue::new("apollo.operation.id", operation_id),
-                KeyValue::new("graphql.operation.name", operation_name),
-                KeyValue::new("graphql.operation.type", operation_type),
-                KeyValue::new("apollo.client.name", client_name),
-                KeyValue::new("apollo.client.version", client_version),
-                KeyValue::new("graphql.error.extensions.code", "SOME_IGNORED_ERROR_CODE"),
-                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
-                KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
-                KeyValue::new("apollo.router.error.service", "myIgnoredSubgraph"),
-            ]
-        );
+                "apollo.router.operations.error",
+                u64,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_IGNORED_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                    KeyValue::new("apollo.router.error.service", "myIgnoredSubgraph"),
+                ]
+            );
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
-
 }
