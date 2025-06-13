@@ -492,6 +492,7 @@ impl SubgraphCache {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
+        storage.truncate_namespace().await?;
 
         let storage = Arc::new(Storage {
             all: Some(storage),

@@ -102,7 +102,6 @@ async fn insert() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -336,7 +335,6 @@ async fn insert_with_requires() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -529,7 +527,6 @@ async fn insert_with_nested_field_set() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -705,7 +702,6 @@ async fn no_cache_control() {
         SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
             .await
             .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -845,7 +841,6 @@ async fn private() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1032,7 +1027,6 @@ async fn no_data() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1241,7 +1235,6 @@ async fn missing_entities() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1398,7 +1391,7 @@ async fn invalidate() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
+
     let invalidation = entity_cache.invalidation.clone();
 
     let service = TestHarness::builder()
