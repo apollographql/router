@@ -72,6 +72,8 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
+pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
+pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -1313,6 +1315,19 @@ async fn cache_store_root_from_response(
             {
                 invalidation_keys.extend(surrogate_keys.map(|s| s.to_string()));
             }
+            if let Some(Value::Array(cache_tags)) = response
+                .response
+                .body()
+                .extensions
+                .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+            {
+                invalidation_keys.extend(
+                    cache_tags
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned()),
+                );
+            }
             let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
 
@@ -1375,6 +1390,14 @@ async fn cache_store_entities_from_response(
             .and_then(|h| h.to_str().ok())
             .map(|h| h.split_whitespace().map(|s| s.to_string()).collect())
             .unwrap_or_default();
+        let per_entity_surrogate_keys = response
+            .response
+            .body()
+            .extensions
+            .get(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
+            .and_then(|value| value.as_array())
+            .map(|vec| vec.as_slice())
+            .unwrap_or_default();
 
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
@@ -1391,6 +1414,7 @@ async fn cache_store_entities_from_response(
             should_cache_private,
             &response.subgraph_name,
             surrogate_keys,
+            per_entity_surrogate_keys,
             response.context.clone(),
             subgraph_request,
         )
@@ -2011,7 +2035,8 @@ async fn insert_entities_in_result(
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
-    surrogate_keys: Vec<String>,
+    common_surrogate_keys: Vec<String>,
+    per_entity_surrogate_keys: &[Value],
     context: Context,
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
@@ -2028,6 +2053,7 @@ async fn insert_entities_in_result(
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
     let mut entities_it = entities.drain(..).enumerate();
+    let mut per_entity_surrogate_keys_it = per_entity_surrogate_keys.iter();
 
     // insert requested entities and cached entities in the same order as
     // they were requested
@@ -2053,6 +2079,7 @@ async fn insert_entities_in_result(
                         .ok_or_else(|| FetchError::MalformedResponse {
                             reason: "invalid number of entities".to_string(),
                         })?;
+                let specific_surrogate_keys = per_entity_surrogate_keys_it.next();
 
                 *inserted_types.entry(typename.clone()).or_default() += 1;
 
@@ -2099,7 +2126,11 @@ async fn insert_entities_in_result(
                     });
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    invalidation_keys.extend(surrogate_keys.clone());
+                    invalidation_keys.extend(common_surrogate_keys.iter().cloned());
+                    if let Some(Value::Array(keys)) = specific_surrogate_keys {
+                        invalidation_keys
+                            .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
+                    }
                     to_insert.push(BatchDocument {
                         control: serde_json::to_string(&cache_control)?,
                         data: serde_json::to_string(&value)?,

@@ -1785,7 +1785,7 @@ async fn invalidate() {
     let res = invalidation
         .invalidate(vec![InvalidationRequest::CacheTag {
             subgraphs: vec!["orga".to_string()].into_iter().collect(),
-            cache_key: String::from("organization-1"),
+            cache_tag: String::from("organization-1"),
         }])
         .await
         .unwrap();

@@ -54,7 +54,7 @@ fn base_subgraphs() -> serde_json::Value {
             "headers": {"cache-control": "public"},
             "query": {
                 "topProducts": [
-                    {"upc": "1"},
+                    {"upc": "1", "__cacheTags": ["topProducts"]},
                     {"upc": "2"},
                 ],
             },
@@ -62,8 +62,18 @@ fn base_subgraphs() -> serde_json::Value {
         "reviews": {
             "headers": {"cache-control": "public"},
             "entities": [
-                {"__typename": "Product", "upc": "1", "reviews": [{"id": "r1a"}, {"id": "r1b"}]},
-                {"__typename": "Product", "upc": "2", "reviews": [{"id": "r2"}]},
+                {
+                    "__cacheTags": ["product-1"],
+                    "__typename": "Product",
+                    "upc": "1",
+                    "reviews": [{"id": "r1a"}, {"id": "r1b"}],
+                },
+                {
+                    "__cacheTags": ["product-2"],
+                    "__typename": "Product",
+                    "upc": "2",
+                    "reviews": [{"id": "r2"}],
+                },
             ],
         },
     })
@@ -244,7 +254,7 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test]
-async fn invalidate_with_endpoint() {
+async fn invalidate_with_endpoint_by_entity_key() {
     if !graph_os_enabled() {
         return;
     }
@@ -269,6 +279,44 @@ async fn invalidate_with_endpoint() {
             "key": {
                 "upc": "1",
             },
+        }]))
+        .unwrap();
+    let (_headers, body) = make_json_request(&mut router, request).await;
+    insta::assert_yaml_snapshot!(body, @"count: 1");
+
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    // After invalidation, reviews need to be requested again but products are still in cache:
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 2
+    "###);
+}
+
+#[tokio::test]
+async fn invalidate_with_endpoint_by_entity_cache_tag() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 1
+    "###);
+
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(INVALIDATION_PATH)
+        .header("Authorization", INVALIDATION_SHARED_KEY)
+        .body(json!([{
+            "kind": "cache_tag",
+            "subgraphs": ["reviews"],
+            "cache_tag": "product-1",
         }]))
         .unwrap();
     let (_headers, body) = make_json_request(&mut router, request).await;

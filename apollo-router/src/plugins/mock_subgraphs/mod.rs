@@ -17,6 +17,8 @@ use self::execution::resolver::ResolvedValue;
 use crate::graphql;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS;
+use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS;
 use crate::services::subgraph;
 
 pub(crate) mod execution;
@@ -268,7 +270,7 @@ impl execution::resolver::Resolver for RootResolver<'_> {
                 if let Some(keys) = entity.get("__cacheTags") {
                     response_extensions
                         .borrow_mut()
-                        .entry("apolloEntityCacheTags")
+                        .entry(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
                         .as_array_mut()
                         .unwrap()
@@ -333,7 +335,7 @@ fn resolve_value<'a>(
                 if let Some(keys) = map.get("__cacheTags") {
                     response_extensions
                         .borrow_mut()
-                        .entry("apolloCacheTags")
+                        .entry(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
                         .as_array_mut()
                         .unwrap()
