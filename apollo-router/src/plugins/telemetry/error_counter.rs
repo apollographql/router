@@ -61,43 +61,24 @@ pub(crate) async fn count_supergraph_errors(
     let (parts, stream) = response.response.into_parts();
 
     let stream = stream.inspect(move |response_body| {
-        // TODO do we really need this?
-        let ClientRequestAccepts {
-            wildcard: accepts_wildcard,
-            json: accepts_json,
-            multipart_defer: accepts_multipart_defer,
-            multipart_subscription: accepts_multipart_subscription,
-        } = context
-            .extensions()
-            .with_lock(|lock| lock.get().cloned())
-            .unwrap_or_default();
-
-        if !response_body.has_next.unwrap_or(false)
-            && !response_body.subscribed.unwrap_or(false)
-            && (accepts_json || accepts_wildcard)
+        // TODO ensure free plan is captured
+        if !response_body.errors.is_empty() {
+            count_operation_errors(&response_body.errors, &context, &errors_config);
+        }
+        if let Some(value_completion) = response_body
+            .extensions
+            .get(EXTENSIONS_VALUE_COMPLETION_KEY)
         {
-            // TODO ensure free plan is captured
-            if !response_body.errors.is_empty() {
-                count_operation_errors(&response_body.errors, &context, &errors_config);
-            }
-            if let Some(value_completion) = response_body
-                .extensions
-                .get(EXTENSIONS_VALUE_COMPLETION_KEY)
-            {
-                if let Some(vc_array) = value_completion.as_array() {
-                    let errors: Vec<graphql::Error> = vc_array
-                        .iter()
-                        .filter_map(graphql::Error::from_value_completion_value)
-                        .collect();
-                    count_operation_errors(&errors, &context, &errors_config);
-                }
-            }
-        } else if accepts_multipart_defer || accepts_multipart_subscription {
-            // TODO can we combine this with above?
-            if !response_body.errors.is_empty() {
-                count_operation_errors(&response_body.errors, &context, &errors_config);
+            if let Some(vc_array) = value_completion.as_array() {
+                // We only count these in the supergraph layer to avoid double counting
+                let errors: Vec<graphql::Error> = vc_array
+                    .iter()
+                    .filter_map(graphql::Error::from_value_completion_value)
+                    .collect();
+                count_operation_errors(&errors, &context, &errors_config);
             }
         }
+
         // Refresh context with the most up-to-date list of errors
         let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
     });
@@ -182,9 +163,6 @@ fn count_operation_errors(
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
-    let _id_str = errors[0].apollo_id().to_string(); // TODO DEBUG REMOVE
-    let _msg_str = errors[0].message.clone(); // TODO DEBUG REMOVE
-
     let previously_counted_errors_map: HashSet<Uuid> = unwrap_from_context(context, COUNTED_ERRORS);
 
     let mut operation_id: String = unwrap_from_context(context, APOLLO_OPERATION_ID);

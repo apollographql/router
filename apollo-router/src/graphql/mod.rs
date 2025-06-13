@@ -228,14 +228,14 @@ impl Error {
                 .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
                     serde_json_bytes::from_value(p.clone()).ok()
                 });
-        let apollo_id = value_completion
-            .get("apolloId")
-            .and_then(|id| id.as_str())
-            .map(|id| Uuid::from_str(id).ok())?;
 
         Some(Self::new(
-            message, locations, path, None, extensions,
-            apollo_id, // TODO confirm this exists from serialized error
+            message,
+            locations,
+            path,
+            None,
+            extensions,
+            None // apollo_id is not serialized, so it will never exist in a serialized vc error
         ))
     }
 

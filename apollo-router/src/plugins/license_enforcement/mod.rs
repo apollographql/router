@@ -112,13 +112,13 @@ mod test {
     use tower_service::Service;
     use tracing_subscriber::filter::FilterExt;
     use super::*;
-    use crate::metrics::FutureMetricsExt;
+    use crate::metrics::{meter_provider, FutureMetricsExt};
     use crate::plugin::test::MockRouterService;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::{FakeDefault, PluginTestHarness, RequestTestExt};
     use crate::services::supergraph;
-    use crate::{Context, TestHarness};
+    use crate::{Context, TestHarness, _private};
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -243,7 +243,7 @@ mod test {
             mock_service
         });
 
-            let mut test_harness = TestHarness::builder()
+            let mut router_service = TestHarness::builder()
                 .extra_private_plugin(license_plugin)
                 .extra_private_plugin(telemetry_plugin)
                 .router_hook(move |_| router_service.clone().boxed())
@@ -253,7 +253,7 @@ mod test {
 
             // WHEN
             // * two reqs happen
-            let _first_response = test_harness
+            let _first_response = router_service
                 .ready()
                 .await
                 .unwrap()
@@ -267,7 +267,7 @@ mod test {
                 .next_response()
                 .await
                 .unwrap();
-            let _second_response = test_harness
+            let _second_response = router_service
                 .ready()
                 .await
                 .unwrap()
