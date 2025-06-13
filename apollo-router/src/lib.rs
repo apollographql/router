@@ -51,7 +51,7 @@ pub mod plugin;
 pub mod metrics;
 
 mod ageing_priority_queue;
-mod apollo_studio_interop;
+pub mod apollo_studio_interop;
 pub(crate) mod axum_factory;
 mod batching;
 mod cache;
