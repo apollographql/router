@@ -260,7 +260,7 @@ impl UsageReporting {
         }
     }
 
-    pub(crate) fn get_operation_id(&self) -> String {
+    pub fn get_operation_id(&self) -> String {
         let string_to_hash = match self {
             UsageReporting::Operation(operation_details)
             | UsageReporting::PersistedQuery {
