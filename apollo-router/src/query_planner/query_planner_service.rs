@@ -184,8 +184,11 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
-            match result {
+            match &result {
                 Ok(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success"),
+                Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
+                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "timeout")
+                }
                 Err(FederationErrorBridge::Cancellation(_)) => {
                     metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "cancelled")
                 }

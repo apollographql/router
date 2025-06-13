@@ -1,7 +1,8 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 use std::task;
 use std::time::Duration;
 
@@ -849,7 +850,20 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
+
+    use mockall::mock;
+    use parking_lot::Mutex;
+    use serde_json_bytes::json;
+    use test_log::test;
+    use tower::Service;
+    use tracing::Subscriber;
+    use tracing_core::Field;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
+    use tracing_subscriber::layer::Context as TracingContext;
+    use tracing_subscriber::prelude::*;
 
     use super::*;
     use crate::Configuration;
@@ -861,16 +875,6 @@ mod tests {
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
-    use mockall::mock;
-    use parking_lot::Mutex;
-    use serde_json_bytes::json;
-    use std::collections::HashMap;
-    use test_log::test;
-    use tower::Service;
-    use tracing::Subscriber;
-    use tracing_core::Field;
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{Layer, Registry, layer::Context as TracingContext};
 
     // Custom layer that records any field updates on spans.
     #[derive(Default, Clone)]
@@ -1138,6 +1142,7 @@ mod tests {
 
         use tokio::sync::Barrier;
 
+        let (layer, _guard) = setup_tracing();
         let barrier = Arc::new(Barrier::new(2));
         let barrier_clone = barrier.clone();
 
@@ -1215,6 +1220,12 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
         // Spawn the planning task
         let planning_task = tokio::spawn(async move {
             planner
@@ -1239,6 +1250,12 @@ mod tests {
             ),
             Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {:?}", e),
         }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the cancelled outcome
+        assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
     macro_rules! test_query_plan {

@@ -25,6 +25,12 @@ impl CooperativeCancellation {
     }
 }
 
+impl Default for CooperativeCancellation {
+    fn default() -> Self {
+        Mode::Measure(Config::Enabled)
+    }
+}
+
 /// Controls cooperative cancellation of query planning.
 ///
 /// When enabled, query planning will be cancelled if the client waiting on the query plan closes

@@ -2,12 +2,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+// Don't add a default here. Instead, Default should be implemented for
+// individual cases of Mode<T>.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Mode<T> {
     Measure(T),
     Enforce(T),
-    #[default]
     Disabled,
 }
 
