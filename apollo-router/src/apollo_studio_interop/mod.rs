@@ -167,12 +167,12 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
 #[serde(rename_all = "camelCase")]
 pub struct UsageReportingOperationDetails {
     /// The operation name, or None if there is no operation name
-    operation_name: Option<String>,
+    pub operation_name: Option<String>,
     /// The normalized operation signature, or None if there is no valid signature
-    operation_signature: Option<String>,
+    pub operation_signature: Option<String>,
     /// a list of all types and fields referenced in the query
     #[serde(default)]
-    referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
 impl UsageReportingOperationDetails {
