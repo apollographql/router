@@ -2428,7 +2428,7 @@ version = "0.1.0"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
- "axum 0.6.20",
+ "axum 0.7.0",
  "env_logger",
  "tokio",
  "tower",
