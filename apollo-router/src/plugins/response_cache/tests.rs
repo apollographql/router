@@ -132,7 +132,11 @@ async fn insert() {
         ck.cache_control.created = 0;
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
     let mut entity_key = serde_json_bytes::Map::new();
     entity_key.insert(
         ByteString::from("id"),
@@ -168,7 +172,21 @@ async fn insert() {
     );
     let mut response = response.next_response().await.unwrap();
     assert!(response.extensions.remove("cacheDebugger").is_some());
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
     let entity_cache =
@@ -224,7 +242,21 @@ async fn insert() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(response.extensions.remove("cacheDebugger").is_some());
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 }
 
 #[tokio::test]

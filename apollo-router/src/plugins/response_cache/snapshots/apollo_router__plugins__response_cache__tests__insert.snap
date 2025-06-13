@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'new' and we have all the entities and root fields"
 expression: cache_keys
 ---
 [

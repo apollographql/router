@@ -498,6 +498,7 @@ impl SubgraphCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone(), 10).await?;
+        storage.migrate().await?;
 
         Ok(Self {
             storage,
