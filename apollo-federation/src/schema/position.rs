@@ -421,6 +421,13 @@ impl Debug for OutputTypeDefinitionPosition {
 impl OutputTypeDefinitionPosition {
     const EXPECTED: &'static str = "an output type";
 
+    pub(crate) fn is_leaf_type(&self) -> bool {
+        matches!(
+            self,
+            OutputTypeDefinitionPosition::Scalar(_) | OutputTypeDefinitionPosition::Enum(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -550,6 +557,24 @@ impl CompositeTypeDefinitionPosition {
                 name.clone(),
                 self.describe(),
             )),
+        }
+    }
+
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
         }
     }
 
@@ -901,7 +926,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
@@ -1053,12 +1078,14 @@ pub(crate) enum TagDirectiveTargetPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
-    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    ArgumentDefinition(FieldArgumentDefinitionPosition),
     Scalar(ScalarTypeDefinitionPosition),
     Enum(EnumTypeDefinitionPosition),
     EnumValue(EnumValueDefinitionPosition),
     InputObject(InputObjectTypeDefinitionPosition),
     InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+    Schema(SchemaDefinitionPosition),
+    DirectiveArgumentDefinition(DirectiveArgumentDefinitionPosition),
 }
 
 impl Debug for TagDirectiveTargetPosition {
@@ -1076,6 +1103,10 @@ impl Debug for TagDirectiveTargetPosition {
             Self::EnumValue(p) => write!(f, "EnumValue({p})"),
             Self::InputObject(p) => write!(f, "InputObject({p})"),
             Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+            Self::Schema(p) => write!(f, "Schema({p})"),
+            Self::DirectiveArgumentDefinition(p) => {
+                write!(f, "DirectiveArgumentDefinition({p})")
+            }
         }
     }
 }

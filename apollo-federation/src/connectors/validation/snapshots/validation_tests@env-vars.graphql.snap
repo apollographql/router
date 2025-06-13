@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graphql
+---
+[
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)`: object values aren't valid here",
+        locations: [
+            19:36..19:40,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)`: `$env.foo` doesn't have a field named `bar`",
+        locations: [
+            20:45..20:48,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.invalidObject`: object values aren't valid here",
+        locations: [
+            36:44..36:48,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.invalidPath`: `$env.foo` doesn't have a field named `bar`",
+        locations: [
+            41:53..41:56,
+        ],
+    },
+]

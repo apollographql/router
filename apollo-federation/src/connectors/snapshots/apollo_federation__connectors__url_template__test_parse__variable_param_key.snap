@@ -1,0 +1,138 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"?{$args.filter.field}={$args.filter.value}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [],
+        query: [
+            (
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "filter",
+                                                            ),
+                                                            range: Some(
+                                                                6..12,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "field",
+                                                                    ),
+                                                                    range: Some(
+                                                                        13..18,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        18..18,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                12..18,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..18,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..18,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 2..20,
+                            },
+                        ),
+                    ],
+                },
+                StringTemplate {
+                    parts: [
+                        Expression(
+                            Expression {
+                                expression: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "filter",
+                                                            ),
+                                                            range: Some(
+                                                                6..12,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "value",
+                                                                    ),
+                                                                    range: Some(
+                                                                        13..18,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        18..18,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                12..18,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..18,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..18,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                location: 23..41,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
+    },
+)

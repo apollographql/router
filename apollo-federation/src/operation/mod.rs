@@ -29,6 +29,7 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -1699,8 +1700,9 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
+                let element_key = element.key().to_owned_key();
                 let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
+                    .entry(element_key.as_borrowed_key())
                     .or_insert(|| {
                         Selection::from_element(
                             element,
@@ -3039,6 +3041,24 @@ impl Display for SelectionSet {
             Err(_) => return Err(std::fmt::Error),
         };
         selection_set.serialize().no_indent().fmt(f)
+    }
+}
+
+pub(crate) struct FieldSetDisplay<T: AsRef<SelectionSet>>(pub(crate) T);
+
+impl<T: AsRef<SelectionSet>> Display for FieldSetDisplay<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let selection_set: executable::SelectionSet = match self.0.as_ref().try_into() {
+            Ok(selection_set) => selection_set,
+            Err(_) => return Err(std::fmt::Error),
+        };
+        FieldSet {
+            sources: Default::default(),
+            selection_set,
+        }
+        .serialize()
+        .no_indent()
+        .fmt(f)
     }
 }
 

@@ -1106,6 +1106,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_response_with_null_data() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                assert_eq!(&*req.id, "5678");
+                Ok(subgraph::Response::builder()
+                    .data(serde_json_bytes::Value::Null)
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                let subgraph_id = body.get("subgraphRequestId").unwrap();
+                assert_eq!(subgraph_id.as_str(), Some("5678"));
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphResponse",
+                                "headers": {
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "data": null
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "accepts-json": false,
+                                      "accepts-wildcard": true,
+                                      "accepts-multipart": false
+                                    }
+                                  },
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+
+        let response = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the subgraph response has been transformed as it should have.
+        assert_eq!(&*response.id, "5678");
+        assert_eq!(
+            serde_json_bytes::Value::Null,
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_subgraph_response_with_selective_context() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),

@@ -2,8 +2,8 @@ use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
-use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::JSONSelection;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::JSONSelection;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -105,6 +105,7 @@ impl RawResponse {
                     .status(parts.status.as_u16())
                     .request(&connector.response_headers, &supergraph_request)
                     .response(&connector.response_headers, Some(&parts))
+                    .env(&connector.env)
                     .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -756,13 +757,13 @@ mod tests {
 
     use apollo_compiler::Schema;
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::EntityResolver;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::EntityResolver;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
@@ -801,6 +802,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -911,6 +913,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1028,6 +1031,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1152,6 +1156,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1278,6 +1283,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1541,6 +1547,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 

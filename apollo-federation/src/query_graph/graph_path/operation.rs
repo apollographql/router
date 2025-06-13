@@ -1978,7 +1978,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        overridden_conditions: &EnabledOverrideConditions,
+        override_conditions: &EnabledOverrideConditions,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
@@ -1986,13 +1986,13 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             condition_resolver,
             &self.excluded_destinations,
             &self.excluded_conditions,
-            overridden_conditions,
+            override_conditions,
             // The transitions taken by this method are non-collecting transitions, in which case
             // the trigger is the context (which is really a hack to provide context information for
             // keys during fetch dependency graph updating).
             |_, context| OpGraphPathTrigger::Context(context.clone()),
-            |graph, node, trigger, overridden_conditions| {
-                graph.edge_for_op_graph_path_trigger(node, trigger, overridden_conditions)
+            |graph, node, trigger, override_conditions| {
+                Ok(graph.edge_for_op_graph_path_trigger(node, trigger, override_conditions))
             },
             disabled_subgraphs,
         )

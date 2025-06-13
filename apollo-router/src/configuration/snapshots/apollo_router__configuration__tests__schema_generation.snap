@@ -1342,8 +1342,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1383,50 +1383,6 @@ expression: "&schema"
     },
     "Config10": {
       "additionalProperties": false,
-      "description": "Configuration for header propagation",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/HeadersLocation",
-          "description": "#/definitions/HeadersLocation",
-          "nullable": true
-        },
-        "connector": {
-          "$ref": "#/definitions/ConnectorHeadersConfiguration",
-          "description": "#/definitions/ConnectorHeadersConfiguration"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation",
-            "description": "#/definitions/HeadersLocation"
-          },
-          "description": "Rules to specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config11": {
-      "additionalProperties": false,
-      "description": "Configuration for exposing errors that originate from subgraphs",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/ErrorMode",
-          "description": "#/definitions/ErrorMode"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConfig2",
-            "description": "#/definitions/SubgraphConfig2"
-          },
-          "default": {},
-          "description": "Overrides global configuration on a per-subgraph basis",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config12": {
-      "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
@@ -1458,11 +1414,88 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Config11": {
+      "additionalProperties": false,
+      "description": "Configuration for header propagation",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Rules to specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config12": {
+      "additionalProperties": false,
+      "description": "Configuration for exposing errors that originate from subgraphs",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ErrorMode",
+          "description": "#/definitions/ErrorMode"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphConfig2",
+            "description": "#/definitions/SubgraphConfig2"
+          },
+          "default": {},
+          "description": "Overrides global configuration on a per-subgraph basis",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "Config13": {
-      "description": "Configuration for the progressive override plugin",
+      "additionalProperties": false,
+      "description": "Configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig2",
+          "description": "#/definitions/InvalidationEndpointConfig2",
+          "nullable": true
+        },
+        "metrics": {
+          "$ref": "#/definitions/Metrics2",
+          "description": "#/definitions/Metrics2"
+        },
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph2",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph2"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
       "type": "object"
     },
     "Config14": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
+    "Config15": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1538,7 +1571,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config15": {
+    "Config16": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1550,8 +1583,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
@@ -1575,7 +1610,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config16": {
+    "Config17": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1592,11 +1627,15 @@ expression: "&schema"
           "default": "/metrics",
           "description": "The path where prometheus will be exposed",
           "type": "string"
+        },
+        "resource_selector": {
+          "$ref": "#/definitions/ResourceSelectorConfig",
+          "description": "#/definitions/ResourceSelectorConfig"
         }
       },
       "type": "object"
     },
-    "Config17": {
+    "Config18": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1617,7 +1656,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config18": {
+    "Config19": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1676,7 +1715,33 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config19": {
+    "Config2": {
+      "description": "Controls cooperative cancellation of query planning.\n\nWhen enabled, query planning will be cancelled if the client waiting on the query plan closes their connection. Additionally, when enabled with a timeout, the query planning will be cancelled if it takes longer than the specified timeout.",
+      "oneOf": [
+        {
+          "description": "Enables cooperative cancellation of query planning, but does not set a timeout.",
+          "enum": [
+            "enabled"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Enables cooperative cancellation of query planning with a timeout.",
+          "properties": {
+            "enabled_with_timeout_in_seconds": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled_with_timeout_in_seconds"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Config20": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1710,32 +1775,6 @@ expression: "&schema"
         }
       },
       "type": "object"
-    },
-    "Config2": {
-      "description": "Controls cooperative cancellation of query planning.\n\nWhen enabled, query planning will be cancelled if the client waiting on the query plan closes their connection. Additionally, when enabled with a timeout, the query planning will be cancelled if it takes longer than the specified timeout.",
-      "oneOf": [
-        {
-          "description": "Enables cooperative cancellation of query planning, but does not set a timeout.",
-          "enum": [
-            "enabled"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Enables cooperative cancellation of query planning with a timeout.",
-          "properties": {
-            "enabled_with_timeout_in_seconds": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "enabled_with_timeout_in_seconds"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "Config3": {
       "additionalProperties": false,
@@ -3220,8 +3259,8 @@ expression: "&schema"
           "description": "#/definitions/Logging"
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics2",
-          "description": "#/definitions/Metrics2"
+          "$ref": "#/definitions/Metrics3",
+          "description": "#/definitions/Metrics3"
         },
         "tracing": {
           "$ref": "#/definitions/Tracing",
@@ -4152,6 +4191,38 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "InvalidationEndpointConfig2": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrent_requests": {
+          "default": 10,
+          "description": "Number of concurrent invalidation requests",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
+        },
+        "scan_count": {
+          "default": 1000,
+          "description": "Number of keys to return at once from a redis SCAN command",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "listen",
+        "path"
+      ],
+      "type": "object"
+    },
     "JWTConf": {
       "additionalProperties": false,
       "properties": {
@@ -4426,6 +4497,28 @@ expression: "&schema"
     },
     "Metrics2": {
       "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "enables metrics evaluating the benefits of entity caching",
+          "type": "boolean"
+        },
+        "separate_per_type": {
+          "default": false,
+          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+          "type": "boolean"
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "Metrics3": {
+      "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
         "common": {
@@ -4433,12 +4526,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config15",
-          "description": "#/definitions/Config15"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config16",
           "description": "#/definitions/Config16"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config17",
+          "description": "#/definitions/Config17"
         }
       },
       "type": "object"
@@ -5299,6 +5392,24 @@ expression: "&schema"
         "header_name"
       ],
       "type": "object"
+    },
+    "ResourceSelectorConfig": {
+      "oneOf": [
+        {
+          "description": "Export all resource attributes with every metrics.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Do not export any resource attributes with every metrics.",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ResponseStatus": {
       "oneOf": [
@@ -6397,6 +6508,40 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Subgraph2": {
+      "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/SubgraphInvalidationConfig2",
+          "description": "#/definitions/SubgraphInvalidationConfig2",
+          "nullable": true
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "nullable": true,
+          "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
     "SubgraphApq": {
       "additionalProperties": false,
       "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
@@ -6445,7 +6590,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntitySurrogateKeys\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6469,7 +6614,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloSurrogateKeys\"]` array.",
           "type": "object"
         }
       },
@@ -6598,6 +6743,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphConfiguration_for_Subgraph2": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph2",
+          "description": "#/definitions/Subgraph2"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph2",
+            "description": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphConfiguration_for_SubgraphApq": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -6713,6 +6877,22 @@ expression: "&schema"
       "type": "object"
     },
     "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig2": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
@@ -8094,24 +8274,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config18",
-          "description": "#/definitions/Config18"
+          "$ref": "#/definitions/Config19",
+          "description": "#/definitions/Config19"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config15",
-          "description": "#/definitions/Config15"
+          "$ref": "#/definitions/Config16",
+          "description": "#/definitions/Config16"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config17",
-          "description": "#/definitions/Config17"
+          "$ref": "#/definitions/Config18",
+          "description": "#/definitions/Config18"
         }
       },
       "type": "object"
@@ -8194,6 +8374,10 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
+      "description": "Per subgraph configuration for entity caching",
+      "type": "string"
+    },
+    "Ttl2": {
       "description": "Per subgraph configuration for entity caching",
       "type": "string"
     },
@@ -9222,6 +9406,10 @@ expression: "&schema"
         "description": "#/definitions/SubgraphConfig"
       },
       "type": "object"
+    },
+    "^experimental_response_cache$": {
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     }
   },
   "properties": {
@@ -9287,8 +9475,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config10",
-      "description": "#/definitions/Config10"
+      "$ref": "#/definitions/Config11",
+      "description": "#/definitions/Config11"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -9299,8 +9487,8 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config11",
-      "description": "#/definitions/Config11"
+      "$ref": "#/definitions/Config12",
+      "description": "#/definitions/Config12"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
@@ -9323,16 +9511,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config12",
-      "description": "#/definitions/Config12"
+      "$ref": "#/definitions/Config13",
+      "description": "#/definitions/Config13"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config13",
-      "description": "#/definitions/Config13"
+      "$ref": "#/definitions/Config14",
+      "description": "#/definitions/Config14"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -9363,8 +9551,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config19",
-      "description": "#/definitions/Config19"
+      "$ref": "#/definitions/Config20",
+      "description": "#/definitions/Config20"
     }
   },
   "title": "Configuration",

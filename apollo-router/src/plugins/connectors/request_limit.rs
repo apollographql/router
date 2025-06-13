@@ -7,14 +7,15 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::connectors::ConnectId;
+use apollo_federation::connectors::SourceName;
 use parking_lot::Mutex;
 
 /// Key to access request limits for a connector
 #[derive(Eq, Hash, PartialEq)]
 pub(crate) enum RequestLimitKey {
     /// A key to access the request limit for a connector referencing a source directive
-    SourceName(String),
+    SourceName(SourceName),
 
     /// A key to access the request limit for a connector without a corresponding source directive
     ConnectorLabel(String),

@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/mod.rs
-expression: prometheus_metrics
+expression: "prometheus_metrics.replace(& format!\n(r#\"service_version=\"{}\"\"#, std :: env! (\"CARGO_PKG_VERSION\")),\nr#\"service_version=\"X\"\"#)"
 ---
 apollo_test_histo_bucket{otel_scope_name="apollo/router",le="+Inf"} 1
 apollo_test_histo_bucket{otel_scope_name="apollo/router",le="10"} 1
