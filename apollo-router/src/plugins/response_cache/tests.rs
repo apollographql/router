@@ -1005,7 +1005,6 @@ async fn no_data() {
     })
     .await
     .unwrap();
-    pg_cache.truncate_namespace().await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1033,6 +1032,7 @@ async fn no_data() {
     let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
+    pg_cache.truncate_namespace().await.unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
