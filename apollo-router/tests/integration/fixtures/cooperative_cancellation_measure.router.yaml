@@ -1,4 +1,0 @@
-supergraph:
-  query_planning:
-    experimental_cooperative_cancellation:
-      measure: enabled

@@ -1,5 +1,0 @@
-supergraph:
-  query_planning:
-    experimental_cooperative_cancellation:
-      enforce:
-        enabled_with_timeout_in_seconds: 0.2
