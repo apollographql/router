@@ -72,12 +72,6 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
-                            u64_counter!( // TODO TEMP REMOVE
-                                "apollo.router.graphql_error",
-                                "Number of GraphQL error responses returned by the router",
-                                1,
-                                code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
-                            );
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
                                 .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
@@ -108,13 +102,11 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
-    use serde_json::Value;
-    use tower_service::Service;
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     use super::*;
-    use crate::TestHarness;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockRouterService;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
@@ -177,7 +169,6 @@ mod test {
     }
 
     #[tokio::test]
-    // TODO CONVERT THIS INTO INTEGRATION TEST WITH free license plugin + telemetry
     async fn it_emits_metrics_when_tps_enforced() {
         async {
             // GIVEN
@@ -192,94 +183,64 @@ mod test {
                 }),
             };
 
-            let license_plugin = LicenseEnforcement::new(
-                PluginInit::fake_builder()
-                    .config(LicenseEnforcementConfig {})
-                    .license(license)
-                    .build(),
-            )
-            .await
-            .expect("license plugin");
-
-            let full_config = serde_yaml::from_str::<Value>(
-                r#"
-            telemetry:
-              apollo:
-                endpoint: "http://example.com"
-                client_name_header: "name_header"
-                client_version_header: "version_header"
-                buffer_size: 10000
-                schema_id: "schema_sha"
-            "#,
-            )
-            .unwrap();
-
-            let telemetry_config = full_config
-                .as_object()
-                .expect("must be an object")
-                .get("telemetry")
-                .expect("telemetry must be a root key");
-
-            let init = PluginInit::fake_builder()
-                .config(telemetry_config.clone())
-                .full_config(full_config)
+            let license_service = PluginTestHarness::<LicenseEnforcement>::builder()
+                .license(license)
                 .build()
-                .with_deserialized_config()
-                .expect("unable to deserialize telemetry config");
-            let telemetry_plugin = Telemetry::new(init).await.expect("telemetry plugin");
-
-            let mut router_service = MockRouterService::new();
-            router_service.expect_clone().return_once(move || {
-                let mut mock_service = test::MockRouterService::new();
-                mock_service.expect_call().times(2).returning(move |_| {
-                    // TODO do we need the async wait?
+                .await
+                .unwrap()
+                .router_service(|req| async {
                     Ok(router::Response::fake_builder()
                         .data(serde_json::json!({"data": {"field": "value"}}))
                         .header("x-custom-header", "test-value")
+                        .context(req.context)
                         .build()
                         .unwrap())
                 });
-                mock_service
-            });
-
-            let mut router_service = TestHarness::builder()
-                .extra_private_plugin(license_plugin)
-                .extra_private_plugin(telemetry_plugin)
-                .router_hook(move |_| router_service.clone().boxed())
-                .build_router()
-                .await
-                .unwrap();
 
             // WHEN
             // * two reqs happen
-            let _first_response = router_service
-                .ready()
+            // * and the telemetry plugin receives the second response with errors to count
+
+            let _first_response = license_service.call_default().await;
+            let license_plugin_error_response = license_service.call_default().await.unwrap();
+
+            // Put the error response in an arc and mutex so we can share it with telemetry threads
+            let slot = Arc::new(Mutex::new(Some(license_plugin_error_response)));
+            // We have to do a weird thing where we take the response from the license plugin and feed
+            // it as the mock response of the telemetry plugin so that telemetry plugin will count
+            // the errors. Ideally this would be done using a TestHarness, but using a "full"
+            // router with the Telemetry plugin will hit reload_metrics() on activation thus
+            // breaking async(){}.with_metrics() by shutting down its metrics provider.
+            // Ultimately this is the best way anyone could think of to simulate this scenario.
+            let _telemetry_service = PluginTestHarness::<Telemetry>::builder()
+                .config(
+                    r#"
+                    telemetry:
+                      apollo:
+                        endpoint: "http://example.com"
+                        client_name_header: "name_header"
+                        client_version_header: "version_header"
+                        buffer_size: 10000
+                    "#,
+                )
+                .build()
                 .await
                 .unwrap()
+                .router_service(move |_req| {
+                    let slot = Arc::clone(&slot);
+                    async move {
+                        // pull out our one error‐response
+                        let mut guard = slot.lock().unwrap();
+                        let resp = guard.take().unwrap();
+                        Ok(resp)
+                    }
+                })
                 .call(
                     router::Request::fake_builder()
                         .header("content-type", "application/json")
                         .build()
                         .unwrap(),
                 )
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
-            let _second_response = router_service
-                .ready()
-                .await
-                .unwrap()
-                .call(
-                    router::Request::fake_builder()
-                        .header("content-type", "application/json")
-                        .build()
-                        .unwrap(),
-                )
-                .await
-                .unwrap()
-                .next_response()
                 .await
                 .unwrap();
 
