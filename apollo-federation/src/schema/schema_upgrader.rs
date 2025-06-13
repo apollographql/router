@@ -12,7 +12,6 @@ use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
-use super::compute_subgraph_metadata;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
@@ -23,7 +22,6 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SubgraphMetadata;
@@ -59,6 +57,7 @@ struct UpgradeMetadata {
     requires_directive_name: Option<Name>,
     provides_directive_name: Option<Name>,
     extends_directive_name: Option<Name>,
+    metadata: SubgraphMetadata,
 }
 
 impl SchemaUpgrader {
@@ -118,6 +117,7 @@ impl SchemaUpgrader {
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
             provides_directive_name: subgraph.provides_directive_name()?.clone(),
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            metadata: subgraph.metadata().clone(),
         };
         self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
@@ -711,12 +711,7 @@ impl SchemaUpgrader {
                 for field in pos.fields(schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
-                    let metadata = compute_subgraph_metadata(schema)?.ok_or_else(|| {
-                        internal_error!(
-                            "Unable to detect federation version used in subgraph '{}'",
-                            upgrade_metadata.subgraph_name
-                        )
-                    })?;
+                    let metadata = &upgrade_metadata.metadata;
                     if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
