@@ -43,7 +43,6 @@ pub(crate) mod new_service;
 pub(crate) mod query_planner;
 pub mod router;
 pub mod subgraph;
-pub(crate) mod subgraph_apq;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
 

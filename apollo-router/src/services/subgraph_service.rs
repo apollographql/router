@@ -79,18 +79,18 @@ use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::layers::apq;
+use crate::services::layers::apq::subgraph::APQError;
+#[cfg(test)]
+use crate::services::layers::apq::subgraph::PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE;
+#[cfg(test)]
+use crate::services::layers::apq::subgraph::PERSISTED_QUERY_NOT_FOUND_MESSAGE;
+#[cfg(test)]
+use crate::services::layers::apq::subgraph::PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE;
+#[cfg(test)]
+use crate::services::layers::apq::subgraph::PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE;
+use crate::services::layers::apq::subgraph::get_apq_error;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::services::subgraph_apq::APQError;
-#[cfg(test)]
-use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE;
-#[cfg(test)]
-use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_FOUND_MESSAGE;
-#[cfg(test)]
-use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE;
-#[cfg(test)]
-use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE;
-use crate::services::subgraph_apq::get_apq_error;
 
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
