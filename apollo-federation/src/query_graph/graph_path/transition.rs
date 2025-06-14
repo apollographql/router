@@ -76,6 +76,7 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
 /// multiple times; but the way the algorithm works, we don't know this in advance. So this
 /// abstraction ensures that we only compute such indirect paths lazily, if we ever need them, while
 /// ensuring we don't recompute those paths multiple times if we do need them multiple times.
+#[derive(Clone)]
 pub(crate) struct TransitionPathWithLazyIndirectPaths {
     pub(crate) path: Arc<TransitionGraphPath>,
     #[allow(dead_code)]
@@ -612,7 +613,7 @@ impl TransitionGraphPath {
 impl TransitionPathWithLazyIndirectPaths {
     // PORT_NOTE: Named `initial()` in the JS codebase, but conventionally in Rust this kind of
     // constructor is named `new()`.
-    fn new(path: Arc<TransitionGraphPath>) -> Self {
+    pub(crate) fn new(path: Arc<TransitionGraphPath>) -> Self {
         Self {
             path,
             lazily_computed_indirect_paths: None,
