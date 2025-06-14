@@ -138,7 +138,7 @@ services/
 - `query_plan` - Query planning
 - `query_preparation` - Composite service combining query parsing and planning
 - `query_execution` - Query execution (responses may contain error streams)
-- `request_dispatcher` - Request routing and dispatch coordination
+- `dispatch` - Request routing and dispatch coordination
 - `http_client` - HTTP client operations
 - `bytes_client` - Byte stream client operations (responses contain error streams)
 - `json_client` - JSON client operations

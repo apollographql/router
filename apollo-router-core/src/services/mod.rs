@@ -1,6 +1,6 @@
 pub mod bytes_client;
 pub mod bytes_server;
-pub mod request_dispatcher;
+pub mod dispatch;
 pub mod http_client;
 pub mod http_server;
 pub mod json_client;
