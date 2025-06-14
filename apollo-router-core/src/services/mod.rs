@@ -5,6 +5,7 @@ pub mod http_client;
 pub mod http_server;
 pub mod json_client;
 pub mod json_server;
+pub mod partition;
 pub mod query_execution;
 pub mod query_parse;
 pub mod query_plan;
