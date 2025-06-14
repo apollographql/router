@@ -1,10 +1,12 @@
+use bytes::Bytes;
+use futures::StreamExt;
+use http_body_util::BodyExt;
+use http_body_util::Full;
+
 use crate::Extensions;
 use crate::layers::bytes_client_to_http_client::BytesToHttpLayer;
 use crate::services::bytes_client::Request as BytesRequest;
 use crate::test_utils::TowerTest;
-use bytes::Bytes;
-use futures::StreamExt;
-use http_body_util::{BodyExt, Full};
 
 #[tokio::test]
 async fn test_bytes_to_http_layer_success() {

@@ -1,16 +1,21 @@
-use crate::Extensions;
-use crate::json::JsonValue;
-use crate::services::query_parse;
-use crate::services::query_plan;
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
+
 use apollo_compiler::Name;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_router_error::Error as RouterError;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tower::{BoxError, Service, ServiceExt};
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceExt;
+
+use crate::Extensions;
+use crate::json::JsonValue;
+use crate::services::query_parse;
+use crate::services::query_plan;
 
 #[derive(Clone)]
 pub struct Request {
@@ -102,7 +107,10 @@ pub trait QueryPreparation {
     /// Returns `Error::ParsingFailed` if the GraphQL query cannot be parsed or validated.
     /// Returns `Error::PlanningFailed` if query planning fails.
     /// Returns `Error::JsonExtraction` if required fields cannot be extracted from the JSON request.
-    fn call(&self, req: Request) -> impl std::future::Future<Output = Result<Response, Error>> + Send;
+    fn call(
+        &self,
+        req: Request,
+    ) -> impl std::future::Future<Output = Result<Response, Error>> + Send;
 }
 
 /// Query preparation service that combines query parsing and planning into a single operation
@@ -233,6 +241,7 @@ where
 ///   "variables": { "id": "123" }
 /// }
 /// ```
+#[allow(clippy::type_complexity)]
 fn extract_graphql_request(
     body: &JsonValue,
 ) -> Result<(String, Option<String>, HashMap<String, Value>), Error> {
@@ -259,7 +268,7 @@ fn extract_graphql_request(
             } else {
                 vars.as_object()
                     .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .ok_or_else(|| Error::VariableExtraction)?
+                    .ok_or(Error::VariableExtraction)?
             }
         }
         None => HashMap::new(),
@@ -271,7 +280,10 @@ fn extract_graphql_request(
 impl QueryPreparation
     for QueryPreparationService<query_parse::QueryParseService, query_plan::QueryPlanService>
 {
-    fn call(&self, req: Request) -> impl std::future::Future<Output = Result<Response, Error>> + Send {
+    fn call(
+        &self,
+        req: Request,
+    ) -> impl std::future::Future<Output = Result<Response, Error>> + Send {
         use tower::ServiceExt;
         let service = self.clone();
         async move {

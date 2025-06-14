@@ -1,6 +1,7 @@
+use tower::ServiceExt;
+
 use super::*;
 use crate::test_utils::TowerTest;
-use tower::ServiceExt;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct TestPartition(String);
@@ -20,14 +21,16 @@ struct TestResponse {
 async fn test_partition_service_creation() {
     let service = PartitionService::new(
         |req: &TestRequest| req.partition_key.clone(),
-        |_partition_key: String| TowerTest::builder().service(
-            |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| async move {
-                handle.allow(1);
-                if let Some((req, resp)) = handle.next_request().await {
-                    resp.send_response(TestResponse { data: req.data });
-                }
-            }
-        )
+        |_partition_key: String| {
+            TowerTest::builder().service(
+                |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| async move {
+                    handle.allow(1);
+                    if let Some((req, resp)) = handle.next_request().await {
+                        resp.send_response(TestResponse { data: req.data });
+                    }
+                },
+            )
+        },
     );
 
     // Service should be created successfully
@@ -39,19 +42,21 @@ async fn test_ergonomic_api_example() {
     // This test demonstrates the exact API requested
     let mut service = PartitionService::new(
         |req: &TestRequest| req.partition_key.clone(),
-        |partition_key: String| TowerTest::builder().service(
-            move |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| {
-                let pk = partition_key.clone();
-                async move {
-                    handle.allow(1);
-                    if let Some((req, resp)) = handle.next_request().await {
-                        resp.send_response(TestResponse { 
-                            data: format!("{}:{}", pk, req.data)
-                        });
+        |partition_key: String| {
+            TowerTest::builder().service(
+                move |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| {
+                    let pk = partition_key.clone();
+                    async move {
+                        handle.allow(1);
+                        if let Some((req, resp)) = handle.next_request().await {
+                            resp.send_response(TestResponse {
+                                data: format!("{}:{}", pk, req.data),
+                            });
+                        }
                     }
-                }
-            }
-        )
+                },
+            )
+        },
     );
 
     let request = TestRequest {
@@ -67,15 +72,17 @@ async fn test_ergonomic_api_example() {
 async fn test_partition_service_with_custom_cache_size() {
     let service = PartitionService::with_cache_size(
         |req: &TestRequest| req.partition_key.clone(),
-        |_partition_key: String| TowerTest::builder().service(
-            |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| async move {
-                handle.allow(1);
-                if let Some((req, resp)) = handle.next_request().await {
-                    resp.send_response(TestResponse { data: req.data });
-                }
-            }
-        ),
-        500
+        |_partition_key: String| {
+            TowerTest::builder().service(
+                |mut handle: tower_test::mock::Handle<TestRequest, TestResponse>| async move {
+                    handle.allow(1);
+                    if let Some((req, resp)) = handle.next_request().await {
+                        resp.send_response(TestResponse { data: req.data });
+                    }
+                },
+            )
+        },
+        500,
     );
 
     // Service should be created successfully with custom cache size
@@ -84,12 +91,13 @@ async fn test_partition_service_with_custom_cache_size() {
 
 #[tokio::test]
 async fn test_partition_service_caches_services() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
     let call_count = Arc::new(AtomicUsize::new(0));
     let call_count_clone = call_count.clone();
-    
+
     let mut service = PartitionService::new(
         |req: &TestRequest| req.partition_key.clone(),
         move |partition_key: String| {
@@ -105,9 +113,9 @@ async fn test_partition_service_caches_services() {
                             });
                         }
                     }
-                }
+                },
             )
-        }
+        },
     );
 
     let req1 = TestRequest {
@@ -133,12 +141,13 @@ async fn test_partition_service_caches_services() {
 
 #[tokio::test]
 async fn test_different_partitions_create_different_services() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
     let call_count = Arc::new(AtomicUsize::new(0));
     let call_count_clone = call_count.clone();
-    
+
     let mut service = PartitionService::new(
         |req: &TestRequest| req.partition_key.clone(),
         move |partition_key: String| {
@@ -154,9 +163,9 @@ async fn test_different_partitions_create_different_services() {
                             });
                         }
                     }
-                }
+                },
             )
-        }
+        },
     );
 
     let req1 = TestRequest {
@@ -190,7 +199,8 @@ async fn test_partition_key_trait_implementation() {
 
     // Test hash consistency
     use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hash;
+    use std::hash::Hasher;
 
     let mut hasher1 = DefaultHasher::new();
     let mut hasher2 = DefaultHasher::new();

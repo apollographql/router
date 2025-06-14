@@ -1,4 +1,12 @@
 #![allow(unexpected_cfgs)]
+#![allow(clippy::bool_assert_comparison)]
+#![allow(clippy::approx_constant)]
+#![allow(clippy::io_other_error)]
+#![allow(clippy::len_zero)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::assertions_on_constants)]
+#![allow(clippy::unneeded_struct_pattern)]
+#![allow(clippy::single_match)]
 
 pub mod error;
 pub mod extensions;
@@ -9,17 +17,19 @@ pub mod services;
 #[cfg(test)]
 pub mod test_utils;
 
+// Re-export error functionality
+pub use error::Error;
+pub use error::GraphQLError;
+pub use error::GraphQLErrorContext;
+pub use error::ToGraphQLError;
+pub use extensions::Extensions;
+use tower::Service;
+use tower::ServiceBuilder;
+
 use crate::layers::ServiceBuilderExt;
 use crate::services::http_server;
 use crate::services::query_execution;
 use crate::services::query_parse;
-
-use tower::{Service, ServiceBuilder};
-
-pub use extensions::Extensions;
-
-// Re-export error functionality
-pub use error::{Error, GraphQLError, GraphQLErrorContext, ToGraphQLError};
 
 /// Builds a complete server-side transformation pipeline from HTTP requests to query execution
 ///

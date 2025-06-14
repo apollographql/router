@@ -1,10 +1,22 @@
-use super::*;
-use bytes::Bytes;
-use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use std::time::Duration;
-use tower::{BoxError, ServiceExt};
-use wiremock::matchers::{body_string, header, method, path};
-use wiremock::{Mock, MockServer, Request as WiremockRequest, Respond, ResponseTemplate};
+
+use bytes::Bytes;
+use http_body_util::BodyExt;
+use http_body_util::Full;
+use http_body_util::combinators::UnsyncBoxBody;
+use tower::BoxError;
+use tower::ServiceExt;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::Request as WiremockRequest;
+use wiremock::Respond;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::body_string;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+
+use super::*;
 
 /// Custom responder that sends data in controlled chunks to test streaming
 struct ChunkedResponder {
@@ -380,10 +392,7 @@ async fn test_error_types_debug_and_display() {
     };
 
     let response_processing_error = Error::ResponseProcessingFailed {
-        source: Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "test error"
-        )),
+        source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "test error")),
     };
 
     // Test that errors can be formatted

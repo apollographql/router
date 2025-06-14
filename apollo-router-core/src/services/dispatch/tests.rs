@@ -1,9 +1,10 @@
-use super::*;
-use crate::test_utils::TowerTest;
 use futures::StreamExt;
 use futures::stream;
 use serde_json::json;
 use tower::ServiceExt;
+
+use super::*;
+use crate::test_utils::TowerTest;
 
 // Test request types
 #[derive(Debug, Clone, PartialEq)]
@@ -15,30 +16,31 @@ struct NumberRequest(i32);
 #[derive(Debug, Clone, PartialEq)]
 struct UnhandledRequest;
 
-
 #[tokio::test]
 async fn test_dispatch_requests() {
-    let usize_handler = TowerTest::builder().service::<Request<usize>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let r = h.next_request().await.expect("no request");
-        r.1.send_response(Response {
-            extensions: Default::default(),
-            responses: Box::pin(stream::iter([json! {
-                "test"
-            }])),
-        })
-    });
+    let usize_handler =
+        TowerTest::builder().service::<Request<usize>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let r = h.next_request().await.expect("no request");
+            r.1.send_response(Response {
+                extensions: Default::default(),
+                responses: Box::pin(stream::iter([json! {
+                    "test"
+                }])),
+            })
+        });
 
-    let string_handler = TowerTest::builder().service::<Request<String>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let r = h.next_request().await.expect("hello");
-        r.1.send_response(Response {
-            extensions: Default::default(),
-            responses: Box::pin(stream::iter([json! {
-                "test"
-            }])),
-        })
-    });
+    let string_handler =
+        TowerTest::builder().service::<Request<String>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let r = h.next_request().await.expect("hello");
+            r.1.send_response(Response {
+                extensions: Default::default(),
+                responses: Box::pin(stream::iter([json! {
+                    "test"
+                }])),
+            })
+        });
     // Build dispatcher with handlers
     let mut handlers = RequestDispatcher::builder();
     handlers.register_handler(usize_handler);
@@ -71,15 +73,16 @@ async fn test_dispatch_requests() {
 
 #[tokio::test]
 async fn test_dispatch_number_request() {
-    let number_handler = TowerTest::builder().service::<Request<NumberRequest>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let (req, resp) = h.next_request().await.expect("should receive request");
-        let value = req.body.0 * 2;
-        resp.send_response(Response {
-            extensions: req.extensions,
-            responses: Box::pin(stream::iter([json!(value)])),
-        })
-    });
+    let number_handler =
+        TowerTest::builder().service::<Request<NumberRequest>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let (req, resp) = h.next_request().await.expect("should receive request");
+            let value = req.body.0 * 2;
+            resp.send_response(Response {
+                extensions: req.extensions,
+                responses: Box::pin(stream::iter([json!(value)])),
+            })
+        });
 
     // Build dispatcher with handlers
     let mut handlers = RequestDispatcher::builder();
@@ -112,9 +115,10 @@ async fn test_dispatch_number_request() {
 
 #[tokio::test]
 async fn test_no_handler_for_type() {
-    let string_handler = TowerTest::builder().service::<Request<String>, _, _, _>(|mut h| async move {
-        h.allow(0); // Don't expect any requests
-    });
+    let string_handler =
+        TowerTest::builder().service::<Request<String>, _, _, _>(|mut h| async move {
+            h.allow(0); // Don't expect any requests
+        });
 
     // Build dispatcher with some handlers but not for UnhandledRequest
     let mut handlers = RequestDispatcher::builder();
@@ -155,18 +159,20 @@ async fn test_no_handler_for_type() {
 
 #[tokio::test]
 async fn test_builder_pattern() {
-    let string_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let (req, resp) = h.next_request().await.expect("should receive request");
-        resp.send_response(Response {
-            extensions: req.extensions,
-            responses: Box::pin(stream::iter([json!(format!("Handled: {}", req.body.0))])),
-        })
-    });
+    let string_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let (req, resp) = h.next_request().await.expect("should receive request");
+            resp.send_response(Response {
+                extensions: req.extensions,
+                responses: Box::pin(stream::iter([json!(format!("Handled: {}", req.body.0))])),
+            })
+        });
 
-    let number_handler = TowerTest::builder().service::<Request<NumberRequest>, _, _, _>(|mut h| async move {
-        h.allow(0); // Not used in this test
-    });
+    let number_handler =
+        TowerTest::builder().service::<Request<NumberRequest>, _, _, _>(|mut h| async move {
+            h.allow(0); // Not used in this test
+        });
 
     // Use the handler registration trait directly
     let mut handlers = RequestDispatcher::builder();
@@ -191,20 +197,17 @@ async fn test_builder_pattern() {
         .unwrap();
     let mut stream = response.responses;
     let value = stream.next().await.unwrap();
-    assert_eq!(
-        value,
-        json!("Handled: builder test")
-    );
+    assert_eq!(value, json!("Handled: builder test"));
 }
-
 
 #[tokio::test]
 async fn test_handler_error_propagation() {
-    let failing_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let (_req, resp) = h.next_request().await.expect("should receive request");
-        resp.send_error(tower::BoxError::from("Intentional failure"));
-    });
+    let failing_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let (_req, resp) = h.next_request().await.expect("should receive request");
+            resp.send_error(tower::BoxError::from("Intentional failure"));
+        });
 
     // Build dispatcher with failing handler
     let mut handlers = RequestDispatcher::builder();
@@ -234,16 +237,17 @@ async fn test_handler_error_propagation() {
 
 #[tokio::test]
 async fn test_multiple_requests_same_type() {
-    let string_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
-        h.allow(3);
-        for _i in 0..3 {
-            let (req, resp) = h.next_request().await.expect("should receive request");
-            resp.send_response(Response {
-                extensions: req.extensions,
-                responses: Box::pin(stream::iter([json!(format!("Handled: {}", req.body.0))])),
-            });
-        }
-    });
+    let string_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
+            h.allow(3);
+            for _i in 0..3 {
+                let (req, resp) = h.next_request().await.expect("should receive request");
+                resp.send_response(Response {
+                    extensions: req.extensions,
+                    responses: Box::pin(stream::iter([json!(format!("Handled: {}", req.body.0))])),
+                });
+            }
+        });
 
     // Build dispatcher
     let mut handlers = RequestDispatcher::builder();
@@ -275,19 +279,20 @@ async fn test_multiple_requests_same_type() {
 #[tokio::test]
 async fn test_service_name_preserved() {
     let expected_service_name = "special-service";
-    let string_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(move |mut h| {
-        let expected = expected_service_name.to_string();
-        async move {
-            h.allow(1);
-            let (req, resp) = h.next_request().await.expect("should receive request");
-            // Verify service name is preserved
-            assert_eq!(req.service_name, expected);
-            resp.send_response(Response {
-                extensions: req.extensions,
-                responses: Box::pin(stream::iter([json!("ok")])),
-            });
-        }
-    });
+    let string_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(move |mut h| {
+            let expected = expected_service_name.to_string();
+            async move {
+                h.allow(1);
+                let (req, resp) = h.next_request().await.expect("should receive request");
+                // Verify service name is preserved
+                assert_eq!(req.service_name, expected);
+                resp.send_response(Response {
+                    extensions: req.extensions,
+                    responses: Box::pin(stream::iter([json!("ok")])),
+                });
+            }
+        });
 
     let mut handlers = RequestDispatcher::builder();
     handlers.register_handler(string_handler);
@@ -318,20 +323,21 @@ async fn test_variables_preserved() {
         vars.insert("key".to_string(), JsonValue::String("value".to_string()));
         vars
     };
-    
-    let string_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(move |mut h| {
-        let expected = expected_variables.clone();
-        async move {
-            h.allow(1);
-            let (req, resp) = h.next_request().await.expect("should receive request");
-            // Verify variables are preserved
-            assert_eq!(req.variables, expected);
-            resp.send_response(Response {
-                extensions: req.extensions,
-                responses: Box::pin(stream::iter([json!("ok")])),
-            });
-        }
-    });
+
+    let string_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(move |mut h| {
+            let expected = expected_variables.clone();
+            async move {
+                h.allow(1);
+                let (req, resp) = h.next_request().await.expect("should receive request");
+                // Verify variables are preserved
+                assert_eq!(req.variables, expected);
+                resp.send_response(Response {
+                    extensions: req.extensions,
+                    responses: Box::pin(stream::iter([json!("ok")])),
+                });
+            }
+        });
 
     let mut handlers = RequestDispatcher::builder();
     handlers.register_handler(string_handler);
@@ -359,19 +365,16 @@ async fn test_variables_preserved() {
 
 #[tokio::test]
 async fn test_stream_response() {
-    let streaming_handler = TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
-        h.allow(1);
-        let (req, resp) = h.next_request().await.expect("should receive request");
-        let values = vec![
-            json!("first"),
-            json!("second"),
-            json!("third"),
-        ];
-        resp.send_response(Response {
-            extensions: req.extensions,
-            responses: Box::pin(stream::iter(values)),
+    let streaming_handler =
+        TowerTest::builder().service::<Request<StringRequest>, _, _, _>(|mut h| async move {
+            h.allow(1);
+            let (req, resp) = h.next_request().await.expect("should receive request");
+            let values = vec![json!("first"), json!("second"), json!("third")];
+            resp.send_response(Response {
+                extensions: req.extensions,
+                responses: Box::pin(stream::iter(values)),
+            });
         });
-    });
 
     let mut handlers = RequestDispatcher::builder();
     handlers.register_handler(streaming_handler);

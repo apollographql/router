@@ -15,12 +15,12 @@ use tower::Service;
 use tower::ServiceExt as _;
 use tracing::Instrument as _;
 
+// FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
+use crate::Context;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-// FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
-use crate::Context;
 use crate::graphql;
 use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::services::router;

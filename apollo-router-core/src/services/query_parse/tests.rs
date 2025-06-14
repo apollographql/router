@@ -1,9 +1,13 @@
-use crate::assert_error;
-use crate::Extensions;
-use crate::services::query_parse::{Error, QueryParseService, Request};
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
-use tower::{Service, ServiceExt};
+use tower::Service;
+use tower::ServiceExt;
+
+use crate::Extensions;
+use crate::assert_error;
+use crate::services::query_parse::Error;
+use crate::services::query_parse::QueryParseService;
+use crate::services::query_parse::Request;
 
 fn create_test_schema() -> Valid<Schema> {
     let schema_sdl = r#"
@@ -386,7 +390,7 @@ async fn test_error_serialization() {
     assert_error!(result, Error::ValidationError { message, errors } => {
         assert!(message.contains("Validation error") || message.contains("Multiple validation errors"));
         assert!(!errors.is_empty());
-        
+
         // Verify we have GraphQLError objects in the errors vec
         for error in errors {
             assert!(!error.message.is_empty());
@@ -403,15 +407,11 @@ async fn test_error_to_json_functionality() {
     let test_cases: Vec<(&str, fn(&Error) -> bool)> = vec![
         (
             r#"query { user( }"#, // Syntax error
-            |error: &Error| {
-                matches!(error, Error::ParseError { errors, .. } if !errors.is_empty())
-            },
+            |error: &Error| matches!(error, Error::ParseError { errors, .. } if !errors.is_empty()),
         ),
         (
             r#"query { user(id: "123") { unknownField } }"#, // Unknown field
-            |error: &Error| {
-                matches!(error, Error::ValidationError { errors, .. } if !errors.is_empty())
-            },
+            |error: &Error| matches!(error, Error::ValidationError { errors, .. } if !errors.is_empty()),
         ),
     ];
 
@@ -421,12 +421,16 @@ async fn test_error_to_json_functionality() {
             operation_name: None,
             query: query.to_string(),
         };
-        
+
         let result = service.call(request).await;
         assert!(result.is_err());
-        
+
         let error = result.unwrap_err();
-        assert!(error_check(&error), "Error structure check failed for query: {}", query);
+        assert!(
+            error_check(&error),
+            "Error structure check failed for query: {}",
+            query
+        );
     }
 }
 
@@ -491,7 +495,7 @@ async fn test_error_json_structure() {
     assert_error!(result, Error::ValidationError { message, errors } => {
         assert!(message.contains("Multiple validation errors"));
         assert!(errors.len() > 1);
-        
+
         // Verify each error is a GraphQLError from diagnostic.to_json()
         for error in errors {
             // The error should be a GraphQLError with diagnostic information
@@ -515,7 +519,7 @@ async fn test_parse_vs_validation_error_separation() {
     let parse_result = service.call(parse_request).await;
     assert_error!(parse_result, Error::ParseError { .. });
 
-    // Test validation error (should be ValidationError) 
+    // Test validation error (should be ValidationError)
     let validation_request = Request {
         extensions: Extensions::new(),
         operation_name: None,

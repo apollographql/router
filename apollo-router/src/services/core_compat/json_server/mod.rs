@@ -1,16 +1,17 @@
-use futures::StreamExt;
 use std::sync::Arc;
-use tower::BoxError;
 
 /// Router core json_server types
-pub(super) use apollo_router_core::services::json_server::{
-    Request as CoreJsonRequest, Response as CoreJsonResponse,
-};
+pub(super) use apollo_router_core::services::json_server::Request as CoreJsonRequest;
+/// Router core json_server types
+pub(super) use apollo_router_core::services::json_server::Response as CoreJsonResponse;
+use futures::StreamExt;
+use tower::BoxError;
 
-use crate::graphql;
-use crate::services::supergraph::{Request as SupergraphRequest, Response as SupergraphResponse};
 use super::RequestMetadata;
 use super::ResponseMetadata;
+use crate::graphql;
+use crate::services::supergraph::Request as SupergraphRequest;
+use crate::services::supergraph::Response as SupergraphResponse;
 
 /// Convert from Router Core json_server Request to Router SupergraphRequest
 pub(crate) fn core_json_request_to_supergraph_request(

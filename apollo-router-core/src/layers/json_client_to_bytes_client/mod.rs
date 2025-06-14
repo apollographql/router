@@ -1,7 +1,7 @@
 //! # JSON to Bytes Layer
 //!
-//! The `JsonToBytesLayer` transforms JSON client requests into bytes client requests in the 
-//! Apollo Router Core client-side pipeline. This layer is responsible for serializing JSON 
+//! The `JsonToBytesLayer` transforms JSON client requests into bytes client requests in the
+//! Apollo Router Core client-side pipeline. This layer is responsible for serializing JSON
 //! values into bytes for transmission to downstream services or external APIs.
 //!
 //! ## Purpose
@@ -65,14 +65,19 @@
 //! - **Fallback Handling**: Uses empty JSON object `{}` as fallback for deserialization errors
 //! - **Memory Efficiency**: Converts JSON directly to bytes without intermediate representations
 
-use crate::services::bytes_client::{Request as BytesRequest, Response as BytesResponse};
-use crate::services::json_client::{Request as JsonRequest, Response as JsonResponse};
-use bytes::Bytes;
-use futures::StreamExt;
 use std::future::Future;
 use std::pin::Pin;
+
+use bytes::Bytes;
+use futures::StreamExt;
 use tower::BoxError;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
+
+use crate::services::bytes_client::Request as BytesRequest;
+use crate::services::bytes_client::Response as BytesResponse;
+use crate::services::json_client::Request as JsonRequest;
+use crate::services::json_client::Response as JsonResponse;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {

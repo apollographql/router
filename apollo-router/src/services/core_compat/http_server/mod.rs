@@ -1,16 +1,17 @@
-use http_body_util::BodyExt;
 use std::sync::Arc;
-use tower::BoxError;
 
 /// Router core http_server types
-pub(super) use apollo_router_core::services::http_server::{
-    Request as CoreRequest, Response as CoreResponse,
-};
+pub(super) use apollo_router_core::services::http_server::Request as CoreRequest;
+/// Router core http_server types
+pub(super) use apollo_router_core::services::http_server::Response as CoreResponse;
+use http_body_util::BodyExt;
+use tower::BoxError;
 
-use crate::services::router::body::RouterBody;
-use crate::services::router::{Request as RouterRequest, Response as RouterResponse};
 use super::RequestMetadata;
 use super::ResponseMetadata;
+use crate::services::router::Request as RouterRequest;
+use crate::services::router::Response as RouterResponse;
+use crate::services::router::body::RouterBody;
 
 /// Convert from Router Core http_server Request to Router Request
 pub(crate) fn core_request_to_router_request(

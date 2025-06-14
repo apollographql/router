@@ -1,3 +1,9 @@
+#![allow(dead_code)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::bool_assert_comparison)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::type_complexity)]
+
 //! Components of a federated GraphQL Server.
 //!
 //! Most of these modules are of varying interest to different audiences.

@@ -47,16 +47,17 @@
 //! ```
 
 // Re-export linkme for use by the derive macro
-pub use linkme;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 // Re-export the derive macro for convenience so users can use apollo_router_error::Error
 pub use apollo_router_error_derive::Error;
-
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
+pub use linkme;
 use miette::Diagnostic;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Error registration entry for introspection
 #[derive(Debug, Clone)]
@@ -240,6 +241,7 @@ pub trait ToGraphQLError {
     fn to_graphql_error_with_context(&self, context: GraphQLErrorContext) -> GraphQLError;
 }
 
+#[allow(clippy::borrowed_box)]
 pub fn box_to_graphql_error(error: &Box<dyn std::error::Error + Send + Sync>) -> GraphQLError {
     box_to_graphql_error_with_context(error, GraphQLErrorContext::default())
 }
@@ -249,6 +251,7 @@ pub fn arc_to_graphql_error(error: &Arc<dyn std::error::Error + Send + Sync>) ->
 }
 
 /// Convert a boxed error to GraphQL format with context
+#[allow(clippy::borrowed_box)]
 pub fn box_to_graphql_error_with_context(
     error: &Box<dyn std::error::Error + Send + Sync>,
     context: GraphQLErrorContext,
@@ -290,7 +293,7 @@ pub fn arc_to_graphql_error_with_context(
 }
 
 /// Extension trait providing consistent GraphQL error conversion for heap-allocated wrapper types
-/// 
+///
 /// This trait provides a consistent API for converting heap-allocated errors (Box and Arc)
 /// to GraphQL format, using the same method names as the ToGraphQLError trait.
 pub trait HeapErrorToGraphQL {

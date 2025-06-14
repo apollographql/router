@@ -1,9 +1,9 @@
-use super::*;
 use bytes::Bytes;
 use futures::stream;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 
+use super::*;
 use crate::layers::http_server_to_bytes_server::HttpToBytesLayer;
 use crate::services::bytes_server::Response as BytesResponse;
 
@@ -133,6 +133,7 @@ async fn test_clean_builder_api_custom_test() {
 #[tokio::test]
 async fn test_service_mock_functionality() {
     use std::time::Duration;
+
     use tower::ServiceExt;
 
     // Create a mock service that expects one request
@@ -160,7 +161,9 @@ async fn test_service_mock_functionality() {
 #[tokio::test]
 async fn test_service_mock_with_constructor() {
     use std::time::Duration;
-    use tower::{Service, ServiceExt};
+
+    use tower::Service;
+    use tower::ServiceExt;
 
     // Create a mock service
     let mock_service = TowerTest::builder()
@@ -266,6 +269,7 @@ async fn test_service_mock_normal_lifecycle() {
 #[tokio::test]
 async fn test_service_mock_clone() {
     use std::time::Duration;
+
     use tower::ServiceExt;
 
     // Create a mock service that expects multiple requests

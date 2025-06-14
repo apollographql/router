@@ -499,6 +499,7 @@ version = "0.1.0"
 dependencies = [
  "Inflector",
  "apollo-router-error",
+ "linkme",
  "macrotest",
  "miette",
  "proc-macro2",

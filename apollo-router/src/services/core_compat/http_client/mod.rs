@@ -1,15 +1,17 @@
-use http_body_util::BodyExt;
 use std::sync::Arc;
-use tower::BoxError;
 
 /// Router core http_client types
-pub(super) use apollo_router_core::services::http_client::{
-    Request as CoreRequest, Response as CoreResponse,
-};
+pub(super) use apollo_router_core::services::http_client::Request as CoreRequest;
+/// Router core http_client types
+pub(super) use apollo_router_core::services::http_client::Response as CoreResponse;
+use http_body_util::BodyExt;
+use tower::BoxError;
 
 use crate::Context;
 /// Router http service types
-use crate::services::http::{HttpRequest as RouterHttpRequest, HttpResponse as RouterHttpResponse};
+use crate::services::http::HttpRequest as RouterHttpRequest;
+/// Router http service types
+use crate::services::http::HttpResponse as RouterHttpResponse;
 use crate::services::router::body::RouterBody;
 
 /// Metadata for storing HTTP request information in extensions during conversion

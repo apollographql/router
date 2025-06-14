@@ -98,7 +98,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        apollo_telemetry_config: ApolloTelemetryConfig,
+        _apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         // Some of the layers in the stack are wrapping previous implementations that are called
         // layers, but are not tower layers at all.
@@ -116,13 +116,11 @@ impl RouterService {
 
         let service = ServiceBuilder::new()
             .layer(BatchingLayer::new(batching))
-
             // FIXME(@goto-bus-stop) We lose the Arc<RequestMetadata> context somewhere in here.
             .layer(router_to_core_http)
             .layer(apollo_router_core::layers::http_server_to_bytes_server::HttpToBytesLayer)
             .layer(apollo_router_core::layers::bytes_server_to_json_server::BytesToJsonLayer)
             .layer(core_json_to_supergraph)
-
             // FIXME(@goto-bus-stop): the conversion layers don't do everything that the
             // RouterToSupergraphRequestLayer does, so we'll need to split that thing up a bit.
             // Error counting, defer/subscription accept/content-type handling, and some other
@@ -249,6 +247,7 @@ pub(crate) async fn empty() -> impl Service<
 
 /// A layer that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
+#[allow(dead_code)]
 struct RouterToSupergraphRequestLayer {
     apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
 }

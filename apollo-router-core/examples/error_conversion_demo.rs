@@ -4,9 +4,15 @@
 //! with Apollo Router errors providing rich structured information and standard
 //! library errors falling back to a generic but informative format.
 
-use apollo_router_core::error::{Error, ToGraphQLError, GraphQLErrorContext, get_error_stats, get_registered_errors, get_registered_graphql_handlers};
-use miette::Diagnostic;
 use std::io;
+
+use apollo_router_core::error::Error;
+use apollo_router_core::error::GraphQLErrorContext;
+use apollo_router_core::error::ToGraphQLError;
+use apollo_router_core::error::get_error_stats;
+use apollo_router_core::error::get_registered_errors;
+use apollo_router_core::error::get_registered_graphql_handlers;
+use miette::Diagnostic;
 use thiserror::Error as ThisError;
 
 /// Example Apollo Router error type that will be registered automatically
@@ -82,8 +88,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 2: Standard library error (automatic fallback)
     println!("📋 Example 2: Standard Library Error (Automatic Fallback)");
-    let std_error = io::Error::new(io::ErrorKind::PermissionDenied, "Access denied to /secure/data");
-    
+    let std_error = io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "Access denied to /secure/data",
+    );
+
     let context = GraphQLErrorContext::builder()
         .service_name("file-service")
         .trace_id("trace-def-789")
@@ -110,7 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 4: Demonstrate error registry information
     println!("📋 Example 4: Error Registry Information");
-    
+
     let stats = get_error_stats();
     println!("Error Registry Stats:");
     println!("  Total error types: {}", stats.total_error_types);
@@ -157,8 +166,11 @@ mod tests {
         };
 
         let graphql_error = ToGraphQLError::to_graphql_error(&error);
-        
-        assert_eq!(graphql_error.extensions.code, "APOLLO_ROUTER_EXAMPLE_SERVICE_QUERY_PARSING_FAILED");
+
+        assert_eq!(
+            graphql_error.extensions.code,
+            "APOLLO_ROUTER_EXAMPLE_SERVICE_QUERY_PARSING_FAILED"
+        );
         assert!(graphql_error.extensions.details.contains_key("queryText"));
         assert!(graphql_error.extensions.details.contains_key("errorLine"));
         assert!(graphql_error.extensions.details.contains_key("errorColumn"));
@@ -168,7 +180,7 @@ mod tests {
     fn test_std_error_conversion() {
         let std_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
         let graphql_error = ToGraphQLError::to_graphql_error(&std_error);
-        
+
         assert_eq!(graphql_error.message, "File not found");
         assert_eq!(graphql_error.extensions.code, "INTERNAL_ERROR");
         assert_eq!(graphql_error.extensions.service, "unknown");
@@ -178,13 +190,13 @@ mod tests {
     #[test]
     fn test_error_registry_populated() {
         let stats = get_error_stats();
-        
+
         // Error stats should be valid (no need to check >= 0 for unsigned integers)
         assert!(stats.total_error_types < 1000); // Sanity check
         assert!(stats.total_variants < 1000); // Sanity check
         assert!(stats.total_graphql_handlers < 1000); // Sanity check
-        
+
         // Check that components list is accessible
         assert!(stats.components.len() < 1000); // Sanity check
     }
-} 
+}

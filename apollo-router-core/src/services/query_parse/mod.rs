@@ -1,13 +1,16 @@
-use crate::Extensions;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Schema;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::response::GraphQLError;
-use apollo_router_error::Error as RouterError;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
+
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Schema;
+use apollo_compiler::response::GraphQLError;
+use apollo_compiler::validation::Valid;
+use apollo_router_error::Error as RouterError;
 use tower::Service;
+
+use crate::Extensions;
 
 #[derive(Clone)]
 pub struct Request {
@@ -76,31 +79,35 @@ impl QueryParseService {
                     .iter()
                     .map(|diagnostic| diagnostic.to_json())
                     .collect();
-                
+
                 // Categorize errors based on content
                 let has_syntax_errors = with_errors.errors.iter().any(|diagnostic| {
                     let message = diagnostic.to_string();
-                    message.contains("syntax") || 
-                    message.contains("expected") || 
-                    message.contains("unexpected") ||
-                    message.contains("parse error") ||
-                    message.contains("parsing failed")
+                    message.contains("syntax")
+                        || message.contains("expected")
+                        || message.contains("unexpected")
+                        || message.contains("parse error")
+                        || message.contains("parsing failed")
                 });
-                
+
                 let message = if errors.len() == 1 {
                     if has_syntax_errors {
-                        format!("Parse error in GraphQL query")
+                        "Parse error in GraphQL query".to_string()
                     } else {
-                        format!("Validation error in GraphQL query")
+                        "Validation error in GraphQL query".to_string()
                     }
+                } else if has_syntax_errors {
+                    format!(
+                        "Multiple parse errors in GraphQL query ({} errors)",
+                        errors.len()
+                    )
                 } else {
-                    if has_syntax_errors {
-                        format!("Multiple parse errors in GraphQL query ({} errors)", errors.len())
-                    } else {
-                        format!("Multiple validation errors in GraphQL query ({} errors)", errors.len())
-                    }
+                    format!(
+                        "Multiple validation errors in GraphQL query ({} errors)",
+                        errors.len()
+                    )
                 };
-                
+
                 if has_syntax_errors {
                     Err(Error::ParseError { message, errors })
                 } else {

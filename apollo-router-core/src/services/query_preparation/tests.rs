@@ -1,11 +1,15 @@
-use super::*;
-use crate::assert_error;
-use crate::services::{query_parse, query_plan};
-use crate::test_utils::tower_test::{MockService, TowerTest};
-use apollo_compiler::{ExecutableDocument, Schema};
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Schema;
 use apollo_federation::query_plan::QueryPlan;
 use serde_json::json;
 use tower::ServiceExt;
+
+use super::*;
+use crate::assert_error;
+use crate::services::query_parse;
+use crate::services::query_plan;
+use crate::test_utils::tower_test::MockService;
+use crate::test_utils::tower_test::TowerTest;
 
 // Helper function to create mock services using TowerTest
 fn create_successful_parse_service() -> MockService<query_parse::Request, query_parse::Response> {

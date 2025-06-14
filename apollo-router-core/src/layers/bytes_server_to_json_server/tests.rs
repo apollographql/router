@@ -1,13 +1,15 @@
-use crate::assert_error;
-use crate::json::JsonValue;
-use crate::layers::bytes_server_to_json_server::{BytesToJsonLayer, Error as BytesToJsonError};
-use crate::services::bytes_server::Request as BytesRequest;
-use crate::services::json_server::Response as JsonResponse;
-use crate::test_utils::TowerTest;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream;
 use serde_json::json;
+
+use crate::assert_error;
+use crate::json::JsonValue;
+use crate::layers::bytes_server_to_json_server::BytesToJsonLayer;
+use crate::layers::bytes_server_to_json_server::Error as BytesToJsonError;
+use crate::services::bytes_server::Request as BytesRequest;
+use crate::services::json_server::Response as JsonResponse;
+use crate::test_utils::TowerTest;
 
 #[tokio::test]
 async fn test_bytes_to_json_conversion() {

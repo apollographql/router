@@ -51,8 +51,15 @@
 
 use inflector::Inflector;
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
-use syn::{Attribute, Data, DataEnum, DeriveInput, Fields, Variant, parse_macro_input};
+use quote::format_ident;
+use quote::quote;
+use syn::Attribute;
+use syn::Data;
+use syn::DataEnum;
+use syn::DeriveInput;
+use syn::Fields;
+use syn::Variant;
+use syn::parse_macro_input;
 
 /// Derive macro for automatically implementing Error and registering with the error registry
 #[proc_macro_derive(Error, attributes(extension))]
@@ -209,9 +216,8 @@ fn parse_diagnostic_attribute(attr: &Attribute) -> syn::Result<(String, Option<S
             if meta.input.peek(syn::Token![=]) {
                 // Parse help = "text" format
                 let value = meta.value()?;
-                match value.parse::<syn::LitStr>()? {
-                    lit_str => help_text = Some(lit_str.value()),
-                }
+                let lit_str = value.parse::<syn::LitStr>()?;
+                help_text = Some(lit_str.value())
             } else {
                 // Parse help("text") format
                 let content;
@@ -344,15 +350,13 @@ fn generate_error_code_match_arms(variants: &[ErrorVariantInfo]) -> Vec<proc_mac
                 quote! {
                     Self::#variant_name => #error_code,
                 }
+            } else if variant.is_tuple_variant {
+                quote! {
+                    Self::#variant_name(..) => #error_code,
+                }
             } else {
-                if variant.is_tuple_variant {
-                    quote! {
-                        Self::#variant_name(..) => #error_code,
-                    }
-                } else {
-                    quote! {
-                        Self::#variant_name { .. } => #error_code,
-                    }
+                quote! {
+                    Self::#variant_name { .. } => #error_code,
                 }
             }
         })
@@ -364,7 +368,7 @@ fn generate_graphql_extensions_arms(
 ) -> Vec<proc_macro2::TokenStream> {
     variants
         .iter()
-        .map(|variant| generate_graphql_extensions_for_variant(variant))
+        .map(generate_graphql_extensions_for_variant)
         .collect()
 }
 
@@ -414,8 +418,7 @@ fn generate_graphql_extensions_for_variant(variant: &ErrorVariantInfo) -> proc_m
             let field_patterns: Vec<_> = variant
                 .fields
                 .iter()
-                .enumerate()
-                .map(|(_i, field)| {
+                .map(|field| {
                     if field.extension_name.is_some() {
                         let field_name = &field.name;
                         quote! { #field_name }
@@ -489,7 +492,7 @@ fn generate_registry_entry(
                 .fields
                 .iter()
                 .filter_map(|f| f.extension_name.as_ref())
-                .map(|name| name.clone())
+                .cloned()
                 .collect();
 
             let help_value = match help {
@@ -531,29 +534,27 @@ fn extract_component_and_category(error_code: &str) -> (String, String) {
     if parts.len() >= 3 {
         // Format: apollo_router::component::category::specific_error
         let component = parts[1].to_string();
-        let category = if parts.len() >= 4 {
-            parts[2].to_string()
-        } else {
-            parts[2].to_string()
-        };
+        let category = parts[2].to_string();
         (component, category)
     } else {
         ("unknown".to_string(), "unknown".to_string())
     }
 }
 
-fn generate_graphql_handler_entry(
-    enum_name: &syn::Ident,
-) -> syn::Result<proc_macro2::TokenStream> {
+fn generate_graphql_handler_entry(enum_name: &syn::Ident) -> syn::Result<proc_macro2::TokenStream> {
     let enum_name_str = enum_name.to_string();
 
     // Generate a unique identifier for the handler function to avoid name collisions
-    let handler_function_name =
-        format_ident!("__{}_graphql_error_handler", enum_name.to_string().to_uppercase());
-    
+    let handler_function_name = format_ident!(
+        "__{}_graphql_error_handler",
+        enum_name.to_string().to_uppercase()
+    );
+
     // Generate a unique static name to avoid collisions
-    let handler_static_name =
-        format_ident!("__{}_GRAPHQL_ERROR_HANDLER", enum_name.to_string().to_uppercase());
+    let handler_static_name = format_ident!(
+        "__{}_GRAPHQL_ERROR_HANDLER",
+        enum_name.to_string().to_uppercase()
+    );
 
     Ok(quote! {
         #[cfg(feature = "registry")]
@@ -568,8 +569,10 @@ fn generate_graphql_handler_entry(
 
 #[cfg(test)]
 mod tests {
+    use syn::DeriveInput;
+    use syn::parse_quote;
+
     use super::*;
-    use syn::{DeriveInput, parse_quote};
 
     #[test]
     fn test_derive_macro_basic() {

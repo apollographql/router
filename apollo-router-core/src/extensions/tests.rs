@@ -1,7 +1,8 @@
-use super::*;
-use crate::Extensions;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+
+use super::*;
+use crate::Extensions;
 
 // Simple value type for basic operations
 #[derive(Debug, PartialEq, Clone)]
@@ -166,7 +167,8 @@ fn test_independent_extensions() {
 
 #[test]
 fn test_shared_values_with_sync_primitives() {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     let mut parent = Extensions::default();
     let counter = Arc::new(Mutex::new(0));
@@ -208,7 +210,7 @@ fn test_conversion_to_http_extensions_with_hierarchy() {
     // Test that conversion only includes current layer, not parent layers
     let mut parent = Extensions::default();
     parent.insert("parent_value".to_string());
-    
+
     let mut child = parent.clone();
     child.insert(42i32);
 
@@ -217,7 +219,7 @@ fn test_conversion_to_http_extensions_with_hierarchy() {
 
     // All values from cloned Extensions should be present
     assert_eq!(http_ext.get::<i32>(), Some(&42)); // Child value present
-    assert_eq!(http_ext.get::<String>(), Some(&"parent_value".to_string()));   // Parent value also present
+    assert_eq!(http_ext.get::<String>(), Some(&"parent_value".to_string())); // Parent value also present
 }
 
 #[test]
@@ -233,7 +235,10 @@ fn test_conversion_from_http_extensions() {
     let recovered_extensions: Extensions = http_ext.into();
 
     // Verify values are preserved
-    assert_eq!(recovered_extensions.get::<String>(), Some("original_value".to_string()));
+    assert_eq!(
+        recovered_extensions.get::<String>(),
+        Some("original_value".to_string())
+    );
     assert_eq!(recovered_extensions.get::<i32>(), Some(123));
 }
 
@@ -265,7 +270,10 @@ fn test_http_wrapped_extensions_can_be_mutated() {
     extensions.insert(789i32);
 
     // Verify both old and new values are accessible
-    assert_eq!(extensions.get::<String>(), Some("initial_value".to_string()));
+    assert_eq!(
+        extensions.get::<String>(),
+        Some("initial_value".to_string())
+    );
     assert_eq!(extensions.get::<i32>(), Some(789));
 }
 
@@ -350,7 +358,7 @@ fn test_remove_independent_extensions() {
     assert_eq!(parent.get::<bool>(), None); // Was never in parent
 }
 
-#[test] 
+#[test]
 fn test_remove_from_http_wrapped() {
     // Create a http-wrapped Extensions
     let mut http_ext = http::Extensions::new();
@@ -360,7 +368,10 @@ fn test_remove_from_http_wrapped() {
     let mut extensions: Extensions = http_ext.into();
 
     // Verify values are present
-    assert_eq!(extensions.get::<String>(), Some("initial_value".to_string()));
+    assert_eq!(
+        extensions.get::<String>(),
+        Some("initial_value".to_string())
+    );
     assert_eq!(extensions.get::<i32>(), Some(123));
 
     // Remove a value from the HTTP-wrapped Extensions
@@ -369,5 +380,8 @@ fn test_remove_from_http_wrapped() {
 
     // Verify it's no longer accessible
     assert_eq!(extensions.get::<i32>(), None);
-    assert_eq!(extensions.get::<String>(), Some("initial_value".to_string()));
+    assert_eq!(
+        extensions.get::<String>(),
+        Some("initial_value".to_string())
+    );
 }

@@ -1,7 +1,7 @@
 //! # Bytes to JSON Layer
 //!
-//! The `BytesToJsonLayer` transforms bytes requests into JSON requests in the Apollo Router Core 
-//! request pipeline. This layer is responsible for parsing bytes as JSON and converting them into 
+//! The `BytesToJsonLayer` transforms bytes requests into JSON requests in the Apollo Router Core
+//! request pipeline. This layer is responsible for parsing bytes as JSON and converting them into
 //! structured JSON requests that can be processed by GraphQL services.
 //!
 //! ## Purpose
@@ -60,13 +60,18 @@
 //! - **Stream Processing**: Handles JSON response streams efficiently
 //! - **Fallback Handling**: Uses empty JSON object `{}` as fallback for serialization errors
 
-use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
-use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
+use std::pin::Pin;
+
 use bytes::Bytes;
 use futures::StreamExt;
-use std::pin::Pin;
 use tower::BoxError;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
+
+use crate::services::bytes_server::Request as BytesRequest;
+use crate::services::bytes_server::Response as BytesResponse;
+use crate::services::json_server::Request as JsonRequest;
+use crate::services::json_server::Response as JsonResponse;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {

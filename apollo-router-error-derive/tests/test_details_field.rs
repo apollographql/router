@@ -14,7 +14,7 @@ pub enum TestError {
         #[extension("context")]
         context: String,
         #[extension("details")]
-        details: String,  // This should not cause naming collision anymore
+        details: String, // This should not cause naming collision anymore
         #[extension("errorCode")]
         error_code: u32,
     },
@@ -31,10 +31,19 @@ fn test_details_field_no_collision() {
     // This should work without compilation errors
     let mut extensions = std::collections::BTreeMap::<String, serde_json::Value>::new();
     apollo_router_error::Error::populate_graphql_extensions(&error, &mut extensions);
-    
+
     // Verify the extensions were populated correctly
-    assert_eq!(extensions.get("context").unwrap().as_str().unwrap(), "test context");
-    assert_eq!(extensions.get("details").unwrap().as_str().unwrap(), "test details");
+    assert_eq!(
+        extensions.get("context").unwrap().as_str().unwrap(),
+        "test context"
+    );
+    assert_eq!(
+        extensions.get("details").unwrap().as_str().unwrap(),
+        "test details"
+    );
     assert_eq!(extensions.get("errorCode").unwrap().as_u64().unwrap(), 42);
-    assert_eq!(extensions.get("errorType").unwrap().as_str().unwrap(), "REQUEST_SERIALIZATION");
-} 
+    assert_eq!(
+        extensions.get("errorType").unwrap().as_str().unwrap(),
+        "REQUEST_SERIALIZATION"
+    );
+}

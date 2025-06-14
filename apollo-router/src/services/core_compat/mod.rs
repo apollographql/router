@@ -21,6 +21,7 @@ struct RequestMetadata {
 
 /// Metadata for storing legacy response information in extensions during conversion
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ResponseMetadata {
     http_parts: http::response::Parts,
     context: Context,

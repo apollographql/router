@@ -1,8 +1,10 @@
-use crate::Extensions;
+use std::pin::Pin;
+
 use bytes::Bytes;
 use futures::Stream;
-use std::pin::Pin;
 use tower::BoxError;
+
+use crate::Extensions;
 
 pub struct Request {
     pub extensions: Extensions,

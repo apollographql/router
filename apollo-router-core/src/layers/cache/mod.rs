@@ -3,10 +3,12 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
 use quick_cache::sync::Cache;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
 use tower::load_shed::error::Overloaded;
 pub type ArcError = Arc<dyn std::error::Error + Send + Sync>;
 
@@ -205,12 +207,12 @@ where
                 }
                 Err(err) => {
                     let arc_err = err.into();
-                    
+
                     // Never cache Overloaded errors as they are transient
                     if arc_err.is::<Overloaded>() {
                         return Err(arc_err);
                     }
-                    
+
                     let should_cache = error_predicate(&arc_err);
 
                     // Try to extract cacheable error

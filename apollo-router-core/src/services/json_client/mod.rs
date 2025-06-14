@@ -1,8 +1,10 @@
+use std::pin::Pin;
+
+use futures::Stream;
+use tower::BoxError;
+
 use crate::Extensions;
 use crate::json::JsonValue;
-use futures::Stream;
-use std::pin::Pin;
-use tower::BoxError;
 
 pub struct Request {
     pub extensions: Extensions,

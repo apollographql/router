@@ -1,12 +1,18 @@
-use crate::Extensions;
-use crate::json::JsonValue;
-use futures::{Stream, TryFutureExt};
-use std::any::{Any, TypeId};
+use std::any::Any;
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
-use tower::{BoxError, Service};
+use std::task::Context;
+use std::task::Poll;
+
+use futures::Stream;
+use futures::TryFutureExt;
+use tower::BoxError;
+use tower::Service;
+
+use crate::Extensions;
+use crate::json::JsonValue;
 
 pub struct Request<T> {
     pub extensions: Extensions,
@@ -49,7 +55,6 @@ pub enum Error {
         #[extension("typeId")]
         type_id: String,
     },
-
 
     /// Request downcasting failed
     #[error("Failed to downcast request body")]
@@ -173,7 +178,7 @@ impl Service<Request<Box<dyn Any + Send + 'static>>> for RequestDispatcher {
         Box::pin(async move {
             // The handler should already be ready since we polled it in poll_ready
             let mut handler = handler;
-            handler.call(req).await.map_err(Into::into)
+            handler.call(req).await
         })
     }
 }

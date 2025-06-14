@@ -1,8 +1,10 @@
-use super::*;
-use crate::Context;
+use std::sync::Arc;
+
 use bytes::Bytes;
 use http_body_util::Full;
-use std::sync::Arc;
+
+use super::*;
+use crate::Context;
 
 #[tokio::test]
 async fn test_core_request_to_router_request_conversion() {

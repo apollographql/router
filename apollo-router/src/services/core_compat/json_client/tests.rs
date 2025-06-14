@@ -1,9 +1,11 @@
-use super::*;
-use crate::Context;
+use std::sync::Arc;
+
 use futures::StreamExt;
 use serde_json::json;
 use serde_json_bytes::json as bjson;
-use std::sync::Arc;
+
+use super::*;
+use crate::Context;
 
 #[tokio::test]
 async fn test_core_json_request_to_subgraph_request_conversion() {

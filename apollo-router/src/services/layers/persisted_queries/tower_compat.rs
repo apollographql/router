@@ -4,14 +4,16 @@
 //! Long-term, we should move the actual implementation code into a service structure, but that is
 //! more work especially to translate the tests.
 
+use std::sync::Arc;
+
+use futures::FutureExt as _;
+use futures::future::BoxFuture;
+use tower::BoxError;
+use tower::Service;
+
 use super::PersistedQueryLayer;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use futures::FutureExt as _;
-use futures::future::BoxFuture;
-use std::sync::Arc;
-use tower::BoxError;
-use tower::Service;
 
 pub(crate) struct ExpandIdsLayer {
     wrapped: Arc<PersistedQueryLayer>,

@@ -1,8 +1,15 @@
-use apollo_router_error::{
-    GraphQLErrorContext, arc_to_graphql_error, box_to_graphql_error, export_error_registry_json,
-    get_error_stats, get_registered_errors,
-};
+#![allow(clippy::len_zero)]
+#![allow(clippy::double_comparisons)]
+#![allow(clippy::io_other_error)]
+
 use std::sync::Arc;
+
+use apollo_router_error::GraphQLErrorContext;
+use apollo_router_error::arc_to_graphql_error;
+use apollo_router_error::box_to_graphql_error;
+use apollo_router_error::export_error_registry_json;
+use apollo_router_error::get_error_stats;
+use apollo_router_error::get_registered_errors;
 
 #[derive(Debug, Clone, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum GraphQLError {

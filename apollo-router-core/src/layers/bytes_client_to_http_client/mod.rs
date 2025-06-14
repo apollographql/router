@@ -73,13 +73,19 @@
 //! - **Extensions Conversion**: Efficient conversion between Extensions types
 //! - **HTTP Overhead**: Adds HTTP protocol overhead to bytes transmission
 
-use crate::services::bytes_client::{Request as BytesRequest, Response as BytesResponse};
-use crate::services::http_client::{Request as HttpRequest, Response as HttpResponse};
-use bytes::Bytes;
-use http_body_util::{BodyExt, combinators::UnsyncBoxBody};
 use std::pin::Pin;
+
+use bytes::Bytes;
+use http_body_util::BodyExt;
+use http_body_util::combinators::UnsyncBoxBody;
 use tower::BoxError;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
+
+use crate::services::bytes_client::Request as BytesRequest;
+use crate::services::bytes_client::Response as BytesResponse;
+use crate::services::http_client::Request as HttpRequest;
+use crate::services::http_client::Response as HttpResponse;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
@@ -220,9 +226,7 @@ impl<S> BytesToHttpService<S> {
             .uri("/")
             .header("content-type", "application/json")
             .body(body)
-            .map_err(|http_error| Error::HttpRequestBuilder {
-                http_error,
-            })?;
+            .map_err(|http_error| Error::HttpRequestBuilder { http_error })?;
 
         Ok(http_req)
     }

@@ -1,10 +1,11 @@
-use crate::layers::http_server_to_bytes_server::HttpToBytesLayer;
-use crate::services::bytes_server::Response as BytesResponse;
-use crate::test_utils::TowerTest;
 use bytes::Bytes;
 use futures::stream;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
+
+use crate::layers::http_server_to_bytes_server::HttpToBytesLayer;
+use crate::services::bytes_server::Response as BytesResponse;
+use crate::test_utils::TowerTest;
 
 #[tokio::test]
 async fn test_http_to_bytes_conversion() {

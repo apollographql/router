@@ -1,6 +1,8 @@
 // Simple integration test to verify the derive macro generates working code
-use apollo_router_error::{Error as RouterError, Error};
 use std::collections::BTreeMap;
+
+use apollo_router_error::Error as RouterError;
+use apollo_router_error::Error;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
 pub enum TestError {

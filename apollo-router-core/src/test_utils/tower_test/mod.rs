@@ -1,8 +1,13 @@
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
-use tower::{Layer, Service, ServiceExt};
+
+use tower::Layer;
+use tower::Service;
+use tower::ServiceExt;
 
 #[cfg(test)]
 mod tests;

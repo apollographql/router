@@ -95,13 +95,18 @@
 //! - **Error Propagation**: Handles errors from multiple service boundaries
 //! - **Future Enhancement**: Currently uses placeholder logic pending full implementation
 
-use crate::services::json_server::{Request as JsonRequest, Response as JsonResponse};
-use crate::services::query_execution::{Request as ExecutionRequest, Response as ExecutionResponse};
+use std::pin::Pin;
+
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::services::json_server::Request as JsonRequest;
+use crate::services::json_server::Response as JsonResponse;
+use crate::services::query_execution::Request as ExecutionRequest;
+use crate::services::query_execution::Response as ExecutionResponse;
 use crate::services::query_parse;
 use crate::services::query_plan;
-use std::pin::Pin;
-use tower::BoxError;
-use tower::{Layer, Service};
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic, apollo_router_error::Error)]
 pub enum Error {
@@ -159,7 +164,7 @@ impl<P, Pl> PrepareQueryLayer<P, Pl> {
     }
 }
 
-impl<S, P, Pl> Layer<S> for PrepareQueryLayer<P, Pl> 
+impl<S, P, Pl> Layer<S> for PrepareQueryLayer<P, Pl>
 where
     P: Clone,
     Pl: Clone,
@@ -167,7 +172,7 @@ where
     type Service = PrepareQueryService<S, P, Pl>;
 
     fn layer(&self, service: S) -> Self::Service {
-        PrepareQueryService { 
+        PrepareQueryService {
             inner: service,
             query_parse_service: self.query_parse_service.clone(),
             query_plan_service: self.query_plan_service.clone(),
@@ -211,7 +216,8 @@ where
 {
     type Response = JsonResponse;
     type Error = BoxError;
-    type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
@@ -223,16 +229,17 @@ where
     fn call(&mut self, req: JsonRequest) -> Self::Future {
         // This layer orchestrates query_parse and query_plan services
         // Flow: JSON Request → query_parse → ExecutableDocument → query_plan → QueryPlan → Execution Request
-        
+
         // Create an extended layer for the inner service
         let original_extensions = req.extensions;
         let cloned_extensions = original_extensions.clone();
 
         // Extract query string, operation name and variables from JSON body
-        let (_query_string, operation_name, query_variables) = match extract_query_details(&req.body) {
-            Ok(details) => details,
-            Err(e) => return Box::pin(async move { Err(e.into()) }),
-        };
+        let (_query_string, operation_name, query_variables) =
+            match extract_query_details(&req.body) {
+                Ok(details) => details,
+                Err(e) => return Box::pin(async move { Err(e.into()) }),
+            };
 
         // Clone services for async usage (will be used in future implementation)
         let _query_parse_service = self.query_parse_service.clone();
@@ -245,7 +252,7 @@ where
             // 1. Call query_parse_service.call(parse_req).await to parse the GraphQL query
             // 2. Call query_plan_service.call(plan_req).await to create the query plan
             // 3. Combine the results into an ExecutionRequest
-            
+
             // Create a placeholder query plan - this will be replaced with actual service calls
             let query_plan = apollo_federation::query_plan::QueryPlan::default();
 
@@ -257,7 +264,10 @@ where
             };
 
             // Call the inner execution service
-            let execution_resp = inner_service.call(execution_req).await.map_err(Into::into)?;
+            let execution_resp = inner_service
+                .call(execution_req)
+                .await
+                .map_err(Into::into)?;
 
             // Transform ExecutionResponse back to JsonResponse
             let json_resp = JsonResponse {
@@ -270,9 +280,20 @@ where
     }
 }
 
-fn extract_query_details(json_body: &crate::json::JsonValue) -> Result<(serde_json::Value, Option<String>, std::collections::HashMap<String, serde_json::Value>), Error> {
+#[allow(clippy::type_complexity)]
+fn extract_query_details(
+    json_body: &crate::json::JsonValue,
+) -> Result<
+    (
+        serde_json::Value,
+        Option<String>,
+        std::collections::HashMap<String, serde_json::Value>,
+    ),
+    Error,
+> {
     // Extract the GraphQL query string
-    let query_string = json_body.get("query")
+    let query_string = json_body
+        .get("query")
         .ok_or_else(|| Error::JsonExtraction {
             missing_field: "query".to_string(),
             request_body: Some(json_body.to_string()),
@@ -280,22 +301,20 @@ fn extract_query_details(json_body: &crate::json::JsonValue) -> Result<(serde_js
         .clone();
 
     // Extract operation name (optional)
-    let operation_name = json_body.get("operationName")
+    let operation_name = json_body
+        .get("operationName")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
     // Extract variables (optional)
-    let query_variables = json_body.get("variables")
+    let query_variables = json_body
+        .get("variables")
         .and_then(|v| v.as_object())
-        .map(|obj| {
-            obj.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        })
+        .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
 
     Ok((query_string, operation_name, query_variables))
 }
 
 #[cfg(test)]
-mod tests; 
+mod tests;

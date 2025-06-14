@@ -3,8 +3,8 @@ use std::time::Duration;
 use tower::BoxError;
 use tower::load_shed::error::Overloaded;
 
-use crate::test_utils::tower_test::TowerTest;
 use super::*;
+use crate::test_utils::tower_test::TowerTest;
 
 // Test request and response types
 #[derive(Clone, Debug, PartialEq)]
@@ -48,11 +48,11 @@ async fn test_cache_successful_responses() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             // Verify request passthrough
             assert_eq!(received_req.query, "query { user }");
             assert_eq!(received_req.id, 1);
-            
+
             // Send success response
             send_response.send_response(TestResponse {
                 data: "success".to_string(),
@@ -69,7 +69,7 @@ async fn test_cache_successful_responses() -> Result<(), BoxError> {
             downstream.allow(0); // No downstream calls expected (cache hit)
         })
         .await?;
-    
+
     assert_eq!(response2.data, "success"); // Should be the same cached response
 
     // Different query should hit service
@@ -86,9 +86,9 @@ async fn test_cache_successful_responses() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             assert_eq!(received_req.query, "query { posts }");
-            
+
             send_response.send_response(TestResponse {
                 data: "second_call_response".to_string(),
             });
@@ -125,7 +125,7 @@ async fn test_cache_specific_error_types() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             // Send ParseError
             send_response.send_error(ParseError {
                 message: "Invalid syntax".to_string(),
@@ -144,7 +144,7 @@ async fn test_cache_specific_error_types() -> Result<(), BoxError> {
         })
         .await
         .expect_err("should error");
-    
+
     assert_eq!(error2.to_string(), "Parse error: Invalid syntax");
     Ok(())
 }
@@ -177,7 +177,7 @@ async fn test_custom_key_extraction() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             send_response.send_response(TestResponse {
                 data: "response1".to_string(),
             });
@@ -213,7 +213,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
             query: "query".to_string(),
             id: i,
         };
-        
+
         let response_data = format!("response{}", i);
         let response = TowerTest::builder()
             .layer(cache_layer.clone())
@@ -223,13 +223,13 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                     .next_request()
                     .await
                     .expect("should receive downstream request");
-                
+
                 send_response.send_response(TestResponse {
                     data: response_data,
                 });
             })
             .await?;
-            
+
         assert_eq!(response.data, format!("response{}", i));
     }
 
@@ -239,7 +239,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
             query: "query".to_string(),
             id: i,
         };
-        
+
         let response_data = format!("response{}", i);
         let response = TowerTest::builder()
             .layer(cache_layer.clone())
@@ -249,13 +249,13 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                     .next_request()
                     .await
                     .expect("should receive downstream request");
-                
+
                 send_response.send_response(TestResponse {
                     data: response_data,
                 });
             })
             .await?;
-            
+
         assert_eq!(response.data, format!("response{}", i));
     }
 
@@ -269,7 +269,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
             query: "query".to_string(),
             id: i,
         };
-        
+
         // Try with no downstream expectation first to see if it's cached
         let result = TowerTest::builder()
             .layer(cache_layer.clone())
@@ -278,7 +278,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                 downstream.allow(0); // No downstream calls expected if cached
             })
             .await;
-            
+
         if result.is_ok() {
             cache_hits += 1;
         } else {
@@ -293,7 +293,7 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
                         .next_request()
                         .await
                         .expect("should receive downstream request");
-                    
+
                     send_response.send_response(TestResponse {
                         data: response_data,
                     });
@@ -303,10 +303,18 @@ async fn test_cache_capacity_limit() -> Result<(), BoxError> {
     }
 
     // Due to cache capacity of 2, we should have some cache hits and some service calls
-    assert!(cache_hits >= 1, "Expected at least 1 cache hit, got {}", cache_hits);
-    assert!(service_calls >= 1, "Expected at least 1 service call, got {}", service_calls);
+    assert!(
+        cache_hits >= 1,
+        "Expected at least 1 cache hit, got {}",
+        cache_hits
+    );
+    assert!(
+        service_calls >= 1,
+        "Expected at least 1 service call, got {}",
+        service_calls
+    );
     assert_eq!(cache_hits + service_calls, 5, "Total should be 5");
-    
+
     Ok(())
 }
 
@@ -336,7 +344,7 @@ async fn test_query_parse_cache_convenience_function() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             send_response.send_error(ParseError {
                 message: "syntax error".to_string(),
             });
@@ -352,7 +360,7 @@ async fn test_query_parse_cache_convenience_function() -> Result<(), BoxError> {
         })
         .await
         .expect_err("should error");
-    
+
     Ok(())
 }
 
@@ -380,7 +388,7 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
         query: "query".to_string(),
         id: 1,
     };
-    
+
     let response = TowerTest::builder()
         .layer(cache_layer.clone())
         .oneshot(request1.clone(), {
@@ -391,12 +399,12 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
                     .next_request()
                     .await
                     .expect("should receive downstream request");
-                
+
                 send_response.send_response(response_clone);
             }
         })
         .await?;
-    
+
     assert_eq!(*response, original_response);
 
     // Call again to ensure it comes from cache (Arc cloning)
@@ -406,7 +414,7 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
             downstream.allow(0); // No downstream calls expected (cache hit)
         })
         .await?;
-    
+
     assert_eq!(*cached_response, original_response);
 
     // Test error caching
@@ -414,7 +422,7 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
         query: "query".to_string(),
         id: 2,
     };
-    
+
     let error = TowerTest::builder()
         .layer(cache_layer.clone())
         .oneshot(request2.clone(), {
@@ -425,13 +433,13 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
                     .next_request()
                     .await
                     .expect("should receive downstream request");
-                
+
                 send_response.send_error(error_clone);
             }
         })
         .await
         .expect_err("should error");
-    
+
     assert_eq!(error.to_string(), "Parse error: test error");
 
     // Call again to ensure error comes from cache (Arc cloning)
@@ -442,7 +450,7 @@ async fn test_response_and_error_conversion_to_arc() -> Result<(), BoxError> {
         })
         .await
         .expect_err("should error");
-    
+
     assert_eq!(cached_error.to_string(), "Parse error: test error");
     Ok(())
 }
@@ -471,12 +479,12 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             send_response.send_error(Overloaded::new());
         })
         .await
         .expect_err("should error");
-    
+
     // Verify it's an Overloaded error (check by error message since TowerTest wrapping affects type checks)
     assert_eq!(error1.to_string(), "service overloaded");
 
@@ -489,12 +497,12 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             send_response.send_error(Overloaded::new());
         })
         .await
         .expect_err("should error");
-    
+
     // Verify it's still an Overloaded error
     assert_eq!(error2.to_string(), "service overloaded");
 
@@ -507,12 +515,12 @@ async fn test_overloaded_errors_never_cached() -> Result<(), BoxError> {
                 .next_request()
                 .await
                 .expect("should receive downstream request");
-            
+
             send_response.send_error(Overloaded::new());
         })
         .await
         .expect_err("should error");
-    
+
     assert_eq!(error3.to_string(), "service overloaded");
     Ok(())
 }

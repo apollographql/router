@@ -1,12 +1,13 @@
+use bytes::Bytes;
+use futures::StreamExt;
+use futures::stream;
+use serde_json::json;
+
 use super::JsonToBytesLayer;
 use crate::Extensions;
 use crate::services::bytes_client::Response as BytesResponse;
 use crate::services::json_client::Request as JsonRequest;
 use crate::test_utils::TowerTest;
-use bytes::Bytes;
-use futures::StreamExt;
-use futures::stream;
-use serde_json::json;
 
 #[tokio::test]
 async fn test_json_to_bytes_layer_success() {

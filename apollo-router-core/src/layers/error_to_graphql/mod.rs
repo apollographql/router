@@ -1,8 +1,8 @@
 //! # Error to GraphQL Layer
 //!
-//! The `ErrorToGraphQLLayer` is a utility layer that transforms service errors into 
+//! The `ErrorToGraphQLLayer` is a utility layer that transforms service errors into
 //! GraphQL-compliant error responses. This layer catches errors from downstream services
-//! and converts them into properly formatted GraphQL error responses following the 
+//! and converts them into properly formatted GraphQL error responses following the
 //! GraphQL specification.
 //!
 //! ## Purpose
@@ -87,16 +87,16 @@
 //! - **Lightweight Conversion**: Efficient error-to-JSON transformation
 //! - **Memory Efficiency**: Only allocates for error responses, not successful ones
 
-use crate::services::json_server::{Response as JsonResponse, ResponseStream};
+use std::pin::Pin;
+
 use apollo_router_error::HeapErrorToGraphQL;
 use futures::stream;
-use std::pin::Pin;
 use tower::BoxError;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
 
-
-
-
+use crate::services::json_server::Response as JsonResponse;
+use crate::services::json_server::ResponseStream;
 
 /// A Tower layer that transforms service errors into GraphQL-compliant error responses.
 ///

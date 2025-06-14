@@ -1,17 +1,23 @@
-use crate::Extensions;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::validation::Valid;
-use apollo_federation::query_plan::QueryPlan;
-use apollo_federation::query_plan::query_planner::{QueryPlanner, QueryPlannerConfig, QueryPlanOptions};
-use apollo_federation::Supergraph;
-use apollo_router_error::Error as RouterError;
-use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
+
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::validation::Valid;
+use apollo_federation::Supergraph;
+use apollo_federation::query_plan::QueryPlan;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_router_error::Error as RouterError;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::Service;
+
+use crate::Extensions;
 
 #[derive(Clone)]
 pub struct Request {
@@ -27,7 +33,9 @@ pub struct Response {
 }
 
 /// Serializable error detail for individual planning errors in GraphQL extensions
-#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic, RouterError)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, thiserror::Error, miette::Diagnostic, RouterError,
+)]
 pub enum PlanningErrorDetail {
     /// Operation name not found in the document
     #[error("Operation name not found")]
@@ -76,7 +84,9 @@ pub enum PlanningErrorDetail {
     #[error("No plan was found when subgraphs were disabled")]
     #[diagnostic(
         code(APOLLO_ROUTER_QUERY_PLAN_NO_PLAN_WITH_DISABLED_SUBGRAPHS),
-        help("Enable the necessary subgraphs or modify your query to work with available subgraphs")
+        help(
+            "Enable the necessary subgraphs or modify your query to work with available subgraphs"
+        )
     )]
     NoPlanFoundWithDisabledSubgraphs,
 
@@ -117,17 +127,25 @@ pub enum PlanningErrorDetail {
 impl From<apollo_federation::error::SingleFederationError> for PlanningErrorDetail {
     fn from(error: apollo_federation::error::SingleFederationError) -> Self {
         use apollo_federation::error::SingleFederationError;
-        
+
         match error {
             SingleFederationError::UnknownOperation => Self::UnknownOperation,
             SingleFederationError::OperationNameNotProvided => Self::OperationNameNotProvided,
-            SingleFederationError::DeferredSubscriptionUnsupported => Self::DeferredSubscriptionUnsupported,
-            SingleFederationError::QueryPlanComplexityExceeded { message } => Self::QueryPlanComplexityExceeded { message },
+            SingleFederationError::DeferredSubscriptionUnsupported => {
+                Self::DeferredSubscriptionUnsupported
+            }
+            SingleFederationError::QueryPlanComplexityExceeded { message } => {
+                Self::QueryPlanComplexityExceeded { message }
+            }
             SingleFederationError::PlanningCancelled => Self::PlanningCancelled,
-            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => Self::NoPlanFoundWithDisabledSubgraphs,
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
+                Self::NoPlanFoundWithDisabledSubgraphs
+            }
             SingleFederationError::InvalidGraphQL { message } => Self::InvalidGraphQL { message },
             SingleFederationError::InvalidSubgraph { message } => Self::InvalidSubgraph { message },
-            other => Self::Other { message: other.to_string() },
+            other => Self::Other {
+                message: other.to_string(),
+            },
         }
     }
 }
@@ -185,7 +203,7 @@ impl From<apollo_federation::error::FederationError> for Error {
     fn from(federation_error: apollo_federation::error::FederationError) -> Self {
         // Extract all errors using the public method
         let all_errors = federation_error.into_errors();
-        
+
         if all_errors.len() == 1 {
             // Single error case
             let single_error = &all_errors[0];
@@ -194,11 +212,8 @@ impl From<apollo_federation::error::FederationError> for Error {
             }
         } else {
             // Multiple errors case
-            let errors: Vec<PlanningErrorDetail> = all_errors
-                .into_iter()
-                .map(Into::into)
-                .collect();
-            
+            let errors: Vec<PlanningErrorDetail> = all_errors.into_iter().map(Into::into).collect();
+
             Self::MultiplePlanningErrors {
                 count: errors.len(),
                 errors,
@@ -208,7 +223,7 @@ impl From<apollo_federation::error::FederationError> for Error {
 }
 
 /// Query planning service that transforms validated ExecutableDocuments into QueryPlans
-/// 
+///
 /// This service uses apollo-federation's QueryPlanner to generate query plans from
 /// validated GraphQL documents against a federated supergraph schema.
 #[derive(Clone)]
@@ -219,8 +234,8 @@ pub struct QueryPlanService {
 impl QueryPlanService {
     /// Create a new QueryPlanService with the given supergraph and configuration
     pub fn new(supergraph: Supergraph, config: QueryPlannerConfig) -> Result<Self, Error> {
-        let query_planner = QueryPlanner::new(&supergraph, config)
-            .map_err(|e| Error::FederationError {
+        let query_planner =
+            QueryPlanner::new(&supergraph, config).map_err(|e| Error::FederationError {
                 message: e.to_string(),
             })?;
 
@@ -241,7 +256,7 @@ impl QueryPlanService {
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, Error> {
         let options = QueryPlanOptions::default();
-        
+
         self.query_planner
             .build_query_plan(document, operation_name, options)
             .map_err(Into::into)
@@ -265,7 +280,9 @@ impl Service<Request> for QueryPlanService {
 
         Box::pin(async move {
             // Generate the query plan using apollo-federation
-            let query_plan = service.plan_query(&document, operation_name.clone()).await?;
+            let query_plan = service
+                .plan_query(&document, operation_name.clone())
+                .await?;
 
             Ok(Response {
                 extensions,

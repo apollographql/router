@@ -3,8 +3,9 @@
 //! This shows that users can now use `apollo_router_error::Error` instead of
 //! `apollo_router_error_derive::Error` for convenience.
 
+// use std::collections::HashMap;
+
 use apollo_router_error::Error;
-use std::collections::HashMap;
 
 // Using the re-exported derive macro - much cleaner!
 #[derive(Debug, thiserror::Error, miette::Diagnostic, Error)]
@@ -49,7 +50,7 @@ fn main() {
     println!("Timeout error code: {}", timeout_error.error_code());
 
     // Demonstrate GraphQL extensions
-    let mut details = HashMap::new();
+    let mut details = std::collections::BTreeMap::new();
     config_error.populate_graphql_extensions(&mut details);
     println!("Config error extensions: {:#?}", details);
 
@@ -60,4 +61,4 @@ fn main() {
     // Demonstrate GraphQL error conversion
     let graphql_error = config_error.to_graphql_error();
     println!("GraphQL error: {:#?}", graphql_error);
-} 
+}

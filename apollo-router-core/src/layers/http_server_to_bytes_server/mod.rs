@@ -57,17 +57,20 @@
 //! - **Streaming Response**: Converts bytes response back to streaming HTTP body
 //! - **Extensions Cloning**: Efficiently handles Extensions conversion via Arc references
 
-use crate::services::bytes_server::{Request as BytesRequest, Response as BytesResponse};
-use crate::services::http_server::{Request as HttpRequest, Response as HttpResponse};
+use std::pin::Pin;
 
 use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
-
-use std::pin::Pin;
 use tower::BoxError;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower::Service;
+
+use crate::services::bytes_server::Request as BytesRequest;
+use crate::services::bytes_server::Response as BytesResponse;
+use crate::services::http_server::Request as HttpRequest;
+use crate::services::http_server::Response as HttpResponse;
 
 #[cfg(test)]
 mod tests;
@@ -184,9 +187,7 @@ where
                 .body(UnsyncBoxBody::new(http_body_util::StreamBody::new(
                     infallible_stream,
                 )))
-                .map_err(|http_error| Error::HttpResponseBuilder {
-                    http_error,
-                })?;
+                .map_err(|http_error| Error::HttpResponseBuilder { http_error })?;
 
             *http_resp.extensions_mut() = bytes_resp.extensions.into();
 

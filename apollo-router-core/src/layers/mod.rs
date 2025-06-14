@@ -11,12 +11,11 @@ pub mod prepare_query;
 
 pub use bytes_client_to_http_client::Error as BytesToHttpError;
 pub use bytes_server_to_json_server::Error as BytesToJsonError;
+// Re-export cache layer types and functions for convenience
+pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 pub use http_server_to_bytes_server::Error as HttpToBytesError;
 pub use json_client_to_bytes_client::Error as JsonToBytesError;
 pub use prepare_query::Error as PrepareQueryError;
-
-// Re-export cache layer types and functions for convenience
-pub use cache::{ArcError, CacheLayer, CacheService, query_parse_cache};
 
 /// Extension trait for `ServiceBuilder` that provides Apollo Router Core layer methods.
 ///
@@ -149,6 +148,7 @@ pub trait ServiceBuilderExt<L> {
     /// let service = ServiceBuilder::new().cache(cache_layer).service(inner);
     /// # }
     /// ```
+    #[allow(clippy::type_complexity)]
     fn cache<Req, Resp, K, F, P>(
         self,
         cache_layer: cache::CacheLayer<Req, Resp, K, F, P>,
