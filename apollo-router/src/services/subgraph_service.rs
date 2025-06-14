@@ -81,12 +81,17 @@ use crate::services::SubgraphResponse;
 use crate::services::layers::apq;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::subgraph_apq::APQError;
+#[cfg(test)]
+use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE;
+#[cfg(test)]
+use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_FOUND_MESSAGE;
+#[cfg(test)]
+use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE;
+#[cfg(test)]
+use crate::services::subgraph_apq::PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE;
+use crate::services::subgraph_apq::get_apq_error;
 
-const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
-const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
-const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
-const PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE: &str = "PersistedQueryNotSupported";
-const CODE_STRING: &str = "code";
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
@@ -100,12 +105,6 @@ pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static ACCEPT_GRAPHQL_JSON: HeaderValue =
     HeaderValue::from_static("application/json, application/graphql-response+json");
-
-enum APQError {
-    PersistedQueryNotSupported,
-    PersistedQueryNotFound,
-    Other,
-}
 
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize, Clone, Debug)]
@@ -1573,30 +1572,6 @@ fn get_websocket_request(
     *request.headers_mut() = parts.headers;
 
     Ok(request)
-}
-
-fn get_apq_error(gql_response: &graphql::Response) -> APQError {
-    for error in &gql_response.errors {
-        // Check if error message is an APQ error
-        match error.message.as_str() {
-            PERSISTED_QUERY_NOT_FOUND_MESSAGE => {
-                return APQError::PersistedQueryNotFound;
-            }
-            PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE => {
-                return APQError::PersistedQueryNotSupported;
-            }
-            _ => {}
-        }
-        // Check if extensions contains the APQ error in "code"
-        if let Some(value) = error.extensions.get(CODE_STRING) {
-            if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
-                return APQError::PersistedQueryNotFound;
-            } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
-                return APQError::PersistedQueryNotSupported;
-            }
-        }
-    }
-    APQError::Other
 }
 
 #[derive(Clone)]
