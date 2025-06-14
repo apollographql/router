@@ -17,9 +17,8 @@ use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_graph::condition_resolver::CachingConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolution;
-use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
-use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
@@ -1261,55 +1260,30 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
     }
 }
 
-// PORT_NOTE: In JS version, QueryPlanningTraversal has `conditionResolver` field, which
-//            is a closure calling `this.resolveConditionPlan` (`this` is captured here).
-//            The same would be infeasible to implement in Rust due to the cyclic references.
-//            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
-//            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl ConditionResolver for QueryPlanningTraversal<'_, '_> {
-    /// A query plan resolver for edge conditions that caches the outcome per edge.
-    #[track_caller]
-    fn resolve(
-        &mut self,
+impl CachingConditionResolver for QueryPlanningTraversal<'_, '_> {
+    fn query_graph(&self) -> &QueryGraph {
+        &self.parameters.federated_query_graph
+    }
+
+    fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
+        &mut self.resolver_cache
+    }
+
+    fn resolve_without_cache(
+        &self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError> {
-        // Invariant check: The edge must have conditions.
-        let graph = &self.parameters.federated_query_graph;
-        let edge_data = graph.edge_weight(edge)?;
-        assert!(
-            edge_data.conditions.is_some() || extra_conditions.is_some(),
-            "Should not have been called for edge without conditions"
-        );
-
-        let cache_result = self.resolver_cache.contains(
+        self.resolve_condition_plan(
             edge,
             context,
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
-        );
-
-        if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
-            return Ok(cached_resolution);
-        }
-
-        let resolution = self.resolve_condition_plan(
-            edge,
-            context,
-            excluded_destinations,
-            excluded_conditions,
-            extra_conditions,
-        )?;
-        // See if this resolution is eligible to be inserted into the cache.
-        if cache_result.is_miss() {
-            self.resolver_cache
-                .insert(edge, resolution.clone(), excluded_destinations.clone());
-        }
-        Ok(resolution)
+        )
     }
 }
 
