@@ -1,8 +1,14 @@
 #![allow(dead_code)]
-use std::sync::Arc;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::RwLock;
+
+use futures::future::BoxFuture;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_service::Service;
 
 use super::Plugins;
@@ -14,6 +20,8 @@ pub(crate) mod service;
 mod tests;
 
 pub(crate) use service::HttpClientService;
+
+use crate::layers::ServiceBuilderExt;
 
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
@@ -35,11 +43,23 @@ pub(crate) struct HttpResponse {
 pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
+    memoized: Arc<
+        RwLock<
+            HashMap<
+                String,
+                Arc<Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>>,
+            >,
+        >,
+    >,
 }
 
 impl HttpClientServiceFactory {
     pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
-        HttpClientServiceFactory { service, plugins }
+        HttpClientServiceFactory {
+            service,
+            plugins,
+            memoized: Arc::new(Default::default()),
+        }
     }
 
     #[cfg(test)]
@@ -61,17 +81,38 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins: Arc::new(IndexMap::default()),
+            memoized: Arc::new(Default::default()),
         }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
+        // Check if we already have a memoized service for this name
+        {
+            let cache = self.memoized.read().unwrap();
+            if let Some(service) = cache.get(name) {
+                return (**service).clone().boxed();
+            }
+        }
+
+        // Create the service if not cached
         let service = self.service.clone();
-        self.plugins
+        let service = self
+            .plugins
             .iter()
             .rev()
             .fold(service.boxed(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
-            })
+            });
+        let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
+
+        // Store in cache
+        let arc_service = Arc::new(buffered_clone_service.clone());
+        {
+            let mut cache = self.memoized.write().unwrap();
+            cache.insert(name.to_string(), arc_service);
+        }
+
+        buffered_clone_service.boxed()
     }
 }
 

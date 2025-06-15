@@ -1480,7 +1480,7 @@ async fn do_fetch(
     FetchError,
 > {
     let response = client
-        .call(HttpRequest {
+        .oneshot(HttpRequest {
             http_request: request,
             context: context.clone(),
         })
