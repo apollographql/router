@@ -3014,7 +3014,7 @@ mod tests {
             .unwrap()
             .apply_to(&data_null);
         assert!(errors.is_empty());
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -3092,7 +3092,7 @@ mod tests {
             .unwrap()
             .apply_to(&data_partial_null);
         assert!(errors.is_empty());
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -3107,7 +3107,7 @@ mod tests {
             .unwrap()
             .apply_to(&data);
         assert!(errors.is_empty());
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -3180,7 +3180,7 @@ mod tests {
             .unwrap()
             .apply_to(&data_null);
         assert!(errors.is_empty());
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -3220,7 +3220,7 @@ mod tests {
             .unwrap()
             .apply_to(&data_null_data);
         assert!(errors.is_empty());
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -3258,7 +3258,7 @@ mod tests {
         let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
             .unwrap()
             .apply_to(&data);
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
         assert_eq!(errors, vec![]);
     }
 
@@ -3339,7 +3339,7 @@ mod tests {
         let (result, errors) = JSONSelection::parse("$.user.profile ?{ name email }")
             .unwrap()
             .apply_to(&data_with_null_profile);
-        assert_eq!(result, Some(json!(null)));
+        assert_eq!(result, None);
         assert_eq!(errors, vec![]);
     }
 
@@ -3360,8 +3360,7 @@ mod tests {
         assert_eq!(
             result,
             Some(json!({
-                "id": 123,
-                "profileName": null
+                "id": 123
             }))
         );
         assert_eq!(errors, vec![]);
