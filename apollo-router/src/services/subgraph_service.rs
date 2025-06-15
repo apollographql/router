@@ -54,6 +54,7 @@ use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
+use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
@@ -289,9 +290,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
 
+                        let operation_name =
+                            context.get::<_, String>(OPERATION_NAME).ok().flatten();
                         // Call create_or_subscribe on notify
                         let (handle, created) = notify
-                            .create_or_subscribe(subscription_id.clone(), true)
+                            .create_or_subscribe(subscription_id.clone(), true, operation_name)
                             .await?;
 
                         // If it existed before just send the right stream (handle) and early return
@@ -501,9 +504,9 @@ async fn call_websocket(
             service: service_name.clone(),
             reason: "cannot get the websocket stream".to_string(),
         })?;
-
+    let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
     let (handle, created) = notify
-        .create_or_subscribe(subscription_hash.clone(), false)
+        .create_or_subscribe(subscription_hash.clone(), false, supergraph_operation_name)
         .await?;
     u64_counter!(
         "apollo.router.operations.subscriptions",
@@ -711,7 +714,11 @@ async fn call_websocket(
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
-        resp.map(|_| graphql::Response::default()),
+        resp.map(|_| {
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .build()
+        }),
         context,
         service_name,
         subgraph_request_id,
@@ -2689,6 +2696,10 @@ mod tests {
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
+        assert_eq!(
+            response.response.body().data,
+            Some(serde_json_bytes::Value::Null)
+        );
 
         let mut gql_stream = rx_stream.next().await.unwrap();
         let message = gql_stream.next().await.unwrap();

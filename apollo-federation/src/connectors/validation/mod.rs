@@ -26,7 +26,7 @@ use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
 use crate::connectors::ConnectSpec;
-use crate::connectors::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::connectors::spec::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::validation::connect::fields_seen_by_all_connects;
 use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
