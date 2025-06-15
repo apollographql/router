@@ -116,7 +116,7 @@ libc = "0.2.155"
 linkme = "0.3.27"
 lru = "0.14.0"
 maplit = "1.0.2"
-mediatype = "0.19.18"
+mediatype = "0.20.0"
 mockall = "0.13.0"
 mime = "0.3.17"
 multer = "3.1.0"
@@ -327,7 +327,7 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
     "fmt",
 ] }
 tracing-opentelemetry = "0.25.0"
-tracing-test = "0.2.5"
+tracing-test = "=0.2.5"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"

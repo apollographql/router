@@ -17,8 +17,8 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 
-use crate::connectors::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 
