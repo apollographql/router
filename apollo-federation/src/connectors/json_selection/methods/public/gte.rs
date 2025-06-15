@@ -30,6 +30,7 @@ fn gte_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
         let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+        let mut apply_to_errors = arg_errors;
         // We have to do this because Value doesn't implement PartialOrd
         let matches = value_opt.is_some_and(|value| {
             match (data, &value) {
@@ -44,11 +45,24 @@ fn gte_method(
                 // Null comparisons (null == null)
                 (JSON::Null, JSON::Null) => true,
                 // Mixed types or uncomparable types (including arrays and objects) return false
-                _ => false,
+                _ => {
+                    apply_to_errors.push(ApplyToError::new(
+                        format!(
+                            "Method ->{} can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {} >= {}",
+                            method_name.as_ref(),
+                            data,
+                            value
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    ));
+
+                    false
+                }
             }
         });
 
-        return (Some(JSON::Bool(matches)), arg_errors);
+        return (Some(JSON::Bool(matches)), apply_to_errors);
     }
     (
         None,
@@ -243,56 +257,71 @@ mod tests {
     }
 
     #[test]
-    fn gte_should_return_false_for_arrays_and_objects() {
-        // Arrays should return false
-        assert_eq!(
-            selection!(
-                r#"
+    fn gte_should_return_false_with_error_for_arrays() {
+        let result = selection!(
+            r#"
                     result: value->gte([1,2])
                 "#
-            )
-            .apply_to(&json!({ "value": [1,2,3] })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
-        );
+        )
+        .apply_to(&json!({ "value": [1,2,3] }));
 
-        // Objects should return false
         assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte({"a": 1})
-                "#
-            )
-            .apply_to(&json!({ "value": {"a": 1, "b": 2} })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
+            result.0,
+            Some(json!({
+                "result": false,
+            })),
+        );
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: [1,2,3] >= [1,2]")
         );
     }
 
     #[test]
-    fn gte_should_return_false_for_mixed_types() {
-        // Mixed types should return false
+    fn gte_should_return_false_with_error_for_objects() {
+        let result = selection!(
+            r#"
+                    result: value->gte({"a": 1})
+                "#
+        )
+        .apply_to(&json!({ "value": {"a": 1, "b": 2} }));
+
         assert_eq!(
-            selection!(
-                r#"
+            result.0,
+            Some(json!({
+                "result": false,
+            })),
+        );
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {\"a\":1,\"b\":2} >= {\"a\":1}")
+        );
+    }
+
+    #[test]
+    fn gte_should_return_false_and_error_for_mixed_types() {
+        let result = selection!(
+            r#"
                     result: value->gte("string")
                 "#
-            )
-            .apply_to(&json!({ "value": 42 })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
+        )
+        .apply_to(&json!({ "value": 42 }));
+
+        assert_eq!(
+            result.0,
+            Some(json!({
+                "result": false,
+            })),
+        );
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: 42 >= \"string\"")
         );
     }
 }
