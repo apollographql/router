@@ -146,19 +146,7 @@ fn filter_shape(
         );
     }
 
-    match input_shape.case() {
-        ShapeCase::Array { prefix: _, tail } => {
-            // Filter preserves the element types but may reduce the count
-            // We can't know statically how many elements will pass the filter,
-            // so we return an array with the same element type but no fixed prefix
-            Shape::list(tail.clone(), input_shape.locations)
-        }
-        _ => {
-            // For non-array inputs, we return a list that may contain 0 or 1 elements
-            // of the same type as the input
-            Shape::list(input_shape.any_item([]), input_shape.locations)
-        }
-    }
+    Shape::list(input_shape.any_item([]), input_shape.locations)
 }
 
 #[cfg(test)]
