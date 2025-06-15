@@ -2,7 +2,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use http::HeaderName;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
@@ -18,23 +17,27 @@ use tower::ServiceExt;
 use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
 use self::error::FileUploadError;
+use self::layer::FileUploadLayer;
 use self::map_field::MapField;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::json_ext;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::execution;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
 mod config;
 mod error;
+mod layer;
 mod map_field;
 mod multipart_form_data;
 mod multipart_request;
@@ -148,6 +151,22 @@ impl PluginPrivate for FileUploadsPlugin {
                     .boxed()
             })
             .buffered()
+            .service(service)
+            .boxed()
+    }
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: tower::util::BoxService<HttpRequest, HttpResponse, BoxError>,
+    ) -> tower::util::BoxService<HttpRequest, HttpResponse, BoxError> {
+        if !self.enabled {
+            return service;
+        }
+
+        ServiceBuilder::new()
+            .layer(FileUploadLayer::new(self.enabled))
+            .buffer(DEFAULT_BUFFER_SIZE)
             .service(service)
             .boxed()
     }
@@ -354,30 +373,6 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
                 .extensions_mut()
                 .insert(MultipartFormData::new(subgraph_map, multipart));
         }
-    }
-    req
-}
-
-static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
-static TRUE: http::HeaderValue = HeaderValue::from_static("true");
-
-pub(crate) async fn http_request_wrapper(
-    mut req: http::Request<RouterBody>,
-) -> http::Request<RouterBody> {
-    let form = req.extensions_mut().get::<MultipartFormData>().cloned();
-    if let Some(form) = form {
-        let (mut request_parts, operations) = req.into_parts();
-        request_parts
-            .headers
-            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
-
-        // override Content-Type to be 'multipart/form-data'
-        request_parts
-            .headers
-            .insert(CONTENT_TYPE, form.content_type());
-        let request_body = router::body::from_result_stream(form.into_stream(operations).await);
-
-        return http::Request::from_parts(request_parts, request_body);
     }
     req
 }
