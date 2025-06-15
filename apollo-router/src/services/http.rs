@@ -2,10 +2,12 @@
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use super::Plugins;
+use super::layers::content_negotiation::ContentNegotiationLayer;
 use super::router::body::RouterBody;
 use crate::Context;
 
@@ -66,12 +68,19 @@ impl HttpClientServiceFactory {
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
         let service = self.service.clone();
-        self.plugins
+        let service_with_plugins = self
+            .plugins
             .iter()
             .rev()
             .fold(service.boxed(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
-            })
+            });
+
+        // Apply content negotiation layer after plugins to preserve current ordering
+        ServiceBuilder::new()
+            .layer(ContentNegotiationLayer::new())
+            .service(service_with_plugins)
+            .boxed()
     }
 }
 
