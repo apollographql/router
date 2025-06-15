@@ -42,6 +42,7 @@ pub(crate) mod mock_subgraphs;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
+mod response_cache;
 pub(crate) mod rhai;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
