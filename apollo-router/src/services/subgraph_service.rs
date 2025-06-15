@@ -1463,7 +1463,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
+    client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
@@ -1475,8 +1475,9 @@ async fn do_fetch(
     ),
     FetchError,
 > {
+    // oneshot must be used because the client service has actual tower layers in now. Therefore poll_ready must be called.
     let response = client
-        .call(HttpRequest {
+        .oneshot(HttpRequest {
             http_request: request,
             context: context.clone(),
         })

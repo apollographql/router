@@ -23,7 +23,6 @@ use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::json_ext;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -166,7 +165,7 @@ impl PluginPrivate for FileUploadsPlugin {
 
         ServiceBuilder::new()
             .layer(FileUploadLayer::new(self.enabled))
-            .buffer(DEFAULT_BUFFER_SIZE)
+            .buffered()
             .service(service)
             .boxed()
     }
