@@ -26,6 +26,8 @@ use crate::layers::ServiceBuilderExt;
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
+type MemoizedService = Arc<Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>>;
+type ServiceCache = Arc<RwLock<HashMap<String, MemoizedService>>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -43,14 +45,7 @@ pub(crate) struct HttpResponse {
 pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
-    memoized: Arc<
-        RwLock<
-            HashMap<
-                String,
-                Arc<Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>>,
-            >,
-        >,
-    >,
+    memoized: ServiceCache,
 }
 
 impl HttpClientServiceFactory {
