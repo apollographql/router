@@ -31,10 +31,14 @@ use tracing::Instrument;
 use tracing::instrument;
 use uuid::Uuid;
 
-use super::Plugins;
-use super::http::HttpClientServiceFactory;
-use super::router::body::RouterBody;
-use super::subgraph::SubgraphRequestId;
+use super::http::ACCEPT_GRAPHQL_JSON;
+// Re-export for other modules
+pub(crate) use super::http::APPLICATION_JSON_HEADER_VALUE;
+use super::http::ContentType;
+use super::http::do_fetch;
+use super::http::get_uri_details;
+use super::http::http_response_to_graphql_response;
+use super::types::SubgraphRequestId;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -65,18 +69,14 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::query_planner::OperationKind;
+use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::apq;
 use crate::services::router;
-use crate::services::subgraph;
-use crate::services::subgraph_impl::http::ACCEPT_GRAPHQL_JSON;
-// Re-export for other modules
-pub(crate) use crate::services::subgraph_impl::http::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::subgraph_impl::http::ContentType;
-use crate::services::subgraph_impl::http::do_fetch;
-use crate::services::subgraph_impl::http::get_uri_details;
-use crate::services::subgraph_impl::http::http_response_to_graphql_response;
+use crate::services::router::body::RouterBody;
+use crate::services::subgraph::types;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -1396,9 +1396,8 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
-    pub(crate) services: Arc<
-        HashMap<String, Buffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>>,
-    >,
+    pub(crate) services:
+        Arc<HashMap<String, Buffer<types::Request, BoxFuture<'static, types::ServiceResult>>>>,
 }
 
 impl SubgraphServiceFactory {
@@ -1424,7 +1423,7 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+    pub(crate) fn create(&self, name: &str) -> Option<types::BoxService> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services.get(name).map(|svc| svc.clone().boxed())
     }
@@ -1434,7 +1433,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxService;
+    fn make(&self) -> types::BoxService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1446,7 +1445,7 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> subgraph::BoxService {
+    fn make(&self) -> types::BoxService {
         self.clone().boxed()
     }
 }
