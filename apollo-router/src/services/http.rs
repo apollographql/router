@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use dashmap::DashMap;
