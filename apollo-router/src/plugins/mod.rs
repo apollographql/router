@@ -45,7 +45,7 @@ mod record_replay;
 mod response_cache;
 pub(crate) mod rhai;
 pub(crate) mod subscription;
-pub(crate) mod telemetry;
+pub mod telemetry;
 #[cfg(test)]
 pub(crate) mod test;
 pub(crate) mod traffic_shaping;

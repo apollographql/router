@@ -329,6 +329,28 @@ pub(crate) struct ReferencedFieldsForType {
     pub(crate) is_interface: bool,
 }
 
+pub fn generate_usage_reporting_from_operation(
+    operation: &ExecutableDocument,
+    operation_name: &Option<String>,
+    schema: &Valid<Schema>,
+) -> UsageReporting {
+    let mut generator = UsageGenerator {
+        signature_doc: operation,
+        references_doc: operation,
+        operation_name,
+        schema,
+        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
+        variables: &Object::new(),
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
+    generator.generate_usage_reporting()
+}
+
 /// Generate a UsageReporting containing the data required to generate a stats_report_key (either a normalized version of
 /// the operation signature or an error key or a PQ ID) and referenced fields of an operation. The document used to
 /// generate the signature and for the references can be different to handle cases where the operation has been filtered,
