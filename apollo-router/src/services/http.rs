@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
-use std::sync::RwLock;
 
+use dashmap::DashMap;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -26,8 +26,8 @@ use crate::layers::ServiceBuilderExt;
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
-type MemoizedService = Arc<Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>>;
-type ServiceCache = Arc<RwLock<HashMap<String, MemoizedService>>>;
+type MemoizedService = Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
+type ServiceCache = Arc<DashMap<String, MemoizedService>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -45,7 +45,7 @@ pub(crate) struct HttpResponse {
 pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
-    memoized: ServiceCache,
+    cache: ServiceCache,
 }
 
 impl HttpClientServiceFactory {
@@ -53,7 +53,7 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins,
-            memoized: Arc::new(Default::default()),
+            cache: Arc::new(Default::default()),
         }
     }
 
@@ -76,38 +76,29 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins: Arc::new(IndexMap::default()),
-            memoized: Arc::new(Default::default()),
+            cache: Arc::new(Default::default()),
         }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
         // Check if we already have a memoized service for this name
-        {
-            let cache = self.memoized.read().unwrap();
-            if let Some(service) = cache.get(name) {
-                return (**service).clone().boxed();
-            }
+        if let Some(service) = self.cache.get(name) {
+            service.deref().clone().boxed()
+        } else {
+            // Create the service if not cached
+            let service = self
+                .plugins
+                .iter()
+                .rev()
+                .fold(self.service.clone().boxed(), |acc, (_, e)| {
+                    e.http_client_service(name, acc)
+                });
+            let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
+
+            self.cache
+                .insert(name.to_string(), buffered_clone_service.clone());
+            buffered_clone_service.boxed()
         }
-
-        // Create the service if not cached
-        let service = self.service.clone();
-        let service = self
-            .plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            });
-        let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
-
-        // Store in cache
-        let arc_service = Arc::new(buffered_clone_service.clone());
-        {
-            let mut cache = self.memoized.write().unwrap();
-            cache.insert(name.to_string(), arc_service);
-        }
-
-        buffered_clone_service.boxed()
     }
 }
 
