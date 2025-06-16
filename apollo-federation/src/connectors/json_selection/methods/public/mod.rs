@@ -4,6 +4,8 @@ mod entries;
 pub(crate) use entries::EntriesMethod;
 mod first;
 pub(crate) use first::FirstMethod;
+mod gte;
+pub(crate) use gte::GteMethod;
 mod json_stringify;
 pub(crate) use json_stringify::JsonStringifyMethod;
 mod last;
