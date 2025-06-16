@@ -144,8 +144,6 @@ impl Request {
     }
 }
 
-use crate::context::ROUTER_RESPONSE_ERRORS;
-
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
     /// couldn't create a valid http GET uri '{0}'
@@ -238,15 +236,6 @@ impl Response {
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-            // This is ONLY guaranteed to capture errors if any were added during router service
-            // processing. We will sometimes avoid this path if no router service errors exist, even
-            // if errors were passed from the supergraph service, because that path builds the
-            // router::Response using parts_new(). This is ok because we only need this context to
-            // count errors introduced in the router service; however, it means that we handle error
-            // counting differently in this layer than others.
-            context
-                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
-                .expect("Unable to serialize router response errors list for context");
         }
         // Build a response
         let b = graphql::Response::builder()
