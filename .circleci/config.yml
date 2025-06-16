@@ -25,12 +25,12 @@ executors:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: cimg/redis:7.4.4
       - image: cimg/postgres:17.0
         environment:
           POSTGRES_USER: root
           POSTGRES_DB: root
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
-      - image: cimg/redis:7.4.4
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
     resource_class: 2xlarge
