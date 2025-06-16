@@ -670,10 +670,6 @@ impl CacheService {
                 .await?
                 {
                     ControlFlow::Break(response) => {
-                        println!(
-                            "=====\n GET root fields data from cache for subgraph {:?}\n=====",
-                            self.name
-                        );
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
                             CacheMetricContextKey::new(response.subgraph_name.clone()),
@@ -682,11 +678,6 @@ impl CacheService {
                         Ok(response)
                     }
                     ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
-                        println!(
-                            "=====\n GET root fields data UPSTREAM for subgraph {:?} with request :\n{:#?}\n=====",
-                            self.name,
-                            request.subgraph_request.body()
-                        );
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
@@ -803,31 +794,9 @@ impl CacheService {
             .instrument(tracing::info_span!("cache.entity.lookup"))
             .await?
             {
-                ControlFlow::Break(response) => {
-                    println!(
-                        "=====\n GET entities data from cache for subgraph {:?}\n=====",
-                        self.name
-                    );
-
-                    Ok(response)
-                }
+                ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, mut cache_result)) => {
                     let context = request.context.clone();
-                    let is_partial = cache_result.0.iter().any(|c| c.cache_entry.is_some());
-                    if is_partial {
-                        println!(
-                            "=====\n GET PARTIAL entities data UPSTREAM for subgraph {:?} with request :\n{:#?}\n=====",
-                            self.name,
-                            request.subgraph_request.body()
-                        );
-                    } else {
-                        println!(
-                            "=====\n GET entities data UPSTREAM for subgraph {:?} with request :\n{:#?}\n=====",
-                            self.name,
-                            request.subgraph_request.body()
-                        );
-                    }
-
                     let mut debug_subgraph_request = None;
                     if self.debug {
                         debug_subgraph_request = Some(request.subgraph_request.body().clone());
@@ -951,7 +920,7 @@ impl CacheService {
 }
 
 #[derive(Default, Clone)]
-pub(crate) struct InvalidationKeysPropagation(HashMap<String, HashSet<String>>);
+pub(crate) struct InvalidationKeysPropagation(HashSet<String>);
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
@@ -968,18 +937,14 @@ async fn cache_lookup_root(
     let (invalidation_cache_keys_propagated, invalidation_cache_keys) =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
     let body = request.subgraph_request.body_mut();
-    println!(
-        "Invalidation keys for root fields in subgraph {name:?}:\n{invalidation_cache_keys:#?}\n========"
-    );
 
-    let subgraph_name = name.clone();
     if !invalidation_cache_keys_propagated.is_empty() {
         request.context.extensions().with_lock(move |ext| {
             let invalidation_cache_key_prop =
                 ext.get_or_default_mut::<InvalidationKeysPropagation>();
             invalidation_cache_key_prop
                 .0
-                .insert(subgraph_name, invalidation_cache_keys_propagated);
+                .extend(invalidation_cache_keys_propagated);
         });
     }
 
@@ -1592,7 +1557,7 @@ fn extract_cache_keys(
         .extensions()
         .with_lock(move |ext| {
             ext.get::<InvalidationKeysPropagation>()
-                .and_then(|invalidat_keys| invalidat_keys.0.get(subgraph_name).cloned())
+                .map(|invalidat_keys| invalidat_keys.0.clone())
         })
         .unwrap_or_default();
 
@@ -1667,16 +1632,11 @@ fn extract_cache_keys(
             }
         }
 
-        // TO DELETE: only to debug
-        let typename = typename.to_string();
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
         invalidation_keys.extend(parent_invalidation_cache_keys.clone());
         invalidation_keys.extend(invalidation_cache_keys);
-        println!(
-            "Invalidation keys for entity type {typename:?} in subgraph {subgraph_name:?}:\n{invalidation_keys:#?}\n========"
-        );
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             invalidation_keys,

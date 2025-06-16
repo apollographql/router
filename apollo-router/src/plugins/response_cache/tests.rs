@@ -27,6 +27,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
+const SCHEMA_CASCADE: &str =
+    include_str!("../../testdata/orga_supergraph_cache_key_cascade.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
@@ -857,7 +859,6 @@ async fn private() {
     assert!(response.extensions.remove("cacheDebugger").is_some());
     insta::assert_json_snapshot!(response);
 
-    println!("\nNOW WITHOUT SUBGRAPHS\n");
     // Now testing without any mock subgraphs, all the data should come from the cache
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -893,8 +894,6 @@ async fn private() {
     assert!(response.extensions.remove("cacheDebugger").is_some());
 
     insta::assert_json_snapshot!(response);
-
-    println!("\nNOW WITH DIFFERENT SUB\n");
 
     let context = Context::new();
     context.insert_json_value("sub", "5678".into());
@@ -1531,4 +1530,293 @@ async fn invalidate() {
     assert!(response.extensions.remove("cacheDebugger").is_some());
 
     insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalidate_cascade() {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_CASCADE, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: String::from("test_invalidate_cascade"),
+    })
+    .await
+    .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+        .await
+        .unwrap();
+
+    let invalidation = entity_cache.invalidation.clone();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::with_settings!({
+        description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains("max-age="),
+    );
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains(",public"),
+    );
+    let mut response = response.next_response().await.unwrap();
+    assert!(response.extensions.remove("cacheDebugger").is_some());
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::with_settings!({
+        description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains("max-age="),
+    );
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains(",public"),
+    );
+    let mut response = response.next_response().await.unwrap();
+    assert!(response.extensions.remove("cacheDebugger").is_some());
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+
+    // now we invalidate data
+    let res = invalidation
+        .invalidate(vec![InvalidationRequest::CacheKey {
+            subgraphs: vec!["orga".to_string(), "user".to_string()]
+                .into_iter()
+                .collect(),
+            cache_key: String::from("currentUser-cascade"),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(res, 2);
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::with_settings!({
+        description => "Make sure everything is in status 'new' (because we invalidate with the cascade key) and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains("max-age="),
+    );
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains(",public"),
+    );
+    let mut response = response.next_response().await.unwrap();
+    assert!(response.extensions.remove("cacheDebugger").is_some());
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 }
