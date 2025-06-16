@@ -15,14 +15,14 @@ use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
-use super::plugin::Storage as EntityStorage;
+use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    pub(crate) storage: Arc<EntityStorage>,
+    pub(crate) storage: Arc<Storage>,
     pub(crate) semaphore: Arc<Semaphore>,
 }
 
@@ -51,7 +51,7 @@ impl std::error::Error for InvalidationErrors {}
 
 impl Invalidation {
     pub(crate) async fn new(
-        storage: Arc<EntityStorage>,
+        storage: Arc<Storage>,
         concurrent_requests: u32,
     ) -> Result<Self, BoxError> {
         Ok(Self {

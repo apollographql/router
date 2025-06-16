@@ -128,12 +128,12 @@ pub(crate) struct Config {
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
 
-    /// Entity caching evaluation metrics
+    /// Response caching evaluation metrics
     #[serde(default)]
     metrics: Metrics,
 }
 
-/// Per subgraph configuration for entity caching
+/// Per subgraph configuration for response caching
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
@@ -165,7 +165,7 @@ impl Default for Subgraph {
     }
 }
 
-/// Per subgraph configuration for entity caching
+/// Per subgraph configuration for response caching
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Ttl(
@@ -174,11 +174,11 @@ pub(crate) struct Ttl(
     pub(crate) Duration,
 );
 
-/// Per subgraph configuration for entity caching
+/// Per subgraph configuration for response caching
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Metrics {
-    /// enables metrics evaluating the benefits of entity caching
+    /// enables metrics evaluating the benefits of response caching
     #[serde(default)]
     pub(crate) enabled: bool,
     /// Metrics counter TTL
@@ -621,9 +621,9 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
-        // Check if the request is part of a batch. If it is, completely bypass entity caching since it
+        // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
-        // This check is what enables Batching and entity caching to work together, so be very careful
+        // This check is what enables Batching and response caching to work together, so be very careful
         // before making any changes to it.
         if request
             .context
@@ -1432,7 +1432,7 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
 }
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
-// This function can be removed outright later at the cost of invalidating all entity caches.
+// This function can be removed outright later at the cost of changing all hashes.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(query_hash.as_bytes());
@@ -1497,7 +1497,7 @@ fn extract_cache_key_root(
     let entity_type = entity_type_opt.unwrap_or("Query");
 
     // the cache key is written to easily find keys matching a prefix for deletion:
-    // - entity cache version: current version of the hash
+    // - response cache version: current version of the hash
     // - subgraph name: subgraph name
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
@@ -1600,7 +1600,7 @@ fn extract_cache_keys(
         let hashed_entity_key = hash_entity_key(&representation_entity_key);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
-        // - entity cache version: current version of the hash
+        // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
         // - entity key: invalidate a specific entity
@@ -1694,10 +1694,6 @@ fn get_invalidation_entity_keys_from_schema(
                         None
                     }
                 })
-
-            // dir.argument_by_name("format", supergraph_schema)
-            //     .ok()
-            //     .and_then(|f| f.as_str()?.parse::<StringTemplate>().ok())
         });
     let mut vars = IndexMap::default();
     vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
@@ -1766,7 +1762,7 @@ fn collect_key_field_sets(
                                 supergraph_schema,
                                 NamedType::new(typename).ok()?,
                                 arg,
-                                "entity_caching.graphql",
+                                "response_caching.graphql",
                             )
                             .ok()
                     })
