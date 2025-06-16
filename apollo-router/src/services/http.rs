@@ -84,7 +84,7 @@ impl HttpClientServiceFactory {
     pub(crate) fn create(&self, name: &str) -> BoxService {
         // Check if we already have a memoized service for this name
         if let Some(service) = self.cache.get(name) {
-            service.deref().clone().boxed()
+            service.clone().boxed()
         } else {
             // Create the service if not cached
             let service = self
