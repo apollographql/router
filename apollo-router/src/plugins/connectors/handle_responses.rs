@@ -107,7 +107,7 @@ impl RawResponse {
                     .config(connector.config.as_ref())
                     .context(context)
                     .status(parts.status.as_u16())
-                    .request(&connector.response_headers, &supergraph_request)
+                    .request(&connector.request_headers, supergraph_request.headers())
                     .response(&connector.response_headers, Some(&parts))
                     .env(&connector.env)
                     .merge();
@@ -184,7 +184,7 @@ impl RawResponse {
                         .config(connector.config.as_ref())
                         .context(context)
                         .status(parts.status.as_u16())
-                        .request(&connector.response_headers, &supergraph_request)
+                        .request(&connector.request_headers, supergraph_request.headers())
                         .response(&connector.response_headers, Some(&parts))
                         .merge()
                 });
