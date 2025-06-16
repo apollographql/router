@@ -290,14 +290,14 @@ impl PluginPrivate for HealthCheck {
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
-                        Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body(
+                        router::Response::http_response_builder()
+                            .response(http::Response::builder().status(status_code).body(
                                 router::body::from_bytes(
                                     serde_json::to_vec(&health).map_err(BoxError::from)?,
                                 ),
-                            )?,
-                            context: req.context,
-                        })
+                            )?)
+                            .context(req.context)
+                            .build()
                     }
                 })
                 .boxed(),

@@ -144,6 +144,8 @@ impl Request {
     }
 }
 
+use crate::context::ROUTER_RESPONSE_ERRORS;
+
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
     /// couldn't create a valid http GET uri '{0}'
@@ -236,6 +238,15 @@ impl Response {
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            // This is ONLY guaranteed to capture errors if any were added during router service
+            // processing. We will sometimes avoid this path if no router service errors exist, even
+            // if errors were passed from the supergraph service, because that path builds the
+            // router::Response using parts_new(). This is ok because we only need this context to
+            // count errors introduced in the router service; however, it means that we handle error
+            // counting differently in this layer than others.
+            context
+                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .expect("Unable to serialize router response errors list for context");
         }
         // Build a response
         let b = graphql::Response::builder()
@@ -267,6 +278,19 @@ impl Response {
         response.stash_the_body_in_extensions(body_string);
 
         Ok(response)
+    }
+
+    #[builder(visibility = "pub")]
+    fn http_response_new(
+        response: http::Response<Body>,
+        context: Context,
+        body_to_stash: Option<String>,
+    ) -> Result<Self, BoxError> {
+        let mut res = Self { response, context };
+        if let Some(body_to_stash) = body_to_stash {
+            res.stash_the_body_in_extensions(body_to_stash)
+        }
+        Ok(res)
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.

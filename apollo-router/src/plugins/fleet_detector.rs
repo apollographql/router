@@ -270,19 +270,22 @@ impl PluginPrivate for FleetDetector {
                 context: req.context,
             })
             // Count the number of response bytes from the router to clients
-            .map_response(move |res: router::Response| router::Response {
-                response: res.response.map(move |body| {
-                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
-                        if let Ok(bytes) = res {
-                            u64_counter!(
-                                "apollo.router.operations.response_size",
-                                "Total number of response bytes to clients",
-                                bytes.len() as u64
-                            );
-                        }
+            .map_response(move |res: router::Response| {
+                router::Response::http_response_builder()
+                    .response(res.response.map(move |body| {
+                        router::body::from_result_stream(body.into_data_stream().inspect(|res| {
+                            if let Ok(bytes) = res {
+                                u64_counter!(
+                                    "apollo.router.operations.response_size",
+                                    "Total number of response bytes to clients",
+                                    bytes.len() as u64
+                                );
+                            }
+                        }))
                     }))
-                }),
-                context: res.context,
+                    .context(res.context)
+                    .build()
+                    .expect("cannot fail") // TODO better error handling
             })
             .boxed()
     }
@@ -532,6 +535,7 @@ mod tests {
     use tower::Service as _;
 
     use super::*;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
     use crate::metrics::collect_metrics;
     use crate::metrics::test_utils::MetricType;
@@ -551,15 +555,19 @@ mod tests {
                 .expect_call()
                 .times(1)
                 .returning(|req: router::Request| {
-                    Ok(router::Response {
-                        context: req.context,
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.router_request.into_body())
-                            .unwrap(),
-                    })
+                    // making sure the request body is consumed
+                    req.router_request.into_body();
+                    router::Response::error_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .error(
+                            graphql::Error::builder()
+                                .message("bad request")
+                                .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                .build(),
+                        )
+                        .build()
                 });
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
@@ -609,15 +617,17 @@ mod tests {
                 .expect_call()
                 .times(1)
                 .returning(|req: router::Request| {
-                    Ok(router::Response {
-                        context: req.context,
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.router_request.into_body())
-                            .unwrap(),
-                    })
+                    router::Response::http_response_builder()
+                        .context(req.context)
+                        .response(
+                            http::Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .header("content-type", "application/json")
+                                // making sure the request body is consumed
+                                .body(req.router_request.into_body())
+                                .unwrap(),
+                        )
+                        .build()
                 });
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());

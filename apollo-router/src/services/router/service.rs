@@ -43,18 +43,12 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_operation_error_codes;
-use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::content_negotiation::invalid_accept_header_response;
-use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
-use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -82,7 +76,6 @@ use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
-use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
@@ -97,7 +90,6 @@ pub(crate) struct RouterService {
     // instance
     batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
-    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
@@ -107,7 +99,6 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
@@ -118,7 +109,6 @@ impl RouterService {
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
             supergraph_service,
-            apollo_telemetry_config,
         }
     }
 }
@@ -300,38 +290,25 @@ impl RouterService {
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
-                Ok(router::Response {
-                    response: http::Response::builder()
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(router::body::from_bytes(
-                            "router service is not available to process request",
-                        ))
-                        .expect("cannot fail"),
-                    context,
-                })
+                router::Response::error_builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(String::from(
+                                "router service is not available to process request",
+                            ))
+                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.to_string())
+                            .build(),
+                    )
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build()
             }
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-                    if let Some(value_completion) =
-                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
-                    {
-                        Self::count_value_completion_errors(
-                            value_completion,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;
@@ -343,28 +320,19 @@ impl RouterService {
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
-                    let mut res = router::Response {
-                        response: Response::from_parts(
+                    router::Response::http_response_builder()
+                        .response(Response::from_parts(
                             parts,
                             router::body::from_bytes(body.clone()),
-                        ),
-                        context,
-                    };
-
-                    if display_router_response {
-                        res.stash_the_body_in_extensions(body);
-                    }
-
-                    Ok(res)
+                        ))
+                        .and_body_to_stash(if display_router_response {
+                            Some(body)
+                        } else {
+                            None
+                        })
+                        .context(context)
+                        .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
@@ -390,19 +358,14 @@ impl RouterService {
                         }
                     };
 
-                    let response = http::Response::from_parts(
-                        parts,
-                        router::body::from_result_stream(response_multipart),
-                    );
-
-                    Ok(RouterResponse { response, context })
+                    RouterResponse::http_response_builder()
+                        .response(http::Response::from_parts(
+                            parts,
+                            router::body::from_result_stream(response_multipart),
+                        ))
+                        .context(context)
+                        .build()
                 } else {
-                    count_operation_error_codes(
-                        &["INVALID_ACCEPT_HEADER"],
-                        &context,
-                        &self.apollo_telemetry_config.errors,
-                    );
-
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(invalid_accept_header_response().into())
                 }
@@ -501,6 +464,8 @@ impl RouterService {
             }
             bytes.put_u8(b']');
 
+            // TODO there's no easy way to pull the errors from the body or http::Response here,
+            // TODO so we still can't store the errors in context for the router
             Ok(RouterResponse {
                 response: http::Response::from_parts(
                     parts,
@@ -828,20 +793,6 @@ impl RouterService {
         };
         Ok(graphql_requests)
     }
-
-    fn count_value_completion_errors(
-        value_completion: &Value,
-        context: &Context,
-        errors_config: &ErrorsConfiguration,
-    ) {
-        if let Some(vc_array) = value_completion.as_array() {
-            let errors: Vec<graphql::Error> = vc_array
-                .iter()
-                .filter_map(graphql::Error::from_value_completion_value)
-                .collect();
-            count_operation_errors(&errors, context, errors_config);
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -929,7 +880,6 @@ impl RouterCreator {
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
-            TelemetryConfig::apollo(&configuration),
         );
 
         // NOTE: This is the start of the router pipeline (router_service)
