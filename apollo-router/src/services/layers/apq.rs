@@ -133,7 +133,6 @@ async fn apq_request(
                     crate::error::Error::builder()
                         .message("provided sha does not match query".to_string())
                         .locations(Default::default())
-                        .path(Path::default())
                         .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
                         .build(),
                 ];
@@ -164,9 +163,7 @@ async fn apq_request(
                 let errors = vec![
                     crate::error::Error::builder()
                         .message("PersistedQueryNotFound".to_string())
-                        .locations(Default::default())
-                        .path(Path::default())
-                        .extension_code("PERSISTED_QUERY_NOT_FOUND")
+                        .locations(Default::default()).extension_code("PERSISTED_QUERY_NOT_FOUND")
                         .build(),
                 ];
                 let res = SupergraphResponse::builder()
@@ -217,7 +214,6 @@ async fn disabled_apq_request(
             crate::error::Error::builder()
                 .message("PersistedQueryNotSupported".to_string())
                 .locations(Default::default())
-                .path(Path::default())
                 .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
                 .build(),
         ];
@@ -261,7 +257,6 @@ mod apq_tests {
         let expected_apq_miss_error = Error::builder()
             .message("PersistedQueryNotFound".to_string())
             .locations(Default::default())
-            .path(Path::default())
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
@@ -384,7 +379,6 @@ mod apq_tests {
         let expected_apq_miss_error = Error::builder()
             .message("PersistedQueryNotFound".to_string())
             .locations(Default::default())
-            .path(Path::default())
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
@@ -483,7 +477,6 @@ mod apq_tests {
         let expected_apq_insert_failed_error = Error::builder()
             .message("provided sha does not match query".to_string())
             .locations(Default::default())
-            .path(Path::default())
             .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
             .build();
         assert_eq!(
@@ -514,7 +507,6 @@ mod apq_tests {
         let expected_apq_miss_error = Error::builder()
             .message("PersistedQueryNotSupported".to_string())
             .locations(Default::default())
-            .path(Path::default())
             .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
             .build();
 

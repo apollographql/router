@@ -30,8 +30,11 @@ use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower_http::follow_redirect::policy::PolicyExt;
+use uuid::Uuid;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
+use apollo_router::graphql::{Error, Response};
 
 mod integration;
 
@@ -118,10 +121,6 @@ async fn simple_queries_should_not_work() {
     Please either specify a 'content-type' header \
     (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
-    let expected_error = graphql::Error::builder()
-        .message(message)
-        .extension_code("CSRF_ERROR")
-        .build();
 
     let mut get_request: router::Request = supergraph::Request::builder()
         .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
@@ -144,6 +143,13 @@ async fn simple_queries_should_not_work() {
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
     let actual = query_with_router(router, get_request).await;
+
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("CSRF_ERROR")
+        // Overwrite error ID to avoid comparing random Uuids
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
 
     assert_eq!(
         1,
@@ -179,6 +185,7 @@ async fn empty_posts_should_not_work() {
         .message(message)
         .extension_code("INVALID_GRAPHQL_REQUEST")
         .extensions(extensions_map)
+        .apollo_id(actual.errors[0].apollo_id())
         .build();
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
@@ -235,11 +242,6 @@ async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
     let mut extensions_map = serde_json_bytes::map::Map::new();
     extensions_map.insert("code", "GRAPHQL_UNKNOWN_OPERATION_NAME".into());
-    let expected_error = apollo_router::graphql::Error::builder()
-        .message(message)
-        .extensions(extensions_map)
-        .extension_code("VALIDATION_ERROR")
-        .build();
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name } }"#)
@@ -250,6 +252,15 @@ async fn service_errors_should_be_propagated() {
     let expected_service_hits = hashmap! {};
 
     let (actual, registry) = query_rust(request).await;
+
+    let expected_error = apollo_router::graphql::Error::builder()
+        .message(message)
+        .extensions(extensions_map)
+        .extension_code("VALIDATION_ERROR")
+        // Overwrite error ID to avoid comparing random Uuids
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
+
 
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), expected_service_hits);
@@ -339,11 +350,6 @@ async fn mutation_should_work_over_post() {
 async fn automated_persisted_queries() {
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
-    let expected_apq_miss_error = apollo_router::graphql::Error::builder()
-        .message("PersistedQueryNotFound")
-        .extension_code("PERSISTED_QUERY_NOT_FOUND")
-        .build();
-
     let persisted = json!({
         "version" : 1u8,
         "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
@@ -360,6 +366,12 @@ async fn automated_persisted_queries() {
     let expected_service_hits = hashmap! {};
 
     let actual = query_with_router(router.clone(), apq_only_request.try_into().unwrap()).await;
+
+    let expected_apq_miss_error = apollo_router::graphql::Error::builder()
+        .message("PersistedQueryNotFound")
+        .extension_code("PERSISTED_QUERY_NOT_FOUND")
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -473,6 +485,8 @@ async fn persisted_queries() {
                     "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
                 ))
                 .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+                // Overwrite error ID to avoid comparing random Uuids
+                .apollo_id(actual.errors[0].apollo_id())
                 .build()
         ]
     );
@@ -572,11 +586,15 @@ async fn missing_variables() {
     )
     .unwrap();
 
-    let mut expected = vec![
+    let mut normalized_actual_errors = normalize_errors(response.errors);
+    normalized_actual_errors.sort_by_key(|e| e.message.clone());
+
+    let mut expected_errors = vec![
         graphql::Error::builder()
             .message("missing variable `$missingVariable`: for required GraphQL type `Int!`")
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
+            .apollo_id(Uuid::nil())
             .build(),
         graphql::Error::builder()
             .message(
@@ -584,11 +602,12 @@ async fn missing_variables() {
             )
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "yetAnotherMissingVariable")
+            .apollo_id(Uuid::nil())
             .build(),
     ];
-    response.errors.sort_by_key(|e| e.message.clone());
-    expected.sort_by_key(|e| e.message.clone());
-    assert_eq!(response.errors, expected);
+
+    expected_errors.sort_by_key(|e| e.message.clone());
+    assert_eq!(normalized_actual_errors, expected_errors);
 }
 
 /// <https://github.com/apollographql/router/issues/2984>
@@ -674,7 +693,8 @@ async fn input_object_variable_validation() {
         .next_response()
         .await
         .unwrap();
-    insta::assert_debug_snapshot!(&response.errors, @r###"
+    let normalized_errors = normalize_errors(response.errors);
+    insta::assert_debug_snapshot!(normalized_errors, @r###"
     [
         Error {
             message: "missing input value at `$x.coordinates[0].longitude`: for required GraphQL type `Float!`",
@@ -688,6 +708,7 @@ async fn input_object_variable_validation() {
                     "VALIDATION_INVALID_TYPE_VARIABLE",
                 ),
             },
+            apollo_id: 00000000-0000-0000-0000-000000000000,
         },
     ]
     "###);
@@ -695,9 +716,9 @@ async fn input_object_variable_validation() {
 
 const PARSER_LIMITS_TEST_QUERY: &str =
     r#"{ me { reviews { author { reviews { author { name } } } } } }"#;
+
 const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 36;
 const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
@@ -1520,4 +1541,18 @@ fn it_will_not_start_with_loose_file_permissions() {
         std::str::from_utf8(&output.stderr).expect("output is a string"),
         "Apollo key file permissions (0o777) are too permissive\n"
     )
+}
+
+fn normalize_errors(errors: Vec<Error>) -> Vec<Error> {
+    let normalized_actual_errors: Vec<_> = errors.into_iter().map(|e| {
+        Error::builder()
+            // Overwrite error ID to avoid comparing random Uuids
+            .apollo_id(Uuid::nil())
+            .message(e.message)
+            .locations(e.locations)
+            .and_path(e.path)
+            .extensions(e.extensions)
+            .build()
+    }).collect();
+    normalized_actual_errors
 }
