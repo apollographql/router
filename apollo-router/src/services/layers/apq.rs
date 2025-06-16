@@ -12,7 +12,6 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::json_ext::Path;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -163,7 +162,8 @@ async fn apq_request(
                 let errors = vec![
                     crate::error::Error::builder()
                         .message("PersistedQueryNotFound".to_string())
-                        .locations(Default::default()).extension_code("PERSISTED_QUERY_NOT_FOUND")
+                        .locations(Default::default())
+                        .extension_code("PERSISTED_QUERY_NOT_FOUND")
                         .build(),
                 ];
                 let res = SupergraphResponse::builder()

@@ -619,12 +619,13 @@ mod tests {
                 .returning(|req: router::Request| {
                     router::Response::http_response_builder()
                         .context(req.context)
-                        .response( http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.router_request.into_body())
-                            .unwrap()
+                        .response(
+                            http::Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .header("content-type", "application/json")
+                                // making sure the request body is consumed
+                                .body(req.router_request.into_body())
+                                .unwrap(),
                         )
                         .build()
                 });

@@ -11,6 +11,7 @@ use apollo_router::_private::create_test_service_factory_from_yaml;
 use apollo_router::Configuration;
 use apollo_router::Context;
 use apollo_router::graphql;
+use apollo_router::graphql::Error;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::router;
@@ -30,11 +31,9 @@ use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_http::follow_redirect::policy::PolicyExt;
 use uuid::Uuid;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
-use apollo_router::graphql::{Error, Response};
 
 mod integration;
 
@@ -260,7 +259,6 @@ async fn service_errors_should_be_propagated() {
         // Overwrite error ID to avoid comparing random Uuids
         .apollo_id(actual.errors[0].apollo_id())
         .build();
-
 
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), expected_service_hits);
@@ -575,7 +573,7 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let mut response = serde_json::from_slice::<graphql::Response>(
+    let response = serde_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -1542,15 +1540,17 @@ fn it_will_not_start_with_loose_file_permissions() {
 }
 
 fn normalize_errors(errors: Vec<Error>) -> Vec<Error> {
-    let normalized_actual_errors: Vec<_> = errors.into_iter().map(|e| {
-        Error::builder()
-            // Overwrite error ID to avoid comparing random Uuids
-            .apollo_id(Uuid::nil())
-            .message(e.message)
-            .locations(e.locations)
-            .and_path(e.path)
-            .extensions(e.extensions)
-            .build()
-    }).collect();
-    normalized_actual_errors
+    errors
+        .into_iter()
+        .map(|e| {
+            Error::builder()
+                // Overwrite error ID to avoid comparing random Uuids
+                .apollo_id(Uuid::nil())
+                .message(e.message)
+                .locations(e.locations)
+                .and_path(e.path)
+                .extensions(e.extensions)
+                .build()
+        })
+        .collect()
 }
