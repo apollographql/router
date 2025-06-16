@@ -36,6 +36,7 @@ pub(super) enum ArrowMethod {
     Entries,
     JsonStringify,
     JoinNotNull,
+    Gte,
 
     // Future methods:
     TypeOf,
@@ -149,6 +150,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Entries => &public::EntriesMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
+            Self::Gte => &public::GteMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -204,6 +206,7 @@ impl ArrowMethod {
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
+            "gte" => Some(Self::Gte),
             _ => None,
         };
 
@@ -229,6 +232,7 @@ impl ArrowMethod {
                 | Self::Entries
                 | Self::JsonStringify
                 | Self::JoinNotNull
+                | Self::Gte
         )
     }
 }

@@ -97,13 +97,13 @@ impl<'schema> UrlProperties<'schema> {
         let context = match property.coordinate.directive {
             ConnectOrSource::Source(_) => expression::Context::for_source(
                 schema,
-                &property.mapping.string,
+                &property.mapping.node,
                 Code::InvalidUrlProperty,
             ),
             ConnectOrSource::Connect(coord) => expression::Context::for_connect_request(
                 schema,
                 coord,
-                &property.mapping.string,
+                &property.mapping.node,
                 Code::InvalidUrlProperty,
             ),
         };
@@ -122,7 +122,7 @@ impl<'schema> UrlProperties<'schema> {
 
 struct Property<'schema> {
     coordinate: Coordinate<'schema>,
-    mapping: MappingArgument<'schema>,
+    mapping: MappingArgument,
 }
 
 impl Property<'_> {
