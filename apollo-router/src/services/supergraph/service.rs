@@ -164,16 +164,12 @@ impl Service<SupergraphRequest> for SupergraphService {
             self.license,
         )
         .or_else(|error: BoxError| async move {
-            let errors = vec![crate::error::Error {
-                message: error.to_string(),
-                extensions: serde_json_bytes::json!({
-                    "code": "INTERNAL_SERVER_ERROR",
-                })
-                .as_object()
-                .unwrap()
-                .to_owned(),
-                ..Default::default()
-            }];
+            let errors = vec![
+                crate::error::Error::builder()
+                    .message(error.to_string())
+                    .extension_code("INTERNAL_SERVER_ERROR")
+                    .build(),
+            ];
 
             Ok(SupergraphResponse::infallible_builder()
                 .errors(errors)

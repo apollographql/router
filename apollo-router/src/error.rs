@@ -157,12 +157,12 @@ impl FetchError {
             }
         }
 
-        Error {
-            message: self.to_string(),
-            locations: Default::default(),
-            path,
-            extensions: value.as_object().unwrap().to_owned(),
-        }
+        Error::builder()
+            .message(self.to_string())
+            .locations(Vec::default())
+            .and_path(path)
+            .extensions(value.as_object().unwrap().to_owned())
+            .build()
     }
 
     /// Convert the error to an appropriate response.
@@ -660,6 +660,9 @@ mod tests {
             )
             .build();
 
-        assert_eq!(expected_gql_error, error.to_graphql_error(None));
+        assert_eq!(
+            expected_gql_error.with_null_id(),
+            error.to_graphql_error(None).with_null_id()
+        );
     }
 }

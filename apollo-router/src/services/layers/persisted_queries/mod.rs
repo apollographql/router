@@ -471,6 +471,7 @@ mod tests {
     use crate::configuration::PersistedQueries;
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
+    use crate::graphql::Error;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -704,8 +705,12 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors,
-            vec![graphql_err_operation_not_found(invalid_id)]
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_operation_not_found(invalid_id).with_null_id()]
         );
     }
 
@@ -838,8 +843,12 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors,
-            vec![graphql_err_operation_not_in_safelist()]
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_operation_not_in_safelist().with_null_id()]
         );
         let mut metric_attributes = vec![opentelemetry::KeyValue::new(
             "persisted_queries.safelist.rejected.unknown".to_string(),
@@ -1079,8 +1088,12 @@ mod tests {
             .await
             .expect("could not get response from pq layer");
         assert_eq!(
-            response.errors,
-            vec![graphql_err_operation_not_found(invalid_id)]
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_operation_not_found(invalid_id).with_null_id()]
         );
     }
 
@@ -1202,7 +1215,14 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_pq_id_required()]);
+        assert_eq!(
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_pq_id_required().with_null_id()]
+        );
 
         // Try again skipping enforcement.
         let context = Context::new();
@@ -1330,7 +1350,14 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
+        assert_eq!(
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_cannot_send_id_and_body().with_null_id()]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1363,6 +1390,13 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
+        assert_eq!(
+            response
+                .errors
+                .iter()
+                .map(|e| e.clone().with_null_id())
+                .collect::<Vec<Error>>(),
+            vec![graphql_err_cannot_send_id_and_body().with_null_id()]
+        );
     }
 }
