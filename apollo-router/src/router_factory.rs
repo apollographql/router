@@ -762,8 +762,8 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_optional_apollo_plugin!("preview_file_uploads");
-    add_optional_apollo_plugin!("preview_cache");
     add_optional_apollo_plugin!("preview_entity_cache");
+    add_optional_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
     add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads

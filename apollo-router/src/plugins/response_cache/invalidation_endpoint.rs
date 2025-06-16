@@ -15,8 +15,8 @@ use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
-use super::entity::Subgraph;
 use super::invalidation::Invalidation;
+use super::plugin::Subgraph;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -249,7 +249,7 @@ fn valid_shared_key(
 
 //     use super::*;
 //     use crate::cache::redis::RedisCacheStorage;
-//     use crate::plugins::response_cache::entity::Storage;
+//     use crate::plugins::response_cache::plugin::Storage;
 //     use crate::plugins::response_cache::tests::MockStore;
 
 //     #[tokio::test]

@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/subgraph_cache/tests.rs
+source: apollo-router/tests/integration/response_cache.rs
 expression: response
 ---
 {

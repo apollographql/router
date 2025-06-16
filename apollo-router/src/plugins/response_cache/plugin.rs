@@ -53,8 +53,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::query_planner::OperationKind;
@@ -63,18 +63,18 @@ use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
-/// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
+/// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
+pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
 
-register_plugin!("apollo", "preview_cache", SubgraphCache);
+register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
 #[derive(Clone)]
-pub(crate) struct SubgraphCache {
+pub(crate) struct ResponseCache {
     storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
@@ -200,7 +200,7 @@ pub(crate) struct CacheHitMiss {
 }
 
 #[async_trait::async_trait]
-impl Plugin for SubgraphCache {
+impl PluginPrivate for ResponseCache {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -479,7 +479,7 @@ impl Plugin for SubgraphCache {
 
 #[cfg(test)]
 pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
-impl SubgraphCache {
+impl ResponseCache {
     #[cfg(test)]
     pub(crate) async fn for_test(
         storage: PostgresCacheStorage,
@@ -1505,10 +1505,10 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
+        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
     let invalidation_keys = vec![format!(
-        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
+        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
     if is_known_private {
@@ -1607,14 +1607,14 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         // Used as a surrogate cache key
         let mut invalidation_keys = vec![
             format!(
-                "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
+                "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
             ),
-            format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
+            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
         ];
 
         // get cache keys from directive

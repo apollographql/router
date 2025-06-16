@@ -1383,6 +1383,30 @@ expression: "&schema"
     },
     "Config10": {
       "additionalProperties": false,
+      "description": "Configuration for header propagation",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Rules to specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config11": {
+      "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
         "all": {
@@ -1399,39 +1423,6 @@ expression: "&schema"
           "type": "object"
         }
       },
-      "type": "object"
-    },
-    "Config11": {
-      "additionalProperties": false,
-      "description": "Configuration for subgraph caching",
-      "properties": {
-        "debug": {
-          "default": false,
-          "description": "Enable debug mode for the debugger",
-          "type": "boolean"
-        },
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the subgraph caching feature",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "$ref": "#/definitions/InvalidationEndpointConfig",
-          "description": "#/definitions/InvalidationEndpointConfig",
-          "nullable": true
-        },
-        "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
-        },
-        "subgraph": {
-          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
-          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
-      ],
       "type": "object"
     },
     "Config12": {
@@ -1881,26 +1872,35 @@ expression: "&schema"
     },
     "Config9": {
       "additionalProperties": false,
-      "description": "Configuration for header propagation",
+      "description": "Configuration for subgraph caching",
       "properties": {
-        "all": {
-          "$ref": "#/definitions/HeadersLocation",
-          "description": "#/definitions/HeadersLocation",
+        "debug": {
+          "default": false,
+          "description": "Enable debug mode for the debugger",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the subgraph caching feature",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
           "nullable": true
         },
-        "connector": {
-          "$ref": "#/definitions/ConnectorHeadersConfiguration",
-          "description": "#/definitions/ConnectorHeadersConfiguration"
+        "metrics": {
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
         },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation",
-            "description": "#/definitions/HeadersLocation"
-          },
-          "description": "Rules to specific subgraphs",
-          "type": "object"
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
+      "required": [
+        "subgraph"
+      ],
       "type": "object"
     },
     "ConnectorAttributes": {
@@ -9439,6 +9439,10 @@ expression: "&schema"
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
     },
+    "experimental_response_cache": {
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
+    },
     "experimental_type_conditioned_fetching": {
       "default": false,
       "description": "Type conditioned fetching configuration.",
@@ -9453,8 +9457,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config9",
-      "description": "#/definitions/Config9"
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -9465,8 +9469,8 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config10",
-      "description": "#/definitions/Config10"
+      "$ref": "#/definitions/Config11",
+      "description": "#/definitions/Config11"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
@@ -9487,10 +9491,6 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
-    },
-    "preview_cache": {
-      "$ref": "#/definitions/Config11",
-      "description": "#/definitions/Config11"
     },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config12",

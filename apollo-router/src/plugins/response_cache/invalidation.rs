@@ -15,10 +15,10 @@ use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
-use super::entity::Storage as EntityStorage;
+use super::plugin::Storage as EntityStorage;
 use super::postgres::PostgresCacheStorage;
-use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -251,10 +251,10 @@ impl InvalidationRequest {
     fn key_prefix(&mut self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}",)
+                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",)
+                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",)
             }
             InvalidationRequest::Entity {
                 subgraph,
@@ -263,7 +263,7 @@ impl InvalidationRequest {
             } => {
                 let entity_key = hash_entity_key(key);
                 format!(
-                    "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
+                    "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
                 )
             }
             InvalidationRequest::CacheKey { cache_key, .. } => cache_key.clone(),

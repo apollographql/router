@@ -13,16 +13,16 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::entity::REPRESENTATIONS;
-use super::entity::Ttl;
-use super::entity::hash_query;
-use super::entity::hash_vary_headers;
+use super::plugin::REPRESENTATIONS;
+use super::plugin::Ttl;
+use super::plugin::hash_query;
+use super::plugin::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
-    "apollo::router::entity_cache_info_subgraph";
+    "apollo::router::plugin_cache_info_subgraph";
 
 impl CacheMetricsService {
     pub(crate) fn create(
