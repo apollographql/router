@@ -29,14 +29,6 @@ pub(crate) fn validate_url_scheme(
     if *scheme == Scheme::HTTP || *scheme == Scheme::HTTPS {
         Ok(())
     } else {
-        let str_value = GraphQLString::new(value, &schema.sources).map_err(|_| Message {
-            code: Code::GraphQLError,
-            message: format!("The value for {coordinate} must be a string."),
-            locations: value
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
         let scheme_location = 0..scheme.as_str().len();
         Err(Message {
             code: Code::InvalidUrlScheme,
