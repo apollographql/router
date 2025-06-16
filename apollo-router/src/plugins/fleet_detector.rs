@@ -617,17 +617,14 @@ mod tests {
                 .expect_call()
                 .times(1)
                 .returning(|req: router::Request| {
-                    // making sure the request body is consumed
-                    req.router_request.into_body();
-                    router::Response::error_builder()
+                    router::Response::http_response_builder()
                         .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .error(
-                            graphql::Error::builder()
-                                .message("bad request")
-                                .extension_code(StatusCode::BAD_REQUEST.to_string())
-                                .build(),
+                        .response( http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            // making sure the request body is consumed
+                            .body(req.router_request.into_body())
+                            .unwrap()
                         )
                         .build()
                 });
@@ -649,7 +646,6 @@ mod tests {
                 .unwrap();
 
             // THEN operation size metrics should exist
-            // TODO check with fleet people to see if the value here actually matters
             assert_counter!("apollo.router.operations.request_size", 7, &[]);
             assert_counter!("apollo.router.operations.response_size", 7, &[]);
         }
