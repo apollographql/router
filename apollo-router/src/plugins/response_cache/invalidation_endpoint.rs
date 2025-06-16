@@ -18,8 +18,9 @@ use tracing_futures::Instrument;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use super::plugin::Subgraph;
-use crate::{graphql, ListenAddr};
+use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::graphql;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -163,8 +164,12 @@ impl Service<router::Request> for InvalidationService {
                                         .status_code(StatusCode::UNAUTHORIZED)
                                         .error(
                                             graphql::Error::builder()
-                                                .message(String::from("Invalid authorization header"))
-                                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                                .message(String::from(
+                                                    "Invalid authorization header",
+                                                ))
+                                                .extension_code(
+                                                    StatusCode::UNAUTHORIZED.to_string(),
+                                                )
                                                 .build(),
                                         )
                                         .context(req.context)
