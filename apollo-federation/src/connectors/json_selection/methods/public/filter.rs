@@ -135,8 +135,13 @@ fn filter_shape(
         source_id,
     );
 
-    // Validate that the condition evaluates to a boolean
-    if !matches!(condition_shape.case(), ShapeCase::Bool(_)) {
+    // Validate that the condition evaluates to a boolean or
+    // something that could become a boolean
+    if !(
+        matches!(condition_shape.case(), ShapeCase::Bool(_)) ||
+        // This allows Unknown and Name shapes, which can produce boolean
+        // values at runtime, without any runtime errors.
+        condition_shape.accepts(&Shape::unknown([]) {
         return Shape::error(
             format!(
                 "->{} condition must return a boolean value",
