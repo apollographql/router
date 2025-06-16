@@ -6,6 +6,8 @@ mod filter;
 pub(crate) use filter::FilterMethod;
 mod first;
 pub(crate) use first::FirstMethod;
+mod gte;
+pub(crate) use gte::GteMethod;
 mod json_stringify;
 pub(crate) use json_stringify::JsonStringifyMethod;
 mod last;
