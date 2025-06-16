@@ -10,6 +10,7 @@ use futures::future::join_all;
 use http::Method;
 use http::StatusCode;
 use http::header;
+use http_body::Body as _;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt as _;
@@ -27,8 +28,8 @@ use crate::services::router;
 use crate::services::router::Request as RouterRequest;
 use crate::services::router::Response as RouterResponse;
 
-// FIXME(@goto-bus-stop): This is a copy of router::service::TranslateError.
-// This should use open core error derive instead
+// FIXME(@goto-bus-stop): This is a copy of router::service::TranslateError. Probably should have
+// its own error type.
 #[derive(Clone)]
 struct TranslateError {
     status: StatusCode,
@@ -94,21 +95,22 @@ where
             let context = req.context;
             let (parts, body) = req.router_request.into_parts();
 
-            // REVIEW NOTE(@goto-bus-stop): equivalent of get_graphql_requests
-
-            // FIXME(@goto-bus-stop): This should be the responsibility of the open core HttpToBytesLayer.
-            let bytes = router::body::into_bytes(body)
-                .instrument(tracing::debug_span!("receive_body"))
-                .await?;
-
-            // FIXME(@goto-bus-stop): telemetry from old `get_graphql_requests` should happen in
-            // between HttpToBytesLayer and this (or before?)
+            // In the future, we should have a `HttpToBytesLayer`, but until then, we need to read
+            // the body here first and wrap it back up after.
+            // We only want to record the "receive_body" span if we haven't received the body yet,
+            // to prevent having multiple of those spans.
+            let is_fixed_size = body.size_hint().exact().is_some();
+            let bytes = if is_fixed_size {
+                router::body::into_bytes(body).await?
+            } else {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
+                    .await?
+            };
 
             let batch = match service.parse_batch_request(&bytes) {
                 Ok(None) => {
                     // Not a batch request. Reassemble the request and pass it on.
-                    // FIXME(@goto-bus-stop): We won't need this conversion when we have the
-                    // open core HttpToBytesLayer
                     let body = router::body::from_bytes(bytes);
                     return service
                         .inner
@@ -134,8 +136,6 @@ where
                         .build();
                 }
             };
-
-            // REVIEW NOTE(@goto-bus-stop): the batching-related parts of `translate_request`
 
             let requests = match service.build_batch_requests(&context, parts, batch) {
                 Ok(results) => results,
@@ -299,9 +299,6 @@ where
         parts: http::request::Parts,
         batch: Vec<graphql::Request>,
     ) -> Result<Vec<RouterRequest>, TranslateError> {
-        // REVIEW NOTE(@goto-bus-stop): This is 1:1 the contents of the old `translate_request`
-        // method, except it builds `RouterRequest`s instead of `SupergraphRequest`s.
-
         let mut results = Vec::with_capacity(batch.len());
         let batch_size = batch.len();
 
@@ -330,7 +327,7 @@ where
             .next()
             .expect("we should have at least one request");
 
-        // Building up the batch of supergraph requests is tricky.
+        // Building up the batch of router requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
         // through the pipeline. This is because there is simply no way to clone http
         // extensions.
@@ -346,8 +343,6 @@ where
         //
         // Note: If we enter this loop, then we must be processing a batch.
         for (index, graphql_request) in ok_results_it.enumerate() {
-            // FIXME(@goto-bus-stop): we won't need to turn this into a Body when we have the
-            // open core HttpToBytesLayer
             let body = router::body::from_bytes(serde_json::to_vec(&graphql_request).unwrap());
             let new = http::Request::from_parts(parts.clone(), body);
             // XXX Lose some private entries, is that ok?
@@ -412,10 +407,10 @@ where
 
     async fn call_inner_service(self, request: RouterRequest) -> Result<RouterResponse, BoxError> {
         // self.inner here is a clone of the service that was readied
-        // in RouterService::poll_ready. Clones are unready by default, so this
+        // in `poll_ready`. Clones are unready by default, so this
         // self.inner is actually not ready, which is why we need to
         // oneshot it here. That technically breaks backpressure, but because we are
-        // still readying the supergraph service before calling into the router
+        // still readying the inner service before calling into the batching
         // service, backpressure is actually still exerted at that point--there's
         // just potential for some requests to slip through the cracks and end up
         // queueing up at this .oneshot() call.

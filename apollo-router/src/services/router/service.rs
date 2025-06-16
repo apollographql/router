@@ -15,6 +15,7 @@ use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
 use http::request::Parts;
+use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
@@ -105,6 +106,7 @@ impl RouterService {
         let query_analysis_layer = Arc::new(query_analysis_layer);
 
         let service = ServiceBuilder::new()
+            .layer(DisplayRouterRequestLayer)
             .layer(BatchingLayer::new(batching))
             .layer(RouterToSupergraphRequestLayer::new(Arc::new(
                 apollo_telemetry_config,
@@ -226,6 +228,118 @@ pub(crate) async fn empty() -> impl Service<
     .make()
 }
 
+/// If the `DisplayRouterRequest(true)` marker value is in context,
+/// reads the request body and logs it out.
+struct DisplayRouterRequestLayer;
+impl<S> tower::Layer<S> for DisplayRouterRequestLayer {
+    type Service = DisplayRouterRequestService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        DisplayRouterRequestService { inner }
+    }
+}
+
+#[derive(Clone)]
+struct DisplayRouterRequestService<S> {
+    inner: S,
+}
+
+impl<S> Service<RouterRequest> for DisplayRouterRequestService<S>
+where
+    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        Box::pin(async move {
+            if let Some(level) = req
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                .map(|d| d.0)
+            {
+                // XXX(@goto-bus-stop): a better implementation of this might be to wrap the body
+                // type, and log automatically once it is out of data. It also wouldn't require the
+                // `is_fixed_size` workaround below.
+                let RouterRequest {
+                    context,
+                    router_request,
+                } = req;
+                let (parts, body) = router_request.into_parts();
+
+                // Only show the "receive_body" span if we haven't received the body yet, to prevent
+                // having multiple of those spans
+                let is_fixed_size = body.size_hint().exact().is_some();
+                let bytes = if is_fixed_size {
+                    router::body::into_bytes(body).await?
+                } else {
+                    router::body::into_bytes(body)
+                        .instrument(tracing::debug_span!("receive_body"))
+                        .await?
+                };
+
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                    .headers
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = &parts.headers;
+
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(format!("{}", parts.method).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                    ),
+                ));
+                log_event(level, "router.request", attrs, "");
+
+                let body = router::body::from_bytes(bytes);
+                req = RouterRequest {
+                    context,
+                    router_request: http::Request::from_parts(parts, body),
+                };
+            }
+
+            inner.call(req).await
+        })
+    }
+}
+
 /// A layer that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
 struct RouterToSupergraphRequestLayer {
@@ -292,7 +406,7 @@ where
     async fn call_inner(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context;
         let (parts, body) = req.router_request.into_parts();
-        let request = Self::get_graphql_request(&context, &parts, body)
+        let request = Self::get_graphql_request(&parts, body)
             .await?
             .and_then(|r| Self::translate_request(&context, parts, r));
 
@@ -497,58 +611,23 @@ where
     }
 
     async fn get_graphql_request(
-        context: &Context,
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
         let graphql_request = if parts.method == Method::GET {
             Self::translate_query_request(parts)
         } else {
-            let bytes = router::body::into_bytes(body)
-                .instrument(tracing::debug_span!("receive_body"))
-                .await?;
-            if let Some(level) = context
-                .extensions()
-                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
-                .map(|d| d.0)
-            {
-                let mut attrs = Vec::with_capacity(5);
-                #[cfg(test)]
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                    .headers
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                #[cfg(test)]
-                headers.sort_keys();
-                #[cfg(not(test))]
-                let headers = &parts.headers;
+            // Only show the "receive_body" span if we haven't received the body yet, to prevent
+            // having multiple of those spans
+            let is_fixed_size = body.size_hint().exact().is_some();
+            let bytes = if is_fixed_size {
+                router::body::into_bytes(body).await?
+            } else {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
+                    .await?
+            };
 
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_METHOD,
-                    opentelemetry::Value::String(format!("{}", parts.method).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_URI,
-                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_VERSION,
-                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY,
-                    opentelemetry::Value::String(
-                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
-                    ),
-                ));
-                log_event(level, "router.request", attrs, "");
-            }
             Self::translate_bytes_request(&bytes)
         };
         Ok(graphql_request)
