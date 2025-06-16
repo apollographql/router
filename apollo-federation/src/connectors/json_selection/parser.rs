@@ -3178,7 +3178,6 @@ mod tests {
 
     #[test]
     fn test_optional_key_access() {
-        // Test optional key access: foo?.bar
         check_path_selection(
             "$.foo?.bar",
             PathSelection {
@@ -3204,7 +3203,6 @@ mod tests {
 
     #[test]
     fn test_optional_method_call() {
-        // Test optional method call: foo?->method
         check_path_selection(
             "$.foo?->method",
             PathSelection {
@@ -3231,7 +3229,6 @@ mod tests {
 
     #[test]
     fn test_chained_optional_accesses() {
-        // Test chained optional accesses: foo?.bar?.baz
         check_path_selection(
             "$.foo?.bar?.baz",
             PathSelection {
@@ -3264,7 +3261,6 @@ mod tests {
 
     #[test]
     fn test_mixed_regular_and_optional_access() {
-        // Test mixed regular and optional access: foo.bar?.baz
         check_path_selection(
             "$.foo.bar?.baz",
             PathSelection {
@@ -3294,7 +3290,6 @@ mod tests {
 
     #[test]
     fn test_optional_chaining_with_subselection() {
-        // Test optional chaining with subselection: foo?.bar { id name }
         check_path_selection(
             "$.foo?.bar { id name }",
             PathSelection {
@@ -3335,7 +3330,6 @@ mod tests {
 
     #[test]
     fn test_optional_method_with_arguments() {
-        // Test optional method with arguments: foo?->filter('active')
         check_path_selection(
             "$.foo?->filter('active')",
             PathSelection {

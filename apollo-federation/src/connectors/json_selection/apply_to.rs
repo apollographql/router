@@ -3430,7 +3430,7 @@ mod tests {
                 }
             ]))
         );
-        // When applying selection to arrays, null elements cause errors when trying to access properties
+
         assert_eq!(errors.len(), 2);
         assert!(
             errors[0]
