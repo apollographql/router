@@ -285,7 +285,7 @@ impl PluginPrivate for FleetDetector {
                     }))
                     .context(res.context)
                     .build()
-                    .expect("cannot fail") // TODO better error handling
+                    .unwrap()
             })
             .boxed()
     }
