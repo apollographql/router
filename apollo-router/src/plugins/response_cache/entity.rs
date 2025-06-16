@@ -485,6 +485,7 @@ impl SubgraphCache {
         storage: PostgresCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
+        truncate_namespace: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -493,7 +494,9 @@ impl SubgraphCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         storage.migrate().await?;
-        storage.truncate_namespace().await?;
+        if truncate_namespace {
+            storage.truncate_namespace().await?;
+        }
 
         let storage = Arc::new(Storage {
             all: Some(storage),

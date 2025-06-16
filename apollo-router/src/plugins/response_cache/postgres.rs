@@ -295,6 +295,7 @@ impl PostgresCacheStorage {
                 .iter()
                 .map(|b| Utc::now() + b.expire)
                 .collect::<Vec<DateTime<Utc>>>();
+
             let resp = sqlx::query!(
                 r#"
                 INSERT INTO cache

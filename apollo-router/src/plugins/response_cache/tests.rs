@@ -99,7 +99,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -110,7 +110,7 @@ async fn insert() {
         }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -187,17 +187,11 @@ async fn insert() {
     }
     "###);
 
-    // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
-
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -308,7 +302,7 @@ async fn insert_with_requires() {
     })
     .await
     .unwrap();
-    let map = [
+    let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
             Subgraph {
@@ -332,16 +326,17 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
-        .await
-        .unwrap();
+    let entity_cache =
+        SubgraphCache::for_test(pg_cache.clone(), map.clone(), valid_schema.clone(), true)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(entity_cache)
-        .extra_plugin(subgraphs)
+        .extra_plugin(entity_cache.clone())
+        .extra_plugin(subgraphs.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -401,17 +396,12 @@ async fn insert_with_requires() {
 
     insta::assert_json_snapshot!(response);
 
-    // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
-
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
         .extra_plugin(entity_cache)
+        .extra_plugin(subgraphs.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -422,7 +412,17 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::assert_json_snapshot!(cache_keys);
     assert!(
         response
             .response
@@ -441,17 +441,6 @@ async fn insert_with_requires() {
             .unwrap()
             .contains(",public"),
     );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
     assert!(response.extensions.remove("cacheDebugger").is_some());
@@ -524,7 +513,7 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -532,7 +521,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -598,17 +587,11 @@ async fn insert_with_nested_field_set() {
 
     insta::assert_json_snapshot!(response);
 
-    // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
-
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -698,16 +681,20 @@ async fn no_cache_control() {
     })
     .await
     .unwrap();
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
+    let entity_cache = SubgraphCache::for_test(
+        pg_cache.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+    )
+    .await
+    .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -733,17 +720,11 @@ async fn no_cache_control() {
 
     insta::assert_json_snapshot!(response);
 
-    // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
-
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -838,7 +819,7 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -882,7 +863,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1024,7 +1005,7 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1032,7 +1013,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1068,11 +1049,6 @@ async fn no_data() {
     assert!(response.extensions.remove("cacheDebugger").is_some());
 
     insta::assert_json_snapshot!(response);
-
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
 
     let subgraphs = MockedSubgraphs(
         [(
@@ -1232,7 +1208,7 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1240,7 +1216,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_plugin(entity_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1256,10 +1232,14 @@ async fn missing_entities() {
     assert!(response.extensions.remove("cacheDebugger").is_some());
     insta::assert_json_snapshot!(response);
 
-    let entity_cache =
-        SubgraphCache::for_test(pg_cache.clone(), HashMap::new(), valid_schema.clone())
-            .await
-            .unwrap();
+    let entity_cache = SubgraphCache::for_test(
+        pg_cache.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+    )
+    .await
+    .unwrap();
 
     let subgraphs = MockedSubgraphs([
             ("user", MockSubgraph::builder().with_json(
@@ -1388,7 +1368,7 @@ async fn invalidate() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone())
+    let entity_cache = SubgraphCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
