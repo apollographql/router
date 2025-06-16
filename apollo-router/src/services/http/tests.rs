@@ -888,3 +888,69 @@ async fn test_unix_socket() {
         .unwrap();
     insta::assert_json_snapshot!(response);
 }
+
+#[tokio::test]
+async fn test_service_caching() {
+    use crate::services::http::HttpClientServiceFactory;
+
+    // Create a factory with a test configuration
+    let config = Configuration::default();
+    let factory = HttpClientServiceFactory::from_config(
+        "test-service",
+        &config,
+        crate::configuration::shared::Client::default(),
+    );
+
+    // Initially cache should be empty
+    assert_eq!(factory.cache_len(), 0, "Cache should start empty");
+
+    // Create first service for "service1"
+    let _service1_first = factory.create("service1");
+    assert_eq!(
+        factory.cache_len(),
+        1,
+        "Cache should contain 1 service after first create"
+    );
+    assert!(
+        factory.has_cached_service("service1"),
+        "service1 should be cached"
+    );
+
+    // Create second service for "service1" - should be cached
+    let _service1_second = factory.create("service1");
+    assert_eq!(
+        factory.cache_len(),
+        1,
+        "Cache should still contain 1 service after cache hit"
+    );
+
+    // Create service for "service2" - should be different from service1
+    let _service2 = factory.create("service2");
+    assert_eq!(
+        factory.cache_len(),
+        2,
+        "Cache should contain 2 services after creating service2"
+    );
+    assert!(
+        factory.has_cached_service("service2"),
+        "service2 should be cached"
+    );
+
+    // Create another service for "service1" - should still be cached
+    let _service1_third = factory.create("service1");
+    assert_eq!(
+        factory.cache_len(),
+        2,
+        "Cache should still contain 2 services after another cache hit"
+    );
+
+    // Verify both services are still cached
+    assert!(
+        factory.has_cached_service("service1"),
+        "service1 should still be cached"
+    );
+    assert!(
+        factory.has_cached_service("service2"),
+        "service2 should still be cached"
+    );
+}
