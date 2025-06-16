@@ -492,6 +492,7 @@ impl SubgraphCache {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
+        storage.migrate().await?;
         storage.truncate_namespace().await?;
 
         let storage = Arc::new(Storage {
@@ -499,7 +500,6 @@ impl SubgraphCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone(), 10).await?;
-        storage.migrate().await?;
 
         Ok(Self {
             storage,
