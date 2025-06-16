@@ -21,6 +21,7 @@ mod supergraph;
 mod traffic_shaping;
 mod typename;
 
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod postgres;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
