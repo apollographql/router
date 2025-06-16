@@ -26,6 +26,8 @@ use crate::layers::ServiceBuilderExt;
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
+
+// You cannot store a CloneBoxFuture in a map because it is not Sync. You can store a buffer though.
 type MemoizedService = Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
 type ServiceCache = Arc<DashMap<String, MemoizedService>>;
 
@@ -99,6 +101,16 @@ impl HttpClientServiceFactory {
                 .insert(name.to_string(), buffered_clone_service.clone());
             buffered_clone_service.boxed()
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cache_len(&self) -> usize {
+        self.cache.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_cached_service(&self, name: &str) -> bool {
+        self.cache.contains_key(name)
     }
 }
 
