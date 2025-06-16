@@ -510,7 +510,7 @@ fn extract_enums_from_selection_set(
     }
 }
 
-struct UsageGenerator<'a> {
+pub struct UsageGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
