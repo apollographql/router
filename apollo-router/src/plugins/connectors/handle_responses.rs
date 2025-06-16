@@ -105,6 +105,7 @@ impl RawResponse {
                     .status(parts.status.as_u16())
                     .request(&connector.response_headers, &supergraph_request)
                     .response(&connector.response_headers, Some(&parts))
+                    .env(&connector.env)
                     .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -801,6 +802,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -911,6 +913,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1028,6 +1031,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1152,6 +1156,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1278,6 +1283,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1551,6 +1557,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 

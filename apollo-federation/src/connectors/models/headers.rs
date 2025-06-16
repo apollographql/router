@@ -15,10 +15,10 @@ use http::header;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::header::HeaderValue;
-use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::connectors::string_template;
 
 #[derive(Clone)]

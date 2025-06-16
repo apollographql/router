@@ -31,6 +31,7 @@ use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
@@ -354,6 +355,7 @@ impl FederationSchema {
         }
     }
 
+    /// For subgraph schemas where the `@context` directive is a federation spec directive.
     pub(crate) fn context_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ContextDirective> {
@@ -407,6 +409,32 @@ impl FederationSchema {
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    /// For supergraph schemas where the `@context` directive is a "context" spec directive.
+    pub(crate) fn context_directive_applications_in_supergraph(
+        &self,
+        context_spec: &ContextSpecDefinition,
+    ) -> FallibleDirectiveIterator<ContextDirective> {
+        let directive_name_in_supergraph = context_spec.url().identity.name.clone();
+        let context_directive_referencers = self
+            .referencers()
+            .get_directive(&directive_name_in_supergraph)?;
+        let mut applications = Vec::new();
+        for type_pos in context_directive_referencers.composite_type_positions() {
+            let directive_apps =
+                type_pos.get_applied_directives(self, &directive_name_in_supergraph);
+            for app in directive_apps {
+                let arguments = context_spec.context_directive_arguments(app);
+                applications.push(arguments.map(|args| ContextDirective {
+                    // Note: `ContextDirectiveArguments` is also defined in `context_spec_definition` module.
+                    //       So, it is converted to the one defined in this module.
+                    arguments: ContextDirectiveArguments { name: args.name },
+                    target: type_pos.clone(),
+                }));
             }
         }
         Ok(applications)
@@ -1092,6 +1120,16 @@ pub(crate) struct ContextDirective<'schema> {
     arguments: ContextDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: CompositeTypeDefinitionPosition,
+}
+
+impl ContextDirective<'_> {
+    pub(crate) fn arguments(&self) -> &ContextDirectiveArguments<'_> {
+        &self.arguments
+    }
+
+    pub(crate) fn target(&self) -> &CompositeTypeDefinitionPosition {
+        &self.target
+    }
 }
 
 pub(crate) struct FromContextDirective<'schema> {
