@@ -149,7 +149,7 @@ use crate::spec::operation_limits::OperationLimits;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
-pub(crate) mod config;
+pub mod config;
 pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;

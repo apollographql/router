@@ -270,7 +270,7 @@ impl TraceIdFormat {
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
-pub(crate) enum ApolloSignatureNormalizationAlgorithm {
+pub enum ApolloSignatureNormalizationAlgorithm {
     /// Use the algorithm that matches the JavaScript-based implementation.
     Legacy,
     /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some

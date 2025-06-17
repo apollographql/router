@@ -320,42 +320,20 @@ impl UsageReporting {
 /// A list of fields that will be resolved for a given type
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ReferencedFieldsForType {
+pub struct ReferencedFieldsForType {
     /// names of the fields queried
     #[serde(default)]
-    pub(crate) field_names: Vec<String>,
+    pub field_names: Vec<String>,
     /// whether the field is an interface
     #[serde(default)]
-    pub(crate) is_interface: bool,
-}
-
-pub fn generate_usage_reporting_from_operation(
-    operation: &ExecutableDocument,
-    operation_name: &Option<String>,
-    schema: &Valid<Schema>,
-) -> UsageReporting {
-    let mut generator = UsageGenerator {
-        signature_doc: operation,
-        references_doc: operation,
-        operation_name,
-        schema,
-        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
-        variables: &Object::new(),
-        fragments_map: HashMap::new(),
-        fields_by_type: HashMap::new(),
-        fields_by_interface: HashMap::new(),
-        enums_by_name: HashMap::new(),
-        input_field_references: HashMap::new(),
-        fragment_spread_set: HashSet::new(),
-    };
-    generator.generate_usage_reporting()
+    pub is_interface: bool,
 }
 
 /// Generate a UsageReporting containing the data required to generate a stats_report_key (either a normalized version of
 /// the operation signature or an error key or a PQ ID) and referenced fields of an operation. The document used to
 /// generate the signature and for the references can be different to handle cases where the operation has been filtered,
 /// but we want to keep the same signature.
-pub(crate) fn generate_usage_reporting(
+pub fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
@@ -510,7 +488,7 @@ fn extract_enums_from_selection_set(
     }
 }
 
-pub struct UsageGenerator<'a> {
+struct UsageGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,

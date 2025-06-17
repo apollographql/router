@@ -69,7 +69,7 @@ pub mod layers;
 pub(crate) mod logging;
 pub(crate) mod notification;
 mod orbiter;
-mod plugins;
+pub mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
 mod router;
