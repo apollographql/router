@@ -22,9 +22,11 @@ The router currently sends the full URI in `http.route`, which can be high cardi
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7405
 
-### Add graphql.operation.name label to apollo.router.opened.subscriptions counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+## 🔍 Debuggability
 
-`apollo.router.opened.subscriptions` metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
+### Add `graphql.operation.name` attribute to `apollo.router.opened.subscriptions` counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+
+The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of subscriptions which are still open.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
 
