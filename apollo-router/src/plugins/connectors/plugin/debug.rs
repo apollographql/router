@@ -5,7 +5,6 @@ use apollo_federation::connectors::HeaderSource;
 use apollo_federation::connectors::HttpJsonTransport;
 use apollo_federation::connectors::OriginatingDirective;
 use apollo_federation::connectors::ProblemLocation;
-use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -56,7 +55,7 @@ impl ConnectorContext {
         &mut self,
         request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
-        body: &Bytes,
+        body: &[u8],
         error_settings: &ConnectorErrorsSettings,
         problems: Vec<(ProblemLocation, Problem)>,
     ) {
