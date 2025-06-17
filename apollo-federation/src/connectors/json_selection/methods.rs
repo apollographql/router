@@ -38,6 +38,7 @@ pub(super) enum ArrowMethod {
     JoinNotNull,
     Filter,
     Gte,
+    Lte,
     Eq,
 
     // Future methods:
@@ -153,6 +154,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
+            Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
 
             // Future methods:
@@ -210,6 +212,7 @@ impl ArrowMethod {
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
+            "lte" => Some(Self::Lte),
             _ => None,
         };
 
@@ -237,6 +240,7 @@ impl ArrowMethod {
                 | Self::JoinNotNull
                 | Self::Filter
                 | Self::Gte
+                | Self::Lte
                 | Self::Eq
         )
     }
