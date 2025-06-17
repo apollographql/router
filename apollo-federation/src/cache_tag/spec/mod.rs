@@ -18,13 +18,13 @@ use crate::schema::FederationSchema;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
 
-/// The known versions of the cacheKey spec
+/// The known versions of the cacheTag spec
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, EnumIter)]
-pub enum CacheKeySpec {
+pub enum CacheTagSpec {
     V0_1,
 }
 
-impl PartialOrd for CacheKeySpec {
+impl PartialOrd for CacheTagSpec {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         let self_version: Version = (*self).into();
         let other_version: Version = (*other).into();
@@ -32,14 +32,14 @@ impl PartialOrd for CacheKeySpec {
     }
 }
 
-impl CacheKeySpec {
+impl CacheTagSpec {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",
         }
     }
 
-    const IDENTITY_NAME: Name = name!("cacheKey");
+    const IDENTITY_NAME: Name = name!("cacheTag");
 
     pub(crate) fn from_directive(directive: &Directive) -> Result<Option<Self>, FederationError> {
         let Some(url) = directive
@@ -107,7 +107,7 @@ impl CacheKeySpec {
                 .into(),
                 Argument {
                     name: name!("name"),
-                    value: Value::String("cacheKey".to_string()).into(),
+                    value: Value::String("cacheTag".to_string()).into(),
                 }
                 .into(),
                 Argument {
@@ -124,28 +124,28 @@ impl CacheKeySpec {
     }
 }
 
-impl TryFrom<&Version> for CacheKeySpec {
+impl TryFrom<&Version> for CacheTagSpec {
     type Error = SingleFederationError;
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
             _ => Err(SingleFederationError::UnknownLinkVersion {
-                message: format!("Unknown cacheKey version: {version}"),
+                message: format!("Unknown cacheTag version: {version}"),
             }),
         }
     }
 }
 
-impl Display for CacheKeySpec {
+impl Display for CacheTagSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl From<CacheKeySpec> for Version {
-    fn from(spec: CacheKeySpec) -> Self {
+impl From<CacheTagSpec> for Version {
+    fn from(spec: CacheTagSpec) -> Self {
         match spec {
-            CacheKeySpec::V0_1 => Version { major: 0, minor: 1 },
+            CacheTagSpec::V0_1 => Version { major: 0, minor: 1 },
         }
     }
 }

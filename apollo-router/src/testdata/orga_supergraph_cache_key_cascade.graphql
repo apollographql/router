@@ -2,13 +2,13 @@ schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-    @link(url: "https://specs.apollo.dev/cacheKey/v0.1", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/cacheTag/v0.1", for: EXECUTION)
     @join__directive(
         graphs: [USER, ORGA]
         name: "link"
         args: {
-            url: "https://specs.apollo.dev/cacheKey/v0.1"
-            import: ["@cacheKey"]
+            url: "https://specs.apollo.dev/cacheTag/v0.1"
+            import: ["@cacheTag"]
         }
     ) {
     query: Query
@@ -74,12 +74,12 @@ type Query @join__type(graph: USER) @join__type(graph: ORGA) {
         @join__field(graph: USER)
         @join__directive(
             graphs: [USER]
-            name: "cacheKey"
+            name: "cacheTag"
             args: { format: "currentUser" }
         )
         @join__directive(
             graphs: [USER]
-            name: "cacheKey"
+            name: "cacheTag"
             args: { format: "currentUser-cascade", cascade: true }
         )
     otherUser: User @join__field(graph: USER)
@@ -95,12 +95,12 @@ type User
     @join__type(graph: USER, key: "id")
     @join__directive(
         graphs: [USER, ORGA]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "user" }
     )
     @join__directive(
         graphs: [USER, ORGA]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "user-{$key.id}" }
     ) {
     id: ID!
@@ -115,12 +115,12 @@ type Organization
     @join__type(graph: USER, key: "id")
     @join__directive(
         graphs: [USER, ORGA]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "organization" }
     )
     @join__directive(
         graphs: [USER, ORGA]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "organization-{$key.id}" }
     ) {
     id: ID

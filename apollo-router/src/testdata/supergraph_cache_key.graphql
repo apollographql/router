@@ -1,13 +1,13 @@
 schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-    @link(url: "https://specs.apollo.dev/cacheKey/v0.1", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/cacheTag/v0.1", for: EXECUTION)
     @join__directive(
         graphs: [PRODUCTS, REVIEWS, INVENTORY, ACCOUNTS]
         name: "link"
         args: {
-            url: "https://specs.apollo.dev/cacheKey/v0.1"
-            import: ["@cacheKey"]
+            url: "https://specs.apollo.dev/cacheTag/v0.1"
+            import: ["@cacheTag"]
         }
     ) {
     query: Query
@@ -97,12 +97,12 @@ type Product
     @join__type(graph: REVIEWS, key: "upc")
     @join__directive(
         graphs: [PRODUCTS, INVENTORY, REVIEWS]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "product-{$key.upc}" }
     )
     @join__directive(
         graphs: [PRODUCTS, INVENTORY, REVIEWS]
-        name: "cacheKey"
+        name: "cacheTag"
         args: { format: "product" }
     ) {
     upc: String!
@@ -129,12 +129,12 @@ type Query
         @join__field(graph: PRODUCTS)
         @join__directive(
             graphs: [PRODUCTS]
-            name: "cacheKey"
+            name: "cacheTag"
             args: { format: "topProducts" }
         )
         @join__directive(
             graphs: [PRODUCTS]
-            name: "cacheKey"
+            name: "cacheTag"
             args: { format: "topProducts-{$args.first}" }
         )
 }

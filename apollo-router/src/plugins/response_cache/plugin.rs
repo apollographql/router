@@ -65,6 +65,7 @@ use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
 pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
+pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
@@ -1066,6 +1067,10 @@ fn get_invalidation_root_keys_from_schema(
                 .directives
                 .get_all("join__directive")
                 .filter_map(|dir| {
+                    let name = dir.argument_by_name("name", &supergraph_schema).ok()?;
+                    if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+                        return None;
+                    }
                     let is_current_subgraph =
                         dir.argument_by_name("graphs", &supergraph_schema)
                             .ok()
@@ -1647,7 +1652,7 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-/// Get invalidation keys from @cacheKey directives in supergraph schema for entities
+/// Get invalidation keys from @cacheTag directives in supergraph schema for entities
 fn get_invalidation_entity_keys_from_schema(
     supergraph_schema: &Arc<Valid<Schema>>,
     subgraph_name: &str,
@@ -1665,6 +1670,10 @@ fn get_invalidation_entity_keys_from_schema(
         .directives
         .get_all("join__directive")
         .filter_map(|dir| {
+            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
+            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+                return None;
+            }
             let is_current_subgraph = dir
                 .argument_by_name("graphs", supergraph_schema)
                 .ok()

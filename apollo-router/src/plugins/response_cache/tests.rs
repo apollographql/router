@@ -1473,7 +1473,7 @@ async fn invalidate() {
 
     // now we invalidate data
     let res = invalidation
-        .invalidate(vec![InvalidationRequest::CacheKey {
+        .invalidate(vec![InvalidationRequest::CacheTag {
             subgraphs: vec!["orga".to_string()].into_iter().collect(),
             cache_key: String::from("organization-1"),
         }])
@@ -1742,7 +1742,7 @@ async fn invalidate_cascade() {
 
     // now we invalidate data
     let res = invalidation
-        .invalidate(vec![InvalidationRequest::CacheKey {
+        .invalidate(vec![InvalidationRequest::CacheTag {
             subgraphs: vec!["orga".to_string(), "user".to_string()]
                 .into_iter()
                 .collect(),

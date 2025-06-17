@@ -113,7 +113,7 @@ impl Invalidation {
                 );
                 count
             }
-            InvalidationRequest::CacheKey {
+            InvalidationRequest::CacheTag {
                 subgraphs,
                 cache_key,
             } => {
@@ -160,7 +160,7 @@ impl Invalidation {
                         None => continue,
                     }
                 }
-                InvalidationRequest::CacheKey { subgraphs, .. } => {
+                InvalidationRequest::CacheTag { subgraphs, .. } => {
                     let mut storages = Vec::new();
                     for subgraph in subgraphs {
                         match self.storage.get(subgraph) {
@@ -230,7 +230,7 @@ pub(crate) enum InvalidationRequest {
         r#type: String,
         key: serde_json_bytes::Map<ByteString, Value>,
     },
-    CacheKey {
+    CacheTag {
         subgraphs: HashSet<String>,
         cache_key: String,
     },
@@ -242,7 +242,7 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { subgraph }
             | InvalidationRequest::Type { subgraph, .. }
             | InvalidationRequest::Entity { subgraph, .. } => vec![subgraph.clone()],
-            InvalidationRequest::CacheKey { subgraphs, .. } => {
+            InvalidationRequest::CacheTag { subgraphs, .. } => {
                 subgraphs.clone().into_iter().collect()
             }
         }
@@ -266,7 +266,7 @@ impl InvalidationRequest {
                     "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
                 )
             }
-            InvalidationRequest::CacheKey { cache_key, .. } => cache_key.clone(),
+            InvalidationRequest::CacheTag { cache_key, .. } => cache_key.clone(),
         }
     }
 
@@ -275,7 +275,7 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
             InvalidationRequest::Entity { .. } => "entity",
-            InvalidationRequest::CacheKey { .. } => "cache_key",
+            InvalidationRequest::CacheTag { .. } => "cache_tag",
         }
     }
 }

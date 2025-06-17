@@ -10,8 +10,8 @@ use apollo_compiler::name;
 use inputs::copy_input_types;
 use multimap::MultiMap;
 
-use crate::cache_key::spec::CacheKeySpec;
-use crate::cache_key::spec::schema::CACHE_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::cache_tag::spec::CacheTagSpec;
+use crate::cache_tag::spec::schema::CACHE_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
@@ -273,14 +273,14 @@ pub(super) fn carryover_directives(
         }
     }
 
-    // @cacheKey
+    // @cacheTag
     if let Some(link) = metadata.for_identity(&Identity {
         domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: CACHE_KEY_DIRECTIVE_NAME_IN_SPEC,
+        name: CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let mut insert_link = false;
 
-        let directive_name = link.directive_name_in_schema(&CACHE_KEY_DIRECTIVE_NAME_IN_SPEC);
+        let directive_name = link.directive_name_in_schema(&CACHE_TAG_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
             .and_then(|referencers| {
@@ -298,7 +298,7 @@ pub(super) fn carryover_directives(
     }
 
     SchemaDefinitionPosition
-        .insert_directive(to, CacheKeySpec::V0_1.join_directive_application().into())?;
+        .insert_directive(to, CacheTagSpec::V0_1.join_directive_application().into())?;
 
     // @join__field(contextArguments: ...)
     // This is a special case where we need to copy a specific argument from
