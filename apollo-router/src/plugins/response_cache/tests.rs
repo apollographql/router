@@ -74,7 +74,7 @@ async fn insert() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_insert"),
+        namespace: String::from("test_insert_simple"),
     })
     .await
     .unwrap();
