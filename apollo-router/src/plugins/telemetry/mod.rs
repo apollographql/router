@@ -112,6 +112,10 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::error_counter::count_execution_errors;
+use crate::plugins::telemetry::error_counter::count_router_errors;
+use crate::plugins::telemetry::error_counter::count_subgraph_errors;
+use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -132,6 +136,7 @@ use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -153,6 +158,7 @@ pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod error_counter;
 mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
@@ -527,7 +533,7 @@ impl PluginPrivate for Telemetry {
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let response: Result<router::Response, BoxError> = fut.await;
+                        let mut response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
@@ -604,6 +610,12 @@ impl PluginPrivate for Telemetry {
                             );
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
+                        }
+
+                        // TODO should I just move this to the above ok? Or maybe we want to count even if we have an Err?
+                        // TODO or move to an and_then() like execution service?
+                        if let Ok(resp) = response {
+                            response = Ok(count_router_errors(resp, &config.apollo.errors).await);
                         }
 
                         response
@@ -743,6 +755,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+
                         add_query_attributes(&ctx, &mut custom_attributes);
                         add_cost_attributes(&ctx, &mut custom_attributes);
                         span.set_span_dyn_attributes(custom_attributes);
@@ -774,6 +787,13 @@ impl PluginPrivate for Telemetry {
                                 custom_graphql_instruments.on_error(err, &ctx);
                             }
                         }
+
+                        // TODO should I just move this to the above ok? Or maybe we want to count even if we have an Err?
+                        // TODO or move to an and_then() like execution service?
+                        if let Ok(resp) = result {
+                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
+                        }
+
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -800,6 +820,9 @@ impl PluginPrivate for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let config = self.config.clone();
+        let config_map_res_first = config.clone();
+
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let operation_kind = req.query_plan.query.operation.kind();
@@ -817,6 +840,14 @@ impl PluginPrivate for Telemetry {
                         "otel.kind" = "INTERNAL",
                         "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
                     ),
+                }
+            })
+            .and_then(move |resp: ExecutionResponse| {
+                // TODO make sure this will still add to the context
+                let config = config_map_res_first.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
                 }
             })
             .service(service)
@@ -891,7 +922,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let result: Result<SubgraphResponse, BoxError> = f.await;
+                        let mut result: Result<SubgraphResponse, BoxError> = f.await;
 
                         match &result {
                             Ok(resp) => {
@@ -925,6 +956,12 @@ impl PluginPrivate for Telemetry {
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }
+                        }
+
+                        // TODO merge into above match? Move into its own and_then()?
+                        if let Ok(resp) = result {
+                            // TODO handle Err() case?
+                            result = Ok(count_subgraph_errors(resp, &conf.apollo.errors).await);
                         }
 
                         result
@@ -2004,10 +2041,14 @@ mod tests {
     use axum_extra::headers::HeaderName;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::Method;
     use http::StatusCode;
+    use http::Uri;
     use http::header::CONTENT_TYPE;
     use insta::assert_snapshot;
     use itertools::Itertools;
+    use mime::APPLICATION_JSON;
+    use opentelemetry::KeyValue;
     use opentelemetry::propagation::Injector;
     use opentelemetry::propagation::TextMapPropagator;
     use opentelemetry::trace::SpanContext;
@@ -2023,10 +2064,15 @@ mod tests {
     use tower::ServiceExt;
     use tower::util::BoxService;
 
+    use super::CLIENT_NAME;
+    use super::CLIENT_VERSION;
     use super::CustomTraceIdPropagator;
     use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
+    use crate::Context;
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
@@ -2034,6 +2080,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
+    use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::PluginInit;
@@ -2047,6 +2094,8 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
+    use crate::plugins::test::PluginTestHarness;
+    use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2054,6 +2103,8 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
+    use crate::services::supergraph;
+    use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
@@ -3323,6 +3374,164 @@ mod tests {
                 "cost.estimated",
                 10.0,
                 "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_operation_errors_emitted_when_config_is_enabled() {
+        async {
+            let query = "query operationName { __typename }";
+            let operation_name = "operationName";
+            let operation_type = "query";
+            let operation_id = "opId";
+            let client_name = "client";
+            let client_version = "version";
+
+            let config = json!({
+                "telemetry":{
+                    "apollo": {
+                        "errors": {
+                            "preview_extended_error_metrics": "enabled",
+                            "subgraph": {
+                                "subgraphs": {
+                                    "myIgnoredSubgraph": {
+                                        "send": false,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .to_string();
+
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(&config)
+                .build()
+                .await
+                .expect("test harness");
+
+            let router_service = test_harness.supergraph_service(|req| async {
+                let example_response = graphql::Response::builder()
+                        .data(json!({"data": null}))
+                        .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
+                        "message": "Cannot return null for non-nullable field SomeType.someField",
+                        "path": Path::from("someType/someField")
+                    }]))
+                        .errors(vec![
+                            graphql::Error::builder()
+                                .message("some error")
+                                .extension_code("SOME_ERROR_CODE")
+                                .extension("service", "mySubgraph")
+                                .path(Path::from("obj/field"))
+                                .build(),
+                            graphql::Error::builder()
+                                .message("some other error")
+                                .extension_code("SOME_OTHER_ERROR_CODE")
+                                .extension("service", "myOtherSubgraph")
+                                .path(Path::from("obj/arr/@/firstElementField"))
+                                .build(),
+                            graphql::Error::builder()
+                                .message("some ignored error")
+                                .extension_code("SOME_IGNORED_ERROR_CODE")
+                                .extension("service", "myIgnoredSubgraph")
+                                .path(Path::from("obj/arr/@/firstElementField"))
+                                .build(),
+                        ])
+                        .build();
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    req.context,
+                ))
+            });
+
+            let context = Context::new();
+            context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
+            context.insert_json_value(OPERATION_NAME, operation_name.into());
+            context.insert_json_value(OPERATION_KIND, operation_type.into());
+            context.insert_json_value(CLIENT_NAME, client_name.into());
+            context.insert_json_value(CLIENT_VERSION, client_version.into());
+
+            router_service
+                .call(
+                    supergraph::Request::builder()
+                        .query(query)
+                        .operation_name(operation_name)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .uri(Uri::from_static("/"))
+                        .method(Method::POST)
+                        .context(context)
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/field"),
+                    KeyValue::new("apollo.router.error.service", "mySubgraph"),
+                ]
+            );
+            assert_counter!(
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_OTHER_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                    KeyValue::new("apollo.router.error.service", "myOtherSubgraph"),
+                ]
+            );
+            assert_counter!(
+                "apollo.router.operations.error",
+                1,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new(
+                        "graphql.error.extensions.code",
+                        "RESPONSE_VALIDATION_FAILED"
+                    ),
+                    KeyValue::new("graphql.error.extensions.severity", "WARN"),
+                    KeyValue::new("graphql.error.path", "/someType/someField"),
+                    KeyValue::new("apollo.router.error.service", ""),
+                ]
+            );
+            assert_counter_not_exists!(
+                "apollo.router.operations.error",
+                u64,
+                &[
+                    KeyValue::new("apollo.operation.id", operation_id),
+                    KeyValue::new("graphql.operation.name", operation_name),
+                    KeyValue::new("graphql.operation.type", operation_type),
+                    KeyValue::new("apollo.client.name", client_name),
+                    KeyValue::new("apollo.client.version", client_version),
+                    KeyValue::new("graphql.error.extensions.code", "SOME_IGNORED_ERROR_CODE"),
+                    KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                    KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                    KeyValue::new("apollo.router.error.service", "myIgnoredSubgraph"),
+                ]
             );
         }
         .with_metrics()
