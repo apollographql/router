@@ -180,7 +180,6 @@ impl Error {
             .map_err(|err| MalformedResponseError {
                 reason: format!("invalid `path` within error: {}", err),
             })?;
-        // TODO confirm camelcase key
         let apollo_id: Option<Uuid> = extract_key_value_from_object!(
             object,
             "apolloId",
@@ -251,11 +250,17 @@ impl Error {
     }
 
     #[cfg(test)]
-    /// Null out the ID for comparing errors in tests where you cannot extract the randomly
-    /// generated Uuid
+    /// Mutates the [`self.apollo_id`] to `Uuid::nil()` for comparing errors in tests where you
+    /// cannot extract the randomly generated Uuid
     pub fn with_null_id(mut self) -> Self {
-        self.apollo_id = Uuid::nil();
+        self.set_apollo_id(Uuid::nil());
         self
+    }
+
+    #[cfg(test)]
+    /// Updates [`self.apollo_id`] to `id`.
+    pub fn set_apollo_id(&mut self, id: Uuid) {
+        self.apollo_id = id;
     }
 }
 

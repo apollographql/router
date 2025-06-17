@@ -54,7 +54,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 use tower::service_fn;
-
+use uuid::Uuid;
 use super::*;
 use crate::ApolloRouterError;
 use crate::Configuration;
@@ -1073,8 +1073,8 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
     }
     .to_response();
     // Overwrite error IDs to avoid random Uuid mismatch
-    response.errors[0] = response.errors[0].clone().with_null_id();
-    expected_response.errors[0] = expected_response.errors[0].clone().with_null_id();
+    response.errors[0].set_apollo_id(Uuid::nil());
+    expected_response.errors[0].set_apollo_id(Uuid::nil());
 
     assert_eq!(response, expected_response);
     server.shutdown().await
