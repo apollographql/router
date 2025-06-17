@@ -28,7 +28,14 @@ fn ne_method(
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            let matches = value_opt.is_some_and(|value| &value != data);
+            let matches = value_opt.is_some_and(|value| match (data, &value) {
+                // Number comparisons: Always convert to float so 1 == 1.0
+                (JSON::Number(left), JSON::Number(right)) => {
+                    left.as_f64().unwrap_or(0.0) != right.as_f64().unwrap_or(0.0)
+                }
+                // Everything else
+                _ => &value != data,
+            });
 
             return (Some(JSON::Bool(matches)), arg_errors);
         }
@@ -93,6 +100,42 @@ mod tests {
             (
                 Some(json!({
                     "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_false_when_applied_to_numbers_of_different_types() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne(1)
+                "#
+            )
+            .apply_to(&json!({ "value": 1.0 })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_false_when_applied_to_negative_numbers_of_different_types() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne(-1)
+                "#
+            )
+            .apply_to(&json!({ "value": -1.0 })),
+            (
+                Some(json!({
+                    "result": false,
                 })),
                 vec![],
             ),
