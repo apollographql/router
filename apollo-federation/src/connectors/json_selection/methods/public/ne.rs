@@ -13,7 +13,7 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(NeMethod, ne_method, ne_shape);
-/// Returns true if argument is equal to the applied to value or false if they are not equal.
+/// Returns true if argument is not equal to the applied to value or false if they are equal.
 /// Simple examples:
 ///
 /// $(123)->ne(123)       results in true
