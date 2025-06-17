@@ -28,8 +28,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
-const SCHEMA_CASCADE: &str =
-    include_str!("../../testdata/orga_supergraph_cache_key_cascade.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
