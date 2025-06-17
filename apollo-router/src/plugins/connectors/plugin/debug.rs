@@ -37,12 +37,12 @@ impl ConnectorContext {
         if let Some(request) = request {
             self.items.push(ConnectorContextItem {
                 request: *request,
-                response: ConnectorDebugHttpResponse::from((
+                response: ConnectorDebugHttpResponse::new(
                     parts,
                     json_body,
                     selection_data,
                     error_settings,
-                )),
+                ),
                 problems,
             });
         } else {
@@ -191,23 +191,13 @@ pub(crate) struct ConnectorDebugHttpRequest {
     connect_headers: Option<Vec<(String, String)>>,
 }
 
-impl
-    From<(
-        &http::Request<String>,
-        String,
-        Option<&serde_json_bytes::Value>,
-        Option<SelectionData>,
-        &HttpJsonTransport,
-    )> for ConnectorDebugHttpRequest
-{
-    fn from(
-        (req, kind, json_body, selection_data, transport): (
-            &http::Request<String>,
-            String,
-            Option<&serde_json_bytes::Value>,
-            Option<SelectionData>,
-            &HttpJsonTransport,
-        ),
+impl ConnectorDebugHttpRequest {
+    pub(crate) fn new(
+        req: &http::Request<String>,
+        kind: String,
+        json_body: Option<&serde_json_bytes::Value>,
+        selection_data: Option<SelectionData>,
+        transport: &HttpJsonTransport,
     ) -> Self {
         let headers = transport.headers.iter().fold(
             HashMap::new(),
@@ -277,21 +267,12 @@ struct ConnectorDebugHttpResponse {
     errors: Option<ConnectorDebugErrors>,
 }
 
-impl
-    From<(
-        &http::response::Parts,
-        &serde_json_bytes::Value,
-        Option<SelectionData>,
-        &ConnectorErrorsSettings,
-    )> for ConnectorDebugHttpResponse
-{
-    fn from(
-        (parts, json_body, selection_data, error_settings): (
-            &http::response::Parts,
-            &serde_json_bytes::Value,
-            Option<SelectionData>,
-            &ConnectorErrorsSettings,
-        ),
+impl ConnectorDebugHttpResponse {
+    pub(crate) fn new(
+        parts: &http::response::Parts,
+        json_body: &serde_json_bytes::Value,
+        selection_data: Option<SelectionData>,
+        error_settings: &ConnectorErrorsSettings,
     ) -> Self {
         ConnectorDebugHttpResponse {
             status: parts.status.as_u16(),

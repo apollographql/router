@@ -105,7 +105,7 @@ pub(crate) fn make_request(
 
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            Box::new(ConnectorDebugHttpRequest::from((
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -117,9 +117,9 @@ pub(crate) fn make_request(
                     result: json_body,
                 }),
                 transport,
-            )))
+            ))
         } else {
-            Box::new(ConnectorDebugHttpRequest::from((
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -129,7 +129,7 @@ pub(crate) fn make_request(
                     result: json_body.clone(),
                 }),
                 transport,
-            )))
+            ))
         }
     });
 
