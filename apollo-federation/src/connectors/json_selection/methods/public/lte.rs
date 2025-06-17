@@ -28,53 +28,54 @@ fn lte_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
-        let mut apply_to_errors = arg_errors;
-        // We have to do this because Value doesn't implement PartialOrd
-        let matches = value_opt.is_some_and(|value| {
-            match (data, &value) {
-                // Number comparisons
-                (JSON::Number(left), JSON::Number(right)) => {
-                    left.as_f64().unwrap_or(0.0) <= right.as_f64().unwrap_or(0.0)
-                }
-                // String comparisons
-                (JSON::String(left), JSON::String(right)) => left <= right,
-                // Boolean comparisons
-                (JSON::Bool(left), JSON::Bool(right)) => left <= right,
-                // Null comparisons (null == null)
-                (JSON::Null, JSON::Null) => true,
-                // Mixed types or uncomparable types (including arrays and objects) return false
-                _ => {
-                    apply_to_errors.push(ApplyToError::new(
-                        format!(
-                            "Method ->{} can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {} <= {}",
-                            method_name.as_ref(),
-                            data,
-                            value
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    ));
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires exactly one argument",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    };
 
-                    false
-                }
+    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+    let mut apply_to_errors = arg_errors;
+    // We have to do this because Value doesn't implement PartialOrd
+    let matches = value_opt.is_some_and(|value| {
+        match (data, &value) {
+            // Number comparisons
+            (JSON::Number(left), JSON::Number(right)) => {
+                left.as_f64().unwrap_or(0.0) <= right.as_f64().unwrap_or(0.0)
             }
-        });
+            // String comparisons
+            (JSON::String(left), JSON::String(right)) => left <= right,
+            // Boolean comparisons
+            (JSON::Bool(left), JSON::Bool(right)) => left <= right,
+            // Null comparisons (null == null)
+            (JSON::Null, JSON::Null) => true,
+            // Mixed types or uncomparable types (including arrays and objects) return false
+            _ => {
+                apply_to_errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{} can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {} <= {}",
+                        method_name.as_ref(),
+                        data,
+                        value
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ));
 
-        return (Some(JSON::Bool(matches)), apply_to_errors);
-    }
-    (
-        None,
-        vec![ApplyToError::new(
-            format!(
-                "Method ->{} requires exactly one argument",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        )],
-    )
+                false
+            }
+        }
+    });
+
+    (Some(JSON::Bool(matches)), apply_to_errors)
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
