@@ -187,7 +187,7 @@ where
         let _timer = Timer::new(|duration| {
             f64_histogram!(
                 "apollo.router.query_planning.warmup.duration",
-                "Time spent warming up the query planner queries",
+                "Time spent warming up the query planner queries in seconds",
                 duration.as_secs_f64()
             );
         });
