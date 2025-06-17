@@ -3243,12 +3243,11 @@ mod tests {
             body,
             &parts,
         );
-        // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual
+        // Overwrite error ID to avoid random Uuid mismatch
+        actual
             .errors
-            .into_iter()
-            .map(|e| e.clone().with_null_id())
-            .collect();
+            .iter_mut()
+            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .error(
@@ -3317,12 +3316,11 @@ mod tests {
             body,
             &parts,
         );
-        // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual
+        // Overwrite error ID to avoid random Uuid mismatch
+        actual
             .errors
-            .into_iter()
-            .map(|e| e.clone().with_null_id())
-            .collect();
+            .iter_mut()
+            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
@@ -3357,12 +3355,11 @@ mod tests {
             body,
             &parts,
         );
-        // Null out error IDs so we can avoid random Uuid mismatch
-        actual.errors = actual
+        // Overwrite error ID to avoid random Uuid mismatch
+        actual
             .errors
-            .into_iter()
-            .map(|e| e.clone().with_null_id())
-            .collect();
+            .iter_mut()
+            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())

@@ -767,6 +767,7 @@ mod tests {
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use uuid::Uuid;
 
     use crate::Context;
     use crate::graphql;
@@ -1379,12 +1380,11 @@ mod tests {
         ])
         .unwrap();
 
-        // Take ownership of the original errors then null out error IDs so we can compare without
-        // randomness of Uuid::new_v4()
+        // Overwrite error IDs to avoid random Uuid mismatch
         let body = res.response.body_mut();
-        let old_errors = std::mem::take(&mut body.errors);
-        let new_errors = old_errors.into_iter().map(|e| e.with_null_id()).collect();
-        body.errors = new_errors;
+        body.errors
+            .iter_mut()
+            .for_each(|error| error.set_apollo_id(Uuid::nil()));
 
         assert_debug_snapshot!(res, @r#"
         Response {

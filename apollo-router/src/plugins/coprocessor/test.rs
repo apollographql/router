@@ -977,8 +977,8 @@ mod tests {
                    "extensions": {
                       "code": "ERROR"
                    },
-                    // Override id to avoid comparing random value
-                   "apolloId": actual_response.errors.first().unwrap().apollo_id()
+                    // Overwrite ID to avoid random Uuid mismatch
+                   "apolloId": actual_response.errors[0].apollo_id()
                 }]
             }))
             .unwrap(),

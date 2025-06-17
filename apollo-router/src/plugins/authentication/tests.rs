@@ -233,8 +233,8 @@ async fn it_rejects_when_there_is_no_auth_header() {
     let expected_error = graphql::Error::builder()
         .message("The request is not authenticated")
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -274,8 +274,8 @@ async fn it_rejects_when_auth_prefix_is_missing() {
             http::header::AUTHORIZATION,
         ))
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -315,8 +315,8 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
             http::header::AUTHORIZATION,
         ))
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -355,8 +355,8 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
             "'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: InvalidToken"
         ))
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -396,8 +396,8 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     let expected_error = graphql::Error::builder()
         .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -437,8 +437,8 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     let expected_error = graphql::Error::builder()
         .message("Cannot decode JWT: InvalidSignature")
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -787,8 +787,8 @@ async fn it_inserts_failure_jwt_status_into_context() {
     let expected_error = graphql::Error::builder()
         .message("Cannot decode JWT: InvalidSignature")
         .extension_code("AUTH_ERROR")
-        // Overwrite expected id with actual id
-        .apollo_id(response.errors.first().unwrap().apollo_id())
+        // Overwrite ID to avoid random Uuid mismatch
+        .apollo_id(response.errors[0].apollo_id())
         .build();
 
     assert_eq!(response.errors, vec![expected_error]);
@@ -1295,8 +1295,8 @@ async fn issuer_check() {
         .errors(vec![graphql::Error::builder()
             .extension_code("AUTH_ERROR")
             .message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'")
-            // Overwrite expected id with actual id
-            .apollo_id(response.errors.first().unwrap().apollo_id())
+            // Overwrite ID to avoid random Uuid mismatch
+            .apollo_id(response.errors[0].apollo_id())
             .build()
         ]).build());
         }
@@ -1341,8 +1341,8 @@ async fn issuer_check() {
             .errors(vec![graphql::Error::builder()
                 .extension_code("AUTH_ERROR")
                 .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
-                // Overwrite expected id with actual id
-                .apollo_id(response.errors.first().unwrap().apollo_id())
+                // Overwrite ID to avoid random Uuid mismatch
+                .apollo_id(response.errors[0].apollo_id())
                 .build()]).build());
         }
         ControlFlow::Continue(_) => {
@@ -1531,8 +1531,8 @@ async fn audience_check() {
                     graphql::Error::builder()
                         .extension_code("AUTH_ERROR")
                         .message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected")
-                        // Overwrite expected id with actual id
-                        .apollo_id(response.errors.first().unwrap().apollo_id())
+                        // Overwrite ID to avoid random Uuid mismatch
+                        .apollo_id(response.errors[0].apollo_id())
                         .build()
                 ]).build());
         }

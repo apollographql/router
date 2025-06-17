@@ -338,7 +338,6 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        let actual_error_apollo_id = response.clone().errors.first().unwrap().apollo_id;
         assert_eq!(
             response,
             Response::builder()
@@ -372,8 +371,8 @@ mod tests {
                                 .cloned()
                                 .unwrap()
                         )
-                        // Use actual's generated UUID for comparison
-                        .apollo_id(actual_error_apollo_id)
+                        // Overwrite ID to avoid random Uuid mismatch
+                        .apollo_id(response.errors[0].apollo_id)
                         .build()
                 ])
                 .extensions(
@@ -433,7 +432,6 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        let actual_error_apollo_id = response.clone().errors.first().unwrap().apollo_id;
         assert_eq!(
             response,
             Response::builder()
@@ -469,8 +467,8 @@ mod tests {
                                 .cloned()
                                 .unwrap()
                         )
-                        // Use actual's generated UUID for comparison
-                        .apollo_id(actual_error_apollo_id)
+                        // Overwrite ID to avoid random Uuid mismatch
+                        .apollo_id(response.errors[0].apollo_id)
                         .build()
                 ])
                 .extensions(
