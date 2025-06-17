@@ -2,6 +2,8 @@ mod echo;
 pub(crate) use echo::EchoMethod;
 mod entries;
 pub(crate) use entries::EntriesMethod;
+mod filter;
+pub(crate) use filter::FilterMethod;
 mod first;
 pub(crate) use first::FirstMethod;
 mod gte;
