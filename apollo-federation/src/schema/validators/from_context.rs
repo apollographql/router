@@ -1,32 +1,32 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::collections::HashSet;
 use regex::Regex;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::schema::FederationSchema;
+use crate::schema::FromContextDirective;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldArgumentDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DeniesAliases;
 use crate::schema::validators::DeniesDirectiveApplications;
 use crate::schema::validators::DenyAliases;
 use crate::schema::validators::DenyFieldsWithDirectiveApplications;
 use crate::schema::validators::SchemaFieldSetValidator;
-use crate::schema::FederationSchema;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldArgumentDefinitionPosition; 
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::FromContextDirective;
 use crate::utils::FallibleIterator;
 use crate::utils::iter_into_single_item;
 
@@ -45,11 +45,6 @@ pub(crate) fn validate_from_context_directives(
         Box::new(DenyOnDirectiveDefinition::new()),
     ];
 
-    let argument_rules: Vec<Box<dyn SchemaFieldSetValidator<FromContextDirective>>> = vec![
-        Box::new(DenyAliases::new()),
-        Box::new(DenyFieldsWithDirectiveApplications::new()),
-    ];
-
     let Ok(from_context_directives) = schema.from_context_directive_applications() else {
         // if we get an error, we probably are pre fed 2.8
         return Ok(());
@@ -63,37 +58,34 @@ pub(crate) fn validate_from_context_directives(
 
                 // Apply each validation rule
                 for rule in from_context_rules.iter() {
-                    rule.validate(&from_context.target, schema, meta, &context, &selection, errors)?;
+                    rule.validate(
+                        &from_context.target,
+                        schema,
+                        meta,
+                        &context,
+                        &selection,
+                        errors,
+                    )?;
                 }
 
                 // after RequireContextExists, we will have errored if either the context or selection is not present
                 let (Some(context), Some(selection)) = (&context, &selection) else {
                     continue;
                 };
-                
+
                 let type_name = match &from_context.target {
                     FieldArgumentDefinitionPosition::Object(position) => position.type_name.clone(),
-                    FieldArgumentDefinitionPosition::Interface(position) => position.type_name.clone(),
+                    FieldArgumentDefinitionPosition::Interface(position) => {
+                        position.type_name.clone()
+                    }
                 };
-                dbg!(&type_name);
-                let fields = FieldSet::parse(
-                    Valid::assume_valid_ref(schema.schema()),
-                    type_name.clone(),
-                    selection,
-                    "from_context.graphql",
-                )?;
-                
-                for rule in argument_rules.iter() {
-                    rule.visit(&type_name, &fields, &from_context, errors);
-                }
-
 
                 // We need the context locations from the context map for this target
                 if let Some(set_context_locations) = context_map.get(context) {
                     if let Err(validation_error) = validate_field_value(
                         context,
-                        &fields.selection_set,
-                        &from_context.target,
+                        selection,
+                        &from_context,
                         set_context_locations,
                         schema,
                         errors,
@@ -213,16 +205,16 @@ fn validate_selection_format(
     from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
 ) -> SelectionType {
-    // if it's a field, we expect there to be only one selection. 
+    // if it's a field, we expect there to be only one selection.
     // if it's an inline fragment, we expect there to be a type_condition on every selection
     let mut type_conditions = std::collections::HashSet::new();
-    
+
     for selection in selection_set.selections.iter() {
         match selection {
             Selection::Field(_) => {
                 return SelectionType::Field;
-            },
-            Selection::InlineFragment(fragment) => {                
+            }
+            Selection::InlineFragment(fragment) => {
                 if let Some(type_condition) = &fragment.type_condition {
                     type_conditions.insert(type_condition.to_string());
                 } else {
@@ -258,12 +250,18 @@ fn validate_selection_format(
 #[allow(dead_code)]
 fn validate_field_value(
     context: &str,
-    selection_set: &SelectionSet,
-    target: &FieldArgumentDefinitionPosition,
+    selection: &String,
+    applied_directive: &FromContextDirective,
     set_context_locations: &[Name],
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
+    let argument_rules: Vec<Box<dyn SchemaFieldSetValidator<FromContextDirective>>> = vec![
+        Box::new(DenyAliases::new()),
+        Box::new(DenyFieldsWithDirectiveApplications::new()),
+    ];
+
+    let target = &applied_directive.target;
     // Get the expected type from the target argument
     let expected_type = match target {
         FieldArgumentDefinitionPosition::Object(pos) => match pos.get(schema.schema()) {
@@ -276,16 +274,9 @@ fn validate_field_value(
         },
     };
 
-    // Validate the selection format
-    let selection_type = validate_selection_format(context, selection_set, target, errors);
-
-    // if there was an error, just return, we've already added it to the errorCollector
-    if selection_type == SelectionType::Error {
-        return Ok(());
-    }
-
     let mut used_type_conditions: HashSet<String> = Default::default();
 
+    let mut selection_type = SelectionType::Error;
     // For each set context location, validate the selection
     for location_name in set_context_locations {
         // Try to create a composite type position from the location name
@@ -298,6 +289,28 @@ fn validate_field_value(
             continue;
         };
 
+        dbg!(&location_name, &selection);
+        let fields = FieldSet::parse(
+            Valid::assume_valid_ref(schema.schema()),
+            location_name.clone(),
+            selection,
+            "from_context.graphql",
+        )?;
+
+        // Validate the selection format
+        selection_type = validate_selection_format(context, &fields.selection_set, target, errors);
+
+        // if there was an error, just return, we've already added it to the errorCollector
+        if selection_type == SelectionType::Error {
+            return Ok(());
+        }
+
+        // TODO: Is it necessary to perform these validations on every iteration or can we do it only once?
+        for rule in argument_rules.iter() {
+            rule.visit(&location_name, &fields, &applied_directive, errors);
+        }
+
+        let selection_set = &fields.selection_set;
         // Check for multiple selections (only when it's a field selection, not inline fragments)
         if selection_type == SelectionType::Field && selection_set.selections.len() > 1 {
             errors.push(
@@ -353,12 +366,12 @@ fn validate_field_value(
                 // For inline fragment selections, validate each fragment
                 for selection in selection_set.selections.iter() {
                     if let Selection::InlineFragment(frag) = selection {
-                        if let Some(type_condition) =
-                            &frag.type_condition
-                        {
+                        if let Some(type_condition) = &frag.type_condition {
                             used_type_conditions.insert(type_condition.as_str().to_string());
 
-                            let Some(extended_type) = schema.schema().types.get(type_condition.as_str()) else {
+                            let Some(extended_type) =
+                                schema.schema().types.get(type_condition.as_str())
+                            else {
                                 errors.push(
                                     SingleFederationError::ContextSelectionInvalid { message: format!(
                                         "Inline fragment type condition invalid. Type '{}' does not exist in schema.", type_condition.as_str()
@@ -368,7 +381,9 @@ fn validate_field_value(
                                 continue;
                             };
                             let frag_type_position = TypeDefinitionPosition::from(extended_type);
-                            if CompositeTypeDefinitionPosition::try_from(frag_type_position.clone()).is_err() {
+                            if CompositeTypeDefinitionPosition::try_from(frag_type_position.clone())
+                                .is_err()
+                            {
                                 errors.push(
                                     SingleFederationError::ContextSelectionInvalid { message: format!(
                                         "Inline fragment type condition invalid. Type '{}' is not a composite type definition.", type_condition.as_str()
@@ -377,7 +392,7 @@ fn validate_field_value(
                                 );
                                 continue;
                             }
-                            
+
                             if let Ok(Some(resolved_type)) = validate_field_value_type(
                                 &frag_type_position,
                                 &frag.selection_set,
@@ -387,7 +402,7 @@ fn validate_field_value(
                             ) {
                                 // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
                                 // This matches the TypeScript behavior
-                                if !expected_type.is_assignable_to(resolved_type) {
+                                if !expected_type.is_assignable_to(&resolved_type) {
                                     errors.push(
                                         SingleFederationError::ContextSelectionInvalid {
                                             message: format!(
@@ -600,8 +615,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
                 SingleFederationError::ContextNotSet {
                     message: format!(
                         "Context \"{}\" is used at location \"{}\" but is never set.",
-                        context,
-                        target
+                        context, target
                     ),
                 }
                 .into(),
@@ -730,7 +744,8 @@ impl DeniesAliases for FromContextDirective<'_> {
         SingleFederationError::ContextSelectionInvalid {
             message: format!(
                 "Context \"{}\" is used in \"{}\" but the selection is invalid: aliases are not allowed in the selection",
-                context.unwrap_or("unknown".to_string()), self.target.to_string()
+                context.unwrap_or("unknown".to_string()),
+                self.target.to_string()
             ),
         }
     }
@@ -742,7 +757,8 @@ impl DeniesDirectiveApplications for FromContextDirective<'_> {
         SingleFederationError::ContextSelectionInvalid {
             message: format!(
                 "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
-                context.unwrap_or("unknown".to_string()), self.target.to_string()
+                context.unwrap_or("unknown".to_string()),
+                self.target.to_string()
             ),
         }
     }
@@ -773,16 +789,21 @@ impl FromContextValidator for DenyOnDirectiveDefinition {
 }
 
 #[allow(dead_code, clippy::only_used_in_recursion)]
-fn validate_field_value_type_inner<'a>(
-    selection_set: &'a SelectionSet,
-    schema: &'a FederationSchema,
-    from_context_parent: &'a FieldArgumentDefinitionPosition,
+fn validate_field_value_type_inner(
+    selection_set: &SelectionSet,
+    schema: &FederationSchema,
+    from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
-) -> Option<&'a Type> {
+) -> Option<Type> {
     let mut types_array = Vec::new();
     
+    if selection_set.selections.is_empty() {
+        types_array.push(Type::Named(selection_set.ty.clone()));
+    }
+
     for selection in selection_set.selections.iter() {
         if let Selection::Field(field) = selection {
+            dbg!(&field);
             if let Some(nested_type) = validate_field_value_type_inner(
                 &field.selection_set,
                 schema,
@@ -803,32 +824,34 @@ fn validate_field_value_type_inner<'a>(
     if types_array.is_empty() {
         return None;
     }
-    types_array.into_iter().map(|item| Some(item)).reduce(|acc, item| {
-        match (acc, item) {
+    types_array
+        .into_iter()
+        .map(|item| Some(item))
+        .reduce(|acc, item| match (acc, item) {
             (Some(acc), Some(item)) => {
                 if acc == item {
                     Some(acc)
-                } else if acc.is_assignable_to(item) {
+                } else if acc.is_assignable_to(&item) {
                     Some(item)
-                } else if item.is_assignable_to(acc) {
+                } else if item.is_assignable_to(&acc) {
                     Some(acc)
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
-        }
-    }).flatten()
+        })
+        .flatten()
 }
 
 #[allow(dead_code)]
-fn validate_field_value_type<'a>(
+fn validate_field_value_type(
     current_type: &TypeDefinitionPosition,
-    selection_set: &'a SelectionSet,
-    schema: &'a FederationSchema,
-    from_context_parent: &'a FieldArgumentDefinitionPosition,
+    selection_set: &SelectionSet,
+    schema: &FederationSchema,
+    from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
-) -> Result<Option<&'a Type>, FederationError> {
+) -> Result<Option<Type>, FederationError> {
     if let Some(metadata) = &schema.subgraph_metadata {
         if let Some(interface_object_directive) = metadata
             .federation_spec_definition()
@@ -859,8 +882,6 @@ mod tests {
     use super::*;
     use crate::error::MultipleFederationErrors;
     use crate::error::SingleFederationError;
-    use crate::schema::ValidFederationSchema;
-    use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
     use crate::subgraph::test_utils::build_and_expand;
 
     #[test]
@@ -888,8 +909,13 @@ mod tests {
         let context_map = HashMap::new();
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type
         assert!(
@@ -938,8 +964,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on a field implementing an interface
         assert!(
@@ -982,8 +1013,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // Check for invalid context error
         assert!(
@@ -1033,8 +1069,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // We expect an error for the missing resolvable key
         let resolvable_key_error = errors
@@ -1134,7 +1175,6 @@ mod tests {
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_single_field() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1169,13 +1209,14 @@ mod tests {
             });
 
         // Test case 1: Single field selection - should return the field type
-    
+
         let fields = FieldSet::parse(
             Valid::assume_valid_ref(subgraph.schema().schema()),
             user_type.type_name().clone(),
             "id",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1190,7 +1231,11 @@ mod tests {
             result.is_some(),
             "Should return a type for single field selection"
         );
-        assert_eq!(result.unwrap().inner_named_type().as_str(), "ID", "Should return ID type");
+        assert_eq!(
+            result.unwrap().inner_named_type().as_str(),
+            "ID",
+            "Should return ID type"
+        );
         assert!(
             errors.errors.is_empty(),
             "Should not have validation errors"
@@ -1232,16 +1277,14 @@ mod tests {
                 argument_name: Name::new_unchecked("id"),
             });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
-            .expect("valid schema");
-
         // Test case: Multiple fields with same type - should return common type
         let fields = FieldSet::parse(
             Valid::assume_valid_ref(subgraph.schema().schema()),
             user_type.type_name().clone(),
             "{ id userId identifier }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1250,7 +1293,7 @@ mod tests {
             &query_contextual_arg_pos,
             &mut errors,
         )
-        .expect("valid field value type");        
+        .expect("valid field value type");
 
         assert!(
             result.is_some(),
@@ -1270,7 +1313,6 @@ mod tests {
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_inconsistent_fields() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1303,16 +1345,14 @@ mod tests {
                 argument_name: Name::new_unchecked("id"),
             });
 
-        let valid_schema = ValidFederationSchema::new_assume_valid(subgraph.schema().clone())
-            .expect("valid schema");
-
         // Test case: Multiple fields with different types - should return None
         let fields = FieldSet::parse(
             Valid::assume_valid_ref(subgraph.schema().schema()),
             user_type.type_name().clone(),
             "{ id name age }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1336,7 +1376,6 @@ mod tests {
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_nested_selection() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1379,7 +1418,8 @@ mod tests {
             user_type.type_name().clone(),
             "{ profile { id } settings { id } }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1388,7 +1428,7 @@ mod tests {
             &query_contextual_arg_pos,
             &mut errors,
         )
-        .expect("valid field value type");        
+        .expect("valid field value type");
 
         assert!(
             result.is_some(),
@@ -1453,7 +1493,8 @@ mod tests {
             user_type.type_name().clone(),
             "{ profile { id } settings { name } }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1462,7 +1503,7 @@ mod tests {
             &query_contextual_arg_pos,
             &mut errors,
         )
-        .expect("valid field value type");        
+        .expect("valid field value type");
 
         assert!(
             result.is_none(),
@@ -1477,7 +1518,6 @@ mod tests {
     #[test]
     // Port note: Relates to JS test "context selection references an @interfaceObject"
     fn test_validate_field_value_type_interface_object_error() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1515,7 +1555,8 @@ mod tests {
             user_type.type_name().clone(),
             "{ id }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1524,7 +1565,7 @@ mod tests {
             &query_contextual_arg_pos,
             &mut errors,
         )
-        .expect("valid field value type");        
+        .expect("valid field value type");
 
         // Should still return the type but generate an error
         assert!(
@@ -1547,7 +1588,6 @@ mod tests {
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_wrapped_types() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1588,7 +1628,8 @@ mod tests {
             user_type.type_name().clone(),
             "{ id idNonNull ids idsNonNull }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1617,7 +1658,6 @@ mod tests {
     #[test]
     // Port note: Tests field value type validation logic - no direct JS equivalent as this is implementation detail
     fn test_validate_field_value_type_deep_nesting() {
-        use crate::schema::position::CompositeTypeDefinitionPosition;
         use crate::schema::position::FieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1662,7 +1702,8 @@ mod tests {
             user_type.type_name().clone(),
             "{ profile { settings { id } } }",
             "from_context.graphql",
-        ).expect("valid field set");
+        )
+        .expect("valid field set");
 
         let result = validate_field_value_type(
             &user_type,
@@ -1671,7 +1712,7 @@ mod tests {
             &query_contextual_arg_pos,
             &mut errors,
         )
-        .expect("valid field value type");        
+        .expect("valid field value type");
 
         assert!(
             result.is_some(),
@@ -1713,26 +1754,16 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "userContext".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "name",
-            "from_context.graphql",
-        ).expect("valid field set");
-        
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1769,26 +1800,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "userContext".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "nonExistentField",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1834,26 +1856,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "userContext".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "name",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1899,27 +1912,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "userContext".to_string();
-        let selection = "... on Parent { name }".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "... on Parent { name }",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1960,26 +1963,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+
         let set_context_locations = vec![Name::new_unchecked("Foo"), Name::new_unchecked("Bar")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "prop",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2033,8 +2027,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // Should have error for not referencing a context (missing $ prefix)
         assert!(!errors.errors.is_empty(), "Should have validation errors");
@@ -2073,27 +2072,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let selection = "{ id prop }".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
+
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "{ id prop }",
-            "from_context.graphql",
-        ).expect("valid field set");
-        
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2141,27 +2130,16 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let selection = "{ prop @testDirective }".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "{ prop @testDirective }",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2207,27 +2185,16 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let selection = "{ alias: prop }".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Parent"),
-            "{ alias: prop }",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2278,26 +2245,16 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
         let set_context_locations = vec![Name::new_unchecked("Bar")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("Bar"),
-            "... on Foo { prop }",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2360,8 +2317,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // We expect an error for the @fromContext on an abstract type (interface)
         assert!(!errors.errors.is_empty(), "Should have validation errors");
@@ -2431,34 +2393,23 @@ mod tests {
 
             type Target @key(fields: "targetId") {
                 targetId: ID!
-                value(contextArg: String! @fromContext(field: "$context prop")): String
+                value(contextArg: String! @fromContext(field: "$context { prop }")): String
             }
         "#;
 
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let context = "context".to_string();
-        let selection = "prop".to_string();
-        let target =
-            FieldArgumentDefinitionPosition::Object(ObjectFieldArgumentDefinitionPosition {
-                type_name: Name::new_unchecked("Target"),
-                field_name: Name::new_unchecked("value"),
-                argument_name: Name::new_unchecked("contextArg"),
-            });
         let set_context_locations = vec![Name::new_unchecked("T")];
 
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(subgraph.schema().schema()),
-            Name::new_unchecked("T1"),
-            "prop",
-            "from_context.graphql",
-        ).expect("valid field set");
-                
+        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
+        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let (context, selection) = parse_context(applied_directive.arguments.field);
+
         let result = validate_field_value(
-            &context,
-            &fields.selection_set,
-            &target,
+            &context.expect("valid context"),
+            &selection.expect("valid selection"),
+            &applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2512,8 +2463,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // Should have error for context name with underscore
         assert!(
@@ -2556,8 +2512,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // Should have error for default values on @fromContext arguments
         assert!(
@@ -2601,8 +2562,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
         assert!(
@@ -2645,8 +2611,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed without any validation errors
         assert!(
@@ -2696,8 +2667,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed because both Foo and Bar have the same field type
         assert!(
@@ -2747,8 +2723,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed with inline fragments
         // TODO: Fix validation logic for inline fragments with multiple contexts
@@ -2794,8 +2775,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed with interface context
         assert!(
@@ -2842,8 +2828,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // This should succeed with interface context and type condition
         // TODO: Fix validation logic for interface context with implementing type conditions
@@ -2885,10 +2876,15 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
-
-            // This should succeed - nullability mismatch is ok if contextual value is non-nullable
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
+        dbg!(&errors);
+        // This should succeed - nullability mismatch is ok if contextual value is non-nullable
         assert!(
             errors.errors.is_empty(),
             "Should not have validation errors for nullability mismatch when contextual value is non-nullable"
@@ -2932,8 +2928,13 @@ mod tests {
         .expect("validates context directives");
 
         // Then validate fromContext directives
-        validate_from_context_directives(subgraph.schema(), subgraph.metadata(), &context_map, &mut errors)
-            .expect("validates fromContext directives");
+        validate_from_context_directives(
+            subgraph.schema(),
+            subgraph.metadata(),
+            &context_map,
+            &mut errors,
+        )
+        .expect("validates fromContext directives");
 
         // Should have error for @fromContext on directive definition argument
         // Note: This validation is not yet implemented because directive definition arguments
