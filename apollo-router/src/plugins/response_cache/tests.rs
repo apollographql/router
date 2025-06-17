@@ -72,7 +72,7 @@ async fn insert() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_insert_simple"),
+        namespace: Some(String::from("test_insert_simple")),
     })
     .await
     .unwrap();
@@ -313,7 +313,7 @@ async fn insert_with_requires() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_insert_with_requires"),
+        namespace: Some(String::from("test_insert_with_requires")),
     })
     .await
     .unwrap();
@@ -542,7 +542,7 @@ async fn insert_with_nested_field_set() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_insert_with_nested_field_set"),
+        namespace: Some(String::from("test_insert_with_nested_field_set")),
     })
     .await
     .unwrap();
@@ -783,7 +783,7 @@ async fn no_cache_control() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_no_cache_control"),
+        namespace: Some(String::from("test_no_cache_control")),
     })
     .await
     .unwrap();
@@ -935,7 +935,7 @@ async fn private() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("private"),
+        namespace: Some(String::from("private")),
     })
     .await
     .unwrap();
@@ -1174,7 +1174,7 @@ async fn no_data() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("no_data"),
+        namespace: Some(String::from("no_data")),
     })
     .await
     .unwrap();
@@ -1440,7 +1440,7 @@ async fn missing_entities() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("missing_entities"),
+        namespace: Some(String::from("missing_entities")),
     })
     .await
     .unwrap();
@@ -1610,7 +1610,7 @@ async fn invalidate() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: String::from("test_invalidate"),
+        namespace: Some(String::from("test_invalidate")),
     })
     .await
     .unwrap();
