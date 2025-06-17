@@ -180,9 +180,17 @@ impl Service<router::Request> for InvalidationService {
                                     .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
-                                    Ok(count) => router::Response::builder()
-                                        .data(json!({ "count": count }))
-                                        .status_code(StatusCode::ACCEPTED)
+                                    Ok(count) => router::Response::http_response_builder()
+                                        .response(
+                                            http::Response::builder()
+                                                .status(StatusCode::ACCEPTED)
+                                                .body(router::body::from_bytes(serde_json::to_string(
+                                                    &json!({
+                                                    "count": count
+                                                }),
+                                                )?))
+                                                .map_err(BoxError::from)?,
+                                        )
                                         .context(req.context)
                                         .build(),
                                     Err(err) => {
