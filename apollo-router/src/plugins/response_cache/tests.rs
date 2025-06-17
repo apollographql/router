@@ -15,6 +15,7 @@ use crate::TestHarness;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
+use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
@@ -172,7 +173,12 @@ async fn insert() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -236,7 +242,12 @@ async fn insert() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -394,7 +405,12 @@ async fn insert_with_requires() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -445,7 +461,12 @@ async fn insert_with_requires() {
     );
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -585,7 +606,12 @@ async fn insert_with_nested_field_set() {
     );
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -636,7 +662,12 @@ async fn insert_with_nested_field_set() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -718,7 +749,12 @@ async fn no_cache_control() {
         "no-store"
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -748,7 +784,12 @@ async fn no_cache_control() {
         "no-store"
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -856,7 +897,12 @@ async fn private() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
     insta::assert_json_snapshot!(response);
     // Now testing without any mock subgraphs, all the data should come from the cache
     let mut service = TestHarness::builder()
@@ -890,7 +936,12 @@ async fn private() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -915,7 +966,12 @@ async fn private() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -1044,7 +1100,12 @@ async fn no_data() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -1117,7 +1178,12 @@ async fn no_data() {
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
     insta::assert_json_snapshot!(cache_keys);
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -1227,7 +1293,12 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
     insta::assert_json_snapshot!(response);
 
     let entity_cache = ResponseCache::for_test(
@@ -1294,7 +1365,12 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -1417,7 +1493,12 @@ async fn invalidate() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -1467,7 +1548,12 @@ async fn invalidate() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 
@@ -1526,7 +1612,12 @@ async fn invalidate() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response);
 }
@@ -1654,7 +1745,12 @@ async fn invalidate_cascade() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -1722,7 +1818,12 @@ async fn invalidate_cascade() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -1801,7 +1902,12 @@ async fn invalidate_cascade() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(response.extensions.remove("cacheDebugger").is_some());
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
 
     insta::assert_json_snapshot!(response, @r###"
     {

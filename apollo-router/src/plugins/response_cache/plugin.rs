@@ -71,6 +71,7 @@ pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
+pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -342,7 +343,8 @@ impl PluginPrivate for ResponseCache {
                         response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
                     {
                         return response.map_stream(move |mut body| {
-                            body.extensions.insert("cacheDebugger", debug_data.clone());
+                            body.extensions
+                                .insert(CACHE_DEBUG_EXTENSIONS_KEY, debug_data.clone());
                             body
                         });
                     }
