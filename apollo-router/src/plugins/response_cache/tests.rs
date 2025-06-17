@@ -237,7 +237,11 @@ async fn insert() {
         ck.cache_control.created = 0;
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
 
     let mut response = response.next_response().await.unwrap();
     assert!(
@@ -382,7 +386,11 @@ async fn insert_with_requires() {
             .flat_map(|c| &c.invalidation_keys)
             .any(|cache_key| cache_key.starts_with(&prefix_key))
     );
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
 
     assert!(
         response
@@ -410,7 +418,19 @@ async fn insert_with_requires() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "topProducts": [
+          {
+            "name": "Test",
+            "shippingEstimate": 15,
+            "price": 150
+          }
+        ]
+      }
+    }
+    "###);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -438,7 +458,11 @@ async fn insert_with_requires() {
         ck.cache_control.created = 0;
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
     assert!(
         response
             .response
@@ -466,7 +490,19 @@ async fn insert_with_requires() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "topProducts": [
+          {
+            "name": "Test",
+            "shippingEstimate": 15,
+            "price": 150
+          }
+        ]
+      }
+    }
+    "###);
 }
 
 #[tokio::test]
@@ -581,8 +617,11 @@ async fn insert_with_nested_field_set() {
             .flat_map(|c| &c.invalidation_keys)
             .any(|cache_key| cache_key.starts_with(&prefix_key))
     );
-
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
 
     assert!(
         response
@@ -611,7 +650,23 @@ async fn insert_with_nested_field_set() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "allProducts": [
+          {
+            "name": "Test",
+            "createdBy": {
+              "name": "test",
+              "country": {
+                "a": "France"
+              }
+            }
+          }
+        ]
+      }
+    }
+    "###);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -657,7 +712,11 @@ async fn insert_with_nested_field_set() {
         ck.cache_control.created = 0;
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    insta::with_settings!({
+        description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+    }, {
+        insta::assert_json_snapshot!(cache_keys);
+    });
 
     let mut response = response.next_response().await.unwrap();
     assert!(
@@ -667,7 +726,23 @@ async fn insert_with_nested_field_set() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "allProducts": [
+          {
+            "name": "Test",
+            "createdBy": {
+              "name": "test",
+              "country": {
+                "a": "France"
+              }
+            }
+          }
+        ]
+      }
+    }
+    "###);
 }
 
 #[tokio::test]
@@ -754,7 +829,21 @@ async fn no_cache_control() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -789,7 +878,21 @@ async fn no_cache_control() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 }
 
 #[tokio::test]
@@ -901,7 +1004,21 @@ async fn private() {
             .remove(CACHE_DEBUG_EXTENSIONS_KEY)
             .is_some()
     );
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
     // Now testing without any mock subgraphs, all the data should come from the cache
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -941,7 +1058,21 @@ async fn private() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 
     let context = Context::new();
     context.insert_json_value("sub", "5678".into());
@@ -971,7 +1102,21 @@ async fn private() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 }
 
 #[tokio::test]
@@ -1105,7 +1250,24 @@ async fn no_data() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": "Organization 1"
+            },
+            {
+              "id": "3",
+              "name": "Organization 3"
+            }
+          ]
+        }
+      }
+    }
+    "###);
 
     let subgraphs = MockedSubgraphs(
         [(
@@ -1183,7 +1345,43 @@ async fn no_data() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": "Organization 1"
+            },
+            {
+              "id": "2",
+              "name": null
+            },
+            {
+              "id": "3",
+              "name": "Organization 3"
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'orga': orga not found",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            1
+          ],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "orga",
+            "reason": "orga not found"
+          }
+        }
+      ]
+    }
+    "###);
 }
 
 #[tokio::test]
@@ -1498,7 +1696,21 @@ async fn invalidate() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
     let service = TestHarness::builder()
@@ -1553,7 +1765,21 @@ async fn invalidate() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 
     // now we invalidate data
     let res = invalidation
@@ -1617,5 +1843,19 @@ async fn invalidate() {
             .is_some()
     );
 
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
 }
