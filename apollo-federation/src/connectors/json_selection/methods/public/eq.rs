@@ -16,8 +16,8 @@ impl_arrow_method!(EqMethod, eq_method, eq_shape);
 /// Returns true if argument is equal to the applied to value or false if they are not equal.
 /// Simple examples:
 ///
-/// $->echo(123)->eq(123)       results in true
-/// $->echo(123)->eq(456)       results in false
+/// $(123)->eq(123)       results in true
+/// $(123)->eq(456)       results in false
 fn eq_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,

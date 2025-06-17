@@ -29,8 +29,8 @@ use crate::connectors::validation::expression::Context;
 use crate::connectors::validation::expression::MappingArgument;
 use crate::connectors::validation::expression::parse_mapping_argument;
 use crate::connectors::validation::expression::scalars;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::validation::http::UrlProperties;
 use crate::connectors::validation::http::headers::Headers;
 use crate::connectors::validation::http::url::validate_url_scheme;
@@ -146,7 +146,7 @@ impl<'schema> Http<'schema> {
 }
 
 struct Body<'schema> {
-    mapping: MappingArgument<'schema>,
+    mapping: MappingArgument,
     coordinate: BodyCoordinate<'schema>,
 }
 
@@ -185,7 +185,7 @@ impl<'schema> Body<'schema> {
             &Context::for_connect_request(
                 schema,
                 coordinate.connect,
-                &mapping.string,
+                &mapping.node,
                 Code::InvalidBody,
             ),
             &Shape::unknown([]),
@@ -219,7 +219,6 @@ struct Transport<'schema> {
     #[allow(dead_code)]
     method: HTTPMethod,
     url: StringTemplate,
-    url_string: GraphQLString<'schema>,
     coordinate: HttpMethodCoordinate<'schema>,
 
     url_properties: UrlProperties<'schema>,
@@ -279,8 +278,8 @@ impl<'schema> Transport<'schema> {
             node: method_value,
         };
 
-        let url_string = GraphQLString::new(coordinate.node, &schema.sources)
-            .map_err(|_| Message {
+        let url_string = coordinate.node.as_str().ok_or_else(|| {
+            vec![Message {
                 code: Code::GraphQLError,
                 message: format!("The value for {coordinate} must be a string."),
                 locations: coordinate
@@ -288,23 +287,20 @@ impl<'schema> Transport<'schema> {
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            })
-            .map_err(|e| vec![e])?;
-        let url = StringTemplate::from_str(url_string.as_str())
+            }]
+        })?;
+        let url = StringTemplate::from_str(url_string)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
-                locations: url_string
-                    .line_col_for_subslice(location, schema)
+                locations: subslice_location(coordinate.node, location, schema)
                     .into_iter()
                     .collect(),
             })
             .map_err(|e| vec![e])?;
 
         if source_name.is_some() {
-            return if url_string.as_str().starts_with("http://")
-                || url_string.as_str().starts_with("https://")
-            {
+            return if url_string.starts_with("http://") || url_string.starts_with("https://") {
                 Err(vec![Message {
                     code: Code::AbsoluteConnectUrlWithSource,
                     message: format!(
@@ -321,19 +317,17 @@ impl<'schema> Transport<'schema> {
                 Ok(Self {
                     method,
                     url,
-                    url_string,
                     coordinate,
                     url_properties,
                 })
             };
         } else {
-            validate_absolute_connect_url(&url, coordinate, coordinate.node, url_string, schema)
+            validate_absolute_connect_url(&url, coordinate, coordinate.node, schema)
                 .map_err(|e| vec![e])?;
         }
         Ok(Self {
             method,
             url,
-            url_string,
             coordinate,
             url_properties,
         })
@@ -346,7 +340,7 @@ impl<'schema> Transport<'schema> {
         let expression_context = Context::for_connect_request(
             schema,
             self.coordinate.connect,
-            &self.url_string,
+            self.coordinate.node,
             Code::InvalidUrl,
         );
 
@@ -378,7 +372,6 @@ fn validate_absolute_connect_url(
     url: &StringTemplate,
     coordinate: HttpMethodCoordinate,
     value: &Node<Value>,
-    str_value: GraphQLString,
     schema: &SchemaInfo,
 ) -> Result<(), Message> {
     let mut is_relative = true;
@@ -429,8 +422,7 @@ fn validate_absolute_connect_url(
             message: format!(
                 "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
-            locations: str_value
-                .line_col_for_subslice(dynamic.location.clone(), schema)
+            locations: subslice_location(value, dynamic.location.clone(), schema)
                 .into_iter()
                 .collect(),
         });
@@ -438,7 +430,7 @@ fn validate_absolute_connect_url(
 
     // Evaluate the template, replacing all dynamic expressions with empty strings. This should result in a valid
     // URL because of the URL building logic in `interpolate_uri`, even if the result is illogical with missing values.
-    let url = url
+    let (url, _) = url
         .interpolate_uri(&Default::default())
         .map_err(|err| Message {
             message: format!("In {coordinate}: {err}"),
@@ -449,7 +441,7 @@ fn validate_absolute_connect_url(
                 .collect(),
         })?;
 
-    validate_url_scheme(&url, coordinate, value, str_value, schema)?;
+    validate_url_scheme(&url, coordinate, value, schema)?;
 
     Ok(())
 }

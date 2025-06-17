@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use apollo_federation::connectors::ApplyToError;
+use apollo_federation::connectors::ProblemLocation;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,12 +18,14 @@ pub(crate) struct Problem {
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem)
-pub(crate) fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<Problem> {
+pub(crate) fn aggregate_apply_to_errors(
+    errors: Vec<ApplyToError>,
+) -> impl Iterator<Item = Problem> {
     errors
-        .iter()
+        .into_iter()
         .fold(
             HashMap::default(),
-            |mut acc: HashMap<(&str, String), usize>, err| {
+            |mut acc: HashMap<(String, String), usize>, err| {
                 let path = err
                     .path()
                     .iter()
@@ -32,17 +35,35 @@ pub(crate) fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<Problem>
                     })
                     .join(".");
 
-                acc.entry((err.message(), path))
+                acc.entry((err.message().to_string(), path))
                     .and_modify(|c| *c += 1)
                     .or_insert(1);
                 acc
             },
         )
-        .iter()
-        .map(|(key, &count)| Problem {
-            message: key.0.to_string(),
-            path: key.1.clone(),
+        .into_iter()
+        .map(|((message, path), count)| Problem {
+            message,
+            path,
             count,
         })
-        .collect()
+}
+
+/// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
+pub(crate) fn aggregate_apply_to_errors_with_problem_locations(
+    errors: Vec<(ProblemLocation, ApplyToError)>,
+) -> impl Iterator<Item = (ProblemLocation, Problem)> {
+    errors
+        .into_iter()
+        .fold(
+            HashMap::new(),
+            |mut acc: HashMap<ProblemLocation, Vec<ApplyToError>>, (loc, err)| {
+                acc.entry(loc).or_default().push(err);
+                acc
+            },
+        )
+        .into_iter()
+        .flat_map(|(location, errors)| {
+            aggregate_apply_to_errors(errors).map(move |problem| (location, problem))
+        })
 }
