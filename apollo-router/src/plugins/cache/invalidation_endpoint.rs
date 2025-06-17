@@ -182,11 +182,11 @@ impl Service<router::Request> for InvalidationService {
                                         .response(
                                             http::Response::builder()
                                                 .status(StatusCode::ACCEPTED)
-                                                .body(router::body::from_bytes(serde_json::to_string(
-                                                    &json!({
-                                                    "count": count
-                                                }),
-                                                )?))
+                                                .body(router::body::from_bytes(
+                                                    serde_json::to_string(&json!({
+                                                        "count": count
+                                                    }))?,
+                                                ))
                                                 .map_err(BoxError::from)?,
                                         )
                                         .context(req.context)
