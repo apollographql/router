@@ -36,7 +36,7 @@ fn base_config() -> serde_json::Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "experimental_response_cache": {
+        "preview_entity_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -362,7 +362,7 @@ async fn response_cache_basic() -> Result<(), BoxError> {
     let supergraph = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -482,7 +482,7 @@ async fn response_cache_basic() -> Result<(), BoxError> {
     let supergraph = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -549,7 +549,7 @@ async fn response_cache_basic() -> Result<(), BoxError> {
     let http_service = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -698,7 +698,7 @@ async fn response_cache_with_nested_field_set() -> Result<(), BoxError> {
     let supergraph = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -760,7 +760,7 @@ async fn response_cache_with_nested_field_set() -> Result<(), BoxError> {
     let supergraph = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -823,7 +823,7 @@ async fn response_cache_with_nested_field_set() -> Result<(), BoxError> {
     let http_service = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -1078,7 +1078,7 @@ async fn response_cache_authorization() -> Result<(), BoxError> {
     let supergraph = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_entity_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
