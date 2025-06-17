@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::sources::connect::HTTPMethod;
-use apollo_federation::sources::connect::HeaderSource;
-use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::MakeUriError;
+use apollo_federation::connectors::ApplyToError;
+use apollo_federation::connectors::HTTPMethod;
+use apollo_federation::connectors::Header;
+use apollo_federation::connectors::HeaderSource;
+use apollo_federation::connectors::HttpJsonTransport;
+use apollo_federation::connectors::MakeUriError;
+use apollo_federation::connectors::OriginatingDirective;
+use apollo_federation::connectors::ProblemLocation;
 use http::HeaderMap;
-use http::HeaderName;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
@@ -16,11 +19,12 @@ use serde_json_bytes::json;
 use thiserror::Error;
 
 use super::form_encoding::encode_json_as_form;
+use super::mapping::aggregate_apply_to_errors_with_problem_locations;
+use super::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::SelectionData;
-use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;
@@ -31,7 +35,9 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = transport.make_uri(&inputs)?;
+    let (uri, uri_apply_to_errors) = transport.make_uri(&inputs)?;
+    let uri_mapping_problems =
+        aggregate_apply_to_errors_with_problem_locations(uri_apply_to_errors);
 
     let method = transport.method;
     let request = http::Request::builder()
@@ -39,16 +45,18 @@ pub(crate) fn make_request(
         .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
-    let (mut request, content_type) = add_headers(
+    let (mut request, content_type, header_apply_to_errors) = add_headers(
         request,
         original_request.supergraph_request.headers(),
         &transport.headers,
         &inputs,
     );
+    let header_mapping_problems =
+        aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
-    let (json_body, form_body, body, content_length, apply_to_errors) =
+    let (json_body, form_body, body, content_length, body_apply_to_errors) =
         if let Some(ref selection) = transport.body {
             let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
             let mut form_body = None;
@@ -85,11 +93,19 @@ pub(crate) fn make_request(
         .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+    let body_mapping_problems = aggregate_apply_to_errors(body_apply_to_errors)
+        .map(|problem| (ProblemLocation::RequestBody, problem));
+
+    let all_problems: Vec<(ProblemLocation, Problem)> = uri_mapping_problems
+        .chain(body_mapping_problems)
+        .chain(header_mapping_problems)
+        .collect();
+
+    let mapping_problems: Vec<Problem> = all_problems.clone().into_iter().map(|(_, p)| p).collect();
 
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            Box::new(serialize_request(
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -99,11 +115,11 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body,
-                    errors: mapping_problems.clone(),
                 }),
+                transport,
             ))
         } else {
-            Box::new(serialize_request(
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -111,8 +127,8 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body.clone(),
-                    errors: mapping_problems.clone(),
                 }),
+                transport,
             ))
         }
     });
@@ -120,41 +136,65 @@ pub(crate) fn make_request(
     Ok((
         TransportRequest::Http(HttpRequest {
             inner: request,
-            debug: debug_request,
+            debug: (debug_request, all_problems),
         }),
         mapping_problems,
     ))
 }
 
-#[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
 fn add_headers(
     mut request: http::request::Builder,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
-    config: &IndexMap<HeaderName, HeaderSource>,
+    config: &[Header],
     inputs: &IndexMap<String, Value>,
-) -> (http::request::Builder, Option<mime::Mime>) {
+) -> (
+    http::request::Builder,
+    Option<mime::Mime>,
+    Vec<(ProblemLocation, ApplyToError)>,
+) {
     let mut content_type = None;
+    let mut warnings = Vec::new();
 
-    for (header_name, header_source) in config {
-        match header_source {
+    for header in config {
+        match &header.source {
             HeaderSource::From(from) => {
                 let values = incoming_supergraph_headers.get_all(from);
                 let mut propagated = false;
                 for value in values {
-                    request = request.header(header_name.clone(), value.clone());
+                    request = request.header(header.name.clone(), value.clone());
                     propagated = true;
                 }
                 if !propagated {
-                    tracing::warn!("Header '{}' not found in incoming request", header_name);
+                    tracing::warn!("Header '{}' not found in incoming request", header.name);
                 }
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
-                Ok(value) => {
-                    request = request.header(header_name, value.clone());
+                Ok((value, apply_to_errors)) => {
+                    warnings.extend(
+                        apply_to_errors
+                            .iter()
+                            .cloned()
+                            .map(|e| {
+                                (
+                                    match header.originating_directive {
+                                        OriginatingDirective::Source => {
+                                            ProblemLocation::SourceHeaders
+                                        }
+                                        OriginatingDirective::Connect => {
+                                            ProblemLocation::ConnectHeaders
+                                        }
+                                    },
+                                    e,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    );
 
-                    if header_name == CONTENT_TYPE {
+                    if header.name == CONTENT_TYPE {
                         content_type = Some(value.clone());
                     }
+
+                    request = request.header(header.name.clone(), value);
                 }
                 Err(err) => {
                     tracing::error!("Unable to interpolate header value: {:?}", err);
@@ -166,6 +206,7 @@ fn add_headers(
     (
         request,
         content_type.and_then(|v| v.to_str().unwrap_or_default().parse().ok()),
+        warnings,
     )
 }
 
@@ -187,10 +228,10 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HeaderSource;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::HTTPMethod;
+    use apollo_federation::connectors::HeaderSource;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;
@@ -212,10 +253,10 @@ mod tests {
         .collect();
 
         let request = http::Request::builder();
-        let (request, _) = add_headers(
+        let (request, ..) = add_headers(
             request,
             &incoming_supergraph_headers,
-            &IndexMap::with_hasher(Default::default()),
+            &[],
             &IndexMap::with_hasher(Default::default()),
         );
         let request = request.body(body::empty()).unwrap();
@@ -233,19 +274,21 @@ mod tests {
         .into_iter()
         .collect();
 
-        #[allow(clippy::mutable_key_type)]
-        let mut config = IndexMap::with_hasher(Default::default());
-        config.insert(
-            "x-new-name".parse().unwrap(),
-            HeaderSource::From("x-rename".parse().unwrap()),
-        );
-        config.insert(
-            "x-insert".parse().unwrap(),
-            HeaderSource::Value("inserted".parse().unwrap()),
-        );
+        let config = vec![
+            Header::from_values(
+                "x-new-name".parse().unwrap(),
+                HeaderSource::From("x-rename".parse().unwrap()),
+                OriginatingDirective::Source,
+            ),
+            Header::from_values(
+                "x-insert".parse().unwrap(),
+                HeaderSource::Value("inserted".parse().unwrap()),
+                OriginatingDirective::Connect,
+            ),
+        ];
 
         let request = http::Request::builder();
-        let (request, _) = add_headers(
+        let (request, ..) = add_headers(
             request,
             &incoming_supergraph_headers,
             &config,
@@ -300,7 +343,10 @@ mod tests {
                         },
                         body: "{\"a\":42}",
                     },
-                    debug: None,
+                    debug: (
+                        None,
+                        [],
+                    ),
                 },
             ),
             [],
@@ -318,11 +364,11 @@ mod tests {
         let doc = ExecutableDocument::parse_and_validate(&schema, "{f(a: 42)}", "").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "a": 42 }));
-        let mut headers = IndexMap::default();
-        headers.insert(
+        let headers = vec![Header::from_values(
             "content-type".parse().unwrap(),
             HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
-        );
+            OriginatingDirective::Connect,
+        )];
 
         let req = super::make_request(
             &HttpJsonTransport {
@@ -360,7 +406,10 @@ mod tests {
                         },
                         body: "a=42",
                     },
-                    debug: None,
+                    debug: (
+                        None,
+                        [],
+                    ),
                 },
             ),
             [],

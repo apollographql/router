@@ -204,13 +204,31 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.keys()
     }
 
+    pub(crate) fn latest(&self) -> &T {
+        self.definitions
+            .last_key_value()
+            .expect("There should always be at least one version defined")
+            .1
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Version, &T)> {
+        self.definitions.iter()
+    }
+
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,
-    ) -> Option<&'static dyn SpecDefinition> {
+    ) -> Option<&'static T> {
         self.definitions
             .values()
             .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+    }
+
+    pub(crate) fn get_dyn_minimum_required_version(
+        &'static self,
+        federation_version: &Version,
+    ) -> Option<&'static dyn SpecDefinition> {
+        self.get_minimum_required_version(federation_version)
             .map(|spec| spec as &dyn SpecDefinition)
     }
 }

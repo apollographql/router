@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/url_properties/invalid_mappings.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v1\")`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            8:52..8:53,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v1\")`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            8:70..8:71,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            15:32..15:33,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            15:50..15:51,
+        ],
+    },
+]

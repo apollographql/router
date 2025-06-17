@@ -16,11 +16,10 @@ export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT_NAME>
 ```
 
 <a id="usage-reporting-via-opentelemetry-protocol-otlp"></a>
-<MinVersion version="1.49.0">
 
 ### GraphOS tracing via OpenTelemetry Protocol (OTLP)
 
-</MinVersion>
+<MinVersionBadge version="Router v1.49.0" />
 
 Prior to router v1.49.0, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format) called Apollo Usage Reporting protocol.
 
@@ -392,13 +391,12 @@ telemetry:
             send: false
 ```
 
-<MinVersion version="2.1.2">
-
 #### Enabling extended error reporting
 
-</MinVersion>
-
-<PreviewFeature />
+<div className="flex flex-row items-start gap-2 mt-2">
+  <MinVersionBadge version="Router v2.1.2" />
+  <PreviewFeatureBadge />
+</div>
 
 Enable richer error reporting via `preview_extended_error_metrics` and `redaction_policy` router configurations.
 

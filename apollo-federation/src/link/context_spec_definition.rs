@@ -176,7 +176,7 @@ impl SpecDefinition for ContextSpecDefinition {
                 DirectiveLocation::Union,
             ],
             true,
-            Some(&|v| CONTEXT_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v)),
             None, // TODO: Add transform
         );
         let from_context_spec = DirectiveSpecification::new(

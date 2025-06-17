@@ -912,7 +912,7 @@ impl SpecDefinition for FederationSpecDefinition {
         specs.push(Box::new(self.shareable_directive_specification()));
 
         if let Some(inaccessible_spec) =
-            INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
+            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(self.version())
         {
             specs.extend(inaccessible_spec.directive_specs());
         }

@@ -905,6 +905,25 @@ impl QueryGraph {
         }
     }
 
+    pub(crate) fn edge_for_transition_graph_path_trigger(
+        &self,
+        node: NodeIndex,
+        transition_graph_path_trigger: &QueryGraphEdgeTransition,
+        override_conditions: &EnabledOverrideConditions,
+    ) -> Result<Option<EdgeIndex>, FederationError> {
+        for edge_ref in self.out_edges(node) {
+            let edge_weight = edge_ref.weight();
+            if edge_weight
+                .transition
+                .matches_supergraph_transition(transition_graph_path_trigger)?
+                && edge_weight.satisfies_override_conditions(override_conditions)
+            {
+                return Ok(Some(edge_ref.id()));
+            }
+        }
+        Ok(None)
+    }
+
     /// Given the possible runtime types at the head of the given edge, returns the possible runtime
     /// types after traversing the edge.
     // PORT_NOTE: Named `updateRuntimeTypes` in the JS codebase.
@@ -931,11 +950,9 @@ impl QueryGraph {
                 field_definition_position,
                 ..
             } => {
-                let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
-                    tail_type_pos.clone().try_into()
-                else {
+                if CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone()).is_err() {
                     return Ok(IndexSet::default());
-                };
+                }
                 let schema = self.schema_by_source(source)?;
                 let mut new_possible_runtime_types = IndexSet::default();
                 for possible_runtime_type in possible_runtime_types {

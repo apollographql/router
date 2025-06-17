@@ -70,7 +70,7 @@ impl TagSpecDefinition {
             true, // repeatable
             &self.directive_locations(),
             true, // composes
-            Some(&|v| TAG_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| TAG_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

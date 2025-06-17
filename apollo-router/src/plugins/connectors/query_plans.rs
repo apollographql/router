@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use indexmap::IndexMap;
 
 use crate::Context;

@@ -51,11 +51,13 @@ pub(super) struct JwksManager {
 }
 
 pub(super) type Issuers = HashSet<String>;
+pub(super) type Audiences = HashSet<String>;
 
 #[derive(Clone)]
 pub(super) struct JwksConfig {
     pub(super) url: Url,
     pub(super) issuers: Option<Issuers>,
+    pub(super) audiences: Option<Audiences>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
     pub(super) headers: Vec<Header>,
@@ -65,6 +67,7 @@ pub(super) struct JwksConfig {
 pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
     pub(super) issuers: Option<Issuers>,
+    pub(super) audiences: Option<Audiences>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
@@ -266,6 +269,7 @@ impl Iterator for Iter<'_> {
                         return Some(JwkSetInfo {
                             jwks: jwks.clone(),
                             issuers: config.issuers.clone(),
+                            audiences: config.audiences.clone(),
                             algorithms: config.algorithms.clone(),
                         });
                     }
@@ -281,6 +285,8 @@ pub(super) struct JWTCriteria {
     pub(super) kid: Option<String>,
 }
 
+pub(super) type SearchResult = (Option<Issuers>, Option<Audiences>, Jwk);
+
 /// Search the list of JWKS to find a key we can use to decode a JWT.
 ///
 /// The search criteria allow us to match a variety of keys depending on which criteria are provided
@@ -289,13 +295,14 @@ pub(super) struct JWTCriteria {
 pub(super) fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Option<Vec<(Option<Issuers>, Jwk)>> {
+) -> Option<Vec<SearchResult>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
         issuers,
+        audiences,
         algorithms,
     } in jwks_manager.iter_jwks()
     {
@@ -404,7 +411,7 @@ pub(super) fn search_jwks(
                 found_highest_score = true;
             }
 
-            candidates.push((key_score, (issuers.clone(), key)));
+            candidates.push((key_score, (issuers.clone(), audiences.clone(), key)));
         }
     }
 
@@ -412,7 +419,7 @@ pub(super) fn search_jwks(
         "jwk candidates: {:?}",
         candidates
             .iter()
-            .map(|(score, (_, candidate))| (
+            .map(|(score, (_, _, candidate))| (
                 score,
                 &candidate.common.key_id,
                 candidate.common.key_algorithm
@@ -548,13 +555,19 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
     }
 }
 
+pub(super) type DecodedClaims = (
+    Option<Issuers>,
+    Option<Audiences>,
+    TokenData<serde_json::Value>,
+);
+
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<(Option<Issuers>, Jwk)>,
+    keys: Vec<SearchResult>,
     criteria: JWTCriteria,
-) -> Result<(Option<Issuers>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for (issuers, jwk) in keys.into_iter() {
+    for (issuers, audiences, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
             Ok(k) => k,
             Err(e) => {
@@ -595,7 +608,7 @@ pub(super) fn decode_jwt(
         validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuers, v)),
+            Ok(v) => return Ok((issuers, audiences, v)),
             Err(e) => {
                 tracing::trace!("JWT decoding failed with error `{e}`");
                 error = Some((
@@ -709,6 +722,7 @@ mod test {
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;
     use super::jwt_expires_in;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn test_exp_defaults_to_max_when_no_jwt_claims_present() {
@@ -718,20 +732,24 @@ mod test {
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_jwt_claims_not_object() {
+        let _guard = tracing_test::dispatcher_guard();
+
         let context = Context::new();
         context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!("not an object"));
 
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain("expected JWT claims to be an object"));
+        assert!(tracing_test::logs_contain(
+            "expected JWT claims to be an object"
+        ));
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_not_integer() {
+        let _guard = tracing_test::dispatcher_guard();
+
         let context = Context::new();
         context.insert_json_value(
             APOLLO_AUTHENTICATION_JWT_CLAIMS,
@@ -743,13 +761,12 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain(
+        assert!(tracing_test::logs_contain(
             "expected JWT 'exp' (expiry) claim to be an integer"
         ));
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_is_valid_but_expired() {
         let context = Context::new();
         context.insert_json_value(
@@ -764,7 +781,6 @@ mod test {
     }
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_expiry_claim_is_valid() {
         let context = Context::new();
         let exp = UNIX_EPOCH.elapsed().unwrap().as_secs() + 3600;

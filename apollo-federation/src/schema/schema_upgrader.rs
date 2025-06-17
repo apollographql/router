@@ -12,22 +12,20 @@ use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
-use super::compute_subgraph_metadata;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
+use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SubgraphMetadata;
-use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -58,6 +56,7 @@ struct UpgradeMetadata {
     requires_directive_name: Option<Name>,
     provides_directive_name: Option<Name>,
     extends_directive_name: Option<Name>,
+    metadata: SubgraphMetadata,
 }
 
 impl SchemaUpgrader {
@@ -117,6 +116,7 @@ impl SchemaUpgrader {
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
             provides_directive_name: subgraph.provides_directive_name()?.clone(),
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            metadata: subgraph.metadata().clone(),
         };
         self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
@@ -160,7 +160,9 @@ impl SchemaUpgrader {
 
         let upgraded_subgraph =
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
-                .assume_expanded()?
+                // This error will be wrapped up as a SubgraphError in `Self::upgrade`
+                .assume_expanded()
+                .map_err(|err| err.error)?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
     }
@@ -629,11 +631,7 @@ impl SchemaUpgrader {
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
-        schema
-            .schema()
-            .schema_definition
-            .iter_root_operations()
-            .any(|op| op.1.as_str() == ty.type_name().as_str())
+        schema.is_root_type(ty.type_name())
     }
 
     fn remove_directives_on_interface(
@@ -703,44 +701,32 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let mut error = MultipleFederationErrors::new();
-        let mut fields_to_remove: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
-            HashSet::new();
-        let mut types_to_remove: HashSet<ObjectOrInterfaceTypeDefinitionPosition> = HashSet::new();
+        let mut fields_to_remove: HashSet<ObjectFieldDefinitionPosition> = HashSet::new();
+        let mut types_to_remove: HashSet<ObjectTypeDefinitionPosition> = HashSet::new();
         for type_ in schema.get_types() {
-            if let Ok(pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_) {
+            // @external is already removed from interfaces so we only need to process objects
+            if let Ok(pos) = ObjectTypeDefinitionPosition::try_from(type_) {
                 let mut has_fields = false;
                 for field in pos.fields(schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
-                    let metadata = compute_subgraph_metadata(schema)?.ok_or_else(|| {
-                        internal_error!(
-                            "Unable to detect federation version used in subgraph '{}'",
-                            upgrade_metadata.subgraph_name
-                        )
-                    })?;
+                    let metadata = &upgrade_metadata.metadata;
                     if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
                     }
                 }
                 if !has_fields {
-                    let is_referenced = match &pos {
-                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj_pos) => schema
-                            .referencers()
-                            .object_types
-                            .get(&obj_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf_pos) => schema
-                            .referencers()
-                            .interface_types
-                            .get(&itf_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                    };
+                    let is_referenced = schema
+                        .referencers
+                        .object_types
+                        .get(&pos.type_name)
+                        .is_some_and(|r| r.len() > 0);
                     if is_referenced {
                         error
                             .errors
                             .push(SingleFederationError::TypeWithOnlyUnusedExternal {
-                                type_name: pos.type_name().clone(),
+                                type_name: pos.type_name.clone(),
                             });
                     } else {
                         types_to_remove.insert(pos);
@@ -952,7 +938,7 @@ impl SchemaUpgrader {
 // However, those messages were never used, so we have omitted them here.
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Upgraded>>, Vec<FederationError>> {
+) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
@@ -963,7 +949,7 @@ pub fn upgrade_subgraphs_if_necessary(
 
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
-    let mut errors: Vec<FederationError> = vec![];
+    let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
     let upgraded_subgraphs: Vec<Subgraph<Upgraded>> = subgraphs
         .into_iter()
@@ -1004,12 +990,14 @@ pub fn upgrade_subgraphs_if_necessary(
 
         let interface_object_subgraphs = format_subgraph_names(subgraphs_using_interface_object);
         let fed_v1_subgraphs = format_subgraph_names(fed_1_subgraphs);
-        return Err(vec![SingleFederationError::InterfaceObjectUsageError {
-            message: format!("The @interfaceObject directive can only be used if all subgraphs have \
+        return Err(vec![CompositionError::InterfaceObjectUsageError {
+            message: format!(
+                "The @interfaceObject directive can only be used if all subgraphs have \
             federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" \
             version 2.0 or newer): @interfaceObject is used in {interface_object_subgraphs} but \
-            {fed_v1_subgraphs} is not a federation 2 subgraph schema.")
-        }.into()]);
+            {fed_v1_subgraphs} is not a federation 2 subgraph schema."
+            ),
+        }]);
     }
     Ok(upgraded_subgraphs)
 }
@@ -1083,7 +1071,7 @@ mod tests {
             upc: ID!
             name: String
             description: String
-            }            
+            }
         "#,
         )
         .expect("parses schema")
@@ -1118,7 +1106,7 @@ mod tests {
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
         directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-        
+
         directive @override(from: String!) on FIELD_DEFINITION
 
         directive @composeDirective(name: String!) repeatable on SCHEMA
@@ -1190,7 +1178,7 @@ mod tests {
             type A @key(fields: id) @key(fields: ["id", "x"]) {
                 id: String
                 x: Int
-            }  
+            }
         "#,
         )
         .expect("parses schema")
@@ -1515,7 +1503,7 @@ mod tests {
 
             type Subscription {
                 update: String!
-            }   
+            }
         "#,
         )
         .expect("parses schema")

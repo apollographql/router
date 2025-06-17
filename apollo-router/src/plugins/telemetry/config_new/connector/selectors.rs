@@ -127,7 +127,7 @@ impl Selector for ConnectorSelector {
                 .id
                 .source_name
                 .as_ref()
-                .cloned()
+                .map(|name| name.value.clone())
                 .map(opentelemetry::Value::from),
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
@@ -297,12 +297,13 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderValue;
     use http::StatusCode;
     use opentelemetry::Array;
@@ -340,7 +341,7 @@ mod tests {
         Connector {
             id: ConnectId::new(
                 TEST_SUBGRAPH_NAME.into(),
-                Some(TEST_SOURCE_NAME.into()),
+                Some(SourceName::cast(TEST_SOURCE_NAME)),
                 name!(Query),
                 name!(users),
                 0,
@@ -361,6 +362,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         }
     }
@@ -400,7 +402,7 @@ mod tests {
             service_name: Default::default(),
             transport_request: TransportRequest::Http(transport::http::HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             }),
             key: response_key(),
             mapping_problems,

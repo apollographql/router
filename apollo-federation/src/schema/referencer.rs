@@ -5,6 +5,7 @@ use apollo_compiler::collections::IndexSet;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -114,15 +115,6 @@ pub(crate) struct InterfaceTypeReferencers {
     pub(crate) interface_fields: IndexSet<InterfaceFieldDefinitionPosition>,
 }
 
-impl InterfaceTypeReferencers {
-    pub(crate) fn len(&self) -> usize {
-        self.object_types.len()
-            + self.object_fields.len()
-            + self.interface_types.len()
-            + self.interface_fields.len()
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UnionTypeReferencers {
     pub(crate) object_fields: IndexSet<ObjectFieldDefinitionPosition>,
@@ -197,5 +189,42 @@ impl DirectiveReferencers {
                     .iter()
                     .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
             )
+    }
+
+    pub(crate) fn composite_type_positions(
+        &self,
+    ) -> impl Iterator<Item = CompositeTypeDefinitionPosition> {
+        self.object_types
+            .iter()
+            .map(|t| CompositeTypeDefinitionPosition::from(t.clone()))
+            .chain(self.interface_types.iter().map(|t| t.clone().into()))
+            .chain(self.union_types.iter().map(|t| t.clone().into()))
+    }
+
+    pub(crate) fn extend(&mut self, other: &Self) {
+        if let Some(schema) = &other.schema {
+            self.schema = Some(schema.clone());
+        }
+        self.scalar_types.extend(other.scalar_types.iter().cloned());
+        self.object_types.extend(other.object_types.iter().cloned());
+        self.object_fields
+            .extend(other.object_fields.iter().cloned());
+        self.object_field_arguments
+            .extend(other.object_field_arguments.iter().cloned());
+        self.interface_types
+            .extend(other.interface_types.iter().cloned());
+        self.interface_fields
+            .extend(other.interface_fields.iter().cloned());
+        self.interface_field_arguments
+            .extend(other.interface_field_arguments.iter().cloned());
+        self.union_types.extend(other.union_types.iter().cloned());
+        self.enum_types.extend(other.enum_types.iter().cloned());
+        self.enum_values.extend(other.enum_values.iter().cloned());
+        self.input_object_types
+            .extend(other.input_object_types.iter().cloned());
+        self.input_object_fields
+            .extend(other.input_object_fields.iter().cloned());
+        self.directive_arguments
+            .extend(other.directive_arguments.iter().cloned());
     }
 }
