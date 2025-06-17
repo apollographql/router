@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_federation::connectors::ApplyToError;
 use apollo_federation::connectors::HTTPMethod;
 use apollo_federation::connectors::Header;
 use apollo_federation::connectors::HeaderSource;
 use apollo_federation::connectors::HttpJsonTransport;
 use apollo_federation::connectors::MakeUriError;
+use apollo_federation::connectors::OriginatingDirective;
+use apollo_federation::connectors::ProblemLocation;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
@@ -16,11 +19,12 @@ use serde_json_bytes::json;
 use thiserror::Error;
 
 use super::form_encoding::encode_json_as_form;
+use super::mapping::aggregate_apply_to_errors_with_problem_locations;
+use super::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::SelectionData;
-use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;
@@ -31,7 +35,9 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = transport.make_uri(&inputs)?;
+    let (uri, uri_apply_to_errors) = transport.make_uri(&inputs)?;
+    let uri_mapping_problems =
+        aggregate_apply_to_errors_with_problem_locations(uri_apply_to_errors);
 
     let method = transport.method;
     let request = http::Request::builder()
@@ -39,16 +45,18 @@ pub(crate) fn make_request(
         .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
-    let (mut request, content_type) = add_headers(
+    let (mut request, content_type, header_apply_to_errors) = add_headers(
         request,
         original_request.supergraph_request.headers(),
         &transport.headers,
         &inputs,
     );
+    let header_mapping_problems =
+        aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
 
     let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
-    let (json_body, form_body, body, content_length, apply_to_errors) =
+    let (json_body, form_body, body, content_length, body_apply_to_errors) =
         if let Some(ref selection) = transport.body {
             let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
             let mut form_body = None;
@@ -85,11 +93,19 @@ pub(crate) fn make_request(
         .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+    let body_mapping_problems = aggregate_apply_to_errors(body_apply_to_errors)
+        .map(|problem| (ProblemLocation::RequestBody, problem));
+
+    let all_problems: Vec<(ProblemLocation, Problem)> = uri_mapping_problems
+        .chain(body_mapping_problems)
+        .chain(header_mapping_problems)
+        .collect();
+
+    let mapping_problems: Vec<Problem> = all_problems.clone().into_iter().map(|(_, p)| p).collect();
 
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            Box::new(serialize_request(
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -99,11 +115,11 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body,
-                    errors: mapping_problems.clone(),
                 }),
+                transport,
             ))
         } else {
-            Box::new(serialize_request(
+            Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -111,8 +127,8 @@ pub(crate) fn make_request(
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
                     result: json_body.clone(),
-                    errors: mapping_problems.clone(),
                 }),
+                transport,
             ))
         }
     });
@@ -120,7 +136,7 @@ pub(crate) fn make_request(
     Ok((
         TransportRequest::Http(HttpRequest {
             inner: request,
-            debug: debug_request,
+            debug: (debug_request, all_problems),
         }),
         mapping_problems,
     ))
@@ -131,8 +147,13 @@ fn add_headers(
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &[Header],
     inputs: &IndexMap<String, Value>,
-) -> (http::request::Builder, Option<mime::Mime>) {
+) -> (
+    http::request::Builder,
+    Option<mime::Mime>,
+    Vec<(ProblemLocation, ApplyToError)>,
+) {
     let mut content_type = None;
+    let mut warnings = Vec::new();
 
     for header in config {
         match &header.source {
@@ -148,7 +169,27 @@ fn add_headers(
                 }
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
-                Ok(value) => {
+                Ok((value, apply_to_errors)) => {
+                    warnings.extend(
+                        apply_to_errors
+                            .iter()
+                            .cloned()
+                            .map(|e| {
+                                (
+                                    match header.originating_directive {
+                                        OriginatingDirective::Source => {
+                                            ProblemLocation::SourceHeaders
+                                        }
+                                        OriginatingDirective::Connect => {
+                                            ProblemLocation::ConnectHeaders
+                                        }
+                                    },
+                                    e,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+
                     if header.name == CONTENT_TYPE {
                         content_type = Some(value.clone());
                     }
@@ -165,6 +206,7 @@ fn add_headers(
     (
         request,
         content_type.and_then(|v| v.to_str().unwrap_or_default().parse().ok()),
+        warnings,
     )
 }
 
@@ -211,7 +253,7 @@ mod tests {
         .collect();
 
         let request = http::Request::builder();
-        let (request, _) = add_headers(
+        let (request, ..) = add_headers(
             request,
             &incoming_supergraph_headers,
             &[],
@@ -236,15 +278,17 @@ mod tests {
             Header::from_values(
                 "x-new-name".parse().unwrap(),
                 HeaderSource::From("x-rename".parse().unwrap()),
+                OriginatingDirective::Source,
             ),
             Header::from_values(
                 "x-insert".parse().unwrap(),
                 HeaderSource::Value("inserted".parse().unwrap()),
+                OriginatingDirective::Connect,
             ),
         ];
 
         let request = http::Request::builder();
-        let (request, _) = add_headers(
+        let (request, ..) = add_headers(
             request,
             &incoming_supergraph_headers,
             &config,
@@ -299,7 +343,10 @@ mod tests {
                         },
                         body: "{\"a\":42}",
                     },
-                    debug: None,
+                    debug: (
+                        None,
+                        [],
+                    ),
                 },
             ),
             [],
@@ -320,6 +367,7 @@ mod tests {
         let headers = vec![Header::from_values(
             "content-type".parse().unwrap(),
             HeaderSource::Value("application/x-www-form-urlencoded".parse().unwrap()),
+            OriginatingDirective::Connect,
         )];
 
         let req = super::make_request(
@@ -358,7 +406,10 @@ mod tests {
                         },
                         body: "a=42",
                     },
-                    debug: None,
+                    debug: (
+                        None,
+                        [],
+                    ),
                 },
             ),
             [],
