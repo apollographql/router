@@ -4,6 +4,8 @@ use std::sync::Arc;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::connectors::Namespace;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::response::Parts;
 use serde_json::Value as JsonValue;
 use serde_json_bytes::ByteString;
@@ -115,12 +117,12 @@ impl MappingContextMerger<'_> {
     pub(crate) fn request(
         mut self,
         headers_used: &HashSet<String>,
-        supergraph_request: &Arc<http::Request<crate::graphql::Request>>,
+        headers: &HeaderMap<HeaderValue>,
     ) -> Self {
         // Add headers from the original router request.
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if self.variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
+            let new_headers = externalize_header_map(headers)
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|(key, value)| {

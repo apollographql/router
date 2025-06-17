@@ -269,6 +269,19 @@ impl Response {
         Ok(response)
     }
 
+    #[builder(visibility = "pub")]
+    fn http_response_new(
+        response: http::Response<Body>,
+        context: Context,
+        body_to_stash: Option<String>,
+    ) -> Result<Self, BoxError> {
+        let mut res = Self { response, context };
+        if let Some(body_to_stash) = body_to_stash {
+            res.stash_the_body_in_extensions(body_to_stash)
+        }
+        Ok(res)
+    }
+
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
