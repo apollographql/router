@@ -503,8 +503,6 @@ impl RouterService {
             }
             bytes.put_u8(b']');
 
-            // TODO there's no easy way to pull the errors from the body or http::Response here,
-            // TODO so we still can't store the errors in context for the router
             Ok(RouterResponse {
                 response: http::Response::from_parts(
                     parts,
