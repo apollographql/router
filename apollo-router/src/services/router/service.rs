@@ -864,7 +864,7 @@ pub(crate) struct RouterCreator {
 impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
@@ -956,15 +956,7 @@ impl RouterCreator {
         })
     }
 
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        router::Request,
-        Response = router::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, router::ServiceResult>,
-    > + Send
-    + use<> {
+    pub(crate) fn make(&self) -> <RouterCreator as ServiceFactory<router::Request>>::Service {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }

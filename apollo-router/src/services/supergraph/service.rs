@@ -1048,20 +1048,14 @@ impl HasConfig for SupergraphCreator {
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
 impl SupergraphCreator {
     pub(crate) fn make(
         &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send
-    + use<> {
+    ) -> <SupergraphCreator as ServiceFactory<supergraph::Request>>::Service {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }

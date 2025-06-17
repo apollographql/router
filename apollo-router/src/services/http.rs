@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use dashmap::DashMap;
 use futures::future::BoxFuture;
+use parking_lot::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -28,7 +29,7 @@ pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 // You cannot store a CloneBoxFuture in a map because it is not Sync. You can store a buffer though.
 type MemoizedService = Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
-type ServiceCache = Arc<DashMap<String, MemoizedService>>;
+type ServiceCache = Arc<RwLock<HashMap<String, MemoizedService>>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -83,7 +84,7 @@ impl HttpClientServiceFactory {
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
         // Check if we already have a memoized service for this name
-        if let Some(service) = self.cache.get(name) {
+        if let Some(service) = self.cache.read().get(name) {
             service.clone().boxed()
         } else {
             // Create the service if not cached
@@ -97,6 +98,7 @@ impl HttpClientServiceFactory {
             let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
 
             self.cache
+                .write()
                 .insert(name.to_string(), buffered_clone_service.clone());
             buffered_clone_service.boxed()
         }
