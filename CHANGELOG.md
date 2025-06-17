@@ -4,6 +4,32 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.8] - 2025-06-17
+
+## 🐛 Fixes
+
+### Set a valid GraphQL response for websocket handshake response ([PR #7680](https://github.com/apollographql/router/pull/7680))
+
+Since this [PR](https://github.com/apollographql/router/pull/7141) we added more checks on graphql response returned by coprocessors to be compliant with GraphQL specs. When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7680
+
+### Spans should only include path in `http.route` ([PR #7405](https://github.com/apollographql/router/pull/7390))
+
+Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
+
+The router currently sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). After this change, the router will only include the path (`/graphql`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7405
+
+### Add graphql.operation.name label to apollo.router.opened.subscriptions counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+
+`apollo.router.opened.subscriptions` metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
+
+
+
 # [1.61.7] - 2025-05-26
 
 ## 🔍 Debuggability
