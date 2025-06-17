@@ -1,21 +1,8 @@
-// No panics allowed in this module
-// The expansion code is called with potentially invalid schemas during the
-// authoring process and we can't panic in the language server.
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::panic,
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unimplemented,
-        clippy::todo
-    )
-)]
-
-mod directives;
-pub(crate) mod schema;
+//! The GraphQL spec for Connectors. Includes parsing of directives and injection of required definitions.
+pub(crate) mod connect;
+pub(crate) mod errors;
+pub(crate) mod http;
+pub(crate) mod source;
 mod type_and_directive_specifications;
 
 use std::fmt::Display;
@@ -26,14 +13,14 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-pub(crate) use directives::extract_connect_directive_arguments;
-pub(crate) use directives::extract_source_directive_arguments;
-pub use schema::ConnectHTTPArguments;
-pub use schema::SourceHTTPArguments;
+pub use connect::ConnectHTTPArguments;
+pub(crate) use connect::extract_connect_directive_arguments;
+pub use source::SourceHTTPArguments;
+pub(crate) use source::extract_source_directive_arguments;
 use strum_macros::EnumIter;
 
-use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
-use self::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+use self::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;

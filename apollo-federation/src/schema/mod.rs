@@ -31,6 +31,7 @@ use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
@@ -68,6 +69,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
 pub(crate) mod definitions;
+pub(crate) mod directive_location;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
@@ -353,6 +355,7 @@ impl FederationSchema {
         }
     }
 
+    /// For subgraph schemas where the `@context` directive is a federation spec directive.
     pub(crate) fn context_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ContextDirective> {
@@ -406,6 +409,32 @@ impl FederationSchema {
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    /// For supergraph schemas where the `@context` directive is a "context" spec directive.
+    pub(crate) fn context_directive_applications_in_supergraph(
+        &self,
+        context_spec: &ContextSpecDefinition,
+    ) -> FallibleDirectiveIterator<ContextDirective> {
+        let directive_name_in_supergraph = context_spec.url().identity.name.clone();
+        let context_directive_referencers = self
+            .referencers()
+            .get_directive(&directive_name_in_supergraph)?;
+        let mut applications = Vec::new();
+        for type_pos in context_directive_referencers.composite_type_positions() {
+            let directive_apps =
+                type_pos.get_applied_directives(self, &directive_name_in_supergraph);
+            for app in directive_apps {
+                let arguments = context_spec.context_directive_arguments(app);
+                applications.push(arguments.map(|args| ContextDirective {
+                    // Note: `ContextDirectiveArguments` is also defined in `context_spec_definition` module.
+                    //       So, it is converted to the one defined in this module.
+                    arguments: ContextDirectiveArguments { name: args.name },
+                    target: type_pos.clone(),
+                }));
             }
         }
         Ok(applications)
@@ -621,7 +650,6 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    // TODO: This currently only returns targets for object_fields and interface_fields
     pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
@@ -630,10 +658,24 @@ impl FederationSchema {
             .get_directive(&tag_directive_definition.name)?;
 
         let mut applications = Vec::new();
-        for field_definition_position in &tag_directive_referencers.object_fields {
-            match field_definition_position.get(self.schema()) {
-                Ok(field_definition) => {
-                    let directives = &field_definition.directives;
+        // Schema
+        if let Some(schema_position) = &tag_directive_referencers.schema {
+            let schema_def = schema_position.get(self.schema());
+            let directives = &schema_def.directives;
+            for tag_directive_application in directives.get_all(&tag_directive_definition.name) {
+                let arguments = federation_spec.tag_directive_arguments(tag_directive_application);
+                applications.push(arguments.map(|args| TagDirective {
+                    arguments: args,
+                    target: TagDirectiveTargetPosition::Schema(schema_position.clone()),
+                    directive: tag_directive_application,
+                }));
+            }
+        }
+        // Interface types
+        for interface_type_position in &tag_directive_referencers.interface_types {
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
                     for tag_directive_application in
                         directives.get_all(&tag_directive_definition.name)
                     {
@@ -641,8 +683,8 @@ impl FederationSchema {
                             federation_spec.tag_directive_arguments(tag_directive_application);
                         applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
-                            target: TagDirectiveTargetPosition::ObjectField(
-                                field_definition_position.clone(),
+                            target: TagDirectiveTargetPosition::Interface(
+                                interface_type_position.clone(),
                             ),
                             directive: tag_directive_application,
                         }));
@@ -651,6 +693,7 @@ impl FederationSchema {
                 Err(error) => applications.push(Err(error.into())),
             }
         }
+        // Interface fields
         for field_definition_position in &tag_directive_referencers.interface_fields {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
@@ -672,6 +715,246 @@ impl FederationSchema {
                 Err(error) => applications.push(Err(error.into())),
             }
         }
+        // Interface field arguments
+        for argument_definition_position in &tag_directive_referencers.interface_field_arguments {
+            match argument_definition_position.get(self.schema()) {
+                Ok(argument_definition) => {
+                    let directives = &argument_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ArgumentDefinition(
+                                argument_definition_position.clone().into(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object types
+        for object_type_position in &tag_directive_referencers.object_types {
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Object(
+                                object_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object fields
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object field arguments
+        for argument_definition_position in &tag_directive_referencers.object_field_arguments {
+            match argument_definition_position.get(self.schema()) {
+                Ok(argument_definition) => {
+                    let directives = &argument_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ArgumentDefinition(
+                                argument_definition_position.clone().into(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Union types
+        for union_type_position in &tag_directive_referencers.union_types {
+            match union_type_position.get(self.schema()) {
+                Ok(union_type) => {
+                    let directives = &union_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Union(union_type_position.clone()),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+
+        // Scalar types
+        for scalar_type_position in &tag_directive_referencers.scalar_types {
+            match scalar_type_position.get(self.schema()) {
+                Ok(scalar_type) => {
+                    let directives = &scalar_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Scalar(
+                                scalar_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Enum types
+        for enum_type_position in &tag_directive_referencers.enum_types {
+            match enum_type_position.get(self.schema()) {
+                Ok(enum_type) => {
+                    let directives = &enum_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Enum(enum_type_position.clone()),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Enum values
+        for enum_value_position in &tag_directive_referencers.enum_values {
+            match enum_value_position.get(self.schema()) {
+                Ok(enum_value) => {
+                    let directives = &enum_value.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::EnumValue(
+                                enum_value_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Input object types
+        for input_object_type_position in &tag_directive_referencers.input_object_types {
+            match input_object_type_position.get(self.schema()) {
+                Ok(input_object_type) => {
+                    let directives = &input_object_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InputObject(
+                                input_object_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Input field definitions
+        for input_field_definition_position in &tag_directive_referencers.input_object_fields {
+            match input_field_definition_position.get(self.schema()) {
+                Ok(input_field_definition) => {
+                    let directives = &input_field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InputObjectFieldDefinition(
+                                input_field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Directive definition arguments
+        for directive_definition_position in &tag_directive_referencers.directive_arguments {
+            match directive_definition_position.get(self.schema()) {
+                Ok(directive_definition) => {
+                    let directives = &directive_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::DirectiveArgumentDefinition(
+                                directive_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+
         Ok(applications)
     }
 
@@ -713,6 +996,7 @@ impl FederationSchema {
                 }
             }
         }
+
         Ok(applications)
     }
 
@@ -836,6 +1120,16 @@ pub(crate) struct ContextDirective<'schema> {
     arguments: ContextDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: CompositeTypeDefinitionPosition,
+}
+
+impl ContextDirective<'_> {
+    pub(crate) fn arguments(&self) -> &ContextDirectiveArguments<'_> {
+        &self.arguments
+    }
+
+    pub(crate) fn target(&self) -> &CompositeTypeDefinitionPosition {
+        &self.target
+    }
 }
 
 pub(crate) struct FromContextDirective<'schema> {

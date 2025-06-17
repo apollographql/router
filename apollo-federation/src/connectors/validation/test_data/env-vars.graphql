@@ -1,0 +1,44 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.3"
+    import: ["@source", "@connect"]
+  )
+  @source(
+    name: "valid-source"
+    http: {
+      baseURL: "http://localhost:3000"
+      headers: [{ name: "x-env", value: "{$env.VALID}" }]
+    }
+  )
+  @source(
+    name: "invalid-source"
+    http: {
+      baseURL: "http://localhost:3000"
+      headers: [
+        { name: "x-env1", value: "{$env}" }
+        { name: "x-env2", value: "{$env.foo.bar}" }
+      ]
+    }
+  )
+
+type Query {
+  validRequest: String
+    @connect(
+      http: { GET: "http://localhost:3000/{$env.ENV_VAR}" }
+      selection: "$"
+    )
+  validResponse: String
+    @connect(http: { GET: "http://localhost:3000/" }, selection: "$env.ENV_VAR")
+
+  invalidObject: String
+    @connect(
+      http: { GET: "http://localhost:3000/{$env}" }
+      selection: "$env" # TODO: This should be an error
+    )
+  invalidPath: String
+    @connect(
+      http: { GET: "http://localhost:3000/{$env.foo.bar}" }
+      selection: "$env.baz.quux" # TODO: This should be an error
+    )
+}
