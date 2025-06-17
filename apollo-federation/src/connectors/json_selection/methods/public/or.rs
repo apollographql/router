@@ -17,11 +17,11 @@ impl_arrow_method!(OrMethod, or_method, or_shape);
 /// Given 2 or more values to compare, returns true if any of the values are truthy or false if none of them are truthy.
 ///
 /// Examples:
-/// $->echo(true)->or(false)            results in true
-/// $->echo(false)->or(true)            results in true
-/// $->echo(true)->or(true)             results in true
-/// $->echo(false)->or(false)           results in false
-/// $->echo(false)->or(false, true)     results in true
+/// $(true)->or(false)            results in true
+/// $(false)->or(true)            results in true
+/// $(true)->or(true)             results in true
+/// $(false)->or(false)           results in false
+/// $(false)->or(false, true)     results in true
 fn or_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
