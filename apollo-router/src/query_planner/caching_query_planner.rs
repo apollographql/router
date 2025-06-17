@@ -444,6 +444,14 @@ where
     }
 }
 
+const BACKPRESSURE: &str = "backpressure";
+const BATCHING_ERROR: &str = "batching_error";
+const CANCELLED: &str = "cancelled";
+const ERROR: &str = "error";
+const OUTCOME: &str = "outcome";
+const SUCCESS: &str = "success";
+const TIMEOUT: &str = "timeout";
+
 impl<T> CachingQueryPlanner<T>
 where
     T: Service<
@@ -615,8 +623,8 @@ where
                 let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
                 let planning_task = tokio::task::spawn(planning_task);
                 let outcome_recorded_for_abort = outcome_recorded.clone();
-                let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
-                let measure_mode = self.cooperative_cancellation.is_measure_mode();
+                let enforce_mode = self.cooperative_cancellation.mode().is_enforce_mode();
+                let measure_mode = self.cooperative_cancellation.mode().is_measure_mode();
                 let _abort_guard =
                     scopeguard::guard(planning_task.abort_handle(), move |abort_handle| {
                         // Client drop handler
@@ -633,7 +641,7 @@ where
                             if enforce_mode {
                                 abort_handle.abort();
                             }
-                            tracing::Span::current().record("outcome", "cancelled");
+                            tracing::Span::current().record(OUTCOME, CANCELLED);
                         }
                     });
 
@@ -666,7 +674,7 @@ where
                                     )
                                     .is_ok()
                             {
-                                tracing::Span::current().record("outcome", "timeout");
+                                tracing::Span::current().record(OUTCOME, TIMEOUT);
                             }
                             res.map_err(convert_timeout_error)?
                         } else if measure_mode {
@@ -683,7 +691,7 @@ where
                                     )
                                     .is_ok()
                                 {
-                                    tracing::Span::current().record("outcome", "timeout");
+                                    tracing::Span::current().record(OUTCOME, TIMEOUT);
                                 }
                             });
                             let _dropped_timeout_guard =
@@ -707,22 +715,24 @@ where
                 tokio::task::spawn(planning_task).await
             }
             .inspect(|res| {
+                // We won't reach this code path if the plan was cancelled, and
+                // thus it won't overwrite the outcome.
                 match res {
                     Ok(_) => {
-                        tracing::Span::current().record("outcome", "success");
+                        tracing::Span::current().record(OUTCOME, SUCCESS);
                     }
                     Err(CacheResolverError::RetrievalError(e)) => {
                         if matches!(e.as_ref(), QueryPlannerError::Timeout(_)) {
-                            tracing::Span::current().record("outcome", "timeout");
+                            tracing::Span::current().record(OUTCOME, TIMEOUT);
                         } else {
-                            tracing::Span::current().record("outcome", "error");
+                            tracing::Span::current().record(OUTCOME, ERROR);
                         };
                     }
                     Err(CacheResolverError::Backpressure(_)) => {
-                        tracing::Span::current().record("outcome", "backpressure");
+                        tracing::Span::current().record(OUTCOME, BACKPRESSURE);
                     }
                     Err(CacheResolverError::BatchingError(_)) => {
-                        tracing::Span::current().record("outcome", "batching_error");
+                        tracing::Span::current().record(OUTCOME, BATCHING_ERROR);
                     }
                 };
             })
@@ -1107,11 +1117,9 @@ mod tests {
 
         // Create a span with the outcome field declared
         let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
-
         // Keep the span alive and ensure it's the current span during the entire operation
         let _span_guard = span.enter();
 
-        // Instrument the call to ensure span context is propagated
         let result = planner
             .call(query_planner::CachingRequest::new(
                 "query Me { me { name { first } } }".to_string(),

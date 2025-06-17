@@ -1230,8 +1230,8 @@ expression: "&schema"
       "description": "Authentication",
       "properties": {
         "connector": {
-          "$ref": "#/definitions/Config7",
-          "description": "#/definitions/Config7",
+          "$ref": "#/definitions/Config6",
+          "description": "#/definitions/Config6",
           "nullable": true
         },
         "router": {
@@ -1240,8 +1240,8 @@ expression: "&schema"
           "nullable": true
         },
         "subgraph": {
-          "$ref": "#/definitions/Config6",
-          "description": "#/definitions/Config6",
+          "$ref": "#/definitions/Config5",
+          "description": "#/definitions/Config5",
           "nullable": true
         }
       },
@@ -1342,8 +1342,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config15",
-          "description": "#/definitions/Config15"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1383,39 +1383,6 @@ expression: "&schema"
     },
     "Config10": {
       "additionalProperties": false,
-      "description": "Configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the entity caching feature",
-          "type": "boolean"
-        },
-        "expose_keys_in_context": {
-          "default": false,
-          "description": "Expose cache keys in context",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "$ref": "#/definitions/InvalidationEndpointConfig",
-          "description": "#/definitions/InvalidationEndpointConfig",
-          "nullable": true
-        },
-        "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
-        },
-        "subgraph": {
-          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
-          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
-      ],
-      "type": "object"
-    },
-    "Config11": {
-      "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
         "all": {
@@ -1438,7 +1405,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config12": {
+    "Config11": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
@@ -1458,7 +1425,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config13": {
+    "Config12": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1491,11 +1458,11 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config13": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config15": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1571,7 +1538,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config16": {
+    "Config15": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1610,7 +1577,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config17": {
+    "Config16": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1635,7 +1602,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config18": {
+    "Config17": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1656,7 +1623,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config19": {
+    "Config18": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1715,33 +1682,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config2": {
-      "description": "Controls cooperative cancellation of query planning.\n\nWhen enabled, query planning will be cancelled if the client waiting on the query plan closes their connection. Additionally, when enabled with a timeout, the query planning will be cancelled if it takes longer than the specified timeout.",
-      "oneOf": [
-        {
-          "description": "Enables cooperative cancellation of query planning, but does not set a timeout.",
-          "enum": [
-            "enabled"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Enables cooperative cancellation of query planning with a timeout.",
-          "properties": {
-            "enabled_with_timeout_in_seconds": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "enabled_with_timeout_in_seconds"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Config20": {
+    "Config19": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1776,7 +1717,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config3": {
+    "Config2": {
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
@@ -1860,7 +1801,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config4": {
+    "Config3": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1873,7 +1814,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config5": {
+    "Config4": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1886,7 +1827,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config5": {
       "additionalProperties": false,
       "description": "Configure subgraph authentication",
       "properties": {
@@ -1907,7 +1848,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config7": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configure connector authentication",
       "properties": {
@@ -1923,10 +1864,43 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Config7": {
+      "type": "object"
+    },
     "Config8": {
       "type": "object"
     },
     "Config9": {
+      "additionalProperties": false,
+      "description": "Configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
+        },
+        "metrics": {
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
+        },
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
       "type": "object"
     },
     "ConnectorAttributes": {
@@ -2337,6 +2311,27 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "CooperativeCancellation": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode",
+          "description": "#/definitions/Mode"
+        },
+        "timeout_in_seconds": {
+          "description": "The timeout in seconds.",
+          "format": "double",
+          "nullable": true,
+          "type": "number"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2684,8 +2679,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "mode": {
-          "$ref": "#/definitions/Mode",
-          "description": "#/definitions/Mode"
+          "$ref": "#/definitions/Mode2",
+          "description": "#/definitions/Mode2"
         },
         "strategy": {
           "$ref": "#/definitions/StrategyConfig",
@@ -4526,12 +4521,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config16",
-          "description": "#/definitions/Config16"
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         },
         "prometheus": {
-          "$ref": "#/definitions/Config17",
-          "description": "#/definitions/Config17"
+          "$ref": "#/definitions/Config16",
+          "description": "#/definitions/Config16"
         }
       },
       "type": "object"
@@ -4600,41 +4595,12 @@ expression: "&schema"
       ],
       "type": "string"
     },
-    "Mode_for_Config": {
-      "oneOf": [
-        {
-          "enum": [
-            "disabled"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "measure": {
-              "$ref": "#/definitions/Config2",
-              "description": "#/definitions/Config2"
-            }
-          },
-          "required": [
-            "measure"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "enforce": {
-              "$ref": "#/definitions/Config2",
-              "description": "#/definitions/Config2"
-            }
-          },
-          "required": [
-            "enforce"
-          ],
-          "type": "object"
-        }
-      ]
+    "Mode2": {
+      "enum": [
+        "measure",
+        "enforce"
+      ],
+      "type": "string"
     },
     "MultipartRequest": {
       "additionalProperties": false,
@@ -4889,8 +4855,8 @@ expression: "&schema"
           "description": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config4",
-          "description": "#/definitions/Config4"
+          "$ref": "#/definitions/Config3",
+          "description": "#/definitions/Config3"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig",
@@ -4901,8 +4867,8 @@ expression: "&schema"
           "description": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config5",
-          "description": "#/definitions/Config5"
+          "$ref": "#/definitions/Config4",
+          "description": "#/definitions/Config4"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf",
@@ -5139,8 +5105,8 @@ expression: "&schema"
           "description": "#/definitions/QueryPlanCache"
         },
         "experimental_cooperative_cancellation": {
-          "$ref": "#/definitions/Mode_for_Config",
-          "description": "#/definitions/Mode_for_Config"
+          "$ref": "#/definitions/CooperativeCancellation",
+          "description": "#/definitions/CooperativeCancellation"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -8274,24 +8240,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config19",
-          "description": "#/definitions/Config19"
+          "$ref": "#/definitions/Config18",
+          "description": "#/definitions/Config18"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config16",
-          "description": "#/definitions/Config16"
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config18",
-          "description": "#/definitions/Config18"
+          "$ref": "#/definitions/Config17",
+          "description": "#/definitions/Config17"
         }
       },
       "type": "object"
@@ -9408,8 +9374,8 @@ expression: "&schema"
       "type": "object"
     },
     "^experimental_response_cache$": {
-      "$ref": "#/definitions/Config10",
-      "description": "#/definitions/Config10"
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     }
   },
   "properties": {
@@ -9434,8 +9400,8 @@ expression: "&schema"
       "description": "#/definitions/ConnectorsConfig"
     },
     "content_negotiation": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
@@ -9454,8 +9420,8 @@ expression: "&schema"
       "description": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config9",
-      "description": "#/definitions/Config9"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
@@ -9475,8 +9441,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config11",
-      "description": "#/definitions/Config11"
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -9487,16 +9453,16 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config12",
-      "description": "#/definitions/Config12"
+      "$ref": "#/definitions/Config11",
+      "description": "#/definitions/Config11"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
       "description": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
-      "$ref": "#/definitions/Config3",
-      "description": "#/definitions/Config3"
+      "$ref": "#/definitions/Config2",
+      "description": "#/definitions/Config2"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf6",
@@ -9511,16 +9477,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config13",
-      "description": "#/definitions/Config13"
+      "$ref": "#/definitions/Config12",
+      "description": "#/definitions/Config12"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config14",
-      "description": "#/definitions/Config14"
+      "$ref": "#/definitions/Config13",
+      "description": "#/definitions/Config13"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -9551,8 +9517,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config20",
-      "description": "#/definitions/Config20"
+      "$ref": "#/definitions/Config19",
+      "description": "#/definitions/Config19"
     }
   },
   "title": "Configuration",
