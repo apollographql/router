@@ -84,24 +84,24 @@ impl HttpClientServiceFactory {
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
         // Check if we already have a memoized service for this name
-        // if let Some(service) = self.cache.read().get(name) {
-        // service.clone().boxed()
-        // } else {
-        // Create the service if not cached
-        let service = self
-            .plugins
-            .iter()
-            .rev()
-            .fold(self.service.clone().boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            });
-        let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
+        if let Some(service) = self.cache.read().get(name) {
+            service.clone().boxed()
+        } else {
+            // Create the service if not cached
+            let service = self
+                .plugins
+                .iter()
+                .rev()
+                .fold(self.service.clone().boxed(), |acc, (_, e)| {
+                    e.http_client_service(name, acc)
+                });
+            let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
 
-        // self.cache
-        // .write()
-        // .insert(name.to_string(), buffered_clone_service.clone());
-        buffered_clone_service.boxed()
-        // }
+            self.cache
+                .write()
+                .insert(name.to_string(), buffered_clone_service.clone());
+            buffered_clone_service.boxed()
+        }
     }
 
     #[cfg(test)]
