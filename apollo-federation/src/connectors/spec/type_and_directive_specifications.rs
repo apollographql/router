@@ -30,7 +30,7 @@ use super::http::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use super::http::URL_PATH_TEMPLATE_SCALAR_NAME;
-use super::source::SOURCE_BASE_URL_ARGUMENT_NAME;
+use super::source::BaseUrl;
 use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::source::SOURCE_HTTP_NAME_IN_SPEC;
 use super::source::SOURCE_NAME_ARGUMENT_NAME;
@@ -351,7 +351,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
     let source_http_fields = [
-        (SOURCE_BASE_URL_ARGUMENT_NAME, ty!(String!).into()),
+        (BaseUrl::ARGUMENT, ty!(String!).into()),
         (
             HEADERS_ARGUMENT_NAME,
             Type::List(Box::new(Type::NonNullNamed(
