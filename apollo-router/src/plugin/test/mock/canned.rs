@@ -28,11 +28,13 @@ pub(crate) fn mock_subgraphs() -> serde_json::Value {
                     "upc": "1",
                     "reviews": [
                         {
+                            "__typename": "Review",
                             "id": "1",
                             "product": { "__typename": "Product", "upc": "1" },
                             "author": { "__typename": "User", "id": "1" },
                         },
                         {
+                            "__typename": "Review",
                             "id": "4",
                             "product": { "__typename": "Product", "upc": "1" },
                             "author": { "__typename": "User", "id": "2" },
@@ -44,12 +46,31 @@ pub(crate) fn mock_subgraphs() -> serde_json::Value {
                     "upc": "2",
                     "reviews": [
                         {
+                            "__typename": "Review",
                             "id": "2",
                             "product": { "__typename": "Product", "upc": "2" },
                             "author": { "__typename": "User", "id": "1" },
                         },
                     ],
-                }
+                },
+                {
+                    "__typename": "Review",
+                    "id": "1",
+                    "product": { "__typename": "Product", "upc": "1" },
+                    "author": { "__typename": "User", "id": "1" },
+                },
+                {
+                    "__typename": "Review",
+                    "id": "2",
+                    "product": { "__typename": "Product", "upc": "2" },
+                    "author": { "__typename": "User", "id": "1" },
+                },
+                {
+                    "__typename": "Review",
+                    "id": "4",
+                    "product": { "__typename": "Product", "upc": "1" },
+                    "author": { "__typename": "User", "id": "2" },
+                },
             ],
         },
     })
