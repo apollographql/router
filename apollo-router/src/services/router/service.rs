@@ -503,13 +503,13 @@ impl RouterService {
             }
             bytes.put_u8(b']');
 
-            Ok(RouterResponse {
-                response: http::Response::from_parts(
+            RouterResponse::http_response_builder()
+                .response(http::Response::from_parts(
                     parts,
                     router::body::from_bytes(bytes.freeze()),
-                ),
-                context,
-            })
+                ))
+                .context(context)
+                .build()
         } else {
             Ok(results.pop().expect("we should have at least one response"))
         }
