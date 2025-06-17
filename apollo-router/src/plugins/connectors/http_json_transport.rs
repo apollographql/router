@@ -9,6 +9,12 @@ use apollo_federation::connectors::HttpJsonTransport;
 use apollo_federation::connectors::MakeUriError;
 use apollo_federation::connectors::OriginatingDirective;
 use apollo_federation::connectors::ProblemLocation;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::SelectionData;
+use apollo_federation::connectors::runtime::mapping::Problem;
+use apollo_federation::connectors::runtime::mapping::aggregate_apply_to_errors;
+use apollo_federation::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_locations;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
@@ -19,12 +25,6 @@ use serde_json_bytes::json;
 use thiserror::Error;
 
 use super::form_encoding::encode_json_as_form;
-use super::mapping::aggregate_apply_to_errors_with_problem_locations;
-use super::plugin::debug::ConnectorDebugHttpRequest;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 

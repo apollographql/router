@@ -304,6 +304,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::mapping::Problem;
     use http::HeaderValue;
     use http::StatusCode;
     use opentelemetry::Array;
@@ -316,7 +317,6 @@ mod tests {
     use crate::Context;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;

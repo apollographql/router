@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::mapping::Problem;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -28,8 +30,6 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;

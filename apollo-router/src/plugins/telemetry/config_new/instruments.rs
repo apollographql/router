@@ -2452,6 +2452,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::mapping::Problem;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2477,7 +2478,6 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
