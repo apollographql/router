@@ -18,6 +18,7 @@ use itertools::Itertools;
 use serde_json_bytes::Value;
 
 pub(crate) use self::encoding::UriString;
+use super::ApplyToError;
 use crate::connectors::JSONSelection;
 
 pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
@@ -108,17 +109,26 @@ impl StringTemplate {
     /// Interpolate the expressions in the template into a basic string.
     ///
     /// For URIs, use [`Self::interpolate_uri`] instead.
-    pub fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
+    pub fn interpolate(
+        &self,
+        vars: &IndexMap<String, Value>,
+    ) -> Result<(String, Vec<ApplyToError>), Error> {
         let mut result = String::new();
+        let mut warnings = Vec::new();
         for part in &self.parts {
-            part.interpolate(vars, &mut result)?;
+            let part_warnings = part.interpolate(vars, &mut result)?;
+            warnings.extend(part_warnings);
         }
-        Ok(result)
+        Ok((result, warnings))
     }
 
     /// Interpolate the expression as a URI, percent-encoding parts as needed.
-    pub fn interpolate_uri(&self, vars: &IndexMap<String, Value>) -> Result<Uri, Error> {
+    pub fn interpolate_uri(
+        &self,
+        vars: &IndexMap<String, Value>,
+    ) -> Result<(Uri, Vec<ApplyToError>), Error> {
         let mut result = UriString::new();
+        let mut warnings = Vec::new();
         for part in &self.parts {
             match part {
                 Part::Constant(constant) => {
@@ -138,11 +148,12 @@ impl StringTemplate {
                     })?;
                 }
                 Part::Expression(_) => {
-                    part.interpolate(vars, &mut result)?;
+                    let part_warnings = part.interpolate(vars, &mut result)?;
+                    warnings.extend(part_warnings);
                 }
             };
         }
-        if result.contains("://") {
+        let uri = if result.contains("://") {
             Uri::from_str(result.as_ref())
         } else {
             // Explicitly set this as a relative URI so it doesn't get confused for a domain name
@@ -151,7 +162,9 @@ impl StringTemplate {
         .map_err(|err| Error {
             message: format!("Invalid URI: {}", err),
             location: 0..result.as_ref().len(),
-        })
+        })?;
+
+        Ok((uri, warnings))
     }
 }
 
@@ -216,21 +229,25 @@ impl Part {
         &self,
         vars: &IndexMap<String, Value>,
         mut output: Output,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<ApplyToError>, Error> {
+        let mut warnings = Vec::new();
         match self {
             Part::Constant(Constant { value, .. }) => {
                 output.write_str(value).map_err(|err| err.into())
             }
             Part::Expression(Expression { expression, .. }) => {
                 // TODO: do something with the ApplyTo errors
-                let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
+                let (value, errs) = expression.apply_with_vars(&Value::Null, vars);
+                warnings.extend(errs);
                 write_value(&mut output, value.as_ref().unwrap_or(&Value::Null))
             }
         }
         .map_err(|err| Error {
             message: err.to_string(),
             location: self.location(),
-        })
+        })?;
+
+        Ok(warnings)
     }
 }
 
@@ -481,14 +498,14 @@ mod test_interpolate {
         let template = StringTemplate::from_str("before {$config.one} after").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "foo"}));
-        assert_eq!(template.interpolate(&vars).unwrap(), "before foo after");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "before foo after");
     }
 
     #[test]
     fn test_interpolate_missing_value() {
         let template = StringTemplate::from_str("{$config.one}").unwrap();
         let vars = IndexMap::default();
-        assert_eq!(template.interpolate(&vars).unwrap(), "");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "");
     }
 
     #[test]
@@ -514,7 +531,7 @@ mod test_interpolate {
         let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": true}));
-        assert_eq!(template.interpolate(&vars).unwrap(), "true");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "true");
     }
 
     #[test]
@@ -522,7 +539,7 @@ mod test_interpolate {
         let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": null}));
-        assert_eq!(template.interpolate(&vars).unwrap(), "");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "");
     }
 
     #[test]
@@ -530,7 +547,7 @@ mod test_interpolate {
         let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": 1}));
-        assert_eq!(template.interpolate(&vars).unwrap(), "1");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "1");
     }
 
     #[test]
@@ -556,7 +573,7 @@ mod test_interpolate {
         let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
-        assert_eq!(template.interpolate(&vars).unwrap(), "string");
+        assert_eq!(template.interpolate(&vars).unwrap().0, "string");
     }
 }
 
@@ -585,7 +602,7 @@ mod test_interpolate_uri {
     #[case::fragment("#blah")]
     fn relative_uris(#[case] val: &str) {
         let template = StringTemplate::from_str(val).unwrap();
-        let uri = template
+        let (uri, _) = template
             .interpolate_uri(&Default::default())
             .expect("case was valid URI");
         assert!(uri.path_and_query().is_some());
@@ -600,7 +617,7 @@ mod test_interpolate_uri {
     #[case::with_port("http://localhost:8080/something")]
     fn absolute_uris(#[case] val: &str) {
         let template = StringTemplate::from_str(val).unwrap();
-        let uri = template
+        let (uri, _) = template
             .interpolate_uri(&Default::default())
             .expect("case was valid URI");
         assert!(uri.path_and_query().is_some());
@@ -622,7 +639,7 @@ mod test_interpolate_uri {
 
         let template = StringTemplate::from_str("http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}")
             .expect("Failed to parse URL template");
-        let url = template
+        let (url, _) = template
             .interpolate_uri(vars)
             .expect("Failed to generate URL");
 
@@ -651,7 +668,7 @@ mod test_interpolate_uri {
         )
         .unwrap();
 
-        let uri = template.interpolate(vars).expect("Failed to interpolate");
+        let (uri, _) = template.interpolate(vars).expect("Failed to interpolate");
 
         assert_eq!(uri, "/1/1.2/true//string")
     }
@@ -660,7 +677,7 @@ mod test_interpolate_uri {
     fn special_symbols_in_literal() {
         let literal = "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='";
         let template = StringTemplate::from_str(literal).expect("Failed to parse URL template");
-        let url = template
+        let (url, _) = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
 
@@ -674,7 +691,7 @@ mod test_interpolate_uri {
         let template = StringTemplate::from_str("https://example.com/😈 \\")
             .expect("Failed to parse URL template");
 
-        let url = template
+        let (url, _) = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
         assert_eq!(url.to_string(), "https://example.com/%F0%9F%98%88%20%5C")
@@ -688,7 +705,7 @@ mod test_interpolate_uri {
         let template = StringTemplate::from_str("https://example.com/%20")
             .expect("Failed to parse URL template");
 
-        let url = template
+        let (url, _) = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
         assert_eq!(url.to_string(), "https://example.com/%20")
@@ -702,7 +719,7 @@ mod test_interpolate_uri {
             "https://example.com\n/broken\npath\n/path\n?param=value\n&param=\r\nvalue&\nparam\n=\nvalue",
         )
         .expect("Failed to parse URL template");
-        let url = template
+        let (url, _) = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
 

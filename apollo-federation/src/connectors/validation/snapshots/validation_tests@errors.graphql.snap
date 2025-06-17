@@ -27,15 +27,15 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@connect(errors.message:)` on `Query.invalid_sourceless_empty_message` must be a string.",
+        code: InvalidErrorsMessage,
+        message: "`@connect(errors.message:)` on `Query.invalid_sourceless_empty_message` is empty",
         locations: [
             114:26..114:28,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@connect(errors.extensions:)` on `Query.invalid_sourceless_empty_extensions` must be a string.",
+        code: InvalidErrorsMessage,
+        message: "`@connect(errors.extensions:)` on `Query.invalid_sourceless_empty_extensions` is empty",
         locations: [
             119:97..119:99,
         ],

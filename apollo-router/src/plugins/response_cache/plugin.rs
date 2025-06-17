@@ -1142,7 +1142,7 @@ fn get_invalidation_root_keys_from_schema(
             vars.insert("$args".to_string(), Value::Object(args));
             // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
             cache_keys
-                .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars)?)))
+                .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars).map(|(res, _)| res)?)))
                 .collect::<Result<Vec<(bool, String)>, anyhow::Error>>()
         })
         .collect::<Result<Vec<Vec<(bool, String)>>, anyhow::Error>>()?;
@@ -1709,7 +1709,7 @@ fn get_invalidation_entity_keys_from_schema(
     let mut vars = IndexMap::default();
     vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
     let invalidation_cache_keys = cache_keys
-        .map(|ck| ck.interpolate(&vars))
+        .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<HashSet<String>, apollo_federation::connectors::Error>>()?;
     Ok(invalidation_cache_keys)
 }

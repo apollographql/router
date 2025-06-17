@@ -1,6 +1,7 @@
 mod headers;
 mod http_json_transport;
 mod keys;
+mod problem_location;
 mod source;
 
 use std::collections::HashMap;
@@ -17,9 +18,11 @@ use serde_json::Value;
 pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
 pub use self::headers::HeaderSource;
+pub use self::headers::OriginatingDirective;
 pub use self::http_json_transport::HTTPMethod;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;

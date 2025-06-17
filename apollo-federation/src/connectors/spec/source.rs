@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -13,16 +15,18 @@ use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ErrorsArguments;
 use crate::connectors::Header;
 use crate::connectors::JSONSelection;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::validation::Code;
+use crate::connectors::validation::Message;
 use crate::error::FederationError;
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
-pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
@@ -75,7 +79,8 @@ impl SourceDirectiveArguments {
                         "`http` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
-                let http_value = SourceHTTPArguments::try_from((http_value, directive_name))?;
+                let http_value =
+                    SourceHTTPArguments::from_directive(http_value, directive_name, sources)?;
 
                 http = Some(http_value);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
@@ -115,14 +120,16 @@ pub struct SourceHTTPArguments {
     pub(crate) query_params: Option<JSONSelection>,
 }
 
-impl TryFrom<(&[(Name, Node<Value>)], &Name)> for SourceHTTPArguments {
-    type Error = FederationError;
-
-    fn try_from(
-        (values, directive_name): (&[(Name, Node<Value>)], &Name),
+impl SourceHTTPArguments {
+    fn from_directive(
+        values: &[(Name, Node<Value>)],
+        directive_name: &Name,
+        sources: &SourceMap,
     ) -> Result<Self, FederationError> {
-        let mut base_url = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let base_url = BaseUrl::parse(values, directive_name, sources)
+            .map_err(|err| FederationError::internal(err.message))?
+            .url;
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Source)
             .into_iter()
             .try_collect()
             .map_err(|err| FederationError::internal(err.to_string()))?;
@@ -131,15 +138,7 @@ impl TryFrom<(&[(Name, Node<Value>)], &Name)> for SourceHTTPArguments {
         for (name, value) in values {
             let name = name.as_str();
 
-            if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_str().ok_or_else(|| FederationError::internal(format!(
-                    "`baseURL` field in `@{directive_name}` directive's `http.baseURL` field is not a string"
-                )))?;
-
-                base_url = Some(base_url_value.parse().map_err(|err| {
-                    FederationError::internal(format!("Invalid base URL: {}", err))
-                })?);
-            } else if name == PATH_ARGUMENT_NAME.as_str() {
+            if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
                         "`{}` field in `@{directive_name}` directive's `http.path` field is not a string",
@@ -163,14 +162,57 @@ impl TryFrom<(&[(Name, Node<Value>)], &Name)> for SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url.ok_or_else(|| {
-                FederationError::internal(format!(
-                    "missing `base_url` field in `@{directive_name}` directive's `http` argument"
-                ))
-            })?,
+            base_url,
             headers,
             path,
             query_params: query,
+        })
+    }
+}
+
+/// The `baseURL` argument to the `@source` directive
+#[derive(Debug)]
+pub(crate) struct BaseUrl {
+    pub(crate) url: Uri,
+    pub(crate) node: Node<Value>,
+}
+
+impl BaseUrl {
+    pub(crate) const ARGUMENT: Name = name!("baseURL");
+
+    pub(crate) fn parse(
+        values: &[(Name, Node<Value>)],
+        directive_name: &Name,
+        sources: &SourceMap,
+    ) -> Result<Self, Message> {
+        const BASE_URL: Name = BaseUrl::ARGUMENT;
+
+        let value = values
+            .iter()
+            .find_map(|(key, value)| (key == &Self::ARGUMENT).then_some(value))
+            .ok_or_else(|| Message {
+                code: Code::GraphQLError,
+                message: format!("`@{directive_name}` must have a `baseURL` argument."),
+                locations: directive_name
+                    .line_column_range(sources)
+                    .into_iter()
+                    .collect(),
+            })?;
+        let str_value = value.as_str().ok_or_else(|| Message {
+            code: Code::GraphQLError,
+            message: format!("`@{directive_name}({BASE_URL}:)` must be a string."),
+            locations: value.line_column_range(sources).into_iter().collect(),
+        })?;
+        let url = Uri::from_str(str_value).map_err(|inner| Message {
+            code: Code::InvalidUrl,
+            message: format!(
+                "`@{directive_name}({BASE_URL:})` value {str_value} is not a valid URL: {inner}."
+            ),
+            locations: value.line_column_range(sources).into_iter().collect(),
+        })?;
+        Ok(Self {
+            url,
+            node: value.clone(),
         })
     }
 }
