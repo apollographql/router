@@ -4,12 +4,8 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use axum::response::*;
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
-use futures::TryFutureExt;
 use futures::future::BoxFuture;
-use futures::future::join_all;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use futures::stream::once;
@@ -19,6 +15,7 @@ use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
 use http::request::Parts;
+use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
@@ -31,18 +28,16 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::Body;
+use super::tower_compat::APQCachingLayer;
+use super::tower_compat::ParseQueryLayer;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::axum_factory::CanceledRequest;
-use crate::batching::Batch;
-use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
-use crate::configuration::BatchingMode;
 use crate::graphql;
-use crate::http_ext;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
@@ -74,11 +69,14 @@ use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQLayer;
+use crate::services::layers::persisted_queries::EnforceSafelistLayer;
+use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
@@ -88,38 +86,54 @@ static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-acce
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
 
 /// Containing [`Service`] in the request lifecyle.
-#[derive(Clone)]
 pub(crate) struct RouterService {
-    apq_layer: Arc<APQLayer>,
-    persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: Arc<QueryAnalysisLayer>,
-    // Cannot be under Arc. Batching state must be preserved for each RouterService
-    // instance
-    batching: Batching,
-    supergraph_service: supergraph::BoxCloneService,
-    apollo_telemetry_config: ApolloTelemetryConfig,
+    // A service stack for the actual implementation of the router service.
+    service: router::BoxService,
 }
 
 impl RouterService {
     fn new(
-        sgb: supergraph::BoxService,
+        supergraph_service: supergraph::BoxService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
         apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+        // Some of the layers in the stack are wrapping previous implementations that are called
+        // layers, but are not tower layers at all.
+        let apq_layer = Arc::new(apq_layer);
+        let query_analysis_layer = Arc::new(query_analysis_layer);
 
-        RouterService {
-            apq_layer: Arc::new(apq_layer),
-            persisted_query_layer,
-            query_analysis_layer: Arc::new(query_analysis_layer),
-            batching,
-            supergraph_service,
-            apollo_telemetry_config,
-        }
+        let service = ServiceBuilder::new()
+            .layer(DisplayRouterRequestLayer)
+            .layer(BatchingLayer::new(batching))
+            .layer(RouterToSupergraphRequestLayer::new(Arc::new(
+                apollo_telemetry_config,
+            )))
+            .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
+            .layer(APQCachingLayer::new(apq_layer))
+            .layer(ParseQueryLayer::new(query_analysis_layer))
+            .layer(EnforceSafelistLayer::new(persisted_query_layer))
+            .buffered() // Makes the supergraph service cloneable
+            .service(supergraph_service)
+            .boxed();
+
+        RouterService { service }
+    }
+}
+
+impl Service<RouterRequest> for RouterService {
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
+        self.service.call(req)
     }
 }
 
@@ -214,7 +228,160 @@ pub(crate) async fn empty() -> impl Service<
     .make()
 }
 
-impl Service<RouterRequest> for RouterService {
+/// If the `DisplayRouterRequest(true)` marker value is in context,
+/// reads the request body and logs it out.
+struct DisplayRouterRequestLayer;
+impl<S> tower::Layer<S> for DisplayRouterRequestLayer {
+    type Service = DisplayRouterRequestService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        DisplayRouterRequestService { inner }
+    }
+}
+
+#[derive(Clone)]
+struct DisplayRouterRequestService<S> {
+    inner: S,
+}
+
+impl<S> Service<RouterRequest> for DisplayRouterRequestService<S>
+where
+    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = RouterResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        Box::pin(async move {
+            if let Some(level) = req
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                .map(|d| d.0)
+            {
+                // XXX(@goto-bus-stop): a better implementation of this might be to wrap the body
+                // type, and log automatically once it is out of data. It also wouldn't require the
+                // `is_fixed_size` workaround below.
+                let RouterRequest {
+                    context,
+                    router_request,
+                } = req;
+                let (parts, body) = router_request.into_parts();
+
+                // Only show the "receive_body" span if we haven't received the body yet, to prevent
+                // having multiple of those spans
+                let is_fixed_size = body.size_hint().exact().is_some();
+                let bytes = if is_fixed_size {
+                    router::body::into_bytes(body).await?
+                } else {
+                    router::body::into_bytes(body)
+                        .instrument(tracing::debug_span!("receive_body"))
+                        .await?
+                };
+
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                    .headers
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = &parts.headers;
+
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(format!("{}", parts.method).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                    ),
+                ));
+                log_event(level, "router.request", attrs, "");
+
+                let body = router::body::from_bytes(bytes);
+                req = RouterRequest {
+                    context,
+                    router_request: http::Request::from_parts(parts, body),
+                };
+            }
+
+            inner.call(req).await
+        })
+    }
+}
+
+/// A layer that translates router requests (streaming http bodies) into supergraph requests
+/// (JSON bodies in the GraphQL spec format).
+struct RouterToSupergraphRequestLayer {
+    apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
+}
+
+impl RouterToSupergraphRequestLayer {
+    /// Telemetry config must be provided for error counting.
+    fn new(apollo_telemetry_config: Arc<ApolloTelemetryConfig>) -> Self {
+        Self {
+            apollo_telemetry_config,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for RouterToSupergraphRequestLayer {
+    type Service = RouterToSupergraphRequestService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RouterToSupergraphRequestService {
+            supergraph_service: inner,
+            apollo_telemetry_config: self.apollo_telemetry_config.clone(),
+        }
+    }
+}
+
+/// A service that translates router requests (streaming http bodies) into supergraph requests
+/// (JSON bodies in the GraphQL spec format).
+#[derive(Clone)]
+struct RouterToSupergraphRequestService<S> {
+    supergraph_service: S, // <supergraph::BoxCloneService>,
+    apollo_telemetry_config: Arc<ApolloTelemetryConfig>,
+}
+
+impl<S> Service<RouterRequest> for RouterToSupergraphRequestService<S>
+where
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -225,57 +392,47 @@ impl Service<RouterRequest> for RouterService {
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         let self_clone = self.clone();
+        let mut this = std::mem::replace(self, self_clone);
 
-        let this = std::mem::replace(self, self_clone);
-
-        let fut = async move { this.call_inner(req).await };
-
-        Box::pin(fut)
+        Box::pin(async move { this.call_inner(req).await })
     }
 }
 
-impl RouterService {
-    async fn process_supergraph_request(
-        self,
-        supergraph_request: SupergraphRequest,
-    ) -> Result<router::Response, BoxError> {
-        // XXX(@goto-bus-stop): This code looks confusing. we are manually calling several
-        // layers with various ifs and matches, but *really*, we are calling each layer in order
-        // and handling short-circuiting.
-        let mut request_res = self
-            .persisted_query_layer
-            .supergraph_request(supergraph_request);
+impl<S> RouterToSupergraphRequestService<S>
+where
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    async fn call_inner(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
+        let context = req.context;
+        let (parts, body) = req.router_request.into_parts();
+        let request = Self::get_graphql_request(&parts, body)
+            .await?
+            .and_then(|r| Self::translate_request(&context, parts, r));
 
-        if let Ok(supergraph_request) = request_res {
-            request_res = self.apq_layer.supergraph_request(supergraph_request).await;
-        }
-
-        let SupergraphResponse { response, context } = match request_res {
-            Err(response) => response,
-            Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
-                Err(response) => response,
-                Ok(request) => match self
-                    .persisted_query_layer
-                    .supergraph_request_with_analyzed_query(request)
-                    .await
-                {
-                    Err(response) => response,
-                    Ok(request) => {
-                        // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are unready by default, so this
-                        // self.supergraph_service is actually not ready, which is why we need to
-                        // oneshot it here. That technically breaks backpressure, but because we are
-                        // still readying the supergraph service before calling into the router
-                        // service, backpressure is actually still exerted at that point--there's
-                        // just potential for some requests to slip through the cracks and end up
-                        // queueing up at this .oneshot() call.
-                        //
-                        // Not ideal, but an improvement on the situation in Router 1.x.
-                        self.supergraph_service.oneshot(request).await?
-                    }
-                },
-            },
+        let supergraph_request = match request {
+            Ok(request) => request,
+            Err(err) => {
+                return router::Response::error_builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(String::from("Invalid GraphQL request"))
+                            .extension_code(err.extension_code)
+                            .extension("details", err.extension_details)
+                            .build(),
+                    )
+                    .status_code(err.status)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build();
+            }
         };
+
+        let SupergraphResponse { context, response } =
+            self.supergraph_service.call(supergraph_request).await?;
+
+        // XXX(@goto-bus-stop): Error counting should be extracted to its own layer.
+        // The rest of this we can probably keep for the time being.
 
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
@@ -410,167 +567,20 @@ impl RouterService {
         }
     }
 
-    async fn call_inner(self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
-        let context = req.context;
-        let (parts, body) = req.router_request.into_parts();
-        let requests = self
-            .clone()
-            .get_graphql_requests(&context, &parts, body)
-            .await?;
-
-        let my_self = self.clone();
-        let (supergraph_requests, is_batch) = match futures::future::ready(requests)
-            .and_then(|r| my_self.translate_request(&context, parts, r))
-            .await
-        {
-            Ok(requests) => requests,
-            Err(err) => {
-                return router::Response::error_builder()
-                    .error(
-                        graphql::Error::builder()
-                            .message(String::from("Invalid GraphQL request"))
-                            .extension_code(err.extension_code)
-                            .extension("details", err.extension_details)
-                            .build(),
-                    )
-                    .status_code(err.status)
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .context(context)
-                    .build();
-            }
-        };
-
-        // We need to handle cases where a failure is part of a batch and thus must be cancelled.
-        // Requests can be cancelled at any point of the router pipeline, but all failures bubble back
-        // up through here, so we can catch them without having to specially handle batch queries in
-        // other portions of the codebase.
-        let futures = supergraph_requests.into_iter().map(|supergraph_request| {
-            let my_self = self.clone();
-            async move {
-                // We clone the context here, because if the request results in an Err, the
-                // response context will no longer exist.
-                let context = supergraph_request.context.clone();
-                let result = my_self.process_supergraph_request(supergraph_request).await;
-
-                // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
-                // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
-                // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
-                let batch_query_opt = context
-                    .extensions()
-                    .with_lock(|lock| lock.remove::<BatchQuery>());
-                if let Some(batch_query) = batch_query_opt {
-                    // Only proceed with signalling cancelled if the batch_query is not finished
-                    if !batch_query.finished() {
-                        tracing::debug!("cancelling batch query in supergraph response");
-                        batch_query
-                            .signal_cancelled("request terminated by user".to_string())
-                            .await?;
-                    }
-                }
-
-                result
-            }
-        });
-
-        // Use join_all to preserve ordering of concurrent operations
-        // (Short circuit processing and propagate any errors in the batch)
-        // Note: We use `join_all` here since it awaits all futures before returning, thus allowing us to
-        // handle cancellation logic without fear of the other futures getting killed.
-        let mut results: Vec<router::Response> = join_all(futures)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<router::Response>, BoxError>>()?;
-
-        // If we detected we are processing a batch, return an array of results even if there is only
-        // one result
-        if is_batch {
-            let mut results_it = results.into_iter();
-            let first = results_it
-                .next()
-                .expect("we should have at least one response");
-            let (parts, body) = first.response.into_parts();
-            let context = first.context;
-            let mut bytes = BytesMut::new();
-            bytes.put_u8(b'[');
-            bytes.extend_from_slice(&router::body::into_bytes(body).await?);
-            for result in results_it {
-                bytes.put(&b", "[..]);
-                bytes.extend_from_slice(
-                    &router::body::into_bytes(result.response.into_body()).await?,
-                );
-            }
-            bytes.put_u8(b']');
-
-            Ok(RouterResponse {
-                response: http::Response::from_parts(
-                    parts,
-                    router::body::from_bytes(bytes.freeze()),
-                ),
-                context,
-            })
-        } else {
-            Ok(results.pop().expect("we should have at least one response"))
-        }
-    }
-
-    async fn translate_query_request(
-        self,
-        parts: &Parts,
-    ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
-        let mut is_batch = false;
+    fn translate_query_request(parts: &Parts) -> Result<graphql::Request, TranslateError> {
         parts.uri.query().map(|q| {
-            let mut result = vec![];
-
             match graphql::Request::from_urlencoded_query(q.to_string()) {
-                Ok(request) => {
-                    result.push(request);
-                }
+                Ok(request) => Ok(request),
                 Err(err) => {
-                    // It may be a batch of requests, so try that (if config allows) before
-                    // erroring out
-                    if self.batching.enabled
-                        && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                    {
-                        result = graphql::Request::batch_from_urlencoded_query(q.to_string())
-                            .map_err(|e| TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                                extension_details: format!(
-                                    "failed to decode a valid GraphQL request from path {e}"
-                                ),
-                            })?;
-                        if result.is_empty() {
-                            return Err(TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                                extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
-                            });
-                        }
-                        is_batch = true;
-                    } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.batching.enabled
-                            && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
-                            format!("batching not supported for mode `{}`", self.batching.mode)
-                        } else {
-                            "batching not enabled".to_string()
-                        };
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "BATCHING_NOT_ENABLED".to_string(),
-                            extension_details,
-                        });
-                    } else {
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                            extension_details: format!(
-                                "failed to decode a valid GraphQL request from path {err}"
-                            ),
-                        });
-                    }
+                    Err(TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+                        extension_details: format!(
+                            "failed to decode a valid GraphQL request from path {err}"
+                        ),
+                    })
                 }
-            };
-            Ok((result, is_batch))
+            }
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
@@ -580,253 +590,47 @@ impl RouterService {
         })
     }
 
-    fn translate_bytes_request(
-        &self,
-        bytes: &Bytes,
-    ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
-        let mut result = vec![];
-        let mut is_batch = false;
-
-        match graphql::Request::deserialize_from_bytes(bytes) {
-            Ok(request) => {
-                result.push(request);
-            }
-            Err(err) => {
-                if self.batching.enabled
-                    && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                {
-                    result =
-                        graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                            extension_details: format!(
-                                "failed to deserialize the request body into JSON: {e}"
-                            ),
-                        })?;
-                    if result.is_empty() {
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                            extension_details:
-                                "failed to decode a valid GraphQL request from path: empty array "
-                                    .to_string(),
-                        });
-                    }
-                    is_batch = true;
-                } else if !bytes.is_empty() && bytes[0] == b'[' {
-                    let extension_details = if self.batching.enabled
-                        && !matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                    {
-                        format!("batching not supported for mode `{}`", self.batching.mode)
-                    } else {
-                        "batching not enabled".to_string()
-                    };
-                    return Err(TranslateError {
-                        status: StatusCode::BAD_REQUEST,
-                        extension_code: "BATCHING_NOT_ENABLED".to_string(),
-                        extension_details,
-                    });
-                } else {
-                    return Err(TranslateError {
-                        status: StatusCode::BAD_REQUEST,
-                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                        extension_details: format!(
-                            "failed to deserialize the request body into JSON: {err}"
-                        ),
-                    });
-                }
-            }
-        };
-
-        if is_batch && self.batching.exceeds_batch_size(&result) {
-            return Err(TranslateError {
-                status: StatusCode::UNPROCESSABLE_ENTITY,
-                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
-                extension_details: format!(
-                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
-                    result.len(),
-                    self.batching.maximum_size.unwrap_or_default()
-                ),
-            });
-        }
-
-        Ok((result, is_batch))
+    fn translate_bytes_request(bytes: &Bytes) -> Result<graphql::Request, TranslateError> {
+        graphql::Request::deserialize_from_bytes(bytes).map_err(|err| TranslateError {
+            status: StatusCode::BAD_REQUEST,
+            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+            extension_details: format!("failed to deserialize the request body into JSON: {err}"),
+        })
     }
 
-    async fn translate_request(
-        self,
+    // Translate parsed JSON GraphQL requests into supergraph requests.
+    fn translate_request(
         context: &Context,
         parts: Parts,
-        graphql_requests: (Vec<graphql::Request>, bool),
-    ) -> Result<(Vec<SupergraphRequest>, bool), TranslateError> {
-        let (ok_results, is_batch) = graphql_requests;
-        let mut results = Vec::with_capacity(ok_results.len());
-        let batch_size = ok_results.len();
-
-        // Modifying our Context extensions.
-        // If we are processing a batch (is_batch == true), insert our batching configuration.
-        // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
-        let shared_batch_details = (is_batch)
-            .then(|| {
-                context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(self.batching.clone()));
-
-                self.batching.subgraph.as_ref()
-            })
-            .flatten()
-            .map(|subgraph_batching_config| {
-                subgraph_batching_config.all.enabled
-                    || subgraph_batching_config
-                        .subgraphs
-                        .values()
-                        .any(|v| v.enabled)
-            })
-            .and_then(|a| a.then_some(Arc::new(Batch::spawn_handler(batch_size))));
-
-        let mut ok_results_it = ok_results.into_iter();
-        let first = ok_results_it
-            .next()
-            .expect("we should have at least one request");
-        let sg = http::Request::from_parts(parts, first);
-
-        // Building up the batch of supergraph requests is tricky.
-        // Firstly note that any http extensions are only propagated for the first request sent
-        // through the pipeline. This is because there is simply no way to clone http
-        // extensions.
-        //
-        // Secondly, we can't clone extensions, but we need to propagate at least
-        // ClientRequestAccepts to ensure correct processing of the response. We do that manually,
-        // but the concern is that there may be other extensions that wish to propagate into
-        // each request or we may add them in future and not know about it here...
-        //
-        // (Technically we could clone extensions, since it is held under an `Arc`, but that
-        // would mean all the requests in a batch shared the same set of extensions and review
-        // comments expressed the sentiment that this may be a bad thing...)
-        //
-        // Note: If we enter this loop, then we must be processing a batch.
-        for (index, graphql_request) in ok_results_it.enumerate() {
-            let mut new = http_ext::clone_http_request(&sg);
-            *new.body_mut() = graphql_request;
-            // XXX Lose some private entries, is that ok?
-            let new_context = Context::new();
-            new_context.extend(context);
-            let client_request_accepts_opt = context
-                .extensions()
-                .with_lock(|lock| lock.get::<ClientRequestAccepts>().cloned());
-            // We are only going to insert a BatchQuery if Subgraph processing is enabled
-            let b_for_index_opt = if let Some(shared_batch_details) = &shared_batch_details {
-                Some(
-                    Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
-                        |err| TranslateError {
-                            status: StatusCode::INTERNAL_SERVER_ERROR,
-                            extension_code: "BATCHING_ERROR".to_string(),
-                            extension_details: format!("failed to create batch entry: {err}"),
-                        },
-                    )?,
-                )
-            } else {
-                None
-            };
-            new_context.extensions().with_lock(|lock| {
-                if let Some(client_request_accepts) = client_request_accepts_opt {
-                    lock.insert(client_request_accepts);
-                }
-                lock.insert(self.batching.clone());
-                // We are only going to insert a BatchQuery if Subgraph processing is enabled
-                if let Some(b_for_index) = b_for_index_opt {
-                    lock.insert(b_for_index);
-                }
-            });
-            results.push(SupergraphRequest {
-                supergraph_request: new,
-                context: new_context,
-            });
-        }
-
-        if let Some(shared_batch_details) = shared_batch_details {
-            let b_for_index =
-                Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    extension_code: "BATCHING_ERROR".to_string(),
-                    extension_details: format!("failed to create batch entry: {err}"),
-                })?;
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert(b_for_index));
-        }
-
-        results.insert(
-            0,
-            SupergraphRequest {
-                supergraph_request: sg,
-                context: context.clone(),
-            },
-        );
-
-        Ok((results, is_batch))
+        graphql_request: graphql::Request,
+    ) -> Result<SupergraphRequest, TranslateError> {
+        Ok(SupergraphRequest {
+            context: context.clone(),
+            supergraph_request: http::Request::from_parts(parts, graphql_request),
+        })
     }
 
-    async fn get_graphql_requests(
-        self,
-        context: &Context,
+    async fn get_graphql_request(
         parts: &Parts,
         body: Body,
-    ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
-        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
-            .method
-            == Method::GET
-        {
-            self.translate_query_request(parts).await
+    ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
+        let graphql_request = if parts.method == Method::GET {
+            Self::translate_query_request(parts)
         } else {
-            let bytes = router::body::into_bytes(body)
-                .instrument(tracing::debug_span!("receive_body"))
-                .await?;
-            if let Some(level) = context
-                .extensions()
-                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
-                .map(|d| d.0)
-            {
-                let mut attrs = Vec::with_capacity(5);
-                #[cfg(test)]
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                    .headers
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                #[cfg(test)]
-                headers.sort_keys();
-                #[cfg(not(test))]
-                let headers = &parts.headers;
+            // Only show the "receive_body" span if we haven't received the body yet, to prevent
+            // having multiple of those spans
+            let is_fixed_size = body.size_hint().exact().is_some();
+            let bytes = if is_fixed_size {
+                router::body::into_bytes(body).await?
+            } else {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
+                    .await?
+            };
 
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_METHOD,
-                    opentelemetry::Value::String(format!("{}", parts.method).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_URI,
-                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_VERSION,
-                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY,
-                    opentelemetry::Value::String(
-                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
-                    ),
-                ));
-                log_event(level, "router.request", attrs, "");
-            }
-            self.translate_bytes_request(&bytes)
+            Self::translate_bytes_request(&bytes)
         };
-        Ok(graphql_requests)
+        Ok(graphql_request)
     }
 
     fn count_value_completion_errors(
