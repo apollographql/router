@@ -12,10 +12,6 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    pub(crate) fn measure_mode() -> Self {
-        Mode::Measure
-    }
-
     /// Returns true if this config is in measure mode.
     pub(crate) fn is_measure_mode(&self) -> bool {
         matches!(self, Mode::Measure)

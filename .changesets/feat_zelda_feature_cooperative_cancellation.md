@@ -16,7 +16,7 @@ supergraph:
     experimental_cooperative_cancellation:
       enabled: true
       mode: measure
-      timeout_in_seconds: 1.0
+      timeout: 1s
 ```
 
 By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7604

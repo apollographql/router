@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::task;
-use std::time::Duration;
 
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -623,8 +622,8 @@ where
                 let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
                 let planning_task = tokio::task::spawn(planning_task);
                 let outcome_recorded_for_abort = outcome_recorded.clone();
-                let enforce_mode = self.cooperative_cancellation.mode().is_enforce_mode();
-                let measure_mode = self.cooperative_cancellation.mode().is_measure_mode();
+                let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
+                let measure_mode = self.cooperative_cancellation.is_measure_mode();
                 let _abort_guard =
                     scopeguard::guard(planning_task.abort_handle(), move |abort_handle| {
                         // Client drop handler
@@ -645,11 +644,7 @@ where
                         }
                     });
 
-                match self
-                    .cooperative_cancellation
-                    .timeout_in_seconds()
-                    .map(Duration::from_secs_f64)
-                {
+                match self.cooperative_cancellation.timeout() {
                     Some(timeout) => {
                         if enforce_mode {
                             fn convert_timeout_error(
@@ -663,7 +658,7 @@ where
                             let outcome_recorded_for_timeout = outcome_recorded.clone();
                             let planning_task_with_timeout = planning_task.timeout(timeout);
                             let res = planning_task_with_timeout.await;
-                            // If timeout occurred, record outcome if not already recorded
+                            // If timeout occurred, record outcome (if not already recorded)
                             if res.is_err()
                                 && outcome_recorded_for_timeout
                                     .compare_exchange(
@@ -1081,7 +1076,9 @@ mod tests {
                     .query_planning(
                         QueryPlanning::builder()
                             .experimental_cooperative_cancellation(
-                                CooperativeCancellation::enabled_with_timeout_in_seconds(0.1),
+                                CooperativeCancellation::enabled_with_timeout(
+                                    std::time::Duration::from_secs(1),
+                                ),
                             )
                             .build(),
                     )
