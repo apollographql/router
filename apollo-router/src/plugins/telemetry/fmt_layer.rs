@@ -270,6 +270,10 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
@@ -296,9 +300,6 @@ mod tests {
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -815,7 +816,7 @@ connector:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                let transport_request = TransportRequest::Http(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
                 });
@@ -881,7 +882,7 @@ connector:
                 let connector_response = Response {
                     context,
                     connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -1169,7 +1170,7 @@ subgraph:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                let transport_request = TransportRequest::Http(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
                 });
@@ -1235,7 +1236,7 @@ subgraph:
                 let connector_response = Response {
                     context,
                     connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))

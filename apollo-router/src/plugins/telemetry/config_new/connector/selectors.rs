@@ -1,3 +1,5 @@
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use derivative::Derivative;
 use opentelemetry::Array;
 use opentelemetry::StringValue;
@@ -17,8 +19,6 @@ use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-use crate::services::connector::request_service::TransportRequest;
-use crate::services::connector::request_service::TransportResponse;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -304,6 +304,10 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use http::HeaderValue;
     use http::StatusCode;
@@ -321,9 +325,6 @@ mod tests {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::services::router::body;
 
     const TEST_SUBGRAPH_NAME: &str = "test_subgraph_name";
@@ -400,7 +401,7 @@ mod tests {
             context: context(),
             connector: Arc::new(connector()),
             service_name: Default::default(),
-            transport_request: TransportRequest::Http(transport::http::HttpRequest {
+            transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             }),
@@ -421,7 +422,7 @@ mod tests {
         Response {
             context: context(),
             connector: connector().into(),
-            transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+            transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
@@ -443,7 +444,7 @@ mod tests {
         Response {
             context: context(),
             connector: connector().into(),
-            transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+            transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
                     .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
