@@ -200,8 +200,8 @@ impl PostgresCacheStorage {
     #[cfg(test)]
     pub(crate) async fn truncate_namespace(&self) -> anyhow::Result<()> {
         sqlx::query!(
-            "DELETE FROM cache WHERE cache_key LIKE $1",
-            format!("{}%", self.namespace)
+            "DELETE FROM cache WHERE starts_with(cache_key, $1)",
+            &self.namespace
         )
         .execute(&self.pg_pool)
         .await?;

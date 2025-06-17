@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM cache WHERE cache_key LIKE $1",
+  "query": "DELETE FROM cache WHERE starts_with(cache_key, $1)",
   "describe": {
     "columns": [],
     "parameters": {
@@ -10,5 +10,5 @@
     },
     "nullable": []
   },
-  "hash": "77ca9ec3322986e72faa20f15883ccac02d06abbd84c1e1ea61aaf01977cf487"
+  "hash": "b7f6dac1056d65e173a6f4f3d81f57f456f3a15c9dfd1388e0b32a0978a08ae0"
 }
