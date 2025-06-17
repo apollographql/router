@@ -700,8 +700,11 @@ impl Service<router::Request> for CallbackService {
                                         .build();
                                 }
 
-                                router::Response::error_builder()
-                                    .status_code(StatusCode::ACCEPTED)
+                                router::Response::http_response_builder()
+                                    .response(http::Response::builder()
+                                        .status(StatusCode::ACCEPTED)
+                                        .body(router::body::empty())
+                                        .map_err(BoxError::from)?)
                                     .context(req.context)
                                     .build()
                             }
