@@ -817,7 +817,7 @@ connector:
                     .insert("x-log-request", HeaderValue::from_static("log"));
                 let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
@@ -1171,7 +1171,7 @@ subgraph:
                     .insert("x-log-request", HeaderValue::from_static("log"));
                 let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
