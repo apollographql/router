@@ -1305,16 +1305,7 @@ async fn cache_store_root_from_response(
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            // Support surrogate keys coming from subgraph response header
-            if let Some(surrogate_keys) = response
-                .response
-                .headers()
-                .get("Surrogate-Key")
-                .and_then(|h| h.to_str().ok())
-                .map(|h| h.split_whitespace())
-            {
-                invalidation_keys.extend(surrogate_keys.map(|s| s.to_string()));
-            }
+            // Support surrogate keys coming from subgraph response extensions
             if let Some(Value::Array(cache_tags)) = response
                 .response
                 .body()
@@ -1382,14 +1373,7 @@ async fn cache_store_entities_from_response(
             None
         };
 
-        // Support surrogate keys coming from subgraph response header
-        let surrogate_keys: Vec<String> = response
-            .response
-            .headers()
-            .get("Surrogate-Key")
-            .and_then(|h| h.to_str().ok())
-            .map(|h| h.split_whitespace().map(|s| s.to_string()).collect())
-            .unwrap_or_default();
+        // Support surrogate keys coming from subgraph extensions
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -1413,7 +1397,6 @@ async fn cache_store_entities_from_response(
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
-            surrogate_keys,
             per_entity_surrogate_keys,
             response.context.clone(),
             subgraph_request,
@@ -2035,7 +2018,6 @@ async fn insert_entities_in_result(
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
-    common_surrogate_keys: Vec<String>,
     per_entity_surrogate_keys: &[Value],
     context: Context,
     // Only Some if debug is enabled
@@ -2126,7 +2108,6 @@ async fn insert_entities_in_result(
                     });
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    invalidation_keys.extend(common_surrogate_keys.iter().cloned());
                     if let Some(Value::Array(keys)) = specific_surrogate_keys {
                         invalidation_keys
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
