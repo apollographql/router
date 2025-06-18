@@ -4857,7 +4857,9 @@ expression: "&schema"
           "type": "integer"
         },
         "namespace": {
+          "default": null,
           "description": "Useful when running tests in parallel to avoid conflicts",
+          "nullable": true,
           "type": "string"
         },
         "password": {
@@ -4895,7 +4897,6 @@ expression: "&schema"
         }
       },
       "required": [
-        "namespace",
         "url"
       ],
       "type": "object"
