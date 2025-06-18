@@ -1185,6 +1185,11 @@ impl IntegrationTest {
 
 impl Drop for IntegrationTest {
     fn drop(&mut self) {
+        if self.router.is_some() {
+            self.read_logs();
+            self.print_logs();
+        }
+
         if let Some(child) = &mut self.router {
             let _ = child.start_kill();
         }

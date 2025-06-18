@@ -62,7 +62,6 @@ use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
-use crate::plugins::file_uploads;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -1298,9 +1297,6 @@ pub(crate) async fn call_single_http(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
-    let request = file_uploads::http_request_wrapper(request).await;
-
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
         attrs.push(KeyValue::new(
@@ -1467,7 +1463,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
+    client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
@@ -1479,8 +1475,9 @@ async fn do_fetch(
     ),
     FetchError,
 > {
+    // oneshot must be used because the client service has actual tower layers in now. Therefore poll_ready must be called.
     let response = client
-        .call(HttpRequest {
+        .oneshot(HttpRequest {
             http_request: request,
             context: context.clone(),
         })
