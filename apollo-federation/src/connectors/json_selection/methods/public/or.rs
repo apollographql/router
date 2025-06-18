@@ -29,8 +29,24 @@ fn or_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let mut result = match data {
+        JSON::Bool(value) => *value,
+        _ => {
+            return (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} can only be applied to boolean values.",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            );
+        }
+    };
+
     if let Some(MethodArgs { args, .. }) = method_args {
-        let mut result = is_truthy(data);
         let mut errors = Vec::new();
 
         for arg in args {
@@ -39,7 +55,23 @@ fn or_method(
             }
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
             errors.extend(arg_errors);
-            result = value_opt.map(|value| is_truthy(&value)).unwrap_or(false);
+
+            result = value_opt
+                .map(|value| match value {
+                    JSON::Bool(value) => value,
+                    _ => {
+                        errors.extend(vec![ApplyToError::new(
+                            format!(
+                                "Method ->{} can only accept boolean arguments.",
+                                method_name.as_ref()
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        )]);
+                        false
+                    }
+                })
+                .unwrap_or(false);
         }
 
         (Some(JSON::Bool(result)), errors)
@@ -54,6 +86,7 @@ fn or_method(
         )
     }
 }
+
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn or_shape(
     method_name: &WithRange<String>,
@@ -67,14 +100,17 @@ fn or_shape(
         ShapeCase::Bool(Some(true)) => {
             return Shape::bool_value(true, method_name.shape_location(source_id));
         }
-        ShapeCase::Int(Some(value)) if *value != 0 => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
-        }
-        ShapeCase::String(Some(value)) if !value.is_empty() => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
-        }
-        ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+        ShapeCase::Array { .. }
+        | ShapeCase::Object { .. }
+        | ShapeCase::String(_)
+        | ShapeCase::Int(_) => {
+            return Shape::error(
+                format!(
+                    "Method ->{} can only be applied to boolean values.",
+                    method_name.as_ref()
+                ),
+                method_name.shape_location(source_id),
+            );
         }
         _ => {}
     };
@@ -91,14 +127,17 @@ fn or_shape(
                 ShapeCase::Bool(Some(true)) => {
                     return Shape::bool_value(true, method_name.shape_location(source_id));
                 }
-                ShapeCase::Int(Some(value)) if *value != 0 => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
-                }
-                ShapeCase::String(Some(value)) if !value.is_empty() => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
-                }
-                ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                ShapeCase::Array { .. }
+                | ShapeCase::Object { .. }
+                | ShapeCase::String(_)
+                | ShapeCase::Int(_) => {
+                    return Shape::error(
+                        format!(
+                            "Method ->{} can only accept boolean arguments.",
+                            method_name.as_ref()
+                        ),
+                        method_name.shape_location(source_id),
+                    );
                 }
                 _ => {}
             }
@@ -106,16 +145,6 @@ fn or_shape(
     }
 
     Shape::bool(method_name.shape_location(source_id))
-}
-
-fn is_truthy(data: &JSON) -> bool {
-    match data {
-        JSON::Bool(b) => *b,
-        JSON::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
-        JSON::Null => false,
-        JSON::String(s) => !s.as_str().is_empty(),
-        JSON::Object(_) | JSON::Array(_) => true,
-    }
 }
 
 #[cfg(test)]
@@ -148,25 +177,27 @@ mod tests {
     }
 
     #[test]
-    fn or_should_return_true_when_any_value_is_truthy() {
-        assert_eq!(
-            selection!("$.a->or($.b, $.c)").apply_to(&json!({
-                "a": true,
-                "b": null,
-                "c": true,
-            })),
-            (Some(json!(true)), vec![]),
-        );
+    fn or_should_return_error_when_arguments_are_not_boolean() {
+        let result = selection!("$.a->or($.b, $.c)").apply_to(&json!({
+            "a": false,
+            "b": null,
+            "c": 0,
+        }));
+        
+        assert_eq!(result.0, Some(json!(false)));
+        assert!(!result.1.is_empty());
+        assert!(result.1[0].message().contains("Method ->or can only accept boolean arguments."));
     }
     #[test]
-    fn or_should_return_false_when_no_value_is_truthy() {
-        assert_eq!(
-            selection!("$.b->or($.a, $.c)").apply_to(&json!({
-                "a": false,
-                "b": null,
-                "c": 0,
-            })),
-            (Some(json!(false)), vec![]),
-        );
+    fn or_should_return_error_when_applied_to_non_boolean() {
+        let result = selection!("$.b->or($.a, $.c)").apply_to(&json!({
+            "a": false,
+            "b": null,
+            "c": 0,
+        }));
+        
+        assert_eq!(result.0, None);
+        assert!(!result.1.is_empty());
+        assert!(result.1[0].message().contains("Method ->or can only be applied to boolean values."));
     }
 }
