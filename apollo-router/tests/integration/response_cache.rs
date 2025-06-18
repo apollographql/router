@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use apollo_router::services;
 use apollo_router::test_harness::HttpService;
@@ -154,7 +155,7 @@ where
     (headers, serde_json::from_slice(&body).unwrap())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_cache_skips_subgraph_request() {
     if !graph_os_enabled() {
         return;
@@ -180,6 +181,8 @@ async fn basic_cache_skips_subgraph_request() {
         products: 1
         reviews: 1
     "###);
+    // Needed because insert in the cache is async
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     insta::assert_yaml_snapshot!(body, @r###"
@@ -198,7 +201,7 @@ async fn basic_cache_skips_subgraph_request() {
     "###);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn not_cached_without_cache_control_header() {
     if !graph_os_enabled() {
         return;
@@ -235,6 +238,9 @@ async fn not_cached_without_cache_control_header() {
         products: 1
         reviews: 1
     "###);
+    // Needed because insert in the cache is async
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
     let (headers, body) = make_graphql_request(&mut router).await;
     assert_eq!(headers["cache-control"], "no-store");
     insta::assert_yaml_snapshot!(body, @r###"
@@ -253,7 +259,7 @@ async fn not_cached_without_cache_control_header() {
     "###);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn invalidate_with_endpoint_by_entity_key() {
     if !graph_os_enabled() {
         return;
@@ -267,7 +273,6 @@ async fn invalidate_with_endpoint_by_entity_key() {
         products: 1
         reviews: 1
     "###);
-
     let request = http::Request::builder()
         .method("POST")
         .uri(INVALIDATION_PATH)
@@ -281,8 +286,17 @@ async fn invalidate_with_endpoint_by_entity_key() {
             },
         }]))
         .unwrap();
-    let (_headers, body) = make_json_request(&mut router, request).await;
-    insta::assert_yaml_snapshot!(body, @"count: 1");
+    // Needed because insert in the cache is async
+    for i in 0..10 {
+        let (_headers, body) = make_json_request(&mut router, request.clone()).await;
+        let expected_value = serde_json::json!({"count": 1});
+
+        if body == expected_value {
+            break;
+        } else if i == 9 {
+            insta::assert_yaml_snapshot!(body, @"count: 1");
+        }
+    }
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
@@ -294,7 +308,7 @@ async fn invalidate_with_endpoint_by_entity_key() {
     "###);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn invalidate_with_endpoint_by_entity_cache_tag() {
     if !graph_os_enabled() {
         return;
@@ -319,9 +333,17 @@ async fn invalidate_with_endpoint_by_entity_cache_tag() {
             "cache_tag": "product-1",
         }]))
         .unwrap();
-    let (_headers, body) = make_json_request(&mut router, request).await;
-    insta::assert_yaml_snapshot!(body, @"count: 1");
+    // Needed because insert in the cache is async
+    for i in 0..10 {
+        let (_headers, body) = make_json_request(&mut router, request.clone()).await;
+        let expected_value = serde_json::json!({"count": 1});
 
+        if body == expected_value {
+            break;
+        } else if i == 9 {
+            insta::assert_yaml_snapshot!(body, @"count: 1");
+        }
+    }
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
