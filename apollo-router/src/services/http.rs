@@ -28,8 +28,6 @@ pub(crate) type BoxCloneSyncService =
     tower::util::BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
-// You cannot store a CloneBoxFuture in a map because it is not Sync. You can store a buffer though.
-type MemoizedService = Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
 type ServiceCache = Arc<RwLock<HashMap<String, BoxCloneSyncService>>>;
 
 #[non_exhaustive]
