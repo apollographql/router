@@ -238,9 +238,8 @@ impl Error {
     pub fn extension_code(&self) -> Option<String> {
         self.extensions.get("code").and_then(|c| match c {
             Value::String(s) => Some(s.as_str().to_owned()),
-            Value::Bool(b) => Some(format!("{b}")),
             Value::Number(n) => Some(n.to_string()),
-            Value::Null | Value::Array(_) | Value::Object(_) => None,
+            Value::Null | Value::Array(_) | Value::Object(_) | Value::Bool(_)  => None,
         })
     }
 
@@ -264,7 +263,7 @@ impl Error {
     }
 }
 
-/// Generate a random Uuid. For use in generating a default [`Error:apollo_id`] when not supplied
+/// Generate a random Uuid. For use in generating a default [`Error::apollo_id`] when not supplied
 /// during deserialization.
 fn generate_uuid() -> Uuid {
     Uuid::new_v4()
