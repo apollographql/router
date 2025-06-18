@@ -1,4 +1,7 @@
 //! HTTP transport for Apollo Connectors
+use apollo_federation::connectors::ProblemLocation;
+
+use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 
 /// Request to an HTTP transport
@@ -6,7 +9,10 @@ use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
     pub(crate) inner: http::Request<String>,
-    pub(crate) debug: Option<Box<ConnectorDebugHttpRequest>>,
+    pub(crate) debug: (
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
 }
 
 /// Response from an HTTP transport

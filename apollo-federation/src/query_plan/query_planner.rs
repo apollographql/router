@@ -76,7 +76,7 @@ pub struct QueryPlannerConfig {
     // Side-note: implemented as an object instead of single boolean because we expect to add more
     // to this soon enough. In particular, once defer-passthrough to subgraphs is implemented, the
     // idea would be to add a new `passthrough_subgraphs` option that is the list of subgraphs to
-    // which we can pass-through some @defer (and it would be empty by default). Similarly, once we
+    // which we can pass through some @defer (and it would be empty by default). Similarly, once we
     // support @stream, grouping the options here will make sense too.
     pub incremental_delivery: QueryPlanIncrementalDeliveryConfig,
 
@@ -185,7 +185,14 @@ pub struct QueryPlanOptions<'a> {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
-
+    /// An optional function that will be called to check if the query plan should be cancelled.
+    ///
+    /// Cooperative cancellation occurs when the original client has abandoned the query.
+    /// When this happens, the query plan should be cancelled to free up resources.
+    ///
+    /// This function should return `ControlFlow::Break` if the query plan should be cancelled.
+    ///
+    /// Defaults to `None`.
     pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.

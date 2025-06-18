@@ -4,6 +4,8 @@ use std::sync::Arc;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::connectors::Namespace;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::response::Parts;
 use serde_json::Value as JsonValue;
 use serde_json_bytes::ByteString;
@@ -23,6 +25,7 @@ pub(crate) struct MappingContextMerger<'merger> {
     pub(super) status: Option<Value>,
     pub(super) request: Option<Value>,
     pub(super) response: Option<Value>,
+    pub(super) env: Option<Value>,
 }
 
 impl MappingContextMerger<'_> {
@@ -73,6 +76,9 @@ impl MappingContextMerger<'_> {
             map.insert(Namespace::Response.as_str().into(), response.to_owned());
         }
 
+        if let Some(env) = self.env.iter().next() {
+            map.insert(Namespace::Env.as_str().into(), env.to_owned());
+        }
         map
     }
 
@@ -93,8 +99,9 @@ impl MappingContextMerger<'_> {
     pub(crate) fn config(mut self, config: Option<&Arc<HashMap<String, JsonValue>>>) -> Self {
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
-        if let (true, Some(config)) = (self.variables_used.contains(&Namespace::Config), config) {
-            self.config = Some(json!(config));
+        // We should always have a value for $config, even if it's an empty object, or we end up with "Variable $config not found" which is a confusing error for users
+        if self.variables_used.contains(&Namespace::Config) {
+            self.config = config.map(|c| json!(c)).or_else(|| Some(json!({})));
         }
         self
     }
@@ -110,12 +117,12 @@ impl MappingContextMerger<'_> {
     pub(crate) fn request(
         mut self,
         headers_used: &HashSet<String>,
-        supergraph_request: &Arc<http::Request<crate::graphql::Request>>,
+        headers: &HeaderMap<HeaderValue>,
     ) -> Self {
         // Add headers from the original router request.
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if self.variables_used.contains(&Namespace::Request) {
-            let new_headers = externalize_header_map(supergraph_request.headers())
+            let new_headers = externalize_header_map(headers)
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|(key, value)| {
@@ -165,6 +172,21 @@ impl MappingContextMerger<'_> {
                 "headers": Value::Object(new_headers)
             });
             self.response = Some(response_object);
+        }
+        self
+    }
+
+    pub(crate) fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
+        if self.variables_used.contains(&Namespace::Env) {
+            let env_vars: Map<ByteString, Value> = env_vars_used
+                .iter()
+                .flat_map(|key| {
+                    std::env::var(key)
+                        .ok()
+                        .map(|value| (key.as_str().into(), Value::String(value.into())))
+                })
+                .collect();
+            self.env = Some(Value::Object(env_vars));
         }
         self
     }

@@ -1606,6 +1606,7 @@ mod test {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1694,6 +1695,7 @@ mod test {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1719,7 +1721,7 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         connector::request_service::Request {

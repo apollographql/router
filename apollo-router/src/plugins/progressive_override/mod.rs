@@ -24,10 +24,8 @@ use crate::spec;
 use crate::spec::query::traverse;
 
 pub(crate) mod visitor;
-pub(crate) const DEPRECATED_UNRESOLVED_LABELS_KEY: &str = "apollo_override::unresolved_labels";
 pub(crate) const UNRESOLVED_LABELS_KEY: &str = "apollo::progressive_override::unresolved_labels";
 pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo::progressive_override::labels_to_override";
-pub(crate) const DEPRECATED_LABELS_TO_OVERRIDE_KEY: &str = "apollo_override::labels_to_override";
 
 pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
 pub(crate) const JOIN_SPEC_BASE_URL: &str = "https://specs.apollo.dev/join";

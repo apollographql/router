@@ -4,6 +4,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::HashMap;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::ProblemLocation;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -72,7 +73,10 @@ enum RawResponse {
         parts: http::response::Parts,
         data: Value,
         key: ResponseKey,
-        debug_request: Option<Box<ConnectorDebugHttpRequest>>,
+        debug_request: (
+            Option<Box<ConnectorDebugHttpRequest>>,
+            Vec<(ProblemLocation, Problem)>,
+        ),
     },
 }
 
@@ -103,25 +107,34 @@ impl RawResponse {
                     .config(connector.config.as_ref())
                     .context(context)
                     .status(parts.status.as_u16())
-                    .request(&connector.response_headers, &supergraph_request)
+                    .request(&connector.response_headers, supergraph_request.headers())
                     .response(&connector.response_headers, Some(&parts))
+                    .env(&connector.env)
                     .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
-                let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
+                let mapping_problems: Vec<Problem> =
+                    aggregate_apply_to_errors(apply_to_errors).collect();
 
                 if let Some(debug) = debug_context {
+                    let mut debug_problems: Vec<(ProblemLocation, Problem)> = mapping_problems
+                        .iter()
+                        .map(|problem| (ProblemLocation::Selection, problem.clone()))
+                        .collect();
+                    debug_problems.extend(debug_request.1);
+
                     debug.lock().push_response(
-                        debug_request.clone(),
+                        debug_request.0.clone(),
                         &parts,
                         &data,
                         Some(SelectionData {
                             source: connector.selection.to_string(),
                             transformed: key.selection().to_string(),
                             result: res.clone(),
-                            errors: mapping_problems.clone(),
                         }),
+                        &connector.error_settings,
+                        debug_problems,
                     );
                 }
 
@@ -162,6 +175,8 @@ impl RawResponse {
                 debug_request,
                 data,
             } => {
+                let mut warnings = Vec::new();
+
                 let inputs = LazyCell::new(|| {
                     key.inputs()
                         .clone()
@@ -169,15 +184,19 @@ impl RawResponse {
                         .config(connector.config.as_ref())
                         .context(context)
                         .status(parts.status.as_u16())
-                        .request(&connector.response_headers, &supergraph_request)
+                        .request(&connector.response_headers, supergraph_request.headers())
                         .response(&connector.response_headers, Some(&parts))
                         .merge()
                 });
 
                 // Do we have a error message mapping set for this connector?
                 let message = if let Some(message_selection) = &connector.error_settings.message {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
+                    let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
+                    warnings.extend(
+                        aggregate_apply_to_errors(apply_to_errors)
+                            .map(|problem| (ProblemLocation::ErrorsMessage, problem))
+                            .collect::<Vec<_>>(),
+                    );
 
                     res.as_ref()
                         .and_then(Value::as_str)
@@ -215,9 +234,13 @@ impl RawResponse {
                 // can't make sense of it in the if/else due to how the builder is constructed.
                 let mut extension_code = "CONNECTOR_FETCH".to_string();
                 if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
+                    let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
+                    warnings.extend(
+                        aggregate_apply_to_errors(apply_to_errors)
+                            .map(|problem| (ProblemLocation::SourceErrorsExtensions, problem))
+                            .collect::<Vec<_>>(),
+                    );
 
                     // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
                     let extensions = res
@@ -237,9 +260,13 @@ impl RawResponse {
                 }
 
                 if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
+                    let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
+                    warnings.extend(
+                        aggregate_apply_to_errors(apply_to_errors)
+                            .map(|problem| (ProblemLocation::ConnectErrorsExtensions, problem))
+                            .collect::<Vec<_>>(),
+                    );
 
                     // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
                     let extensions = res
@@ -266,9 +293,18 @@ impl RawResponse {
                     .with_subgraph_name(&connector.id.subgraph_name);
 
                 if let Some(debug) = debug_context {
-                    debug
-                        .lock()
-                        .push_response(debug_request.clone(), &parts, &data, None);
+                    debug.lock().push_response(
+                        debug_request.0.clone(),
+                        &parts,
+                        &data,
+                        None,
+                        &connector.error_settings,
+                        [debug_request.1, warnings]
+                            .iter()
+                            .flatten()
+                            .cloned()
+                            .collect(),
+                    );
                 }
 
                 MappedResponse::Error { error, key }
@@ -445,7 +481,10 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: Option<Box<ConnectorDebugHttpRequest>>,
+    debug_request: (
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
@@ -572,7 +611,10 @@ async fn deserialize_response<T: HttpBody>(
     context: &Context,
     response_key: &ResponseKey,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    debug_request: &Option<Box<ConnectorDebugHttpRequest>>,
+    debug_request: &(
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
 ) -> Result<Value, graphql::Error> {
     use serde_json_bytes::*;
 
@@ -714,9 +756,13 @@ async fn deserialize_response<T: HttpBody>(
             Ok(json_data) => Ok(json_data),
             Err(_) => {
                 if let Some(debug_context) = debug_context {
-                    debug_context
-                        .lock()
-                        .push_invalid_response(debug_request.clone(), parts, body);
+                    debug_context.lock().push_invalid_response(
+                        debug_request.0.clone(),
+                        parts,
+                        body,
+                        &connector.error_settings,
+                        debug_request.1.clone(),
+                    );
                 }
                 Err(make_err(path))
             }
@@ -735,9 +781,13 @@ async fn deserialize_response<T: HttpBody>(
 
         if had_errors {
             if let Some(debug_context) = debug_context {
-                debug_context
-                    .lock()
-                    .push_invalid_response(debug_request.clone(), parts, body);
+                debug_context.lock().push_invalid_response(
+                    debug_request.0.clone(),
+                    parts,
+                    body,
+                    &connector.error_settings,
+                    debug_request.1.clone(),
+                );
             }
             return Err(make_err(path));
         }
@@ -801,6 +851,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -834,7 +885,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -845,7 +896,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -911,6 +962,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -944,7 +996,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -955,7 +1007,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1028,6 +1080,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1074,7 +1127,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1152,6 +1205,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1189,7 +1243,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1200,7 +1254,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1278,6 +1332,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1331,7 +1386,7 @@ mod tests {
                 response_key_plaintext,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1342,7 +1397,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1353,7 +1408,7 @@ mod tests {
                 response_key2,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1364,7 +1419,7 @@ mod tests {
                 response_key3,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1541,6 +1596,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1566,7 +1622,7 @@ mod tests {
                 response_key1,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
