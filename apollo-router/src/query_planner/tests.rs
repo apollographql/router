@@ -35,7 +35,7 @@ use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::subgraph::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::spec::Query;
 use crate::spec::Schema;

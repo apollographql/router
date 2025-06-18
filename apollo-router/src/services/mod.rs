@@ -6,7 +6,8 @@ use parking_lot::Mutex;
 
 pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
-pub(crate) use self::subgraph_service::*;
+pub(crate) use self::subgraph::APPLICATION_JSON_HEADER_VALUE;
+pub(crate) use self::subgraph::*;
 pub(crate) use self::supergraph::service::*;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -43,7 +44,6 @@ pub(crate) mod new_service;
 pub(crate) mod query_planner;
 pub mod router;
 pub mod subgraph;
-pub(crate) mod subgraph_service;
 pub mod supergraph;
 
 impl AsRef<Request> for http_ext::Request<Request> {

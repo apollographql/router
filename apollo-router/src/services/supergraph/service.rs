@@ -81,7 +81,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::subgraph::BoxGqlStream;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::subgraph::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
