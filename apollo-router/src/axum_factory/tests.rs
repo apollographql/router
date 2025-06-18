@@ -1067,14 +1067,15 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    let expected_response = crate::error::FetchError::SubrequestHttpError {
-        status_code: Some(200),
-        service: "Mock service".to_string(),
-        reason: "Mock error".to_string(),
-    }
-    .to_response();
-
-    assert_response_eq_ignoring_error_id!(response, expected_response);
+    assert_response_eq_ignoring_error_id!(
+        response,
+        crate::error::FetchError::SubrequestHttpError {
+            status_code: Some(200),
+            service: "Mock service".to_string(),
+            reason: "Mock error".to_string(),
+        }
+        .to_response()
+    );
     server.shutdown().await
 }
 

@@ -277,7 +277,7 @@ mod forbid_http_get_mutations_tests {
                 expected_allow_header,
                 error_response.response.headers().get("Allow").unwrap()
             );
-            assert_error_eq_ignoring_id!(response.errors[0], expected_error);
+            assert_error_eq_ignoring_id!(expected_error, response.errors[0]);
         }
     }
 

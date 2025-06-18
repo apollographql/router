@@ -479,10 +479,7 @@ mod apq_tests {
             .locations(Default::default())
             .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
             .build();
-        assert_eq!(
-            graphql_response.errors[0].clone().with_null_id(),
-            expected_apq_insert_failed_error.with_null_id()
-        );
+        assert_error_eq_ignoring_id!(expected_apq_insert_failed_error, graphql_response.errors[0]);
 
         // apq insert failed, this call will miss
         let second_apq_error = router_service

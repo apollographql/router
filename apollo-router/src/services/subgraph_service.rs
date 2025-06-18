@@ -3356,8 +3356,8 @@ mod tests {
                 }
                 .to_graphql_error(None),
             )
-            .error(error.with_null_id())
+            .error(error)
             .build();
-        assert_response_eq_ignoring_error_id!(actual, expected);
+        assert_response_eq_ignoring_error_id!(expected, actual);
     }
 }
