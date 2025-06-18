@@ -2316,6 +2316,7 @@ expression: "&schema"
       "properties": {
         "enabled": {
           "default": true,
+          "description": "When true, cooperative cancellation is enabled.",
           "type": "boolean"
         },
         "mode": {
