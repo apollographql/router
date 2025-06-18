@@ -100,10 +100,10 @@ fn or_shape(
         ShapeCase::Bool(Some(true)) => {
             return Shape::bool_value(true, method_name.shape_location(source_id));
         }
-        ShapeCase::Array { .. }
-        | ShapeCase::Object { .. }
-        | ShapeCase::String(_)
-        | ShapeCase::Int(_) => {
+        ShapeCase::Unknown | ShapeCase::Bool(Some(false)) => {
+            // Continue onward... if unknown we don't know the shape, and if it's false, it still might be true later!
+        }
+        _ => {
             return Shape::error(
                 format!(
                     "Method ->{} can only be applied to boolean values.",
@@ -112,8 +112,7 @@ fn or_shape(
                 method_name.shape_location(source_id),
             );
         }
-        _ => {}
-    };
+    }
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
@@ -127,10 +126,10 @@ fn or_shape(
                 ShapeCase::Bool(Some(true)) => {
                     return Shape::bool_value(true, method_name.shape_location(source_id));
                 }
-                ShapeCase::Array { .. }
-                | ShapeCase::Object { .. }
-                | ShapeCase::String(_)
-                | ShapeCase::Int(_) => {
+                ShapeCase::Unknown | ShapeCase::Bool(Some(false)) => {
+                    // Continue onward... if unknown we don't know the shape, and if it's false, it still might be true later!
+                }
+                _ => {
                     return Shape::error(
                         format!(
                             "Method ->{} can only accept boolean arguments.",
@@ -139,7 +138,6 @@ fn or_shape(
                         method_name.shape_location(source_id),
                     );
                 }
-                _ => {}
             }
         }
     }
