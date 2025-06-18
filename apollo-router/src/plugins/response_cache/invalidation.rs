@@ -115,11 +115,11 @@ impl Invalidation {
             }
             InvalidationRequest::CacheTag {
                 subgraphs,
-                cache_key,
+                cache_tag,
             } => {
                 pg_storage
                     .invalidate(
-                        vec![cache_key.clone()],
+                        vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                     )
                     .await?
@@ -232,7 +232,7 @@ pub(crate) enum InvalidationRequest {
     },
     CacheTag {
         subgraphs: HashSet<String>,
-        cache_key: String,
+        cache_tag: String,
     },
 }
 
@@ -266,7 +266,7 @@ impl InvalidationRequest {
                     "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
                 )
             }
-            InvalidationRequest::CacheTag { cache_key, .. } => cache_key.clone(),
+            InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
         }
     }
 

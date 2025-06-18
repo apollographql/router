@@ -4857,7 +4857,9 @@ expression: "&schema"
           "type": "integer"
         },
         "namespace": {
+          "default": null,
           "description": "Useful when running tests in parallel to avoid conflicts",
+          "nullable": true,
           "type": "string"
         },
         "password": {
@@ -4895,7 +4897,6 @@ expression: "&schema"
         }
       },
       "required": [
-        "namespace",
         "url"
       ],
       "type": "object"
@@ -6572,7 +6573,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntitySurrogateKeys\"]` array.",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntityCacheTags\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6596,7 +6597,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloSurrogateKeys\"]` array.",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloCacheTags\"]` array.",
           "type": "object"
         }
       },
