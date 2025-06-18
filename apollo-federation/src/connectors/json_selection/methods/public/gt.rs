@@ -75,7 +75,7 @@ fn gt_method(
             }
         });
 
-    return (Some(JSON::Bool(matches)), apply_to_errors);
+    (Some(JSON::Bool(matches)), apply_to_errors)
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
