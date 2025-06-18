@@ -72,6 +72,8 @@ To get more information on the planning and warm-up process use the following me
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
+    * `planner`: The query planner implementation used (`rust` or `js`)
+    * `outcome`: The outcome of the query planning process (`success`, `timeout`, `cancelled`, `error`)
   * `apollo.router.schema.load.duration`: time spent loading a schema
   * `apollo.router.cache.hit.time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
   * `apollo.router.cache.miss.time{kind="query planner", storage="<storage>"}`

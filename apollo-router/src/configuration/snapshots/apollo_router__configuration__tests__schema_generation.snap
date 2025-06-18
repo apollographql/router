@@ -2311,6 +2311,27 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "CooperativeCancellation": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "When true, cooperative cancellation is enabled.",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode",
+          "description": "#/definitions/Mode"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for query planning.",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2658,8 +2679,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "mode": {
-          "$ref": "#/definitions/Mode",
-          "description": "#/definitions/Mode"
+          "$ref": "#/definitions/Mode2",
+          "description": "#/definitions/Mode2"
         },
         "strategy": {
           "$ref": "#/definitions/StrategyConfig",
@@ -4574,6 +4595,13 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "Mode2": {
+      "enum": [
+        "measure",
+        "enforce"
+      ],
+      "type": "string"
+    },
     "MultipartRequest": {
       "additionalProperties": false,
       "description": "Configuration for a multipart request for file uploads.\n\nThis protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)",
@@ -5075,6 +5103,10 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
+        },
+        "experimental_cooperative_cancellation": {
+          "$ref": "#/definitions/CooperativeCancellation",
+          "description": "#/definitions/CooperativeCancellation"
         },
         "experimental_paths_limit": {
           "default": null,
