@@ -295,17 +295,17 @@ fn validate_field_value(
         for ty in all_types {
             let result = FieldSet::parse(
                 Valid::assume_valid_ref(schema.schema()),
-                location_name.clone(),
+                ty.clone(),
                 selection,
                 "from_context.graphql",
             );
 
-            if let Err(err) = result {
+            if let Err(_) = result {
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid for type {}. {}.",
-                            context, location_name, ty, err,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid for type \"{}\".",
+                            context, target, ty,
                         ),
                     }
                     .into(),
@@ -347,6 +347,7 @@ fn validate_field_value(
                     let type_position = TypeDefinitionPosition::from(location.clone());
 
                     let resolved_type = validate_field_value_type(
+                        context,
                         &type_position,
                         selection_set,
                         schema,
@@ -414,6 +415,7 @@ fn validate_field_value(
                                 }
 
                                 if let Ok(Some(resolved_type)) = validate_field_value_type(
+                                    context,
                                     &frag_type_position,
                                     &frag.selection_set,
                                     schema,
@@ -696,7 +698,7 @@ impl FromContextValidator for RequireResolvableKey {
                     SingleFederationError::ContextNoResolvableKey {
                         message: format!(
                             "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                            target
+                            parent
                         ),
                     }
                     .into(),
@@ -842,6 +844,7 @@ fn validate_field_value_type_inner(
 
 #[allow(dead_code)]
 fn validate_field_value_type(
+    context: &str,
     current_type: &TypeDefinitionPosition,
     selection_set: &SelectionSet,
     schema: &FederationSchema,
@@ -856,7 +859,7 @@ fn validate_field_value_type(
             if current_type.has_applied_directive(schema, &interface_object_directive.name) {
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
-                        message: format!("Context is used in \"{}\" but the selection is invalid: One of the types in the selection is an interface Object: \"{}\".", from_context_parent, current_type.type_name())
+                        message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"{}\".", context, from_context_parent, current_type.type_name())
                     }
                     .into(),
                 );
@@ -1045,7 +1048,7 @@ mod tests {
                 @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context", "@fromContext", "@key"])
                 
             type Query {
-                user(id: ID! @fromContext(field: "userContext.userId")): User
+                user(id: ID! @fromContext(field: "$userContext { userId }")): User
             }
 
             type User @context(name: "userContext") @key(fields: "id", resolvable: false) {
@@ -1085,7 +1088,7 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    SingleFederationError::ContextNoResolvableKey { message } if message == "Object \"User\" has no resolvable key but has a field with a contextual argument."
+                    SingleFederationError::ContextNoResolvableKey { message } if message == "Object \"Query\" has no resolvable key but has a field with a contextual argument."
                 ),
                 "Expected an error about no resolvable key"
             );
@@ -1215,6 +1218,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1283,6 +1287,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1351,6 +1356,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1418,6 +1424,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1493,6 +1500,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1555,6 +1563,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1575,7 +1584,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"User\" is used in \"Query.contextual(id:)\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"User\""
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"userContext\" is used in \"Query.contextual(id:)\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"User\"."
             )),
             "Should have specific interface object error"
         );
@@ -1628,6 +1637,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1702,6 +1712,7 @@ mod tests {
         .expect("valid field set");
 
         let result = validate_field_value_type(
+            "userContext",
             &user_type,
             &fields.selection_set,
             subgraph.schema(),
@@ -1834,7 +1845,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"userContext\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type Parent. Error: Cannot query field \"nonExistentField\" on type \"Parent\"."
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"userContext\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"Parent\"."
             )),
             "Should have specific invalid selection error"
         );
@@ -1977,7 +1988,7 @@ mod tests {
 
             type Target @key(fields: "targetId") {
                 targetId: ID!
-                value(contextArg: String! @fromContext(field: "$context prop")): String
+                value(contextArg: String @fromContext(field: "$context { prop }")): String
             }
         "#;
 
@@ -2437,7 +2448,7 @@ mod tests {
 
             type Target @key(fields: "targetId") {
                 targetId: ID!
-                value(contextArg: String! @fromContext(field: "$context { prop }")): String
+                value(contextArg: String @fromContext(field: "$context { prop }")): String
             }
         "#;
 
@@ -2475,7 +2486,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type T. Error: Cannot query field \"prop\" on type \"T\"."
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"T2\"."
             )),
             "Should have specific union field error"
         );
