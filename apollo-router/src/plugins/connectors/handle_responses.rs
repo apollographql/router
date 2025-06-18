@@ -816,7 +816,6 @@ mod tests {
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use uuid::Uuid;
 
     use crate::Context;
     use crate::graphql;
@@ -1431,9 +1430,7 @@ mod tests {
 
         // Overwrite error IDs to avoid random Uuid mismatch
         let body = res.response.body_mut();
-        body.errors
-            .iter_mut()
-            .for_each(|error| error.set_apollo_id(Uuid::nil()));
+        body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
         assert_debug_snapshot!(res, @r#"
         Response {

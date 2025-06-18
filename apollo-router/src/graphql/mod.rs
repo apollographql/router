@@ -239,7 +239,7 @@ impl Error {
         self.extensions.get("code").and_then(|c| match c {
             Value::String(s) => Some(s.as_str().to_owned()),
             Value::Number(n) => Some(n.to_string()),
-            Value::Null | Value::Array(_) | Value::Object(_) | Value::Bool(_)  => None,
+            Value::Null | Value::Array(_) | Value::Object(_) | Value::Bool(_) => None,
         })
     }
 
@@ -249,17 +249,12 @@ impl Error {
     }
 
     #[cfg(test)]
-    /// Mutates the [`self.apollo_id`] to `Uuid::nil()` for comparing errors in tests where you
-    /// cannot extract the randomly generated Uuid
-    pub fn with_null_id(mut self) -> Self {
-        self.set_apollo_id(Uuid::nil());
-        self
-    }
-
-    #[cfg(test)]
-    /// Updates [`self.apollo_id`] to `id`.
-    pub fn set_apollo_id(&mut self, id: Uuid) {
-        self.apollo_id = id;
+    /// Returns a duplicate of the error where [`self.apollo_id`] is `Uuid::nil()`. Used for
+    /// comparing errors in tests where you cannot control the randomly generated Uuid
+    pub fn with_null_id(&self) -> Self {
+        let mut new_err = self.clone();
+        new_err.apollo_id = Uuid::nil();
+        new_err
     }
 }
 
@@ -349,4 +344,41 @@ impl From<CompilerExecutionError> for Error {
             apollo_id: Uuid::new_v4(),
         }
     }
+}
+
+/// Assert that the expected and actual [`Error`] are equal when ignoring their
+/// [`Error::apollo_id`].
+#[macro_export]
+macro_rules! assert_error_eq_ignoring_id {
+    ($expected:expr, $actual:expr) => {
+        assert_eq!($expected.with_null_id(), $actual.with_null_id());
+    };
+}
+
+/// Assert that the expected and actual lists of [`Error`] are equal when ignoring their
+/// [`Error::apollo_id`].
+#[macro_export]
+macro_rules! assert_errors_eq_ignoring_id {
+    ($expected:expr, $actual:expr) => {{
+        let normalize =
+            |v: &[graphql::Error]| v.iter().map(|e| e.with_null_id()).collect::<Vec<_>>();
+
+        assert_eq!(normalize(&$expected), normalize(&$actual));
+    }};
+}
+
+/// Assert that the expected and actual [`Response`] are equal when ignoring the
+/// [`Error::apollo_id`] on any [`Error`] in their [`Response::errors`].
+#[macro_export]
+macro_rules! assert_response_eq_ignoring_error_id {
+    ($expected:expr, $actual:expr) => {{
+        let normalize =
+            |v: &[graphql::Error]| v.iter().map(|e| e.with_null_id()).collect::<Vec<_>>();
+        let mut expected_response: graphql::Response = $expected.clone();
+        let mut actual_response: graphql::Response = $actual.clone();
+        expected_response.errors = normalize(&expected_response.errors);
+        actual_response.errors = normalize(&actual_response.errors);
+
+        assert_eq!(expected_response, actual_response);
+    }};
 }

@@ -773,6 +773,7 @@ mod tests {
 
     use super::*;
     use crate::Notify;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
@@ -1142,15 +1143,13 @@ mod tests {
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::ACCEPTED);
         let msg = handler.next().await.unwrap();
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             msg,
             graphql::Response::builder()
                 .errors(vec![
                     graphql::Error::builder()
                         .message("cannot complete the subscription")
                         .extension_code("SUBSCRIPTION_ERROR")
-                        // Overwrite error ID to avoid random Uuid mismatch
-                        .apollo_id(msg.errors[0].apollo_id())
                         .build()
                 ])
                 .build()
@@ -1226,7 +1225,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             subgraph_response.response.body(),
             &graphql::Response::builder()
                 .data(serde_json_bytes::Value::Null)
@@ -1236,8 +1235,6 @@ mod tests {
                             "cannot execute a subscription if it's not enabled in the configuration"
                         )
                         .extension_code("SUBSCRIPTION_DISABLED")
-                        // Overwrite error ID to avoid random Uuid mismatch
-                        .apollo_id(subgraph_response.response.body().errors[0].apollo_id())
                         .build()
                 )
                 .extensions(Object::default())

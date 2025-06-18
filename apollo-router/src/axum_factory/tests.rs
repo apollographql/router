@@ -54,13 +54,13 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 use tower::service_fn;
-use uuid::Uuid;
 
 use super::*;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -1048,7 +1048,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
     .await;
     let (server, client) = init(router_service).await;
 
-    let mut response = client
+    let response = client
         .post(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1067,17 +1067,14 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    let mut expected_response = crate::error::FetchError::SubrequestHttpError {
+    let expected_response = crate::error::FetchError::SubrequestHttpError {
         status_code: Some(200),
         service: "Mock service".to_string(),
         reason: "Mock error".to_string(),
     }
     .to_response();
-    // Overwrite error IDs to avoid random Uuid mismatch
-    response.errors[0].set_apollo_id(Uuid::nil());
-    expected_response.errors[0].set_apollo_id(Uuid::nil());
 
-    assert_eq!(response, expected_response);
+    assert_response_eq_ignoring_error_id!(response, expected_response);
     server.shutdown().await
 }
 

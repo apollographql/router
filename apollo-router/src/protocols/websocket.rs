@@ -697,6 +697,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
 
     async fn emulate_correct_websocket_server_new_protocol(
@@ -982,14 +983,12 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(next_payload, graphql::Response::builder()
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
                         "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                     .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                    // Overwrite error ID to avoid random Uuid mismatch
-                    .apollo_id(next_payload.errors[0].apollo_id())
                     .build(),
             )
             .build()
@@ -1047,14 +1046,12 @@ mod tests {
 
         let next_payload = gql_read_stream.next().await.unwrap();
 
-        assert_eq!(next_payload, graphql::Response::builder()
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
                         "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                     .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                    // Overwrite error ID to avoid random Uuid mismatch
-                    .apollo_id(next_payload.errors[0].apollo_id())
                     .build(),
             )
             .build()

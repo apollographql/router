@@ -147,10 +147,10 @@ mod forbid_http_get_mutations_tests {
 
     use apollo_compiler::ast;
     use tower::ServiceExt;
-    use uuid::Uuid;
 
     use super::*;
     use crate::Context;
+    use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
     use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
@@ -271,8 +271,6 @@ mod forbid_http_get_mutations_tests {
             let expected_error = Error::builder()
                 .message("Mutations can only be sent over HTTP POST".to_string())
                 .extension_code("MUTATION_FORBIDDEN")
-                // Overwrite error ID to avoid random Uuid mismatch
-                .apollo_id(Uuid::nil())
                 .build();
 
             assert_eq!(expected_status, error_response.response.status());
@@ -280,7 +278,7 @@ mod forbid_http_get_mutations_tests {
                 expected_allow_header,
                 error_response.response.headers().get("Allow").unwrap()
             );
-            assert_eq!(response.errors[0].clone().with_null_id(), expected_error);
+            assert_error_eq_ignoring_id!(response.errors[0], expected_error);
         }
     }
 

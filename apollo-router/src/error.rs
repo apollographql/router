@@ -640,6 +640,7 @@ pub(crate) enum SubgraphBatchingError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assert_error_eq_ignoring_id;
     use crate::graphql;
 
     #[test]
@@ -660,9 +661,6 @@ mod tests {
             )
             .build();
 
-        assert_eq!(
-            expected_gql_error.with_null_id(),
-            error.to_graphql_error(None).with_null_id()
-        );
+        assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));
     }
 }

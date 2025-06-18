@@ -261,7 +261,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::assert_response_eq_ignoring_error_id;
+    use crate::graphql;
+    use crate::graphql::Error;
     use crate::graphql::Location;
+    use crate::graphql::Response;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
@@ -338,7 +342,7 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             response,
             Response::builder()
                 .data(json!({
@@ -371,8 +375,6 @@ mod tests {
                                 .cloned()
                                 .unwrap()
                         )
-                        // Overwrite ID to avoid random Uuid mismatch
-                        .apollo_id(response.errors[0].apollo_id)
                         .build()
                 ])
                 .extensions(
@@ -432,7 +434,7 @@ mod tests {
             .as_str(),
         );
         let response = result.unwrap();
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             response,
             Response::builder()
                 .label("part".to_owned())
@@ -467,8 +469,6 @@ mod tests {
                                 .cloned()
                                 .unwrap()
                         )
-                        // Overwrite ID to avoid random Uuid mismatch
-                        .apollo_id(response.errors[0].apollo_id)
                         .build()
                 ])
                 .extensions(

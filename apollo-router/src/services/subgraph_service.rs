@@ -1685,6 +1685,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -3237,17 +3238,12 @@ mod tests {
             .body(None)
             .unwrap()
             .into_parts();
-        let mut actual = super::http_response_to_graphql_response(
+        let actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
-        // Overwrite error ID to avoid random Uuid mismatch
-        actual
-            .errors
-            .iter_mut()
-            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .error(
@@ -3256,11 +3252,10 @@ mod tests {
                     service: "test_service".into(),
                     reason: "418: I'm a teapot".into(),
                 }
-                .to_graphql_error(None)
-                .with_null_id(),
+                .to_graphql_error(None),
             )
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3310,23 +3305,18 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let mut actual = super::http_response_to_graphql_response(
+        let actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
-        // Overwrite error ID to avoid random Uuid mismatch
-        actual
-            .errors
-            .iter_mut()
-            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
-            .error(error.with_null_id())
+            .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3349,17 +3339,12 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let mut actual = super::http_response_to_graphql_response(
+        let actual = super::http_response_to_graphql_response(
             "test_service",
             Ok(ContentType::ApplicationGraphqlResponseJson),
             body,
             &parts,
         );
-        // Overwrite error ID to avoid random Uuid mismatch
-        actual
-            .errors
-            .iter_mut()
-            .for_each(|e| e.set_apollo_id(Uuid::nil()));
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
@@ -3369,11 +3354,10 @@ mod tests {
                     service: "test_service".into(),
                     reason: "418: I'm a teapot".into(),
                 }
-                .to_graphql_error(None)
-                .with_null_id(),
+                .to_graphql_error(None),
             )
             .error(error.with_null_id())
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 }
