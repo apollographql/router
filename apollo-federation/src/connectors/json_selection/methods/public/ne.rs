@@ -55,12 +55,19 @@ fn ne_method(
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn ne_shape(
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
+    method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
+    if method_args.and_then(|args| args.args.first()).is_none() {
+        return Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    }
+
     Shape::bool(method_name.shape_location(source_id))
 }
 
