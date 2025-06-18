@@ -2610,6 +2610,7 @@ mod tests {
             headers: HashMap<String, String>,
             body: Option<String>,
             #[serde(default)]
+            #[schemars(with = "Option<serde_json::Value>")]
             mapping_problems: Vec<Problem>,
         },
         ConnectorResponse {
@@ -2622,6 +2623,7 @@ mod tests {
             headers: HashMap<String, String>,
             body: String,
             #[serde(default)]
+            #[schemars(with = "Option<serde_json::Value>")]
             mapping_problems: Vec<Problem>,
         },
     }
@@ -3068,7 +3070,7 @@ mod tests {
                                     let transport_request =
                                         TransportRequest::Http(transport::http::HttpRequest {
                                             inner: http_request,
-                                            debug: None,
+                                            debug: Default::default(),
                                         });
                                     let connector = Connector {
                                         id: ConnectId::new(

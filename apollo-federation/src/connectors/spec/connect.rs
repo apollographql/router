@@ -3,57 +3,34 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
-use apollo_compiler::parser::SourceMap;
-use apollo_compiler::schema::Component;
+use apollo_compiler::name;
 use itertools::Itertools;
 
-use super::schema::BATCH_ARGUMENT_NAME;
-use super::schema::CONNECT_BODY_ARGUMENT_NAME;
-use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use super::schema::ConnectBatchArguments;
-use super::schema::ConnectDirectiveArguments;
-use super::schema::ConnectHTTPArguments;
-use super::schema::ERRORS_ARGUMENT_NAME;
-use super::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
-use super::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
-use super::schema::ErrorsArguments;
-use super::schema::HTTP_ARGUMENT_NAME;
-use super::schema::PATH_ARGUMENT_NAME;
-use super::schema::QUERY_PARAMS_ARGUMENT_NAME;
-use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use super::schema::SourceDirectiveArguments;
-use super::schema::SourceHTTPArguments;
+use super::errors::ERRORS_ARGUMENT_NAME;
+use super::errors::ErrorsArguments;
+use super::http::HTTP_ARGUMENT_NAME;
+use super::http::PATH_ARGUMENT_NAME;
+use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
-macro_rules! internal {
-    ($s:expr) => {
-        FederationError::internal($s)
-    };
-}
-
-pub(crate) fn extract_source_directive_arguments(
-    schema: &Schema,
-    name: &Name,
-) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
-    schema
-        .schema_definition
-        .directives
-        .iter()
-        .filter(|directive| directive.name == *name)
-        .map(|directive| SourceDirectiveArguments::from_directive(directive, &schema.sources))
-        .collect()
-}
+pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
+pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
+pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
+pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
+pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
+pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
+pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
@@ -133,148 +110,42 @@ pub(crate) fn extract_connect_directive_arguments(
         .collect()
 }
 
-/// Internal representation of the object type pairs
-type ObjectNode = [(Name, Node<Value>)];
+/// Arguments to the `@connect` directive
+///
+/// Refer to [ConnectSpecDefinition] for more info.
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectDirectiveArguments {
+    pub(crate) position: ConnectorPosition,
 
-impl SourceDirectiveArguments {
-    fn from_directive(
-        value: &Component<Directive>,
-        sources: &SourceMap,
-    ) -> Result<Self, FederationError> {
-        let args = &value.arguments;
-        let directive_name = &value.name;
+    /// The upstream source for shared connector configuration.
+    ///
+    /// Must match the `name` argument of a @source directive in this schema.
+    pub(crate) source: Option<SourceName>,
 
-        // We'll have to iterate over the arg list and keep the properties by their name
-        let name = SourceName::from_directive_permissive(value, sources).map_err(|message| {
-            SingleFederationError::InvalidGraphQL {
-                message: message.message,
-            }
-        })?;
-        let mut http = None;
-        let mut errors = None;
-        for arg in args {
-            let arg_name = arg.name.as_str();
+    /// HTTP options for this connector
+    ///
+    /// Marked as optional in the GraphQL schema to allow for future transports,
+    /// but is currently required.
+    pub(crate) http: Option<ConnectHTTPArguments>,
 
-            if arg_name == HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or_else(|| {
-                    internal!(format!(
-                        "`http` field in `@{directive_name}` directive is not an object"
-                    ))
-                })?;
-                let http_value = SourceHTTPArguments::try_from((http_value, directive_name))?;
+    /// Fields to extract from the upstream JSON response.
+    ///
+    /// Uses the JSONSelection syntax to define a mapping of connector response to
+    /// GraphQL schema.
+    pub(crate) selection: JSONSelection,
 
-                http = Some(http_value);
-            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or_else(|| {
-                    internal!(format!(
-                        "`errors` field in `@{directive_name}` directive is not an object"
-                    ))
-                })?;
-                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
+    /// Entity resolver marker
+    ///
+    /// Marks this connector as a canonical resolver for an entity (uniquely
+    /// identified domain model.) If true, the connector must be defined on a field
+    /// of the Query type.
+    pub(crate) entity: bool,
 
-                errors = Some(errors_value);
-            }
-        }
+    /// Settings for the connector when it is doing a $batch entity resolver
+    pub(crate) batch: Option<ConnectBatchArguments>,
 
-        Ok(Self {
-            name,
-            http: http.ok_or_else(|| {
-                internal!(format!(
-                    "missing `http` field in `@{directive_name}` directive"
-                ))
-            })?,
-            errors,
-        })
-    }
-}
-
-impl TryFrom<(&ObjectNode, &Name)> for SourceHTTPArguments {
-    type Error = FederationError;
-
-    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
-        let mut base_url = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
-            .into_iter()
-            .try_collect()
-            .map_err(|err| internal!(err.to_string()))?;
-        let mut path = None;
-        let mut query = None;
-        for (name, value) in values {
-            let name = name.as_str();
-
-            if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_str().ok_or_else(|| internal!(format!(
-                    "`baseURL` field in `@{directive_name}` directive's `http.baseURL` field is not a string"
-                )))?;
-
-                base_url = Some(
-                    base_url_value
-                        .parse()
-                        .map_err(|err| internal!(format!("Invalid base URL: {}", err)))?,
-                );
-            } else if name == PATH_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or_else(|| {
-                    internal!(format!(
-                        "`{}` field in `@{directive_name}` directive's `http.path` field is not a string",
-                        PATH_ARGUMENT_NAME
-                    ))
-                })?;
-                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
-            } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
-                let value = value.as_str().ok_or_else(|| internal!(format!(
-                    "`{}` field in `@{directive_name}` directive's `http.queryParams` field is not a string",
-                    QUERY_PARAMS_ARGUMENT_NAME
-                )))?;
-                query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
-            }
-        }
-
-        Ok(Self {
-            base_url: base_url.ok_or_else(|| {
-                internal!(format!(
-                    "missing `base_url` field in `@{directive_name}` directive's `http` argument"
-                ))
-            })?,
-            headers,
-            path,
-            query_params: query,
-        })
-    }
-}
-
-impl TryFrom<(&ObjectNode, &Name)> for ErrorsArguments {
-    type Error = FederationError;
-
-    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
-        let mut message = None;
-        let mut extensions = None;
-        for (name, value) in values {
-            let name = name.as_str();
-
-            if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
-                let message_value = value.as_str().ok_or_else(|| internal!(format!(
-                    "`message` field in `@{directive_name}` directive's `errors` field is not a string")
-                ))?;
-                message =
-                    Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
-            } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
-                let extensions_value = value.as_str().ok_or_else(|| internal!(format!(
-                    "`extensions` field in `@{directive_name}` directive's `errors` field is not a string")
-                ))?;
-                extensions =
-                    Some(JSONSelection::parse(extensions_value).map_err(|e| internal!(e.message))?);
-            } else {
-                return Err(internal!(format!(
-                    "unknown argument in `@{directive_name}` directive's `errors` field: {name}"
-                )));
-            }
-        }
-
-        Ok(Self {
-            message,
-            extensions,
-        })
-    }
+    /// Configure the error mapping functionality for this connect
+    pub(crate) errors: Option<ErrorsArguments>,
 }
 
 impl ConnectDirectiveArguments {
@@ -297,7 +168,7 @@ impl ConnectDirectiveArguments {
 
             if arg_name == HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`http` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
@@ -308,7 +179,7 @@ impl ConnectDirectiveArguments {
                 ))?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`http` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
@@ -319,7 +190,7 @@ impl ConnectDirectiveArguments {
                 ))?);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`errors` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
@@ -329,15 +200,17 @@ impl ConnectDirectiveArguments {
                 errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`selection` field in `@{directive_name}` directive is not a string"
                     ))
                 })?;
-                selection =
-                    Some(JSONSelection::parse(selection_value).map_err(|e| internal!(e.message))?);
+                selection = Some(
+                    JSONSelection::parse(selection_value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
                 let entity_value = arg.value.to_bool().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`entity` field in `@{directive_name}` directive is not a boolean"
                     ))
                 })?;
@@ -351,7 +224,7 @@ impl ConnectDirectiveArguments {
             source,
             http,
             selection: selection.ok_or_else(|| {
-                internal!(format!(
+                FederationError::internal(format!(
                     "`@{directive_name}` directive is missing a selection"
                 ))
             })?,
@@ -360,6 +233,33 @@ impl ConnectDirectiveArguments {
             errors,
         })
     }
+}
+
+/// The HTTP arguments needed for a connect request
+#[cfg_attr(test, derive(Debug))]
+pub struct ConnectHTTPArguments {
+    pub(crate) get: Option<String>,
+    pub(crate) post: Option<String>,
+    pub(crate) patch: Option<String>,
+    pub(crate) put: Option<String>,
+    pub(crate) delete: Option<String>,
+
+    /// Request body
+    ///
+    /// Define a request body using JSONSelection. Selections can include values from
+    /// field arguments using `$args.argName` and from fields on the parent type using
+    /// `$this.fieldName`.
+    pub(crate) body: Option<JSONSelection>,
+
+    /// Configuration for headers to attach to the request.
+    ///
+    /// Overrides headers from the associated @source by name.
+    pub(crate) headers: Vec<Header>,
+
+    /// A [`JSONSelection`] that should resolve to an array of strings to append to the path.
+    pub(crate) path: Option<JSONSelection>,
+    /// A [`JSONSelection`] that should resolve to an object to convert to query params.
+    pub(crate) query_params: Option<JSONSelection>,
 }
 
 impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
@@ -372,10 +272,10 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Connect)
             .into_iter()
             .try_collect()
-            .map_err(|err| internal!(err.to_string()))?;
+            .map_err(|err| FederationError::internal(err.to_string()))?;
         let mut path = None;
         let mut query_params = None;
         for (name, value) in values {
@@ -383,45 +283,54 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
 
             if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
                 let body_value = value.as_str().ok_or_else(|| {
-                    internal!(format!("`body` field in `@{directive_name}` directive's `http` field is not a string"))
+                    FederationError::internal(format!("`body` field in `@{directive_name}` directive's `http` field is not a string"))
                 })?;
-                body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
+                body = Some(
+                    JSONSelection::parse(body_value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             } else if name == "GET" {
-                get = Some(value.as_str().ok_or_else(|| internal!(format!(
+                get = Some(value.as_str().ok_or_else(|| FederationError::internal(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
                 )))?.to_string());
             } else if name == "POST" {
-                post = Some(value.as_str().ok_or_else(|| internal!(format!(
+                post = Some(value.as_str().ok_or_else(|| FederationError::internal(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
                 )))?.to_string());
             } else if name == "PATCH" {
-                patch = Some(value.as_str().ok_or_else(|| internal!(format!(
+                patch = Some(value.as_str().ok_or_else(|| FederationError::internal(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
                 )))?.to_string());
             } else if name == "PUT" {
-                put = Some(value.as_str().ok_or_else(|| internal!(format!(
+                put = Some(value.as_str().ok_or_else(|| FederationError::internal(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
                 )))?.to_string());
             } else if name == "DELETE" {
-                delete = Some(value.as_str().ok_or_else(|| internal!(format!(
+                delete = Some(value.as_str().ok_or_else(|| FederationError::internal(format!(
                     "supplied HTTP template URL in `@{directive_name}` directive's `http` field is not a string"
                 )))?.to_string());
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`{}` field in `@{directive_name}` directive's `http` field is not a string",
                         PATH_ARGUMENT_NAME
                     ))
                 })?;
-                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+                path = Some(
+                    JSONSelection::parse(value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
-                    internal!(format!(
+                    FederationError::internal(format!(
                         "`{}` field in `@{directive_name}` directive's `http` field is not a string",
                         QUERY_PARAMS_ARGUMENT_NAME
                     ))
                 })?;
-                query_params = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+                query_params = Some(
+                    JSONSelection::parse(value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             }
         }
 
@@ -439,6 +348,18 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
     }
 }
 
+/// Settings for the connector when it is doing a $batch entity resolver
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of `max_size`.
+    pub max_size: Option<usize>,
+}
+
+/// Internal representation of the object type pairs
+type ObjectNode = [(Name, Node<Value>)];
+
 impl TryFrom<(&ObjectNode, &Name)> for ConnectBatchArguments {
     type Error = FederationError;
 
@@ -448,12 +369,12 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectBatchArguments {
             let name = name.as_str();
 
             if name == "maxSize" {
-                let max_size_int = Some(value.to_i32().ok_or_else(|| internal!(format!(
+                let max_size_int = Some(value.to_i32().ok_or_else(|| FederationError::internal(format!(
                     "supplied 'max_size' field in `@{directive_name}` directive's `batch` field is not a positive integer"
                 )))?);
                 // Convert the int to a usize since it is used for chunking an array later.
                 // Much better to fail here than during the request lifecycle.
-                max_size = max_size_int.map(|i| usize::try_from(i).map_err(|_| internal!(format!(
+                max_size = max_size_int.map(|i| usize::try_from(i).map_err(|_| FederationError::internal(format!(
                     "supplied 'max_size' field in `@{directive_name}` directive's `batch` field is not a positive integer"
                 )))).transpose()?;
             }
@@ -468,10 +389,8 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::name;
 
+    use super::*;
     use crate::ValidFederationSubgraphs;
-    use crate::connectors::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
-    use crate::connectors::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-    use crate::connectors::spec::schema::SourceDirectiveArguments;
     use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
@@ -481,48 +400,6 @@ mod tests {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
         let supergraph_schema = FederationSchema::new(schema).unwrap();
         extract_subgraphs_from_supergraph(&supergraph_schema, Some(true)).unwrap()
-    }
-
-    #[test]
-    fn it_parses_at_source() {
-        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-
-        let actual_definition = subgraph
-            .schema
-            .get_directive_definition(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap()
-            .get(subgraph.schema.schema())
-            .unwrap();
-
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA");
-
-        insta::assert_debug_snapshot!(
-            subgraph.schema
-                .referencers()
-                .get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str())
-                .unwrap(),
-            @r###"
-                DirectiveReferencers {
-                    schema: Some(
-                        SchemaDefinitionPosition,
-                    ),
-                    scalar_types: {},
-                    object_types: {},
-                    object_fields: {},
-                    object_field_arguments: {},
-                    interface_types: {},
-                    interface_fields: {},
-                    interface_field_arguments: {},
-                    union_types: {},
-                    enum_types: {},
-                    enum_values: {},
-                    input_object_types: {},
-                    input_object_fields: {},
-                    directive_arguments: {},
-                }
-            "###
-        );
     }
 
     #[test]
@@ -562,81 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn it_extracts_at_source() {
-        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-        let schema = &subgraph.schema;
-
-        // Try to extract the source information from the valid schema
-        // TODO: This should probably be handled by the rest of the stack
-        let sources = schema
-            .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
-        // Extract the sources from the schema definition and map them to their `Source` equivalent
-        let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Result<Vec<_>, _> = schema_directive_refs
-            .get(schema.schema())
-            .directives
-            .iter()
-            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|directive| {
-                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
-            })
-            .collect();
-
-        insta::assert_debug_snapshot!(
-            sources.unwrap(),
-            @r#"
-        [
-            SourceDirectiveArguments {
-                name: "json",
-                http: SourceHTTPArguments {
-                    base_url: https://jsonplaceholder.typicode.com/,
-                    headers: [
-                        Header {
-                            name: "authtoken",
-                            source: From(
-                                "x-auth-token",
-                            ),
-                        },
-                        Header {
-                            name: "user-agent",
-                            source: Value(
-                                HeaderValue(
-                                    StringTemplate {
-                                        parts: [
-                                            Constant(
-                                                Constant {
-                                                    value: "Firefox",
-                                                    location: 0..7,
-                                                },
-                                            ),
-                                        ],
-                                    },
-                                ),
-                            ),
-                        },
-                    ],
-                    path: None,
-                    query_params: None,
-                },
-                errors: None,
-            },
-        ]
-        "#
-        );
-    }
-
-    #[test]
     fn it_extracts_at_connect() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = super::extract_connect_directive_arguments(schema.schema(), &name!(connect));
+        let connects = extract_connect_directive_arguments(schema.schema(), &name!(connect));
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
