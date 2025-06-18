@@ -64,7 +64,6 @@ use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
-pub use crate::link::federation_spec_definition::get_federation_spec_definition_string_from_version;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LinkSpecDefinition;
@@ -82,6 +81,10 @@ use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
+
+pub mod internal_lsp_api {
+    pub use crate::subgraph::typestate::schema_diff_expanded_from_initial;
+}
 
 pub(crate) type SupergraphSpecs = (
     &'static LinkSpecDefinition,

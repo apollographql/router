@@ -236,37 +236,6 @@ impl Subgraph<Initial> {
             state: Expanded { schema, metadata },
         })
     }
-
-    pub fn schema_diff_expanded_from_initial(
-        schema_str: String,
-    ) -> Result<String, FederationError> {
-        // Parse schema string as Schema
-        let initial_schema = Schema::parse(schema_str, "")?;
-
-        // Initialize and expand subgraph, without validation
-        let initial_subgraph = Self::new("S", "http://S", initial_schema.clone());
-        let expanded_subgraph = initial_subgraph.expand_links()?;
-
-        // Build string of missing directives and types from initial to expanded
-        let mut diff = String::new();
-
-        // Push newly added directives onto diff
-        for (dir_name, dir_def) in &expanded_subgraph.schema().schema().directive_definitions {
-            if !initial_schema.directive_definitions.contains_key(dir_name) {
-                diff.push_str(&dir_def.to_string());
-                diff.push('\n');
-            }
-        }
-
-        // Push newly added types onto diff
-        for (named_ty, extended_ty) in &expanded_subgraph.schema().schema().types {
-            if !initial_schema.types.contains_key(named_ty) {
-                diff.push_str(&extended_ty.to_string());
-            }
-        }
-
-        Ok(diff)
-    }
 }
 
 impl Subgraph<Expanded> {
@@ -703,6 +672,41 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     Ok(schema)
 }
 
+// INTERNAL: For use by Language Server Protocol (LSP) team
+// Generates a diff string containing directives and types not included in initial schema string
+pub fn schema_diff_expanded_from_initial(
+    schema_str: String,
+) -> Result<String, FederationError> {
+    // Parse schema string as Schema
+    let initial_schema = Schema::parse(schema_str, "")?;
+
+    // Initialize and expand subgraph, without validation
+    let initial_subgraph = Subgraph::new("S", "http://S", initial_schema.clone());
+    let expanded_subgraph = initial_subgraph
+        .expand_links()
+        .expect("Subgraph expanded successfully");
+
+    // Build string of missing directives and types from initial to expanded
+    let mut diff = String::new();
+
+    // Push newly added directives onto diff
+    for (dir_name, dir_def) in &expanded_subgraph.schema().schema().directive_definitions {
+        if !initial_schema.directive_definitions.contains_key(dir_name) {
+            diff.push_str(&dir_def.to_string());
+            diff.push('\n');
+        }
+    }
+
+    // Push newly added types onto diff
+    for (named_ty, extended_ty) in &expanded_subgraph.schema().schema().types {
+        if !initial_schema.types.contains_key(named_ty) {
+            diff.push_str(&extended_ty.to_string());
+        }
+    }
+
+    Ok(diff)
+}
+
 /// Bootstrap link spec and federation spec links.
 /// - Make sure the schema has a link spec definition & link.
 /// - Make sure the schema has a federation spec link.
@@ -1074,7 +1078,7 @@ mod tests {
         )
         .unwrap();
 
-        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+        let diff = schema_diff_expanded_from_initial(schema_string);
 
         insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @core(feature: String, as: String, for: core__Purpose) repeatable on SCHEMA
 directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
@@ -1113,7 +1117,7 @@ type _Service {
         )
         .unwrap();
 
-        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+        let diff = schema_diff_expanded_from_initial(schema_string);
 
         insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
@@ -1155,7 +1159,7 @@ type _Service {
         )
         .unwrap();
 
-        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+        let diff = schema_diff_expanded_from_initial(schema_string);
 
         insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
@@ -1199,7 +1203,7 @@ type _Service {
         )
         .unwrap();
 
-        let diff = Subgraph::schema_diff_expanded_from_initial(schema_string);
+        let diff = schema_diff_expanded_from_initial(schema_string);
 
         insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE

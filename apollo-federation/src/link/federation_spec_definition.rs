@@ -117,9 +117,11 @@ impl FederationSpecDefinition {
 
     pub(crate) fn federation_spec_to_string(&self) -> Result<String, FederationError> {
         // Parse a simple schema to get an expanded subgraph
-        let subgraph = Subgraph::parse("S", "http://S", "type Query { hello: String }")?
+        let subgraph = Subgraph::parse("S", "http://S", "type Query { hello: String }")
+            .expect("new subgraph generated")
             .into_fed2_subgraph(self.version())?
-            .expand_links()?;
+            .expand_links()
+            .expect("subgraph expanded successfully");
         let mut result = String::new();
 
         let directive_definitions = self.directive_specs();
@@ -1096,7 +1098,8 @@ pub(crate) fn fed1_link_imports() -> Vec<Arc<link::Import>> {
         .collect()
 }
 
-pub fn get_federation_spec_definition_string_from_version(
+#[allow(unused)]
+pub(crate) fn get_federation_spec_definition_string_from_version(
     version: Version,
 ) -> Result<String, FederationError> {
     let fed_spec_definition = FEDERATION_VERSIONS.find(&version).ok_or_else(|| {
