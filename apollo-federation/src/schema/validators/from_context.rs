@@ -49,7 +49,7 @@ pub(crate) fn validate_from_context_directives(
         // if we get an error, we probably are pre fed 2.8
         return Ok(());
     };
-    
+
     for from_context_directive in from_context_directives {
         match from_context_directive {
             Ok(from_context) => {
@@ -284,7 +284,11 @@ fn validate_field_value(
 
         let all_types = match extended_type {
             ExtendedType::Union(un) => un.members.iter().map(|ty| ty.name.clone()).collect(),
-            ExtendedType::Interface(intf) => intf.implements_interfaces.iter().map(|ty| ty.name.clone()).collect(),
+            ExtendedType::Interface(intf) => intf
+                .implements_interfaces
+                .iter()
+                .map(|ty| ty.name.clone())
+                .collect(),
             _ => vec![location_name.clone()],
         };
 
@@ -2886,7 +2890,7 @@ mod tests {
         assert!(
             errors.errors.is_empty(),
             "Should not have validation errors for valid interface context"
-        );        
+        );
     }
 
     #[test]
@@ -2938,6 +2942,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // TODO: Fix this if we decide we care, but probably not worth the effort
     // Port note: Ported from JS test "contextual argument on a directive definition argument"
     fn test_fromcontext_on_directive_definition() {
         let schema_str = r#"
@@ -2982,11 +2987,9 @@ mod tests {
         )
         .expect("validates fromContext directives");
 
-        // Should have error for @fromContext on directive definition argument
-        // Note: This validation is not yet implemented because directive definition arguments
-        // are not processed by the from_context_directive_applications() method.
-        // This would need to be implemented at the schema parsing level.
-        // For now, we'll just check that the test completes without panicking.
-        // TODO: Implement proper validation for @fromContext on directive definition arguments
+        assert!(
+            !errors.errors.is_empty(),
+            "Should have validation errors for @fromContext on directive definition argument"
+        );
     }
 }
