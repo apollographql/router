@@ -292,6 +292,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
+
+    /// Query planning timed out: {0}
+    Timeout(String),
 }
 
 impl From<FederationErrorBridge> for QueryPlannerError {
@@ -314,6 +317,8 @@ pub(crate) enum FederationErrorBridge {
     OperationNameNotProvided(String),
     /// {0}
     Other(String),
+    /// {0}
+    Cancellation(String),
 }
 
 impl From<FederationError> for FederationErrorBridge {
@@ -325,6 +330,9 @@ impl From<FederationError> for FederationErrorBridge {
             err @ FederationError::SingleFederationError(
                 apollo_federation::error::SingleFederationError::OperationNameNotProvided,
             ) => Self::OperationNameNotProvided(err.to_string()),
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::PlanningCancelled,
+            ) => Self::Cancellation(err.to_string()),
             err => Self::Other(err.to_string()),
         }
     }
