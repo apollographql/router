@@ -61,6 +61,17 @@ fn ne_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
     if method_args.and_then(|args| args.args.first()).is_none() {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
