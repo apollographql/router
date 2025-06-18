@@ -3,6 +3,8 @@
 //! For more information on APQ see:
 //! <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
+pub(crate) mod subgraph;
+
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
