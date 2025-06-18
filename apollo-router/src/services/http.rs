@@ -3,12 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use parking_lot::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 
 use super::Plugins;
 use super::router::body::RouterBody;
