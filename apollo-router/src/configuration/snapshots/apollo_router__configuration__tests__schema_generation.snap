@@ -2312,24 +2312,23 @@ expression: "&schema"
       "description": "Configures the context"
     },
     "CooperativeCancellation": {
+      "additionalProperties": false,
       "properties": {
         "enabled": {
+          "default": true,
           "type": "boolean"
         },
         "mode": {
           "$ref": "#/definitions/Mode",
           "description": "#/definitions/Mode"
         },
-        "timeout_in_seconds": {
-          "description": "The timeout in seconds.",
-          "format": "double",
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for query planning.",
           "nullable": true,
-          "type": "number"
+          "type": "string"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Cors": {
