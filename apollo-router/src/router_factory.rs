@@ -766,7 +766,6 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
-    add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("connectors");
