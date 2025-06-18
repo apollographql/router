@@ -74,13 +74,6 @@ pub(crate) fn validate_from_context_directives(
                     continue;
                 };
 
-                let type_name = match &from_context.target {
-                    FieldArgumentDefinitionPosition::Object(position) => position.type_name.clone(),
-                    FieldArgumentDefinitionPosition::Interface(position) => {
-                        position.type_name.clone()
-                    }
-                };
-
                 // We need the context locations from the context map for this target
                 if let Some(set_context_locations) = context_map.get(context) {
                     if let Err(validation_error) = validate_field_value(
@@ -308,7 +301,7 @@ fn validate_field_value(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
                             "Context \"{}\" is used in \"{}\" but the selection is invalid for type {}. {}.",
-                            context, location_name, ty, err.to_string(),
+                            context, location_name, ty, err,
                         ),
                     }
                     .into(),
@@ -318,9 +311,9 @@ fn validate_field_value(
             let fields = result.unwrap();
             // TODO: Is it necessary to perform these validations on every iteration or can we do it only once?
             for rule in argument_rules.iter() {
-                rule.visit(&location_name, &fields, &applied_directive, errors);
+                rule.visit(location_name, &fields, applied_directive, errors);
             }
-            if errors.errors.len() > 0 {
+            if !errors.errors.is_empty() {
                 return Ok(());
             }
             selection_type =
@@ -351,7 +344,7 @@ fn validate_field_value(
 
                     let resolved_type = validate_field_value_type(
                         &type_position,
-                        &selection_set,
+                        selection_set,
                         schema,
                         target,
                         errors,
@@ -369,7 +362,7 @@ fn validate_field_value(
                     );
                         return Ok(());
                     };
-                    if !resolved_type.is_assignable_to(&expected_type) {
+                    if !resolved_type.is_assignable_to(expected_type) {
                         errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
@@ -764,12 +757,12 @@ impl FromContextValidator for DenyDefaultValues {
 
 impl DeniesAliases for FromContextDirective<'_> {
     fn error(&self, _alias: &Name, _field: &Field) -> SingleFederationError {
-        let (context, _) = parse_context(&self.arguments.field);
+        let (context, _) = parse_context(self.arguments.field);
         SingleFederationError::ContextSelectionInvalid {
             message: format!(
                 "Context \"{}\" is used in \"{}\" but the selection is invalid: aliases are not allowed in the selection",
                 context.unwrap_or("unknown".to_string()),
-                self.target.to_string()
+                self.target
             ),
         }
     }
@@ -777,12 +770,12 @@ impl DeniesAliases for FromContextDirective<'_> {
 
 impl DeniesDirectiveApplications for FromContextDirective<'_> {
     fn error(&self, _: &DirectiveList) -> SingleFederationError {
-        let (context, _) = parse_context(&self.arguments.field);
+        let (context, _) = parse_context(self.arguments.field);
         SingleFederationError::ContextSelectionInvalid {
             message: format!(
                 "Context \"{}\" is used in \"{}\" but the selection is invalid: directives are not allowed in the selection",
                 context.unwrap_or("unknown".to_string()),
-                self.target.to_string()
+                self.target
             ),
         }
     }
@@ -849,7 +842,7 @@ fn validate_field_value_type_inner(
     }
     types_array
         .into_iter()
-        .map(|item| Some(item))
+        .map(Some)
         .reduce(|acc, item| match (acc, item) {
             (Some(acc), Some(item)) => {
                 if acc == item {
@@ -944,7 +937,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextNotSet { message } if message.contains("abstract type")
+                SingleFederationError::ContextNotSet { message } if message == "@fromContext argument cannot be used on a field that exists on an abstract type \"Entity.id(contextArg:)\"."
             )),
             "Expected an error about abstract type"
         );
@@ -999,7 +992,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextNotSet { message } if message.contains("implementing an interface field")
+                SingleFederationError::ContextNotSet { message } if message == "@fromContext argument cannot be used on a field implementing an interface field \"User.id(contextArg:)\"."
             )),
             "Expected an error about implementing an interface field"
         );
@@ -1048,7 +1041,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextNotSet { message } if message.contains("invalidContext")
+                SingleFederationError::ContextNotSet { message } if message == "Context \"invalidContext\" is used at location \"Query.invalid(id:)\" but is never set."
             )),
             "Expected an error about invalid context"
         );
@@ -1057,7 +1050,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::NoSelectionForContext { message } if message.contains("has no selection")
+                SingleFederationError::NoSelectionForContext { message } if message == "@fromContext directive in field \"Query.noContext(id:)\" has no selection"
             )),
             "Expected an error about missing selection"
         );
@@ -1112,7 +1105,7 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    SingleFederationError::ContextNoResolvableKey { message } if message.contains("no resolvable key")
+                    SingleFederationError::ContextNoResolvableKey { message } if message == "Object \"User\" has no resolvable key but has a field with a contextual argument."
                 ),
                 "Expected an error about no resolvable key"
             );
@@ -1602,7 +1595,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("interface Object")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"User\" is used in \"Query.contextual(id:)\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"User\""
             )),
             "Should have specific interface object error"
         );
@@ -1793,7 +1786,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1846,7 +1839,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1861,7 +1854,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("selection is invalid")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"userContext\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type Parent. Error: Cannot query field \"nonExistentField\" on type \"Parent\"."
             )),
             "Should have specific invalid selection error"
         );
@@ -1908,7 +1901,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -1923,7 +1916,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("does not match the expected type")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"userContext\" is used in \"Target.value(contextArg:)\" but the selection is invalid: the type of the selection \"String\" does not match the expected type \"ID!\""
             )),
             "Should have specific type mismatch error"
         );
@@ -1970,7 +1963,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2027,7 +2020,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2042,7 +2035,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("does not match the expected type")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid: the type of the selection \"Int\" does not match the expected type \"String\""
             )),
             "Should have specific type mismatch error"
         );
@@ -2094,7 +2087,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::NoContextReferenced { message } if message.contains("does not reference a context")
+                SingleFederationError::NoContextReferenced { message } if message == "@fromContext argument does not reference a context \"$ \"."
             )),
             "Should have specific no context reference error"
         );
@@ -2142,7 +2135,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2157,7 +2150,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("multiple selections are made")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid: multiple selections are made"
             )),
             "Should have specific multiple selections error"
         );
@@ -2206,7 +2199,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2220,7 +2213,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("directives are not allowed")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid: directives are not allowed in the selection"
             )),
             "Should have specific directive error"
         );
@@ -2267,7 +2260,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2282,7 +2275,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("aliases are not allowed")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid: aliases are not allowed in the selection"
             )),
             "Should have specific alias error"
         );
@@ -2334,7 +2327,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2351,7 +2344,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("no type condition matches the location")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid: no type condition matches the location \"Bar\""
             )),
             "Should have specific type condition mismatch error"
         );
@@ -2401,7 +2394,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextNotSet { message } if message.contains("abstract type")
+                SingleFederationError::ContextNotSet { message } if message == "@fromContext argument cannot be used on a field that exists on an abstract type \"Entity.id(contextArg:)\"."
             )),
             "Expected an error about abstract type"
         );
@@ -2487,7 +2480,7 @@ mod tests {
         let result = validate_field_value(
             &context.expect("valid context"),
             &selection.expect("valid selection"),
-            &applied_directive,
+            applied_directive,
             &set_context_locations,
             subgraph.schema(),
             &mut errors,
@@ -2502,7 +2495,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("selection is invalid for type")
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type T. Error: Cannot query field \"prop\" on type \"T\"."
             )),
             "Should have specific union field error"
         );
