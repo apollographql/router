@@ -300,7 +300,7 @@ fn validate_field_value(
                 "from_context.graphql",
             );
 
-            if let Err(_) = result {
+            if result.is_err() {
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
