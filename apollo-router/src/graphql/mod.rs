@@ -13,7 +13,6 @@ use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
 pub use response::IncrementalResponse;
-use response::MalformedResponseError;
 pub use response::Response;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,6 +21,7 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 pub(crate) use visitor::ResponseVisitor;
 
+use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
@@ -124,39 +124,41 @@ impl Error {
         }
     }
 
-    pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
-        let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
-            reason: format!("invalid error within `errors`: {}", error),
-        })?;
+    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: format!("invalid error within `errors`: {}", error),
+            })?;
 
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(|err| MalformedResponseError {
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
                     reason: format!("invalid `extensions` within error: {}", err),
                 })?
                 .unwrap_or_default();
-        let message = match extract_key_value_from_object!(object, "message", Value::String(s) => s)
-        {
-            Ok(Some(s)) => Ok(s.as_str().to_string()),
-            Ok(None) => Err(MalformedResponseError {
-                reason: "missing required `message` property within error".to_owned(),
-            }),
-            Err(err) => Err(MalformedResponseError {
+        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
                 reason: format!("invalid `message` within error: {}", err),
-            }),
-        }?;
+            })?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
         let locations = extract_key_value_from_object!(object, "locations")
             .map(skip_invalid_locations)
             .map(serde_json_bytes::from_value)
             .transpose()
-            .map_err(|err| MalformedResponseError {
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
                 reason: format!("invalid `locations` within error: {}", err),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
-            .map_err(|err| MalformedResponseError {
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
                 reason: format!("invalid `path` within error: {}", err),
             })?;
 

@@ -12,7 +12,6 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
-use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
@@ -210,7 +209,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<Value>(&bytes))
+        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
@@ -253,10 +252,10 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response =
-                graphql::Response::from_value(co_processor_output.body.unwrap_or(Value::Null))
+            let graphql_response: crate::graphql::Response =
+                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
                     .unwrap_or_else(|error| {
-                        graphql::Response::builder()
+                        crate::graphql::Response::builder()
                             .errors(vec![
                                 Error::builder()
                                     .message(format!(
@@ -296,8 +295,9 @@ where
     // Finally, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
-    let new_body: graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json_bytes::from_value(value)?,
+
+    let new_body: crate::graphql::Request = match co_processor_output.body {
+        Some(value) => serde_json::from_value(value)?,
         None => body,
     };
 
@@ -358,7 +358,7 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
+        .then(|| serde_json::to_value(&first).expect("serialization will not fail"));
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
@@ -392,7 +392,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(first, co_processor_output.body)?;
+    let new_body: graphql::Response = handle_graphql_response(first, co_processor_output.body)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
@@ -425,8 +425,7 @@ where
 
             async move {
                 let body_to_send = response_config.body.then(|| {
-                    serde_json_bytes::to_value(&deferred_response)
-                        .expect("serialization will not fail")
+                    serde_json::to_value(&deferred_response).expect("serialization will not fail")
                 });
                 let context_to_send = response_config
                     .context
@@ -460,7 +459,7 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response =
+                let new_deferred_response: graphql::Response =
                     handle_graphql_response(deferred_response, co_processor_output.body)?;
 
                 if let Some(context) = co_processor_output.context {
@@ -505,13 +504,12 @@ mod tests {
 
     use futures::future::BoxFuture;
     use http::StatusCode;
-    use serde_json_bytes::json;
+    use serde_json::json;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use super::*;
-    use crate::json_ext::Object;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::services::execution;
@@ -612,7 +610,7 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(crate::json_ext::Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
@@ -682,7 +680,7 @@ mod tests {
         let request = execution::Request::fake_builder().build();
 
         assert_eq!(
-            json!({ "test": 1234_u32 }),
+            serde_json_bytes::json!({ "test": 1234_u32 }),
             service
                 .oneshot(request)
                 .await
@@ -790,7 +788,7 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(crate::json_ext::Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
@@ -799,7 +797,7 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let deserialized_response: Externalizable<Value> =
+                    let deserialized_response: Externalizable<serde_json::Value> =
                         serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                             .unwrap();
 
@@ -896,7 +894,7 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // the body should have changed:
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
     }
@@ -946,7 +944,7 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> =
+                    let mut deserialized_response: Externalizable<serde_json::Value> =
                         serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                             .unwrap();
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -968,7 +966,9 @@ mod tests {
                         .unwrap()
                         .insert(
                             "has_next".to_string(),
-                            Value::from(deserialized_response.has_next.unwrap_or_default()),
+                            serde_json::Value::from(
+                                deserialized_response.has_next.unwrap_or_default(),
+                            ),
                         );
 
                     Ok(http::Response::builder()
@@ -994,17 +994,17 @@ mod tests {
 
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
     }
