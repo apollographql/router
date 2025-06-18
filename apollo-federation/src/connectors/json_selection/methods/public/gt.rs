@@ -232,55 +232,48 @@ mod tests {
     }
 
     #[test]
-    fn gt_should_compare_null_values() {
+    fn gt_should_return_false_with_error_for_null_values() {
+        let result = selection!(
+            r#"
+                result: value->gt(null)
+            "#
+        )
+        .apply_to(&json!({ "value": null }));
+
         assert_eq!(
-            selection!(
-                r#"
-                    result: value->gt(null)
-                "#
-            )
-            .apply_to(&json!({ "value": null })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
+            result.0,
+            Some(json!({
+                "result": false,
+            })),
+        );
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: null > null")
         );
     }
 
     #[test]
-    fn gt_should_compare_boolean_values() {
-        // true > false should be true
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gt(false)
-                "#
-            )
-            .apply_to(&json!({ "value": true })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
+    fn gt_should_return_false_with_error_for_boolean_values() {
+        let result = selection!(
+            r#"
+                result: value->gt(false)
+            "#
+        )
+        .apply_to(&json!({ "value": true }));
 
-        // false > true should be false
         assert_eq!(
-            selection!(
-                r#"
-                    result: value->gt(true)
-                "#
-            )
-            .apply_to(&json!({ "value": false })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
+            result.0,
+            Some(json!({
+                "result": false,
+            })),
+        );
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: true > false")
         );
     }
 
@@ -303,7 +296,7 @@ mod tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gt can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: [1,2,3] > [1,2]")
+                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: [1,2,3] > [1,2]")
         );
     }
 
@@ -326,7 +319,7 @@ mod tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gt can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {\"a\":1,\"b\":2} > {\"a\":1}")
+                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: {\"a\":1,\"b\":2} > {\"a\":1}")
         );
     }
 
@@ -349,7 +342,7 @@ mod tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gt can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: 42 > \"string\"")
+                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: 42 > \"string\"")
         );
     }
 }
