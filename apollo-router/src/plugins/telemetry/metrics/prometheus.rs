@@ -4,6 +4,7 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
+use opentelemetry_prometheus::ResourceSelector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::View;
@@ -32,16 +33,38 @@ use crate::services::router;
 pub(crate) struct Config {
     /// Set to true to enable
     pub(crate) enabled: bool,
+    /// resource_selector is used to select which resource to export with every metrics.
+    pub(crate) resource_selector: ResourceSelectorConfig,
     /// The listen address
     pub(crate) listen: ListenAddr,
     /// The path where prometheus will be exposed
     pub(crate) path: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ResourceSelectorConfig {
+    /// Export all resource attributes with every metrics.
+    All,
+    #[default]
+    /// Do not export any resource attributes with every metrics.
+    None,
+}
+
+impl From<ResourceSelectorConfig> for ResourceSelector {
+    fn from(value: ResourceSelectorConfig) -> Self {
+        match value {
+            ResourceSelectorConfig::All => ResourceSelector::All,
+            ResourceSelectorConfig::None => ResourceSelector::None,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: false,
+            resource_selector: ResourceSelectorConfig::default(),
             listen: ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
             path: "/metrics".to_string(),
         }
@@ -127,6 +150,7 @@ impl MetricsConfigurator for Config {
                     .record_min_max(true)
                     .build(),
             )
+            .with_resource_selector(self.resource_selector)
             .with_registry(registry.clone())
             .build()?;
 
@@ -186,14 +210,17 @@ impl Service<router::Request> for PrometheusService {
             // Let's remove any problems they may have created for us.
             let stats = String::from_utf8_lossy(&result);
             let modified_stats = stats.replace("_total_total", "_total");
-            Ok(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::OK)
-                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body(router::body::from_bytes(modified_stats))
-                    .map_err(BoxError::from)?,
-                context: req.context,
-            })
+
+            router::Response::http_response_builder()
+                .response(
+                    http::Response::builder()
+                        .status(StatusCode::OK)
+                        .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+                        .body(router::body::from_bytes(modified_stats))
+                        .map_err(BoxError::from)?,
+                )
+                .context(req.context)
+                .build()
         })
     }
 }

@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use apollo_compiler::Schema;
 use bytes::Bytes;
-use fred::error::RedisErrorKind;
+use fred::error::ErrorKind as RedisErrorKind;
 use fred::mocks::MockCommand;
 use fred::mocks::Mocks;
-use fred::prelude::RedisError;
-use fred::prelude::RedisValue;
+use fred::prelude::Error as RedisError;
+use fred::prelude::Value as RedisValue;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use parking_lot::Mutex;

@@ -24,6 +24,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
@@ -52,7 +53,6 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
-pub(crate) const DEPRECATED_APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 /// Hashed value of query planner configuration for use in cache keys.
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -273,12 +273,25 @@ where
             config_mode_hash: _,
         } in all_cache_keys
         {
-            let doc = match query_analysis
-                .parse_document(&query, operation_name.as_deref())
-                .await
-            {
-                Ok(doc) => doc,
-                Err(_) => continue,
+            // NB: warmup tasks have a low priority so that real requests are prioritized
+            let doc = loop {
+                match query_analysis
+                    .parse_document(
+                        &query,
+                        operation_name.as_deref(),
+                        ComputeJobType::QueryParsingWarmup,
+                    )
+                    .await
+                {
+                    Ok(doc) => break doc,
+                    Err(MaybeBackPressureError::PermanentError(_)) => {
+                        continue 'all_cache_keys_loop;
+                    }
+                    Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // try again
+                    }
+                }
             };
 
             let caching_key = CachingQueryKey {
@@ -316,26 +329,6 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = loop {
-                    match query_analysis
-                        .parse_document(&query, operation_name.as_deref())
-                        .await
-                    {
-                        Ok(doc) => break doc,
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            let e = Arc::new(QueryPlannerError::SpecError(error));
-                            tokio::spawn(async move {
-                                entry.insert(Err(e)).await;
-                            });
-                            continue 'all_cache_keys_loop;
-                        }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            // try again
-                        }
-                    }
-                };
-
                 loop {
                     let request = QueryPlannerRequest {
                         query: query.clone(),
@@ -343,6 +336,7 @@ where
                         document: doc.clone(),
                         metadata: caching_key.metadata.clone(),
                         plan_options: caching_key.plan_options.clone(),
+                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
                     };
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
@@ -510,6 +504,7 @@ where
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
+                .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,
@@ -724,6 +719,8 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use mockall::mock;
     use serde_json_bytes::json;
     use test_log::test;
@@ -1176,5 +1173,86 @@ mod tests {
         } else {
             panic!("Expected both calls to return same error");
         }
+    }
+
+    #[tokio::test]
+    async fn test_cache_warmup() {
+        let create_delegate = |call_count| {
+            let mut delegate = MockMyQueryPlanner::new();
+            delegate.expect_clone().times(1).returning(move || {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(call_count).returning(|_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+            delegate
+        };
+
+        let configuration: Configuration = Default::default();
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../testdata/starstuff@current.graphql"),
+                &configuration,
+            )
+            .unwrap(),
+        );
+
+        let create_planner = async |delegate| {
+            CachingQueryPlanner::new(
+                delegate,
+                schema.clone(),
+                Default::default(),
+                &configuration,
+                IndexMap::default(),
+            )
+            .await
+            .unwrap()
+        };
+
+        let create_request = || {
+            let query_str = "query ExampleQuery { me { name } }".to_string();
+            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+            query_planner::CachingRequest::new(query_str, None, context)
+        };
+
+        // send query to caching planner. it should save this query plan in its cache
+        let mut planner = create_planner(create_delegate(1)).await;
+        let response = planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(planner.cache.len().await, 1);
+
+        // create and warm up a new planner. new planner's delegate should be called once during
+        // the warm-up phase to populate the cache
+        let query_analysis_layer =
+            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+        let mut new_planner = create_planner(create_delegate(1)).await;
+        new_planner
+            .warm_up(
+                &query_analysis_layer,
+                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                Some(planner.previous_cache()),
+                Some(1),
+                Default::default(),
+                &Default::default(),
+            )
+            .await;
+        // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(new_planner.cache.len().await, 1);
+
+        // create a new delegate that _shouldn't_ be called since the new planner already has the
+        // result in its cache
+        new_planner.delegate = create_delegate(0);
+        let response = new_planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(new_planner.cache.len().await, 1);
     }
 }

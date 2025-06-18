@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid-jsonselection-in-expression.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.resources`: nom::error::ErrorKind::Eof",
+        locations: [
+            12:27..12:28,
+        ],
+    },
+]

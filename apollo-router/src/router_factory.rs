@@ -518,12 +518,7 @@ fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
         .collect::<Result<Vec<_>, _>>()
         // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
         // instead of replacing it with this generic error message?
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "failed to load certificate".to_string(),
-            )
-        })
+        .map_err(|_| io::Error::other("failed to load certificate"))
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -768,6 +763,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication");
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
+    add_optional_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
     add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads

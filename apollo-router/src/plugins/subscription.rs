@@ -375,7 +375,7 @@ pub(crate) enum SubscriptionPayload {
     #[serde(rename = "next")]
     Next {
         id: String,
-        payload: Response,
+        payload: Box<Response>,
         verifier: String,
     },
     #[serde(rename = "complete")]
@@ -465,13 +465,15 @@ impl Service<router::Request> for CallbackService {
                         let cb_body = match cb_body {
                             Ok(cb_body) => cb_body,
                             Err(err) => {
-                                return Ok(router::Response {
-                                    response: http::Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(router::body::from_bytes(err))
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                });
+                                return router::Response::error_builder()
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .error(graphql::Error::builder()
+                                        .message(err)
+                                        .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                        .build()
+                                    )
+                                    .context(req.context)
+                                    .build();
                             }
                         };
                         let id = cb_body.id().clone();
@@ -492,13 +494,15 @@ impl Service<router::Request> for CallbackService {
                         let expected_hashed_verifier = verifier_hasher.finalize();
 
                         if hashed_verifier != expected_hashed_verifier {
-                            return Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::UNAUTHORIZED)
-                                    .body(router::body::from_bytes("verifier doesn't match"))
-                                    .map_err(BoxError::from)?,
-                                context: req.context,
-                            });
+                            return router::Response::error_builder()
+                                .status_code(StatusCode::UNAUTHORIZED)
+                                .error(graphql::Error::builder()
+                                    .message("verifier doesn't match")
+                                    .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                    .build()
+                                )
+                                .context(req.context)
+                                .build();
                         }
 
                         if let Err(res) = ensure_id_consistency(&req.context, &sub_id, &id) {
@@ -513,13 +517,15 @@ impl Service<router::Request> for CallbackService {
                                 let mut handle = match notify.subscribe_if_exist(id).await? {
                                     Some(handle) => handle.into_sink(),
                                     None => {
-                                        return Ok(router::Response {
-                                            response: http::Response::builder()
-                                                .status(StatusCode::NOT_FOUND)
-                                                .body(router::body::from_bytes("suscription doesn't exist"))
-                                                .map_err(BoxError::from)?,
-                                            context: req.context,
-                                        });
+                                        return router::Response::error_builder()
+                                            .status_code(StatusCode::NOT_FOUND)
+                                            .error(graphql::Error::builder()
+                                                .message("subscription doesn't exist")
+                                                .extension_code(StatusCode::NOT_FOUND.to_string())
+                                                .build()
+                                            )
+                                            .context(req.context)
+                                            .build();
                                     }
                                 };
                                 // Keep the subscription to the client opened
@@ -530,37 +536,37 @@ impl Service<router::Request> for CallbackService {
                                     1,
                                     subscriptions.mode = "callback"
                                 );
-                                handle.send_sync(payload)?;
+                                handle.send_sync(*payload)?;
 
-                                Ok(router::Response {
-                                    response: http::Response::builder()
-                                        .status(StatusCode::OK)
-                                        .body(router::body::empty())
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                })
+                                router::Response::builder()
+                                    .context(req.context)
+                                    .build()
                             }
                             CallbackPayload::Subscription(SubscriptionPayload::Check {
                                 ..
                             }) => {
                                 if notify.exist(id).await? {
-                                    Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NO_CONTENT)
-                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body(router::body::empty())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    })
+                                    router::Response::error_builder()
+                                        .status_code(StatusCode::NO_CONTENT)
+                                        .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
+                                        .error(graphql::Error::builder()
+                                            .message(String::default())
+                                            .extension_code(StatusCode::NO_CONTENT.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 } else {
-                                    Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body(router::body::from_bytes("suscription doesn't exist"))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    })
+                                    router::Response::error_builder()
+                                        .status_code(StatusCode::NOT_FOUND)
+                                        .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
+                                        .error(graphql::Error::builder()
+                                            .message("subscription doesn't exist")
+                                            .extension_code(StatusCode::NOT_FOUND.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 }
                             }
                             CallbackPayload::Subscription(SubscriptionPayload::Heartbeat {
@@ -569,32 +575,38 @@ impl Service<router::Request> for CallbackService {
                                 verifier,
                             }) => {
                                 if !ids.contains(&id) {
-                                    return Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::UNAUTHORIZED)
-                                            .body(router::body::from_bytes("id used for the verifier is not part of ids array"))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    });
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::UNAUTHORIZED)
+                                        .error(graphql::Error::builder()
+                                            .message("id used for the verifier is not part of ids array")
+                                            .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 }
 
                                 let (mut valid_ids, invalid_ids) = notify.invalid_ids(ids).await?;
                                 if invalid_ids.is_empty() {
-                                    Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NO_CONTENT)
-                                            .body(router::body::empty())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    })
+                                    router::Response::error_builder()
+                                        .status_code(StatusCode::NO_CONTENT)
+                                        .error(graphql::Error::builder()
+                                            .message(String::default())
+                                            .extension_code(StatusCode::NO_CONTENT.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 } else if valid_ids.is_empty() {
-                                    Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::from_bytes("suscriptions don't exist"))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    })
+                                    router::Response::error_builder()
+                                        .status_code(StatusCode::NOT_FOUND)
+                                        .error(graphql::Error::builder()
+                                            .message("subscriptions don't exist")
+                                            .extension_code(StatusCode::NOT_FOUND.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 } else {
                                     let (id, verifier) = if invalid_ids.contains(&id) {
                                         (id, verifier)
@@ -610,19 +622,19 @@ impl Service<router::Request> for CallbackService {
 
                                         (new_id, verifier)
                                     };
-                                    Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::from_bytes(
-                                                serde_json::to_string_pretty(&InvalidIdsPayload{
-                                                    invalid_ids,
-                                                    id,
-                                                    verifier,
-                                                })?,
-                                            ))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    })
+                                    router::Response::error_builder()
+                                        .status_code(StatusCode::NOT_FOUND)
+                                        .error(graphql::Error::builder()
+                                            .message(serde_json::to_string_pretty(&InvalidIdsPayload{
+                                                invalid_ids,
+                                                id,
+                                                verifier,
+                                            }).map_err(BoxError::from)?)
+                                            .extension_code(StatusCode::NOT_FOUND.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build()
                                 }
                             }
                             CallbackPayload::Subscription(SubscriptionPayload::Complete {
@@ -633,22 +645,26 @@ impl Service<router::Request> for CallbackService {
                                     let mut handle = match notify.subscribe(id.clone()).await {
                                          Ok(handle) => handle.into_sink(),
                                          Err(NotifyError::UnknownTopic) => {
-                                            return Ok(router::Response {
-                                                response: http::Response::builder()
-                                                    .status(StatusCode::NOT_FOUND)
-                                                    .body(router::body::from_bytes("unknown topic"))
-                                                    .map_err(BoxError::from)?,
-                                                context: req.context,
-                                            });
+                                            return router::Response::error_builder()
+                                                .status_code(StatusCode::NOT_FOUND)
+                                                .error(graphql::Error::builder()
+                                                    .message("unknown topic")
+                                                    .extension_code(StatusCode::NOT_FOUND.to_string())
+                                                    .build()
+                                                )
+                                                .context(req.context)
+                                                .build();
                                          },
                                          Err(err) => {
-                                            return Ok(router::Response {
-                                                response: http::Response::builder()
-                                                    .status(StatusCode::NOT_FOUND)
-                                                    .body(router::body::from_bytes(err.to_string()))
-                                                    .map_err(BoxError::from)?,
-                                                context: req.context,
-                                            });
+                                            return router::Response::error_builder()
+                                                .status_code(StatusCode::NOT_FOUND)
+                                                .error(graphql::Error::builder()
+                                                    .message(err.to_string())
+                                                    .extension_code(StatusCode::NOT_FOUND.to_string())
+                                                    .build()
+                                                )
+                                                .context(req.context)
+                                                .build();
                                          }
                                     };
                                     u64_counter!(
@@ -661,41 +677,48 @@ impl Service<router::Request> for CallbackService {
                                     if let Err(_err) = handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
                                     ) {
-                                        return Ok(router::Response {
-                                            response: http::Response::builder()
-                                                .status(StatusCode::NOT_FOUND)
-                                                .body(router::body::from_bytes("cannot send errors to the client"))
-                                                .map_err(BoxError::from)?,
-                                            context: req.context,
-                                        });
+                                       return router::Response::error_builder()
+                                            .status_code(StatusCode::NOT_FOUND)
+                                            .error(graphql::Error::builder()
+                                                .message("cannot send errors to the client")
+                                                .extension_code(StatusCode::NOT_FOUND.to_string())
+                                                .build()
+                                            )
+                                            .context(req.context)
+                                            .build();
                                     }
                                 }
                                 if let Err(_err) = notify.force_delete(id).await {
-                                    return Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .body(router::body::from_bytes("cannot force delete"))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    });
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::NOT_FOUND)
+                                        .error(graphql::Error::builder()
+                                            .message("cannot force delete")
+                                            .extension_code(StatusCode::NOT_FOUND.to_string())
+                                            .build()
+                                        )
+                                        .context(req.context)
+                                        .build();
                                 }
-                                Ok(router::Response {
-                                    response: http::Response::builder()
+
+                                router::Response::http_response_builder()
+                                    .response(http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
                                         .body(router::body::empty())
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                })
+                                        .map_err(BoxError::from)?)
+                                    .context(req.context)
+                                    .build()
                             }
                         }
                     }
-                    _ => Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body(router::body::empty())
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    }),
+                    _ => router::Response::error_builder()
+                        .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                        .error(graphql::Error::builder()
+                            .message(String::default())
+                            .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
+                            .build()
+                        )
+                        .context(req.context)
+                        .build()
                 }
             }
             .instrument(tracing::info_span!("subscription_callback")),
@@ -715,24 +738,27 @@ pub(crate) fn create_verifier(sub_id: &str) -> Result<String, BoxError> {
     Ok(verifier)
 }
 
+#[allow(clippy::result_large_err)]
 fn ensure_id_consistency(
     context: &Context,
     id_from_path: &str,
     id_from_body: &str,
 ) -> Result<(), router::Response> {
-    (id_from_path != id_from_body)
-        .then(|| {
-            Err(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(router::body::from_bytes(
-                        "id from url path and id from body are different",
-                    ))
-                    .expect("this body is valid"),
-                context: context.clone(),
-            })
-        })
-        .unwrap_or_else(|| Ok(()))
+    if id_from_path != id_from_body {
+        Err(router::Response::error_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .error(
+                graphql::Error::builder()
+                    .message("id from url path and id from body are different")
+                    .extension_code(StatusCode::BAD_REQUEST.to_string())
+                    .build(),
+            )
+            .context(context.clone())
+            .build()
+            .expect("this response is valid"))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -809,7 +835,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = create_verifier(&new_sub_id).unwrap();
@@ -839,9 +865,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -868,9 +894,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -952,7 +978,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (_handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = String::from("XXX");
@@ -976,9 +1002,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -1042,7 +1068,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = create_verifier(&new_sub_id).unwrap();
@@ -1073,9 +1099,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier: verifier.clone(),
             }))
             .unwrap(),
@@ -1136,9 +1162,9 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: graphql::Response::builder()
+                payload: Box::new(graphql::Response::builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build(),
+                    .build()),
                 verifier,
             }))
             .unwrap(),

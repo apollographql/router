@@ -117,14 +117,18 @@ pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
     Introspection,
+    QueryParsingWarmup,
+    QueryPlanningWarmup,
 }
 
 impl From<ComputeJobType> for Priority {
     fn from(job_type: ComputeJobType) -> Self {
         match job_type {
-            ComputeJobType::QueryPlanning => Self::P8, // high
-            ComputeJobType::QueryParsing => Self::P4,  // medium
-            ComputeJobType::Introspection => Self::P1, // low
+            ComputeJobType::QueryPlanning => Self::P8,       // high
+            ComputeJobType::QueryParsing => Self::P4,        // medium
+            ComputeJobType::Introspection => Self::P3,       // low
+            ComputeJobType::QueryParsingWarmup => Self::P1,  // low
+            ComputeJobType::QueryPlanningWarmup => Self::P2, // low
         }
     }
 }
@@ -318,14 +322,23 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
 
-    #[tokio::test]
-    async fn test_observability() {
-        // make sure that the queue has been initialized by calling `execute`. if this
-        // step is skipped, the queue will _sometimes_ be initialized in the step below,
-        // which causes an additional log line and a snapshot mismatch.
+    /// Send a request to the compute queue to make sure it is initialized.
+    ///
+    /// The queue is (a) wrapped in a `OnceLock`, so it is shared between tests, and (b) only
+    /// initialized after receiving and processing a request.
+    /// These two properties can lead to inconsistent behavior.
+    async fn ensure_queue_is_initialized() {
         execute(ComputeJobType::Introspection, |_| {})
             .unwrap()
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_observability() {
+        // make sure that the queue has been initialized - if this step is skipped, the
+        // queue will _sometimes_ be initialized in the step below, which causes an
+        // additional log line and a snapshot mismatch.
+        ensure_queue_is_initialized().await;
 
         async {
             let span = info_span!("test_observability");

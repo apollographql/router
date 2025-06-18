@@ -15,6 +15,7 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
+use http_body_util::BodyExt;
 use insta::assert_yaml_snapshot;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::EncodingKey;
@@ -52,6 +53,7 @@ use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::plugin::test;
 use crate::plugins::authentication::Issuers;
+use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::JWTCriteria;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::jwks::JwksManager;
@@ -1058,6 +1060,7 @@ async fn build_jwks_search_components() -> JwksManager {
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1076,7 +1079,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1093,7 +1096,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1122,7 +1125,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         alg: Algorithm::ES256,
     };
 
-    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1142,7 +1145,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         alg: Algorithm::RS256,
     };
 
-    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1158,9 +1161,10 @@ struct Claims {
     sub: String,
     exp: u64,
     iss: Option<String>,
+    aud: Option<String>,
 }
 
-fn make_manager(jwk: &Jwk, issuers: Option<Issuers>) -> JwksManager {
+fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences>) -> JwksManager {
     let jwks = JwkSet {
         keys: vec![jwk.clone()],
     };
@@ -1169,6 +1173,7 @@ fn make_manager(jwk: &Jwk, issuers: Option<Issuers>) -> JwksManager {
     let list = vec![JwksConfig {
         url: url.clone(),
         issuers,
+        audiences,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
         headers: Vec::new(),
@@ -1205,6 +1210,7 @@ async fn issuer_check() {
     let manager = make_manager(
         &jwk,
         Some(HashSet::from(["hello".to_string(), "goodbye".to_string()])),
+        None,
     );
 
     // No issuer
@@ -1214,6 +1220,7 @@ async fn issuer_check() {
             sub: "test".to_string(),
             exp: get_current_timestamp(),
             iss: None,
+            aud: None,
         },
         &encoding_key,
     )
@@ -1251,6 +1258,7 @@ async fn issuer_check() {
             sub: "test".to_string(),
             exp: get_current_timestamp(),
             iss: Some("hello".to_string()),
+            aud: None,
         },
         &encoding_key,
     )
@@ -1290,6 +1298,7 @@ async fn issuer_check() {
             sub: "test".to_string(),
             exp: get_current_timestamp(),
             iss: Some("AAAA".to_string()),
+            aud: None,
         },
         &encoding_key,
     )
@@ -1317,13 +1326,14 @@ async fn issuer_check() {
     }
 
     // no issuer check
-    let manager = make_manager(&jwk, None);
+    let manager = make_manager(&jwk, None, None);
     let token = encode(
         &jsonwebtoken::Header::new(Algorithm::ES256),
         &Claims {
             sub: "test".to_string(),
             exp: get_current_timestamp(),
             iss: Some("hello".to_string()),
+            aud: None,
         },
         &encoding_key,
     )
@@ -1358,6 +1368,187 @@ async fn issuer_check() {
 }
 
 #[tokio::test]
+async fn audience_check() {
+    let signing_key = SigningKey::random(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    let point = verifying_key.to_encoded_point(false);
+
+    let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
+
+    let jwk = Jwk {
+        common: CommonParameters {
+            public_key_use: Some(PublicKeyUse::Signature),
+            key_operations: Some(vec![KeyOperations::Verify]),
+            key_algorithm: Some(KeyAlgorithm::ES256),
+            key_id: Some("hello".to_string()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+            curve: EllipticCurve::P256,
+            x: BASE64_URL_SAFE_NO_PAD.encode(point.x().unwrap()),
+            y: BASE64_URL_SAFE_NO_PAD.encode(point.y().unwrap()),
+        }),
+    };
+
+    let manager = make_manager(
+        &jwk,
+        None,
+        Some(HashSet::from(["hello".to_string(), "goodbye".to_string()])),
+    );
+
+    // No audience
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            aud: None,
+            iss: None,
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    let mut config = JWTConf::default();
+    config.sources.push(Source::Header {
+        name: super::default_header_name(),
+        value_prefix: super::default_header_value_prefix(),
+    });
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
+        ControlFlow::Break(res) => {
+            assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+            let body = res.response.into_body().collect().await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body.to_bytes()).unwrap();
+            let expected_body = serde_json::json!({
+                "errors": [
+                    {
+                        "message": "Invalid audience: the token's `aud` was 'null', but 'goodbye, hello' was expected",
+                        "extensions": {
+                            "code": "AUTH_ERROR"
+                        }
+                    }
+                ]
+            });
+            assert_eq!(body, expected_body);
+        }
+        ControlFlow::Continue(_req) => {
+            panic!("expected a rejection for a lack of audience");
+        }
+    }
+
+    // Valid audience
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            aud: Some("hello".to_string()),
+            iss: None,
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
+        ControlFlow::Break(_res) => {
+            panic!("expected audience to be valid");
+        }
+        ControlFlow::Continue(req) => {
+            let claims: serde_json::Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(claims["aud"], "hello");
+        }
+    }
+
+    // Invalid audience
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            aud: Some("AAAA".to_string()),
+            iss: None,
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+                .errors(vec![
+                    graphql::Error::builder()
+                        .extension_code("AUTH_ERROR")
+                        .message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected")
+                        .build()
+                ]).build());
+        }
+        ControlFlow::Continue(_) => {
+            panic!("audience check should have failed")
+        }
+    }
+
+    // no audience check
+    let manager = make_manager(&jwk, None, None);
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            aud: Some("hello".to_string()),
+            iss: None,
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&config, &manager, request.try_into().unwrap()) {
+        ControlFlow::Break(_res) => {
+            panic!("expected audience to be valid");
+        }
+        ControlFlow::Continue(req) => {
+            let claims: serde_json::Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            assert_eq!(claims["aud"], "hello");
+        }
+    }
+}
+
+#[tokio::test]
 async fn it_rejects_key_with_restricted_algorithm() {
     let mut sets = vec![];
     let mut urls = vec![];
@@ -1371,6 +1562,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1403,6 +1595,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1442,6 +1635,7 @@ async fn it_accepts_key_without_use_or_keyops() {
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1473,6 +1667,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1504,6 +1699,7 @@ async fn it_accepts_rsa_key_without_alg() {
         urls.push(JwksConfig {
             url,
             issuers: None,
+            audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1559,6 +1755,7 @@ async fn jwks_send_headers() {
     let _jwks_manager = JwksManager::new(vec![JwksConfig {
         url,
         issuers: None,
+        audiences: None,
         algorithms: Some(HashSet::from([Algorithm::RS256])),
         poll_interval: Duration::from_secs(60),
         headers: vec![Header {

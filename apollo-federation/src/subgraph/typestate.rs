@@ -22,7 +22,9 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -250,6 +252,19 @@ impl Subgraph<Expanded> {
 }
 
 impl Subgraph<Upgraded> {
+    pub fn assume_validated(self) -> Result<Subgraph<Validated>, SubgraphError> {
+        let valid_federation_schema = ValidFederationSchema::new_assume_valid(self.state.schema)
+            .map_err(|(_schema, error)| SubgraphError::new(self.name.clone(), error))?;
+        Ok(Subgraph {
+            name: self.name,
+            url: self.url,
+            state: Validated {
+                schema: valid_federation_schema,
+                metadata: self.state.metadata,
+            },
+        })
+    }
+
     pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
         let schema = self
             .state
@@ -330,6 +345,10 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 }
 
 impl Subgraph<Validated> {
+    pub fn validated_schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
     pub fn invalidate(self) -> Subgraph<Upgraded> {
         // PORT_NOTE: In JS, the metadata gets invalidated by calling
         // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
@@ -367,10 +386,26 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)
     }
 
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(
+                self.schema(),
+                &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+            )
+    }
+
     pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn override_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)
     }
 
     pub(crate) fn provides_directive_name(&self) -> Result<Option<Name>, FederationError> {

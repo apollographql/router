@@ -122,7 +122,7 @@ impl Plugin for Connectors {
                                         let serialized = { &debug.lock().clone().serialize() };
                                         chunk.extensions.insert(
                                             CONNECTORS_DEBUG_KEY,
-                                            json!({"version": "1", "data": serialized }),
+                                            json!({"version": "2", "data": serialized }),
                                         );
                                         chunk
                                     });

@@ -156,6 +156,9 @@ When using the macro in a test you will need a different pattern depending on if
 
 Make sure to use `.with_metrics()` method on the async block to ensure that the metrics are stored in a task local.
 *Tests will silently fail to record metrics if this is not done.*
+
+For testing metrics across spawned tasks, use `.with_current_meter_provider()` to propagate the meter provider to child tasks:
+
 ```rust
     use crate::metrics::FutureMetricsExt;
 
@@ -180,10 +183,29 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         .with_metrics()
         .await;
     }
+
+    #[tokio::test]
+    async fn test_metrics_across_tasks() {
+        async {
+            u64_counter!("apollo.router.test", "metric", 1);
+            assert_counter!("apollo.router.test", 1);
+
+            // Use with_current_meter_provider to propagate metrics to spawned task
+            tokio::spawn(async move {
+                u64_counter!("apollo.router.test", "metric", 2);
+            }.with_current_meter_provider())
+            .await
+            .unwrap();
+
+            // Now the metric correctly resolves to 3 since the meter provider was propagated
+            assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
+    }
 ```
 
-Note: this relies on metrics being updated within the same thread. Metrics that are updated from multiple threads will
-not be collected correctly.
+Note: Without using `with_current_meter_provider()`, metrics updated from spawned tasks will not be collected correctly:
 
 ```rust
 #[tokio::test]
@@ -240,13 +262,13 @@ There are different types of metrics.
 * Static - Declared via macro, cannot be configured, low cardinality, and are transmitted to Apollo.
 * Dynamic - Configurable via yaml, not transmitted to Apollo.
 
-> New features should add BOTH static and dynamic metrics.
+New features should add BOTH static and dynamic metrics.
 
 > Why are static metrics less good for users to for debugging?
-> 
-> They can be used, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
-> 
-> For instance, it we must not add operation name to the attributes of a static metric as this is potentially infinite cardinality, but as a dynamic metric this is fine as users can use conditions to reduce the amount of data they are looking at.
+ 
+They can be used, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
+ 
+For instance, we **must not** add operation name to the attributes of a static metric as this is potentially infinite cardinality, but as a dynamic metric this is fine as users can use conditions to reduce the amount of data they are looking at.
 
 ### Naming
 Metrics should be named in a way that is consistent with the rest of the metrics in the system.

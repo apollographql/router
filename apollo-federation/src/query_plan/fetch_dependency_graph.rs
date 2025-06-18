@@ -2922,7 +2922,8 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        if !self.context_inputs.iter().any(|c| *c == renamer) {
+        // XXX(@goto-bus-stop): this looks like it should be an IndexSet!
+        if !self.context_inputs.contains(&renamer) {
             self.context_inputs.push(renamer);
         }
     }
@@ -4048,11 +4049,11 @@ fn compute_nodes_for_op_path_element<'a>(
             node.selection_set
                 .add_at_path(path_in_parent, Some(&Arc::new(key_inputs)))?;
 
-            let Ok(input_type): Result<CompositeTypeDefinitionPosition, _> = dependency_graph
-                .supergraph_schema
-                .get_type(source_type.type_name().clone())?
-                .try_into()
-            else {
+            let Ok(input_type) = CompositeTypeDefinitionPosition::try_from(
+                dependency_graph
+                    .supergraph_schema
+                    .get_type(source_type.type_name().clone())?,
+            ) else {
                 bail!(
                     "Type {} should exist in the supergraph and be a composite type",
                     source_type.type_name()

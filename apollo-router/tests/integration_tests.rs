@@ -574,12 +574,14 @@ async fn missing_variables() {
 
     let mut expected = vec![
         graphql::Error::builder()
-            .message("invalid type for variable: 'missingVariable'")
+            .message("missing variable `$missingVariable`: for required GraphQL type `Int!`")
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
             .build(),
         graphql::Error::builder()
-            .message("invalid type for variable: 'yetAnotherMissingVariable'")
+            .message(
+                "missing variable `$yetAnotherMissingVariable`: for required GraphQL type `ID!`",
+            )
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "yetAnotherMissingVariable")
             .build(),
@@ -587,6 +589,108 @@ async fn missing_variables() {
     response.errors.sort_by_key(|e| e.message.clone());
     expected.sort_by_key(|e| e.message.clone());
     assert_eq!(response.errors, expected);
+}
+
+/// <https://github.com/apollographql/router/issues/2984>
+#[tokio::test(flavor = "multi_thread")]
+async fn input_object_variable_validation() {
+    let schema = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+          query: Query
+        }
+
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        input CoordinatesInput
+          @join__type(graph: SUBGRAPH1)
+        {
+          latitude: Float!
+          longitude: Float!
+        }
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+          SUBGRAPH1 @join__graph(name: "subgraph1", url: "http://localhost:4001")
+        }
+
+        scalar link__Import
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        input MyInput
+          @join__type(graph: SUBGRAPH1)
+        {
+          coordinates: [CoordinatesInput]
+        }
+
+        type Query
+          @join__type(graph: SUBGRAPH1)
+        {
+          getData(params: MyInput): Int
+        }
+    "#;
+    let request = apollo_router::services::supergraph::Request::fake_builder()
+        .query("query($x: MyInput) { getData(params: $x) }")
+        .variable(
+            "x",
+            json!({"coordinates": [{"latitude": 45.5, "longitude": null}]}),
+        )
+        .build()
+        .unwrap();
+    let response = apollo_router::TestHarness::builder()
+        .schema(schema)
+        .build_supergraph()
+        .await
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_debug_snapshot!(&response.errors, @r###"
+    [
+        Error {
+            message: "missing input value at `$x.coordinates[0].longitude`: for required GraphQL type `Float!`",
+            locations: [],
+            path: None,
+            extensions: {
+                "name": String(
+                    "x",
+                ),
+                "code": String(
+                    "VALIDATION_INVALID_TYPE_VARIABLE",
+                ),
+            },
+        },
+    ]
+    "###);
 }
 
 const PARSER_LIMITS_TEST_QUERY: &str =
@@ -1347,7 +1451,6 @@ async fn all_stock_router_example_yamls_are_valid() {
 }
 
 #[tokio::test]
-#[tracing_test::traced_test]
 async fn test_starstuff_supergraph_is_valid() {
     let schema = include_str!("../../examples/graphql/supergraph.graphql");
     apollo_router::TestHarness::builder()
@@ -1366,7 +1469,6 @@ Make sure it is accessible, and the configuration is working with the router."#,
 // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
 // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
 #[tokio::test(flavor = "multi_thread")]
-#[tracing_test::traced_test]
 async fn test_telemetry_doesnt_hang_with_invalid_schema() {
     create_test_service_factory_from_yaml(
         include_str!("../src/testdata/invalid_supergraph.graphql"),

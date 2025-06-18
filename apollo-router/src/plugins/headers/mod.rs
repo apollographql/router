@@ -612,11 +612,11 @@ mod test {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
@@ -1606,6 +1606,7 @@ mod test {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1694,6 +1695,7 @@ mod test {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1719,7 +1721,7 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         connector::request_service::Request {

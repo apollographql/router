@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.2.1"
+version = "2.3.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -35,7 +35,7 @@ multi_try = "0.3.0"
 nom = "7.1.3"
 nom_locate = "4.2.0"
 percent-encoding = "2.3.1"
-petgraph = { version = "0.6.4", features = ["serde-1"] }
+petgraph = { version = "0.8.0", features = ["serde-1"] }
 regex = "1.11.1"
 serde.workspace = true
 serde_json.workspace = true

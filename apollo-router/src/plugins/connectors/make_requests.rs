@@ -5,10 +5,10 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
-use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::EntityResolver;
-use apollo_federation::sources::connect::JSONSelection;
-use apollo_federation::sources::connect::Namespace;
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::EntityResolver;
+use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::Namespace;
 use parking_lot::Mutex;
 use request_merger::MappingContextMerger;
 use serde_json_bytes::ByteString;
@@ -50,6 +50,7 @@ impl RequestInputs {
             status: None,
             request: None,
             response: None,
+            env: None,
         }
     }
 }
@@ -247,10 +248,10 @@ fn request_params_to_requests(
                 .context(&original_request.context)
                 .request(
                     &connector.request_headers,
-                    &original_request.supergraph_request,
+                    original_request.supergraph_request.headers(),
                 )
                 .merge(),
-            &original_request,
+            original_request.supergraph_request.headers(),
             debug,
         )?;
 
@@ -708,12 +709,12 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::ConnectorBatchSettings;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::connectors::ConnectBatchArguments;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
     use http::Uri;
     use insta::assert_debug_snapshot;
 
@@ -775,6 +776,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -860,6 +862,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -971,6 +974,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1094,6 +1098,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1216,6 +1221,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1319,6 +1325,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1444,6 +1451,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1604,6 +1612,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1761,6 +1770,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1889,6 +1899,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2001,9 +2012,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2121,9 +2133,10 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2248,6 +2261,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2326,6 +2340,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2366,7 +2381,10 @@ mod tests {
                         batch: []
                     },
                 },
-                None,
+                (
+                    None,
+                    [],
+                ),
             ),
         ]
         "#);

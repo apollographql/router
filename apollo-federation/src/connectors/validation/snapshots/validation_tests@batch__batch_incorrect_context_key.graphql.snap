@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/batch/batch_incorrect_context_key.graphql
+---
+[
+    Message {
+        code: ConnectorsNonRootBatchKey,
+        message: "`$batch` fields must be mapped from the API response body. Variables such as `$context` and `$this` are not supported",
+        locations: [
+            12:4..12:11,
+        ],
+    },
+]

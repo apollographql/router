@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_federation::sources::connect::Connector;
+use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -30,7 +30,6 @@ use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -348,7 +347,7 @@ impl tower::Service<Request> for ConnectorRequestService {
         });
 
         Box::pin(async move {
-            let mut debug_request: Option<ConnectorDebugHttpRequest> = None;
+            let mut debug_request = (None, Default::default());
             let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                 Err(Error::RequestLimitExceeded)
             } else {

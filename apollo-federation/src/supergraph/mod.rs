@@ -96,7 +96,10 @@ pub struct Supergraph<S> {
 impl Supergraph<Merged> {
     pub fn new(schema: Valid<Schema>) -> Self {
         Self {
-            state: Merged { schema },
+            state: Merged {
+                schema,
+                hints: vec![],
+            },
         }
     }
 
@@ -112,6 +115,34 @@ impl Supergraph<Merged> {
     pub fn schema(&self) -> &Valid<Schema> {
         &self.state.schema
     }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
+
+    #[allow(unused)]
+    pub(crate) fn subgraph_name_to_graph_enum_value(
+        &self,
+    ) -> Result<IndexMap<String, Name>, FederationError> {
+        // TODO: We can avoid this clone if the `Merged` struct contains a `FederationSchema`.
+        let supergraph_schema = FederationSchema::new(self.schema().clone().into_inner())?;
+        // PORT_NOTE: The JS version calls the `extractSubgraphsFromSupergraph` function, which
+        //            returns the subgraph name to graph enum value mapping, but the corresponding
+        //            `extract_subgraphs_from_supergraph` function in Rust does not need it and
+        //            does not return it. Therefore, a small part of
+        //            `extract_subgraphs_from_supergraph` function is reused here to compute the
+        //            mapping, instead of modifying the function itself.
+        let (_link_spec_definition, join_spec_definition, _context_spec_definition) =
+            crate::validate_supergraph_for_query_planning(&supergraph_schema)?;
+        let (_subgraphs, _federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
+            collect_empty_subgraphs(&supergraph_schema, join_spec_definition)?;
+        Ok(graph_enum_value_name_to_subgraph_name
+            .into_iter()
+            .map(|(enum_value_name, subgraph_name)| {
+                (subgraph_name.to_string(), enum_value_name.clone())
+            })
+            .collect())
+    }
 }
 
 impl Supergraph<Satisfiable> {
@@ -123,12 +154,31 @@ impl Supergraph<Satisfiable> {
     ) -> Result<ValidFederationSchema, FederationError> {
         api_schema::to_api_schema(self.state.schema.clone(), options)
     }
+
+    pub fn schema(&self) -> &ValidFederationSchema {
+        &self.state.schema
+    }
+
+    pub fn metadata(&self) -> &SupergraphMetadata {
+        &self.state.metadata
+    }
+
+    pub fn hints(&self) -> &Vec<CompositionHint> {
+        &self.state.hints
+    }
 }
 
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub struct Merged {
     schema: Valid<Schema>,
+    hints: Vec<CompositionHint>,
+}
+
+impl Merged {
+    pub fn schema(&self) -> &Valid<Schema> {
+        &self.schema
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -157,7 +207,20 @@ pub struct SupergraphMetadata {
 #[allow(unused)]
 #[allow(unreachable_pub)]
 pub struct CompositionHint {
-    message: String,
+    pub message: String,
+    pub code: String,
+}
+
+impl CompositionHint {
+    #[allow(unused)]
+    pub(crate) fn code(&self) -> &str {
+        &self.code
+    }
+
+    #[allow(unused)]
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 /// Assumes the given schema has been validated.
@@ -1738,7 +1801,7 @@ pub(crate) const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
 pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
-const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
+pub(crate) const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
 pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
 pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
 pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");
@@ -1900,8 +1963,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
         }
 
         // Ignore non-object/interface types.
-        let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> = type_pos.try_into()
-        else {
+        let Ok(type_pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos) else {
             continue;
         };
 

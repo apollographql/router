@@ -70,6 +70,10 @@ pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) resolvable: bool,
 }
 
+pub(crate) struct ExternalDirectiveArguments<'doc> {
+    pub(crate) reason: Option<&'doc str>,
+}
+
 pub(crate) struct RequiresDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
 }
@@ -216,7 +220,7 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
             )?
-            .unwrap_or(false),
+            .unwrap_or(Self::resolvable_argument_default_value()),
         })
     }
 
@@ -315,6 +319,18 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    pub(crate) fn external_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ExternalDirectiveArguments<'doc>, FederationError> {
+        Ok(ExternalDirectiveArguments {
+            reason: directive_optional_string_argument(
+                application,
+                &FEDERATION_REASON_ARGUMENT_NAME,
+            )?,
         })
     }
 
@@ -677,12 +693,16 @@ impl FederationSpecDefinition {
         }
     }
 
+    fn resolvable_argument_default_value() -> bool {
+        true
+    }
+
     fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
                 get_type: |_, _| Ok(ty!(Boolean)),
-                default_value: Some(Value::Boolean(true)),
+                default_value: Some(Value::Boolean(Self::resolvable_argument_default_value())),
             },
             composition_strategy: None,
         }
@@ -862,7 +882,7 @@ impl SpecDefinition for FederationSpecDefinition {
         specs.push(Box::new(self.shareable_directive_specification()));
 
         if let Some(inaccessible_spec) =
-            INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
+            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(self.version())
         {
             specs.extend(inaccessible_spec.directive_specs());
         }

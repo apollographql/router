@@ -400,7 +400,9 @@ impl InstrumentData {
             opt.signature_normalization_algorithm,
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
-            "$.metrics_reference_mode"
+            "$.metrics_reference_mode",
+            opt.errors.preview_extended_error_metrics,
+            "$.errors.preview_extended_error_metrics"
         );
 
         populate_config_instrument!(

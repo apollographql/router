@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/plugins/telemetry/mod.rs
+expression: "prometheus_metrics.replace(& format!\n(r#\"service_version=\"{}\"\"#, std :: env! (\"CARGO_PKG_VERSION\")),\nr#\"service_version=\"X\"\"#)"
+---
+

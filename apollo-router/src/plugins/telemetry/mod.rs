@@ -171,14 +171,10 @@ pub(crate) mod utils;
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
 pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
-pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
 pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
 pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_library_version";
-pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
-pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
-pub(crate) const DEPRECATED_STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -513,10 +509,18 @@ impl PluginPrivate for Telemetry {
                         //  at the router service to modify the name and version.
                         let get_from_context =
                             |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME)
-                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_NAME));
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION)
-                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_VERSION));
+                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
+                            )
+                        });
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
+                            )
+                        });
                         custom_attributes.extend([
                             KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
                             KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
@@ -1191,47 +1195,41 @@ impl Telemetry {
         custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
-        let res = match result {
-            Ok(response) => {
-                let ctx = context.clone();
-                // Wait for the first response of the stream
-                let (parts, stream) = response.response.into_parts();
-                let config_cloned = config.clone();
-                let stream = stream.inspect(move |resp| {
-                    let has_errors = !resp.errors.is_empty();
-                    // Useful for selector in spans/instruments/events
-                    ctx.insert_json_value(
-                        CONTAINS_GRAPHQL_ERROR,
-                        serde_json_bytes::Value::Bool(has_errors),
-                    );
-                    let span = Span::current();
-                    span.set_span_dyn_attributes(
-                        config_cloned
-                            .instrumentation
-                            .spans
-                            .supergraph
-                            .attributes
-                            .on_response_event(resp, &ctx),
-                    );
-                    custom_instruments.on_response_event(resp, &ctx);
-                    custom_events.on_response_event(resp, &ctx);
-                    custom_graphql_instruments.on_response_event(resp, &ctx);
-                });
-                let (first_response, rest) = StreamExt::into_future(stream).await;
+        let response = result?;
+        let ctx = context.clone();
+        // Wait for the first response of the stream
+        let (parts, stream) = response.response.into_parts();
+        let config_cloned = config.clone();
+        let stream = stream.inspect(move |resp| {
+            let has_errors = !resp.errors.is_empty();
+            // Useful for selector in spans/instruments/events
+            ctx.insert_json_value(
+                CONTAINS_GRAPHQL_ERROR,
+                serde_json_bytes::Value::Bool(has_errors),
+            );
+            let span = Span::current();
+            span.set_span_dyn_attributes(
+                config_cloned
+                    .instrumentation
+                    .spans
+                    .supergraph
+                    .attributes
+                    .on_response_event(resp, &ctx),
+            );
+            custom_instruments.on_response_event(resp, &ctx);
+            custom_events.on_response_event(resp, &ctx);
+            custom_graphql_instruments.on_response_event(resp, &ctx);
+        });
+        let (first_response, rest) = StreamExt::into_future(stream).await;
 
-                let response = http::Response::from_parts(
-                    parts,
-                    once(ready(first_response.unwrap_or_default()))
-                        .chain(rest)
-                        .boxed(),
-                );
+        let response = http::Response::from_parts(
+            parts,
+            once(ready(first_response.unwrap_or_default()))
+                .chain(rest)
+                .boxed(),
+        );
 
-                Ok(SupergraphResponse { context, response })
-            }
-            Err(err) => Err(err),
-        };
-
-        res
+        Ok(SupergraphResponse { context, response })
     }
 
     fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
@@ -1999,6 +1997,7 @@ pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Ve
 }
 
 struct EnableSubgraphFtv1;
+
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
 //
@@ -2062,6 +2061,21 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
+
+    macro_rules! assert_prometheus_metrics {
+        ($plugin:expr) => {{
+            let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let regexp = regex::Regex::new(
+                r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
+            )
+            .unwrap();
+            let prometheus_metrics = regexp.replace_all(&prometheus_metrics, "").to_owned();
+            assert_snapshot!(prometheus_metrics.replace(
+                &format!(r#"service_version="{}""#, std::env!("CARGO_PKG_VERSION")),
+                r#"service_version="X""#
+            ));
+        }};
+    }
 
     async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
         let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
@@ -3033,8 +3047,7 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3050,9 +3063,7 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3067,9 +3078,7 @@ mod tests {
             .await;
             make_supergraph_request(plugin.as_ref()).await;
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3083,9 +3092,7 @@ mod tests {
             ))
             .await;
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-
-            assert!(prometheus_metrics.is_empty());
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;
@@ -3100,8 +3107,7 @@ mod tests {
             f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
 
             make_supergraph_request(plugin.as_ref()).await;
-            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
-            assert_snapshot!(prometheus_metrics);
+            assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
         .await;

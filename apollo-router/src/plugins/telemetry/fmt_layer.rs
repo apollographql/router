@@ -126,7 +126,7 @@ where
                 extensions.insert(fields);
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("FmtLayer::on_new_span: Span not found, this is a bug");
         }
     }
 
@@ -140,10 +140,10 @@ where
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
                 }));
             } else {
-                eprintln!("cannot access to LogAttributes, this is a bug");
+                eprintln!("FmtLayer::on_record: cannot access to LogAttributes, this is a bug");
             }
         } else {
-            tracing::error!("Span not found, this is a bug");
+            eprintln!("FmtLayer::on_record: Span not found, this is a bug");
         }
     }
 
@@ -175,7 +175,7 @@ where
             if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
                 let mut writer = self.make_writer.make_writer();
                 if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
-                    eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
+                    eprintln!("FmtLayer::on_event: cannot flush the logging buffer, this is a bug: {err:?}");
                 }
             }
             buf.clear();
@@ -263,12 +263,13 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::ConnectSpec;
-    use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::StringTemplate;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::StringTemplate;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
@@ -816,12 +817,12 @@ connector:
                     .insert("x-log-request", HeaderValue::from_static("log"));
                 let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
                         0,
@@ -841,6 +842,7 @@ connector:
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
+                    env: Default::default(),
                     error_settings: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
@@ -1169,12 +1171,12 @@ subgraph:
                     .insert("x-log-request", HeaderValue::from_static("log"));
                 let transport_request = TransportRequest::Http(transport::http::HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
                         0,
@@ -1194,6 +1196,7 @@ subgraph:
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
+                    env: Default::default(),
                     error_settings: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {

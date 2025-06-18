@@ -127,13 +127,13 @@ impl Plugin for Record {
 
                     let stream = stream.into_data_stream().chain(after_complete);
 
-                    Ok(router::Response {
-                        context: res.context,
-                        response: http::Response::from_parts(
+                    router::Response::http_response_builder()
+                        .context(res.context)
+                        .response(http::Response::from_parts(
                             parts,
                             router::body::from_result_stream(stream),
-                        ),
-                    })
+                        ))
+                        .build()
                 }
             })
             .service(service)
@@ -250,43 +250,35 @@ impl Plugin for Record {
                     let subgraph_name = subgraph_name.clone();
                     async move {
                         let res: subgraph::ServiceResult = future.await;
+                        let res = res?;
 
                         let operation_name = req
                             .operation_name
                             .clone()
                             .unwrap_or_else(|| "UnnamedOperation".to_string());
 
-                        let res = match res {
-                            Ok(res) => {
-                                let subgraph = Subgraph {
-                                    subgraph_name,
-                                    response: ResponseDetails {
-                                        headers: externalize_header_map(
-                                            &res.response.headers().clone(),
-                                        )
-                                        .expect("failed to externalize header map"),
-                                        chunks: vec![res.response.body().clone()],
-                                    },
-                                    request: req,
-                                };
-
-                                res.context.extensions().with_lock(|lock| {
-                                    if let Some(recording) = lock.get_mut::<Recording>() {
-                                        if recording.subgraph_fetches.is_none() {
-                                            recording.subgraph_fetches = Some(Default::default());
-                                        }
-
-                                        if let Some(fetches) = &mut recording.subgraph_fetches {
-                                            fetches.insert(operation_name, subgraph);
-                                        }
-                                    }
-                                });
-                                Ok(res)
-                            }
-                            Err(err) => Err(err),
+                        let subgraph = Subgraph {
+                            subgraph_name,
+                            response: ResponseDetails {
+                                headers: externalize_header_map(&res.response.headers().clone())
+                                    .expect("failed to externalize header map"),
+                                chunks: vec![res.response.body().clone()],
+                            },
+                            request: req,
                         };
 
-                        res
+                        res.context.extensions().with_lock(|lock| {
+                            if let Some(recording) = lock.get_mut::<Recording>() {
+                                if recording.subgraph_fetches.is_none() {
+                                    recording.subgraph_fetches = Some(Default::default());
+                                }
+
+                                if let Some(fetches) = &mut recording.subgraph_fetches {
+                                    fetches.insert(operation_name, subgraph);
+                                }
+                            }
+                        });
+                        Ok(res)
                     }
                 },
             )

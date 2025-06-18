@@ -24,13 +24,16 @@ use std::sync::atomic;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
@@ -51,6 +54,8 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
+use crate::supergraph::GRAPHQL_STRING_TYPE_NAME;
+use crate::utils::MultiIndexMap;
 
 mod contains;
 mod directive_list;
@@ -449,8 +454,8 @@ impl Selection {
 
     /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
     /// - Note: The returned selection may have no subselection set or an empty one if the mapper
-    ///         returns so, which may make the returned selection invalid. It's caller's responsibility
-    ///         to appropriately handle invalid return values.
+    ///   returns so, which may make the returned selection invalid. It's caller's responsibility
+    ///   to appropriately handle invalid return values.
     pub(crate) fn map_selection_set(
         &self,
         mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
@@ -974,37 +979,6 @@ pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
 use self::selection_map::OwnedSelectionKey;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
-
-/// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
-/// - Preserves the insertion order of keys and values.
-struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
-
-impl<K, V> Deref for MultiIndexMap<K, V> {
-    type Target = IndexMap<K, Vec<V>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<K, V> MultiIndexMap<K, V>
-where
-    K: Eq + Hash,
-{
-    fn new() -> Self {
-        Self(IndexMap::default())
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        self.0.entry(key).or_default().push(value);
-    }
-
-    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iterable: I) {
-        for (key, value) in iterable {
-            self.insert(key, value);
-        }
-    }
-}
 
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
@@ -1726,8 +1700,9 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
+                let element_key = element.key().to_owned_key();
                 let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
+                    .entry(element_key.as_borrowed_key())
                     .or_insert(|| {
                         Selection::from_element(
                             element,
@@ -2903,11 +2878,43 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
             }
             flattened.push(selection);
         }
+        if flattened.is_empty() {
+            // In theory, for valid operations, we shouldn't have empty selection sets (field
+            // selections whose type is a leaf will have an undefined selection set, not an empty
+            // one). We do "abuse" this a bit however when create query "witness" during
+            // composition validation where, to make it easier for users to locate the issue, we
+            // want the created witness query to stop where the validation problem lies, even if
+            // we're not on a leaf type. To make this look nice and explicit, we handle that case
+            // by create a fake selection set that just contains an ellipsis, indicate there is
+            // supposed to be more but we elided it for clarity. And yes, the whole thing is a bit
+            // of a hack, albeit a convenient one.
+            flattened.push(ellipsis_field()?);
+        }
         Ok(Self {
             ty: val.type_position.type_name().clone(),
             selections: flattened,
         })
     }
+}
+
+/// Create a synthetic field named "...".
+fn ellipsis_field() -> Result<executable::Selection, FederationError> {
+    let field_name = Name::new_unchecked("...");
+    let field_def = ast::FieldDefinition {
+        description: None,
+        ty: ty!(String),
+        name: field_name.clone(),
+        arguments: vec![],
+        directives: Default::default(),
+    };
+    Ok(executable::Selection::Field(Node::new(executable::Field {
+        definition: Node::new(field_def),
+        alias: None,
+        name: field_name,
+        arguments: vec![],
+        directives: Default::default(),
+        selection_set: executable::SelectionSet::new(GRAPHQL_STRING_TYPE_NAME),
+    })))
 }
 
 impl TryFrom<&Selection> for executable::Selection {
@@ -3034,6 +3041,24 @@ impl Display for SelectionSet {
             Err(_) => return Err(std::fmt::Error),
         };
         selection_set.serialize().no_indent().fmt(f)
+    }
+}
+
+pub(crate) struct FieldSetDisplay<T: AsRef<SelectionSet>>(pub(crate) T);
+
+impl<T: AsRef<SelectionSet>> Display for FieldSetDisplay<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let selection_set: executable::SelectionSet = match self.0.as_ref().try_into() {
+            Ok(selection_set) => selection_set,
+            Err(_) => return Err(std::fmt::Error),
+        };
+        FieldSet {
+            sources: Default::default(),
+            selection_set,
+        }
+        .serialize()
+        .no_indent()
+        .fmt(f)
     }
 }
 
