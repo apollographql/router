@@ -9,6 +9,7 @@ use crate::configuration::mode::Mode;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CooperativeCancellation {
+    /// When true, cooperative cancellation is enabled.
     enabled: bool,
     /// When enabled, this sets whether the router will cancel query planning or
     /// merely emit a metric when it would have happened.
