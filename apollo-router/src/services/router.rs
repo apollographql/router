@@ -31,6 +31,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
+use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
