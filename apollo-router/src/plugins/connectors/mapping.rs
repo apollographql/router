@@ -10,7 +10,6 @@ use serde::Serialize;
 
 /// A mapping problem
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub(crate) struct Problem {
     pub(crate) message: String,
     pub(crate) path: String,

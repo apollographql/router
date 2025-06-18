@@ -248,10 +248,10 @@ fn request_params_to_requests(
                 .context(&original_request.context)
                 .request(
                     &connector.request_headers,
-                    &original_request.supergraph_request,
+                    original_request.supergraph_request.headers(),
                 )
                 .merge(),
-            &original_request,
+            original_request.supergraph_request.headers(),
             debug,
         )?;
 
