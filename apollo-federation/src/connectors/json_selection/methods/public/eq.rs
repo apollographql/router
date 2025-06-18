@@ -61,7 +61,7 @@ fn eq_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-     if method_args.and_then(|args| args.args.first()).is_none() {
+    if method_args.and_then(|args| args.args.first()).is_none() {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
             method_name.shape_location(source_id),
