@@ -183,10 +183,14 @@ mod tests {
             "b": null,
             "c": 0,
         }));
-        
+
         assert_eq!(result.0, Some(json!(false)));
         assert!(!result.1.is_empty());
-        assert!(result.1[0].message().contains("Method ->or can only accept boolean arguments."));
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->or can only accept boolean arguments.")
+        );
     }
     #[test]
     fn or_should_return_error_when_applied_to_non_boolean() {
@@ -195,9 +199,13 @@ mod tests {
             "b": null,
             "c": 0,
         }));
-        
+
         assert_eq!(result.0, None);
         assert!(!result.1.is_empty());
-        assert!(result.1[0].message().contains("Method ->or can only be applied to boolean values."));
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->or can only be applied to boolean values.")
+        );
     }
 }
