@@ -43,13 +43,13 @@ pub(crate) fn validate_from_context_directives(
         Box::new(RequireContextExists::new(context_map)),
         Box::new(RequireResolvableKey::new()),
         Box::new(DenyDefaultValues::new()),
-        Box::new(DenyOnDirectiveDefinition::new()),
     ];
 
     let Ok(from_context_directives) = schema.from_context_directive_applications() else {
         // if we get an error, we probably are pre fed 2.8
         return Ok(());
     };
+    
     for from_context_directive in from_context_directives {
         match from_context_directive {
             Ok(from_context) => {
@@ -192,7 +192,6 @@ enum SelectionType {
 }
 
 /// Validates a field value selection format and returns whether it's a field or inline fragment
-/// TODO: This code is broken, but is dependent on parse being somewhat more user friendly
 fn validate_selection_format(
     context: &str,
     selection_set: &SelectionSet,
@@ -285,6 +284,7 @@ fn validate_field_value(
 
         let all_types = match extended_type {
             ExtendedType::Union(un) => un.members.iter().map(|ty| ty.name.clone()).collect(),
+            ExtendedType::Interface(intf) => intf.implements_interfaces.iter().map(|ty| ty.name.clone()).collect(),
             _ => vec![location_name.clone()],
         };
 
@@ -778,30 +778,6 @@ impl DeniesDirectiveApplications for FromContextDirective<'_> {
                 self.target
             ),
         }
-    }
-}
-
-/// Validator that denies @fromContext on directive definition arguments
-struct DenyOnDirectiveDefinition {}
-
-impl DenyOnDirectiveDefinition {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl FromContextValidator for DenyOnDirectiveDefinition {
-    fn validate(
-        &self,
-        _target: &FieldArgumentDefinitionPosition,
-        _schema: &FederationSchema,
-        _meta: &SubgraphMetadata,
-        _context: &Option<String>,
-        _selection: &Option<String>,
-        _errors: &mut MultipleFederationErrors,
-    ) -> Result<(), FederationError> {
-        // TODO: These occurrences are just silently ignored for now. That may be fine.
-        Ok(())
     }
 }
 
@@ -2802,10 +2778,10 @@ mod tests {
         )
         .expect("validates fromContext directives");
 
-        // This should succeed with inline fragments
-        // TODO: Fix validation logic for inline fragments with multiple contexts
-        // Current implementation is too strict about type condition matching
-        // assert!(errors.errors.is_empty(), "Should not have validation errors for valid inline fragments");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for valid interface context"
+        );
     }
 
     #[test]
@@ -2907,10 +2883,10 @@ mod tests {
         )
         .expect("validates fromContext directives");
 
-        // This should succeed with interface context and type condition
-        // TODO: Fix validation logic for interface context with implementing type conditions
-        // Current implementation doesn't recognize that implementing types can match interface contexts
-        // assert!(errors.errors.is_empty(), "Should not have validation errors for valid interface context with type condition");
+        assert!(
+            errors.errors.is_empty(),
+            "Should not have validation errors for valid interface context"
+        );        
     }
 
     #[test]
