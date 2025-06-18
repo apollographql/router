@@ -9,6 +9,7 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use regex::Regex;
 
@@ -289,31 +290,50 @@ fn validate_field_value(
             continue;
         };
 
-        dbg!(&location_name, &selection);
-        let fields = FieldSet::parse(
-            Valid::assume_valid_ref(schema.schema()),
-            location_name.clone(),
-            selection,
-            "from_context.graphql",
-        )?;
+        let all_types = match extended_type {
+            ExtendedType::Union(un) => un.members.iter().map(|ty| ty.name.clone()).collect(),
+            _ => vec![location_name.clone()],
+        };
 
-        // Validate the selection format
-        selection_type = validate_selection_format(context, &fields.selection_set, target, errors);
+        for ty in all_types {
+            let result = FieldSet::parse(
+                Valid::assume_valid_ref(schema.schema()),
+                location_name.clone(),
+                selection,
+                "from_context.graphql",
+            );
 
-        // if there was an error, just return, we've already added it to the errorCollector
-        if selection_type == SelectionType::Error {
-            return Ok(());
-        }
+            if let Err(err) = result {
+                errors.push(
+                    SingleFederationError::ContextSelectionInvalid {
+                        message: format!(
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid for type {}. {}.",
+                            context, location_name, ty, err.to_string(),
+                        ),
+                    }
+                    .into(),
+                );
+                return Ok(());
+            }
+            let fields = result.unwrap();
+            // TODO: Is it necessary to perform these validations on every iteration or can we do it only once?
+            for rule in argument_rules.iter() {
+                rule.visit(&location_name, &fields, &applied_directive, errors);
+            }
+            if errors.errors.len() > 0 {
+                return Ok(());
+            }
+            selection_type =
+                validate_selection_format(context, &fields.selection_set, target, errors);
+            // if there was an error, just return, we've already added it to the errorCollector
+            if selection_type == SelectionType::Error {
+                return Ok(());
+            }
 
-        // TODO: Is it necessary to perform these validations on every iteration or can we do it only once?
-        for rule in argument_rules.iter() {
-            rule.visit(&location_name, &fields, &applied_directive, errors);
-        }
-
-        let selection_set = &fields.selection_set;
-        // Check for multiple selections (only when it's a field selection, not inline fragments)
-        if selection_type == SelectionType::Field && selection_set.selections.len() > 1 {
-            errors.push(
+            let selection_set = &fields.selection_set;
+            // Check for multiple selections (only when it's a field selection, not inline fragments)
+            if selection_type == SelectionType::Field && selection_set.selections.len() > 1 {
+                errors.push(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
                         "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
@@ -322,23 +342,23 @@ fn validate_field_value(
                 }
                 .into(),
             );
-        }
+            }
 
-        match &selection_type {
-            SelectionType::Field => {
-                // For field selections, validate the type
-                let type_position = TypeDefinitionPosition::from(location);
+            match &selection_type {
+                SelectionType::Field => {
+                    // For field selections, validate the type
+                    let type_position = TypeDefinitionPosition::from(location.clone());
 
-                let resolved_type = validate_field_value_type(
-                    &type_position,
-                    &selection_set,
-                    schema,
-                    target,
-                    errors,
-                )?;
+                    let resolved_type = validate_field_value_type(
+                        &type_position,
+                        &selection_set,
+                        schema,
+                        target,
+                        errors,
+                    )?;
 
-                let Some(resolved_type) = resolved_type else {
-                    errors.push(
+                    let Some(resolved_type) = resolved_type else {
+                        errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
@@ -347,10 +367,10 @@ fn validate_field_value(
                         }
                         .into(),
                     );
-                    return Ok(());
-                };
-                if !resolved_type.is_assignable_to(&expected_type) {
-                    errors.push(
+                        return Ok(());
+                    };
+                    if !resolved_type.is_assignable_to(&expected_type) {
+                        errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
@@ -359,51 +379,54 @@ fn validate_field_value(
                         }
                         .into(),
                     );
-                    return Ok(());
+                        return Ok(());
+                    }
                 }
-            }
-            SelectionType::InlineFragment { type_conditions } => {
-                // For inline fragment selections, validate each fragment
-                for selection in selection_set.selections.iter() {
-                    if let Selection::InlineFragment(frag) = selection {
-                        if let Some(type_condition) = &frag.type_condition {
-                            used_type_conditions.insert(type_condition.as_str().to_string());
+                SelectionType::InlineFragment { type_conditions } => {
+                    // For inline fragment selections, validate each fragment
+                    for selection in selection_set.selections.iter() {
+                        if let Selection::InlineFragment(frag) = selection {
+                            if let Some(type_condition) = &frag.type_condition {
+                                used_type_conditions.insert(type_condition.as_str().to_string());
 
-                            let Some(extended_type) =
-                                schema.schema().types.get(type_condition.as_str())
-                            else {
-                                errors.push(
+                                let Some(extended_type) =
+                                    schema.schema().types.get(type_condition.as_str())
+                                else {
+                                    errors.push(
                                     SingleFederationError::ContextSelectionInvalid { message: format!(
                                         "Inline fragment type condition invalid. Type '{}' does not exist in schema.", type_condition.as_str()
                                     ) }
                                     .into(),
                                 );
-                                continue;
-                            };
-                            let frag_type_position = TypeDefinitionPosition::from(extended_type);
-                            if CompositeTypeDefinitionPosition::try_from(frag_type_position.clone())
+                                    continue;
+                                };
+                                let frag_type_position =
+                                    TypeDefinitionPosition::from(extended_type);
+                                if CompositeTypeDefinitionPosition::try_from(
+                                    frag_type_position.clone(),
+                                )
                                 .is_err()
-                            {
-                                errors.push(
+                                {
+                                    errors.push(
                                     SingleFederationError::ContextSelectionInvalid { message: format!(
                                         "Inline fragment type condition invalid. Type '{}' is not a composite type definition.", type_condition.as_str()
                                     ) }
                                     .into(),
                                 );
-                                continue;
-                            }
+                                    continue;
+                                }
 
-                            if let Ok(Some(resolved_type)) = validate_field_value_type(
-                                &frag_type_position,
-                                &frag.selection_set,
-                                schema,
-                                target,
-                                errors,
-                            ) {
-                                // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
-                                // This matches the TypeScript behavior
-                                if !expected_type.is_assignable_to(&resolved_type) {
-                                    errors.push(
+                                if let Ok(Some(resolved_type)) = validate_field_value_type(
+                                    &frag_type_position,
+                                    &frag.selection_set,
+                                    schema,
+                                    target,
+                                    errors,
+                                ) {
+                                    // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
+                                    // This matches the TypeScript behavior
+                                    if !expected_type.is_assignable_to(&resolved_type) {
+                                        errors.push(
                                         SingleFederationError::ContextSelectionInvalid {
                                             message: format!(
                                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
@@ -412,10 +435,10 @@ fn validate_field_value(
                                         }
                                         .into(),
                                     );
-                                    return Ok(());
-                                }
-                            } else {
-                                errors.push(
+                                        return Ok(());
+                                    }
+                                } else {
+                                    errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
                                             "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
@@ -424,34 +447,34 @@ fn validate_field_value(
                                     }
                                     .into(),
                                 );
-                                return Ok(());
+                                    return Ok(());
+                                }
                             }
                         }
                     }
-                }
-                let context_location_names: std::collections::HashSet<String> =
-                    set_context_locations
-                        .iter()
-                        .map(|name| name.as_str().to_string())
-                        .collect();
+                    let context_location_names: std::collections::HashSet<String> =
+                        set_context_locations
+                            .iter()
+                            .map(|name| name.as_str().to_string())
+                            .collect();
 
-                let mut has_matching_condition = false;
-                for type_condition in type_conditions {
-                    if context_location_names.contains(type_condition) {
-                        has_matching_condition = true;
-                        break;
+                    let mut has_matching_condition = false;
+                    for type_condition in type_conditions {
+                        if context_location_names.contains(type_condition) {
+                            has_matching_condition = true;
+                            break;
+                        }
                     }
-                }
 
-                if !has_matching_condition && !type_conditions.is_empty() {
-                    // No type condition matches any context location
-                    let context_locations_str = set_context_locations
-                        .iter()
-                        .map(|name| name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    if !has_matching_condition && !type_conditions.is_empty() {
+                        // No type condition matches any context location
+                        let context_locations_str = set_context_locations
+                            .iter()
+                            .map(|name| name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
 
-                    errors.push(
+                        errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
                                 "Context \"{}\" is used in \"{}\" but the selection is invalid: no type condition matches the location \"{}\"",
@@ -460,9 +483,10 @@ fn validate_field_value(
                         }
                         .into(),
                     );
+                    }
                 }
+                SelectionType::Error => return Ok(()),
             }
-            SelectionType::Error => return Ok(()),
         }
     }
 
@@ -756,7 +780,7 @@ impl DeniesDirectiveApplications for FromContextDirective<'_> {
         let (context, _) = parse_context(&self.arguments.field);
         SingleFederationError::ContextSelectionInvalid {
             message: format!(
-                "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
+                "Context \"{}\" is used in \"{}\" but the selection is invalid: directives are not allowed in the selection",
                 context.unwrap_or("unknown".to_string()),
                 self.target.to_string()
             ),
@@ -796,14 +820,13 @@ fn validate_field_value_type_inner(
     errors: &mut MultipleFederationErrors,
 ) -> Option<Type> {
     let mut types_array = Vec::new();
-    
+
     if selection_set.selections.is_empty() {
         types_array.push(Type::Named(selection_set.ty.clone()));
     }
 
     for selection in selection_set.selections.iter() {
         if let Selection::Field(field) = selection {
-            dbg!(&field);
             if let Some(nested_type) = validate_field_value_type_inner(
                 &field.selection_set,
                 schema,
@@ -1754,8 +1777,15 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let set_context_locations = vec![Name::new_unchecked("Parent")];
@@ -1800,11 +1830,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -1856,11 +1892,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -1912,11 +1954,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -1963,11 +2011,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-
         let set_context_locations = vec![Name::new_unchecked("Foo"), Name::new_unchecked("Bar")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2072,11 +2126,17 @@ mod tests {
         let subgraph = build_and_expand(schema_str);
         let mut errors = MultipleFederationErrors::new();
 
-
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2132,8 +2192,15 @@ mod tests {
 
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2144,7 +2211,6 @@ mod tests {
             subgraph.schema(),
             &mut errors,
         );
-
         assert!(result.is_ok(), "Function should complete");
         // Should have errors for directives in selection
         assert!(
@@ -2187,8 +2253,15 @@ mod tests {
 
         let set_context_locations = vec![Name::new_unchecked("Parent")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2247,8 +2320,15 @@ mod tests {
 
         let set_context_locations = vec![Name::new_unchecked("Bar")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2268,19 +2348,10 @@ mod tests {
             "Should have validation errors for type condition mismatch"
         );
 
-        // Note that the JS code matched against this error, but because fo the way that from_selection_set works we are generating other
-        // errors. I think that's ok.
-        // assert!(
-        //     errors.errors.iter().any(|e| matches!(
-        //         e,
-        //         SingleFederationError::ContextSelectionInvalid { message } if message.contains("no type condition matches the location")
-        //     )),
-        //     "Should have specific type condition mismatch error"
-        // );
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message.contains("but the selection is invalid for type")
+                SingleFederationError::ContextSelectionInvalid { message } if message.contains("no type condition matches the location")
             )),
             "Should have specific type condition mismatch error"
         );
@@ -2402,8 +2473,15 @@ mod tests {
 
         let set_context_locations = vec![Name::new_unchecked("T")];
 
-        let applied_directives = subgraph.schema().from_context_directive_applications().expect("valid from context directive");
-        let applied_directive = applied_directives.first().expect("at least one from context directive").as_ref().expect("valid from context directive");
+        let applied_directives = subgraph
+            .schema()
+            .from_context_directive_applications()
+            .expect("valid from context directive");
+        let applied_directive = applied_directives
+            .first()
+            .expect("at least one from context directive")
+            .as_ref()
+            .expect("valid from context directive");
         let (context, selection) = parse_context(applied_directive.arguments.field);
 
         let result = validate_field_value(
@@ -2883,7 +2961,6 @@ mod tests {
             &mut errors,
         )
         .expect("validates fromContext directives");
-        dbg!(&errors);
         // This should succeed - nullability mismatch is ok if contextual value is non-nullable
         assert!(
             errors.errors.is_empty(),
