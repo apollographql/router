@@ -1,0 +1,19 @@
+---
+source: apollo-router/tests/integration/response_cache.rs
+expression: response
+---
+{
+  "data": {
+    "allProducts": [
+      {
+        "name": "Test",
+        "createdBy": {
+          "name": "test",
+          "country": {
+            "a": "France"
+          }
+        }
+      }
+    ]
+  }
+}

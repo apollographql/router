@@ -9,7 +9,7 @@ use shape::Shape;
 
 mod strings;
 
-pub(super) use strings::GraphQLString;
+pub(super) use strings::subslice_location;
 
 use crate::connectors::validation::link::ConnectLink;
 

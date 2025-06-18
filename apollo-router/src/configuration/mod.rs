@@ -26,7 +26,6 @@ use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
-use schema::Mode;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -50,6 +49,7 @@ use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
+use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
@@ -63,10 +63,12 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
+pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
+pub(crate) mod mode;
 mod persisted_queries;
 pub(crate) mod schema;
 pub(crate) mod server;
@@ -573,7 +575,8 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, schema::Mode::Upgrade)?
+            .validate()
     }
 }
 
@@ -900,6 +903,35 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
+
+    /// Configures cooperative cancellation of query planning
+    ///
+    /// See [`CooperativeCancellation`] for more details.
+    pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+}
+
+#[buildstructor::buildstructor]
+impl QueryPlanning {
+    #[builder]
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        cache: Option<QueryPlanCache>,
+        warmed_up_queries: Option<usize>,
+        experimental_plans_limit: Option<u32>,
+        experimental_paths_limit: Option<u32>,
+        experimental_reuse_query_plans: Option<bool>,
+        experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+    ) -> Self {
+        Self {
+            cache: cache.unwrap_or_default(),
+            warmed_up_queries,
+            experimental_plans_limit,
+            experimental_paths_limit,
+            experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
+            experimental_cooperative_cancellation: experimental_cooperative_cancellation
+                .unwrap_or_default(),
+        }
+    }
 }
 
 /// Cache configuration

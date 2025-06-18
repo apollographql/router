@@ -10,15 +10,10 @@ mod link;
 mod schema;
 mod source;
 
-use std::fmt::Display;
 use std::ops::Range;
-use std::str::FromStr;
 
-use ::http::Uri;
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
@@ -26,9 +21,8 @@ use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
 use crate::connectors::ConnectSpec;
-use crate::connectors::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::connectors::spec::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::validation::connect::fields_seen_by_all_connects;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::link::ConnectLink;
 use crate::connectors::validation::source::SourceDirective;
@@ -83,11 +77,11 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
         .iter()
-        .map(|directive| directive.name)
+        .map(|directive| directive.name.clone())
         .collect_vec();
 
     for source in source_directives {
-        messages.extend(source.type_check())
+        messages.extend(source.type_check());
     }
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {
@@ -162,30 +156,6 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
-
-fn parse_url<Coordinate: Display + Copy>(
-    value: &Node<Value>,
-    coordinate: Coordinate,
-    schema: &SchemaInfo,
-) -> Result<(), Message> {
-    let str_value = GraphQLString::new(value, &schema.sources).map_err(|_| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    let url = Uri::from_str(str_value.as_str()).map_err(|inner| Message {
-        code: Code::InvalidUrl,
-        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
-}
 
 type DirectiveName = Name;
 
