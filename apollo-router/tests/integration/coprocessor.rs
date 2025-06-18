@@ -422,10 +422,6 @@ mod on_graphql_error_selector {
 
         let response = serde_json::from_str(&response.text().await?).unwrap();
 
-        router.read_logs();
-        router.print_logs();
-        eprintln!("response = {response}");
-
         // NB: should be ok to read and clone bc response should have finished
         Ok((response, coprocessor_hits.read().unwrap().clone()))
     }
