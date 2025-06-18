@@ -103,6 +103,7 @@ impl HttpClientServiceFactory {
             self.cache
                 .write()
                 .insert(name.to_string(), boxed_clone_sync_service.clone());
+
             boxed_clone_sync_service
         }
     }
