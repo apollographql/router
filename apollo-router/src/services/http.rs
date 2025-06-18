@@ -9,7 +9,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::buffer::Buffer;
-use tower_service::Service;
 
 use super::Plugins;
 use super::router::body::RouterBody;
@@ -25,11 +24,13 @@ use crate::layers::ServiceBuilderExt;
 
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
+pub(crate) type BoxCloneSyncService =
+    tower::util::BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 // You cannot store a CloneBoxFuture in a map because it is not Sync. You can store a buffer though.
 type MemoizedService = Buffer<HttpRequest, BoxFuture<'static, Result<HttpResponse, BoxError>>>;
-type ServiceCache = Arc<RwLock<HashMap<String, MemoizedService>>>;
+type ServiceCache = Arc<RwLock<HashMap<String, BoxCloneSyncService>>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -82,10 +83,10 @@ impl HttpClientServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
+    pub(crate) fn create(&self, name: &str) -> BoxCloneSyncService {
         // Check if we already have a memoized service for this name
         if let Some(service) = self.cache.read().get(name) {
-            service.clone().boxed()
+            service.clone()
         } else {
             // Create the service if not cached
             let service = self
@@ -97,38 +98,22 @@ impl HttpClientServiceFactory {
                 });
             let buffered_clone_service = ServiceBuilder::new().buffered().service(service);
 
+            let boxed_clone_sync_service = BoxCloneSyncService::new(buffered_clone_service);
+
             self.cache
                 .write()
-                .insert(name.to_string(), buffered_clone_service.clone());
-            buffered_clone_service.boxed()
+                .insert(name.to_string(), boxed_clone_sync_service.clone());
+            boxed_clone_sync_service
         }
     }
 
     #[cfg(test)]
     pub(crate) fn cache_len(&self) -> usize {
-        self.cache.len()
+        self.cache.read().len()
     }
 
     #[cfg(test)]
     pub(crate) fn has_cached_service(&self, name: &str) -> bool {
-        self.cache.contains_key(name)
-    }
-}
-
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
-}
-
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+        self.cache.read().contains_key(name)
     }
 }
