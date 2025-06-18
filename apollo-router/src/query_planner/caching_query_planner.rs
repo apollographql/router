@@ -1089,7 +1089,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::new(
             SlowQueryPlanner,
             schema.clone(),
             Default::default(),
@@ -1111,6 +1111,33 @@ mod tests {
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected an error, but got a response"),
+            Err(e) => {
+                assert!(matches!(e, CacheResolverError::RetrievalError(_)));
+                assert!(e.to_string().contains("timed out"));
+            }
+        }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
     #[test(tokio::test)]
