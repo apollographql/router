@@ -239,6 +239,10 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_non_http_post_mutations_pass_through() {
+        let expected_error = Error::builder()
+            .message("Mutations can only be sent over HTTP POST".to_string())
+            .extension_code("MUTATION_FORBIDDEN")
+            .build();
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
@@ -267,11 +271,6 @@ mod forbid_http_get_mutations_tests {
 
             let mut error_response = services.call(request).await.unwrap();
             let response = error_response.next_response().await.unwrap();
-
-            let expected_error = Error::builder()
-                .message("Mutations can only be sent over HTTP POST".to_string())
-                .extension_code("MUTATION_FORBIDDEN")
-                .build();
 
             assert_eq!(expected_status, error_response.response.status());
             assert_eq!(

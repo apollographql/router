@@ -75,6 +75,7 @@ mod forbid_http_get_mutations_tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::assert_error_eq_ignoring_id;
     use crate::graphql;
     use crate::http_ext::Request;
     use crate::plugin::PluginInit;
@@ -116,8 +117,7 @@ mod forbid_http_get_mutations_tests {
         let expected_error = Error::builder()
             .message("Mutations are forbidden".to_string())
             .extension_code("MUTATION_FORBIDDEN")
-            .build()
-            .with_null_id();
+            .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
@@ -130,12 +130,10 @@ mod forbid_http_get_mutations_tests {
         let request = create_request(Method::GET, OperationKind::Mutation);
 
         let mut response = service_stack.oneshot(request).await.unwrap();
-
-        assert_eq!(expected_status, response.response.status());
-
         let actual_error = &response.next_response().await.unwrap().errors[0];
 
-        assert_eq!(actual_error.clone().with_null_id(), expected_error);
+        assert_eq!(expected_status, response.response.status());
+        assert_error_eq_ignoring_id!(actual_error, expected_error);
     }
 
     #[tokio::test]

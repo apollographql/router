@@ -243,8 +243,8 @@ mod apq_tests {
     use super::*;
     use crate::Configuration;
     use crate::Context;
+    use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
-    use crate::graphql::Response;
     use crate::plugins::content_negotiation::ClientRequestAccepts;
     use crate::services::router::service::from_supergraph_mock_callback;
     use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
@@ -319,7 +319,7 @@ mod apq_tests {
             .unwrap()
             .unwrap();
 
-        assert_error_matches(&expected_apq_miss_error, apq_error);
+        assert_error_eq_ignoring_id!(expected_apq_miss_error, apq_error.errors[0]);
 
         let with_query = SupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
@@ -451,7 +451,7 @@ mod apq_tests {
             .unwrap()
             .unwrap();
 
-        assert_error_matches(&expected_apq_miss_error, apq_error);
+        assert_error_eq_ignoring_id!(expected_apq_miss_error, apq_error.errors[0]);
 
         // sha256 is wrong, apq insert won't happen
         let insert_failed_response = router_service
@@ -499,7 +499,7 @@ mod apq_tests {
             .unwrap()
             .unwrap();
 
-        assert_error_matches(&expected_apq_miss_error, second_apq_error);
+        assert_error_eq_ignoring_id!(expected_apq_miss_error, second_apq_error.errors[0]);
     }
 
     #[tokio::test]
@@ -552,7 +552,7 @@ mod apq_tests {
             .unwrap()
             .unwrap();
 
-        assert_error_matches(&expected_apq_miss_error, apq_error);
+        assert_error_eq_ignoring_id!(expected_apq_miss_error, apq_error.errors[0]);
 
         let with_query = SupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
@@ -579,7 +579,7 @@ mod apq_tests {
             .unwrap()
             .unwrap();
 
-        assert_error_matches(&expected_apq_miss_error, apq_error);
+        assert_error_eq_ignoring_id!(expected_apq_miss_error, apq_error.errors[0]);
 
         let without_apq = SupergraphRequest::fake_builder()
             .query("{__typename}".to_string())
@@ -606,13 +606,6 @@ mod apq_tests {
             .unwrap();
 
         assert!(without_apq_graphql_response.errors.is_empty());
-    }
-
-    fn assert_error_matches(expected_error: &Error, res: Response) {
-        assert_eq!(
-            res.errors[0].clone().with_null_id(),
-            expected_error.clone().with_null_id()
-        );
     }
 
     fn new_context() -> Context {

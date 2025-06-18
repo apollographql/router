@@ -466,12 +466,13 @@ mod tests {
     use super::manifest::ManifestOperation;
     use super::*;
     use crate::Context;
+    use crate::assert_errors_eq_ignoring_id;
     use crate::assert_snapshot_subscriber;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
-    use crate::graphql::Error;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -704,13 +705,9 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_operation_not_found(invalid_id).with_null_id()]
+        assert_errors_eq_ignoring_id!(
+            response.errors,
+            [graphql_err_operation_not_found(invalid_id)]
         );
     }
 
@@ -842,14 +839,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_operation_not_in_safelist().with_null_id()]
-        );
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_operation_not_in_safelist()]);
         let mut metric_attributes = vec![opentelemetry::KeyValue::new(
             "persisted_queries.safelist.rejected.unknown".to_string(),
             true,
@@ -1087,13 +1077,9 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_operation_not_found(invalid_id).with_null_id()]
+        assert_errors_eq_ignoring_id!(
+            response.errors,
+            [graphql_err_operation_not_found(invalid_id)]
         );
     }
 
@@ -1215,14 +1201,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_pq_id_required().with_null_id()]
-        );
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_pq_id_required()]);
 
         // Try again skipping enforcement.
         let context = Context::new();
@@ -1350,14 +1329,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_cannot_send_id_and_body().with_null_id()]
-        );
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_cannot_send_id_and_body()]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1390,13 +1362,6 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response
-                .errors
-                .iter()
-                .map(|e| e.clone().with_null_id())
-                .collect::<Vec<Error>>(),
-            vec![graphql_err_cannot_send_id_and_body().with_null_id()]
-        );
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_cannot_send_id_and_body()]);
     }
 }
