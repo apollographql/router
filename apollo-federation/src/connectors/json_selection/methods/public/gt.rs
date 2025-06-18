@@ -46,33 +46,31 @@ fn gt_method(
     let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
     let mut apply_to_errors = arg_errors;
     // We have to do this because Value doesn't implement PartialOrd
-    let matches = value_opt.is_some_and(|value| {
-            match (data, &value) {
-                // Number comparisons
-                (JSON::Number(left), JSON::Number(right)) => {
-                    left.as_f64().unwrap_or(0.0) > right.as_f64().unwrap_or(0.0)
-                }
-                // String comparisons
-                (JSON::String(left), JSON::String(right)) => left > right,
-                // Mixed types or uncomparable types (including arrays and objects) return false
-                _ => {
-                    apply_to_errors.push(ApplyToError::new(
-                        format!(
-                            "Method ->{} can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: {} > {}",
-                            method_name.as_ref(),
-                            data,
-                            value
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    ));
+    let matches = value_opt.and_then(|value| {
+        match (data, &value) {
+            // Number comparisons
+            (JSON::Number(left), JSON::Number(right)) => Some(JSON::Bool(
+                left.as_f64().unwrap_or(0.0) > right.as_f64().unwrap_or(0.0),
+            )),
+            // String comparisons
+            (JSON::String(left), JSON::String(right)) => Some(JSON::Bool(left > right)),
+            // Mixed types or uncomparable types (including arrays and objects) return false
+            _ => {
+                apply_to_errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{} can only compare numbers and strings. Found: {data} > {value}",
+                        method_name.as_ref(),
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ));
 
-                    false
-                }
+                None
             }
-        });
+        }
+    });
 
-    (Some(JSON::Bool(matches)), apply_to_errors)
+    (matches, apply_to_errors)
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
@@ -84,6 +82,17 @@ fn gt_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
@@ -102,15 +111,15 @@ fn gt_shape(
         (ShapeCase::Unknown, ShapeCase::Unknown)
         | (ShapeCase::Int(_), ShapeCase::Int(_))
         | (ShapeCase::Float, ShapeCase::Float)
+        | (ShapeCase::Int(_), ShapeCase::Float)
+        | (ShapeCase::Float, ShapeCase::Int(_))
         | (ShapeCase::String(_), ShapeCase::String(_)) => {
             Shape::bool(method_name.shape_location(source_id))
         }
         _ => Shape::error(
             format!(
-                "Method ->{} can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: {} > {}",
-                method_name.as_ref(),
-                input_shape,
-                arg_shape
+                "Method ->{} can only compare two numbers or two strings. Found {input_shape} > {arg_shape}",
+                method_name.as_ref()
             ),
             method_name.shape_location(source_id),
         ),
@@ -240,17 +249,12 @@ mod tests {
         )
         .apply_to(&json!({ "value": null }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: null > null")
+                .contains("Method ->gt can only compare numbers and strings. Found: null > null")
         );
     }
 
@@ -263,17 +267,12 @@ mod tests {
         )
         .apply_to(&json!({ "value": true }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: true > false")
+                .contains("Method ->gt can only compare numbers and strings. Found: true > false")
         );
     }
 
@@ -286,17 +285,12 @@ mod tests {
         )
         .apply_to(&json!({ "value": [1,2,3] }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: [1,2,3] > [1,2]")
+            result.1[0].message().contains(
+                "Method ->gt can only compare numbers and strings. Found: [1,2,3] > [1,2]"
+            )
         );
     }
 
@@ -309,18 +303,11 @@ mod tests {
         )
         .apply_to(&json!({ "value": {"a": 1, "b": 2} }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
-        assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: {\"a\":1,\"b\":2} > {\"a\":1}")
-        );
+        assert!(result.1[0].message().contains(
+            "Method ->gt can only compare numbers and strings. Found: {\"a\":1,\"b\":2} > {\"a\":1}"
+        ));
     }
 
     #[test]
@@ -332,17 +319,12 @@ mod tests {
         )
         .apply_to(&json!({ "value": 42 }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->gt can directly compare numbers and strings. Either a mix of these was provided or something else such as an array, object, null, or bool. Found: 42 > \"string\"")
+            result.1[0].message().contains(
+                "Method ->gt can only compare numbers and strings. Found: 42 > \"string\""
+            )
         );
     }
 }
