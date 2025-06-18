@@ -1089,7 +1089,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let planner = CachingQueryPlanner::new(
             SlowQueryPlanner,
             schema.clone(),
             Default::default(),
