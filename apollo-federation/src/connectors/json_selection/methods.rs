@@ -38,10 +38,10 @@ pub(super) enum ArrowMethod {
     JoinNotNull,
     Filter,
     Gte,
+    Eq,
 
     // Future methods:
     TypeOf,
-    Eq,
     MatchIf,
     Add,
     Sub,
@@ -153,10 +153,10 @@ impl std::ops::Deref for ArrowMethod {
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
+            Self::Eq => &public::EqMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
-            Self::Eq => &future::EqMethod,
             Self::MatchIf => &future::MatchIfMethod,
             Self::Add => &future::AddMethod,
             Self::Sub => &future::SubMethod,
@@ -237,6 +237,7 @@ impl ArrowMethod {
                 | Self::JoinNotNull
                 | Self::Filter
                 | Self::Gte
+                | Self::Eq
         )
     }
 }

@@ -23,6 +23,7 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -43,7 +44,6 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::count_operation_error_codes;
@@ -300,15 +300,19 @@ impl RouterService {
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
-                Ok(router::Response {
-                    response: http::Response::builder()
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(router::body::from_bytes(
-                            "router service is not available to process request",
-                        ))
-                        .expect("cannot fail"),
-                    context,
-                })
+                router::Response::error_builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(String::from(
+                                "router service is not available to process request",
+                            ))
+                            .extension_code(StatusCode::SERVICE_UNAVAILABLE.to_string())
+                            .build(),
+                    )
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build()
             }
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
@@ -331,7 +335,6 @@ impl RouterService {
                             &self.apollo_telemetry_config.errors,
                         );
                     }
-
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;
@@ -343,19 +346,18 @@ impl RouterService {
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
-                    let mut res = router::Response {
-                        response: Response::from_parts(
+                    router::Response::http_response_builder()
+                        .response(Response::from_parts(
                             parts,
                             router::body::from_bytes(body.clone()),
-                        ),
-                        context,
-                    };
-
-                    if display_router_response {
-                        res.stash_the_body_in_extensions(body);
-                    }
-
-                    Ok(res)
+                        ))
+                        .and_body_to_stash(if display_router_response {
+                            Some(body)
+                        } else {
+                            None
+                        })
+                        .context(context)
+                        .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if !response.errors.is_empty() {
                         count_operation_errors(
@@ -364,7 +366,6 @@ impl RouterService {
                             &self.apollo_telemetry_config.errors,
                         );
                     }
-
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
@@ -390,12 +391,13 @@ impl RouterService {
                         }
                     };
 
-                    let response = http::Response::from_parts(
-                        parts,
-                        router::body::from_result_stream(response_multipart),
-                    );
-
-                    Ok(RouterResponse { response, context })
+                    RouterResponse::http_response_builder()
+                        .response(http::Response::from_parts(
+                            parts,
+                            router::body::from_result_stream(response_multipart),
+                        ))
+                        .context(context)
+                        .build()
                 } else {
                     count_operation_error_codes(
                         &["INVALID_ACCEPT_HEADER"],
@@ -501,13 +503,13 @@ impl RouterService {
             }
             bytes.put_u8(b']');
 
-            Ok(RouterResponse {
-                response: http::Response::from_parts(
+            RouterResponse::http_response_builder()
+                .response(http::Response::from_parts(
                     parts,
                     router::body::from_bytes(bytes.freeze()),
-                ),
-                context,
-            })
+                ))
+                .context(context)
+                .build()
         } else {
             Ok(results.pop().expect("we should have at least one response"))
         }

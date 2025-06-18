@@ -282,6 +282,8 @@ impl Prepare {
                     "--set",
                     "router.configuration.telemetry.metrics.prometheus.enabled=true",
                     "--set",
+                    "router.configuration.telemetry.metrics.prometheus.listen=127.0.0.1:9090",
+                    "--set",
                     "managedFederation.apiKey=REDACTED",
                     "--set",
                     "managedFederation.graphRef=REDACTED",
@@ -293,7 +295,7 @@ impl Prepare {
         )?;
 
         replace_in_file!(
-            "./docs/source/routing/self-hosted/containerization/kubernetes.mdx",
+            "./docs/shared/k8s-manual-config.mdx",
             "^```yaml\n---\n# Source: router/templates/serviceaccount.yaml(.|\n)+?```",
             format!("```yaml\n{}\n```", helm_chart.trim())
         );
