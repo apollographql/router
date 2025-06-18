@@ -1,6 +1,7 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
+use shape::ShapeCase;
 use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
@@ -81,13 +82,56 @@ fn lte_method(
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn lte_shape(
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    Shape::bool(method_name.shape_location(source_id))
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
+        return Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let arg_shape = first_arg.compute_output_shape(
+        input_shape.clone(),
+        dollar_shape,
+        named_var_shapes,
+        source_id,
+    );
+
+    match (arg_shape.case(), input_shape.case()) {
+        (ShapeCase::Unknown, ShapeCase::Unknown)
+        | (ShapeCase::Int(_), ShapeCase::Int(_))
+        | (ShapeCase::Float, ShapeCase::Float)
+        | (ShapeCase::Int(_), ShapeCase::Float)
+        | (ShapeCase::Float, ShapeCase::Int(_))
+        | (ShapeCase::Bool(_), ShapeCase::Bool(_))
+        | (ShapeCase::Null, ShapeCase::Null)
+        | (ShapeCase::String(_), ShapeCase::String(_)) => {
+            Shape::bool(method_name.shape_location(source_id))
+        }
+        _ => Shape::error(
+            format!(
+                "Method ->{} can only compare two numbers, strings, booleans, or nulls. Found {input_shape} <= {arg_shape}",
+                method_name.as_ref()
+            ),
+            method_name.shape_location(source_id),
+        ),
+    }
 }
 
 #[cfg(test)]
