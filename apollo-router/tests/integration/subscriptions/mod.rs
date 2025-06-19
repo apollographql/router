@@ -28,7 +28,7 @@ pub mod ws_passthrough;
 
 #[derive(Clone)]
 struct SubscriptionServerConfig {
-    nb_events: usize,
+    payloads: Vec<serde_json::Value>,
     interval_ms: u64,
 }
 
@@ -76,8 +76,15 @@ pub async fn start_subscription_server_with_config(
     nb_events: usize,
     interval_ms: u64,
 ) -> (SocketAddr, wiremock::MockServer) {
+    start_subscription_server_with_payloads(generate_default_payloads(nb_events), interval_ms).await
+}
+
+pub async fn start_subscription_server_with_payloads(
+    payloads: Vec<serde_json::Value>,
+    interval_ms: u64,
+) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
-        nb_events,
+        payloads,
         interval_ms,
     };
 
@@ -174,29 +181,22 @@ pub async fn start_coprocessor_server() -> wiremock::MockServer {
 
 pub async fn verify_subscription_events(
     mut stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
-    expected_min_events: usize,
+    expected_events: Vec<serde_json::Value>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let mut subscription_events = Vec::new();
-    let mut received_chunks = Vec::new();
+    use pretty_assertions::assert_eq;
 
-    // Set a longer timeout for receiving all events - give plenty of time for all events to arrive
+    let mut subscription_events = Vec::new();
+
+    // Set a longer timeout for receiving all events
     let timeout = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
             let chunk_str = String::from_utf8_lossy(&chunk);
-            received_chunks.push(chunk_str.to_string());
 
             debug!("Received chunk: {}", chunk_str);
 
             // Parse multipart chunks that contain GraphQL data
             if chunk_str.contains("content-type: application/json") {
-                debug!("Found JSON chunk, analyzing...");
-                debug!("Chunk contains 'User': {}", chunk_str.contains("User"));
-                debug!(
-                    "Chunk contains 'userWasCreated': {}",
-                    chunk_str.contains("userWasCreated")
-                );
-
                 // Extract JSON from multipart response
                 if let Some(json_start) = chunk_str.find('{') {
                     if let Some(json_end) = chunk_str.rfind('}') {
@@ -211,53 +211,29 @@ pub async fn verify_subscription_events(
                             if let Some(data) = data {
                                 if let Some(user_created) = data.get("userWasCreated") {
                                     subscription_events.push(user_created.clone());
-
-                                    // Verify the structure of each event
-                                    if user_created.get("name").is_none() {
-                                        return Err(format!(
-                                            "Event missing 'name' field: {:?}",
-                                            user_created
-                                        ));
-                                    }
-                                    if user_created.get("reviews").is_none() {
-                                        return Err(format!(
-                                            "Event missing 'reviews' field: {:?}",
-                                            user_created
-                                        ));
-                                    }
-
-                                    info!(
-                                        "Received subscription event {}: {:?}",
-                                        subscription_events.len(),
-                                        user_created
-                                    );
+                                } else if data.is_object() && !data.as_object().unwrap().is_empty() {
+                                    // Data object exists but no userWasCreated - only push null for non-empty objects (error scenario)
+                                    subscription_events.push(serde_json::json!(null));
                                 }
+                                // Skip empty data objects or other irrelevant data
+                            } else {
+                                // Pure error event with no data field at all
+                                subscription_events.push(serde_json::json!(null));
                             }
 
-                            // Check for errors
-                            if let Some(errors) = parsed.get("errors") {
-                                warn!("Received error in subscription: {:?}", errors);
-                            }
+                            info!("Received subscription event {}", subscription_events.len());
                         }
                     }
                 }
             }
 
-            // Break when we receive the completion marker, indicating the subscription is finished
-            if chunk_str.contains("--graphql--") {
+            // Break when we receive the completion marker or expected number of events
+            if chunk_str.contains("--graphql--")
+                || subscription_events.len() >= expected_events.len()
+            {
                 debug!(
-                    "Breaking because found completion marker --graphql-- with {} events",
+                    "Breaking with {} events received",
                     subscription_events.len()
-                );
-                break;
-            }
-
-            // Only break early if we've received more events than expected (safety check)
-            if subscription_events.len() > expected_min_events + 5 {
-                debug!(
-                    "Breaking because received {} events, much more than expected {}",
-                    subscription_events.len(),
-                    expected_min_events
                 );
                 break;
             }
@@ -269,153 +245,18 @@ pub async fn verify_subscription_events(
         .await
         .map_err(|_| "Subscription test timed out".to_string())??;
 
-    // Verify we received multiple subscription events
-    if subscription_events.is_empty() {
-        return Err(format!(
-            "No subscription events were received. Chunks: {:?}",
-            received_chunks
-        ));
-    }
-
-    if subscription_events.len() < expected_min_events {
-        return Err(format!(
-            "Expected at least {} subscription events, but received {}. Events: {:?}",
-            expected_min_events,
-            subscription_events.len(),
-            subscription_events
-        ));
-    }
-
-    debug!("Final event count: {}", subscription_events.len());
-
-    // Verify content of subscription events
-    for (i, event) in subscription_events.iter().enumerate() {
-        let name = event.get("name").unwrap().as_str().unwrap();
-        if !name.starts_with("User ") {
-            return Err(format!(
-                "Event {} name should start with 'User ', got: {}",
-                i + 1,
-                name
-            ));
-        }
-
-        if let Some(reviews) = event.get("reviews").and_then(|r| r.as_array()) {
-            if reviews.is_empty() {
-                return Err(format!("Event {} reviews should not be empty", i + 1));
-            }
-            let review_body = reviews[0].get("body").unwrap().as_str().unwrap();
-            if !review_body.contains("Review") {
-                return Err(format!(
-                    "Event {} review should contain 'Review', got: {}",
-                    i + 1,
-                    review_body
-                ));
-            }
-        }
-    }
-
-    // Verify events have different content (proving streaming works)
-    if subscription_events.len() > 1 {
-        let first_name = subscription_events[0]
-            .get("name")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        let last_name = subscription_events[subscription_events.len() - 1]
-            .get("name")
-            .unwrap()
-            .as_str()
-            .unwrap();
-
-        if first_name == last_name {
-            return Err(
-                "First and last events should have different names, indicating proper streaming"
-                    .to_string(),
-            );
-        }
-    }
-
-    info!(
-        "✅ Successfully received {} subscription events",
-        subscription_events.len()
+    // Simple equality comparison using pretty_assertions
+    assert_eq!(
+        subscription_events, expected_events,
+        "Subscription events do not match expected events"
     );
-    info!("✅ All events contain required fields: name, reviews");
-    info!("✅ Events have different content, confirming streaming works");
-
-    Ok(subscription_events)
-}
-
-pub async fn verify_subscription_data(
-    events: Vec<serde_json::Value>,
-    expected_min_events: usize,
-) -> Result<(), String> {
-    // Verify we received enough subscription events
-    if events.is_empty() {
-        return Err("No subscription events were received".to_string());
-    }
-
-    if events.len() < expected_min_events {
-        return Err(format!(
-            "Expected at least {} subscription events, but received {}. Events: {:?}",
-            expected_min_events,
-            events.len(),
-            events
-        ));
-    }
-
-    debug!("Verifying {} subscription events", events.len());
-
-    // Verify content of subscription events
-    for (i, event) in events.iter().enumerate() {
-        let name = event.get("name").unwrap().as_str().unwrap();
-        if !name.starts_with("User ") {
-            return Err(format!(
-                "Event {} name should start with 'User ', got: {}",
-                i + 1,
-                name
-            ));
-        }
-
-        if let Some(reviews) = event.get("reviews").and_then(|r| r.as_array()) {
-            if reviews.is_empty() {
-                return Err(format!("Event {} reviews should not be empty", i + 1));
-            }
-            let review_body = reviews[0].get("body").unwrap().as_str().unwrap();
-            if !review_body.contains("Review") {
-                return Err(format!(
-                    "Event {} review should contain 'Review', got: {}",
-                    i + 1,
-                    review_body
-                ));
-            }
-        }
-    }
-
-    // Verify events have different content (proving streaming works)
-    if events.len() > 1 {
-        let first_name = events[0].get("name").unwrap().as_str().unwrap();
-        let last_name = events[events.len() - 1]
-            .get("name")
-            .unwrap()
-            .as_str()
-            .unwrap();
-
-        if first_name == last_name {
-            return Err(
-                "First and last events should have different names, indicating proper streaming"
-                    .to_string(),
-            );
-        }
-    }
 
     info!(
         "✅ Successfully verified {} subscription events",
-        events.len()
+        subscription_events.len()
     );
-    info!("✅ All events contain required fields: name, reviews");
-    info!("✅ Events have different content, confirming streaming works");
 
-    Ok(())
+    Ok(subscription_events)
 }
 
 async fn websocket_handler(
@@ -458,13 +299,13 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                         payload.get("query").and_then(|q| q.as_str())
                                     {
                                         if query.contains("userWasCreated") {
-                                            // Use configured values instead of parsing variables
-                                            let nb_events = config.nb_events;
                                             let interval_ms = config.interval_ms;
+                                            let payloads = &config.payloads;
 
                                             info!(
                                                 "Starting subscription with {} events, interval {}ms (configured)",
-                                                nb_events, interval_ms
+                                                payloads.len(),
+                                                interval_ms
                                             );
 
                                             // Give the router time to fully establish the subscription stream
@@ -474,21 +315,11 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                             .await;
 
                                             // Send multiple subscription events
-                                            for i in 1..=nb_events {
+                                            for (i, custom_payload) in payloads.iter().enumerate() {
                                                 let event_data = json!({
                                                     "id": id,
                                                     "type": "data",
-                                                    "payload": {
-                                                        "data": {
-                                                            "userWasCreated": {
-                                                                "name": format!("User {}", i),
-                                                                "username": format!("user{}", i),
-                                                                "reviews": [{
-                                                                    "body": format!("Review {} from user {}", i, i)
-                                                                }]
-                                                            }
-                                                        }
-                                                    }
+                                                    "payload": custom_payload
                                                 });
 
                                                 if socket
@@ -503,14 +334,19 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
 
                                                 debug!(
                                                     "Sent subscription event {}/{}",
-                                                    i, nb_events
+                                                    i + 1,
+                                                    payloads.len()
                                                 );
 
                                                 // Wait between events
-                                                tokio::time::sleep(
-                                                    tokio::time::Duration::from_millis(interval_ms),
-                                                )
-                                                .await;
+                                                if i < payloads.len() - 1 {
+                                                    tokio::time::sleep(
+                                                        tokio::time::Duration::from_millis(
+                                                            interval_ms,
+                                                        ),
+                                                    )
+                                                    .await;
+                                                }
                                             }
 
                                             // Send completion
@@ -530,7 +366,7 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
 
                                             info!(
                                                 "Completed subscription with {} events",
-                                                nb_events
+                                                payloads.len()
                                             );
                                         }
                                     }
@@ -621,9 +457,10 @@ async fn handle_callback(
         }
         "heartbeat" => {
             let ids = state.subscription_ids.lock().unwrap();
-            let all_valid = payload.ids.as_ref().map_or(true, |callback_ids| {
-                callback_ids.iter().all(|id| ids.contains(id))
-            });
+            let all_valid = payload
+                .ids
+                .as_ref()
+                .is_none_or(|callback_ids| callback_ids.iter().all(|id| ids.contains(id)));
 
             if all_valid {
                 StatusCode::NO_CONTENT
@@ -659,6 +496,19 @@ pub async fn start_callback_subgraph_server(
     interval_ms: u64,
     callback_url: String,
 ) -> wiremock::MockServer {
+    start_callback_subgraph_server_with_payloads(
+        generate_default_payloads(nb_events),
+        interval_ms,
+        callback_url,
+    )
+    .await
+}
+
+pub async fn start_callback_subgraph_server_with_payloads(
+    payloads: Vec<serde_json::Value>,
+    interval_ms: u64,
+    callback_url: String,
+) -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -688,10 +538,10 @@ pub async fn start_callback_subgraph_server(
                         );
                         info!("Subscription ID: {}", subscription_id);
 
-                        tokio::spawn(send_callback_events(
+                        tokio::spawn(send_callback_events_with_payloads(
                             callback_url.to_string(),
                             subscription_id.to_string(),
-                            nb_events,
+                            payloads.clone(),
                             interval_ms,
                         ));
 
@@ -726,23 +576,10 @@ pub async fn start_callback_subgraph_server(
     server
 }
 
-async fn send_callback_events(
-    callback_url: String,
-    subscription_id: String,
-    nb_events: usize,
-    interval_ms: u64,
-) {
-    let client = reqwest::Client::new();
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    for i in 1..=nb_events {
-        let payload = CallbackPayload {
-            kind: "subscription".to_string(),
-            action: "next".to_string(),
-            id: subscription_id.clone(),
-            verifier: "test-verifier".to_string(),
-            payload: Some(json!({
+pub fn generate_default_payloads(nb_events: usize) -> Vec<serde_json::Value> {
+    (1..=nb_events)
+        .map(|i| {
+            json!({
                 "data": {
                     "userWasCreated": {
                         "name": format!("User {}", i),
@@ -751,7 +588,28 @@ async fn send_callback_events(
                         }]
                     }
                 }
-            })),
+            })
+        })
+        .collect()
+}
+
+async fn send_callback_events_with_payloads(
+    callback_url: String,
+    subscription_id: String,
+    payloads: Vec<serde_json::Value>,
+    interval_ms: u64,
+) {
+    let client = reqwest::Client::new();
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    for (i, custom_payload) in payloads.iter().enumerate() {
+        let payload = CallbackPayload {
+            kind: "subscription".to_string(),
+            action: "next".to_string(),
+            id: subscription_id.clone(),
+            verifier: "test-verifier".to_string(),
+            payload: Some(custom_payload.clone()),
             errors: None,
             ids: None,
         };
@@ -761,14 +619,14 @@ async fn send_callback_events(
         match response {
             Ok(resp) => debug!(
                 "Sent callback event {}/{}, status: {}",
-                i,
-                nb_events,
+                i + 1,
+                payloads.len(),
                 resp.status()
             ),
-            Err(e) => warn!("Failed to send callback event {}: {}", i, e),
+            Err(e) => warn!("Failed to send callback event {}: {}", i + 1, e),
         }
 
-        if i < nb_events {
+        if i < payloads.len() - 1 {
             tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
         }
     }

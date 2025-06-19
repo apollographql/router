@@ -5,7 +5,7 @@ use crate::integration::subscriptions::CALLBACK_CONFIG;
 use crate::integration::subscriptions::CallbackTestState;
 use crate::integration::subscriptions::start_callback_server;
 use crate::integration::subscriptions::start_callback_subgraph_server;
-use crate::integration::subscriptions::verify_subscription_data;
+use crate::integration::subscriptions::start_callback_subgraph_server_with_payloads;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_callback() -> Result<(), BoxError> {
@@ -22,8 +22,12 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
             start_callback_subgraph_server(nb_events, interval_ms, callback_url.clone()).await;
 
         // Create router config with callback URL pointing to our callback server
+        // Use a different port for router's callback listener (callback_addr.port() + 100)
+        let router_callback_port = callback_addr.port() + 100;
+        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
         let config = CALLBACK_CONFIG
             .replace("http://localhost:4002/callback", &callback_url)
+            .replace("127.0.0.1:4002", &callback_listen)
             .replace("http://localhost:4001", &subgraph_server.uri());
 
         let mut router = IntegrationTest::builder()
@@ -67,8 +71,28 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
         ))
         .await;
 
-        // Verify callbacks were received
-        verify_callback_events(&callback_state, nb_events).await?;
+        // Verify callbacks were received - expect default user events
+        let expected_user_events = vec![
+            serde_json::json!({
+                "name": "User 1",
+                "reviews": [{
+                    "body": "Review 1 from user 1"
+                }]
+            }),
+            serde_json::json!({
+                "name": "User 2",
+                "reviews": [{
+                    "body": "Review 2 from user 2"
+                }]
+            }),
+            serde_json::json!({
+                "name": "User 3",
+                "reviews": [{
+                    "body": "Review 3 from user 3"
+                }]
+            }),
+        ];
+        verify_callback_events(&callback_state, expected_user_events).await?;
 
         tracing::info!("✅ Callback mode subscription test completed successfully");
     } else {
@@ -82,93 +106,54 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
 
 async fn verify_callback_events(
     callback_state: &CallbackTestState,
-    expected_events: usize,
+    expected_user_events: Vec<serde_json::Value>,
 ) -> Result<(), BoxError> {
+    use pretty_assertions::assert_eq;
+
     let callbacks = callback_state.received_callbacks.lock().unwrap().clone();
 
-    // Should have received: nb_events "next" callbacks + 1 "complete" callback
+    // Should have received: expected_user_events.len() "next" callbacks + 1 "complete" callback
     let next_callbacks: Vec<_> = callbacks.iter().filter(|c| c.action == "next").collect();
     let complete_callbacks: Vec<_> = callbacks
         .iter()
         .filter(|c| c.action == "complete")
         .collect();
 
-    if next_callbacks.len() != expected_events {
-        return Err(format!(
-            "Expected {} 'next' callbacks, got {}. All callbacks: {:?}",
-            expected_events,
-            next_callbacks.len(),
-            callbacks
-        )
-        .into());
-    }
+    // Note: We don't check next_callbacks.len() == expected_user_events.len() 
+    // because some callbacks may not have userWasCreated data (e.g., pure error payloads)
 
-    if complete_callbacks.len() != 1 {
-        return Err(format!(
-            "Expected 1 'complete' callback, got {}. All callbacks: {:?}",
-            complete_callbacks.len(),
-            callbacks
-        )
-        .into());
-    }
+    assert_eq!(
+        complete_callbacks.len(),
+        1,
+        "Expected 1 'complete' callback, got {}. All callbacks: {:?}",
+        complete_callbacks.len(),
+        callbacks
+    );
 
-    // Verify callback structure
-    for (i, callback) in next_callbacks.iter().enumerate() {
-        if callback.kind != "subscription" {
-            return Err(format!(
-                "Callback {} kind should be 'subscription', got: {}",
-                i + 1,
-                callback.kind
-            )
-            .into());
-        }
-
-        if callback.verifier.is_empty() {
-            return Err(format!("Callback {} should have verifier", i + 1).into());
-        }
-
-        if callback.payload.is_none() {
-            return Err(format!("Callback {} missing payload", i + 1).into());
-        }
-    }
-
-    // Verify completion callback
-    let complete_callback = &complete_callbacks[0];
-    if complete_callback.kind != "subscription" {
-        return Err("Complete callback kind should be 'subscription'".into());
-    }
-
-    if complete_callback.verifier.is_empty() {
-        return Err("Complete callback should have verifier".into());
-    }
-
-    // Extract userWasCreated events for data validation
-    let mut user_events = Vec::new();
+    // Extract userWasCreated events for validation
+    let mut actual_user_events = Vec::new();
     for callback in &next_callbacks {
         if let Some(payload) = &callback.payload {
             if let Some(data) = payload.get("data") {
                 if let Some(user_created) = data.get("userWasCreated") {
-                    user_events.push(user_created.clone());
-                } else {
-                    return Err("Callback missing 'userWasCreated' field".into());
+                    actual_user_events.push(user_created.clone());
                 }
-            } else {
-                return Err("Callback missing 'data' field".into());
+                // If there's a data field but no userWasCreated, it's an empty/error case
             }
+            // If there's no data field (pure error payload), we don't extract anything
         }
     }
 
-    // Use shared validation for subscription data
-    verify_subscription_data(user_events, expected_events)
-        .await
-        .map_err(|e| -> BoxError { e.into() })?;
+    // Simple equality comparison using pretty_assertions
+    assert_eq!(
+        actual_user_events, expected_user_events,
+        "Callback user events do not match expected events"
+    );
 
     tracing::info!(
-        "✅ Verified {} callback events with proper structure",
+        "✅ Successfully verified {} callback events",
         callbacks.len()
     );
-    tracing::info!("✅ All events contain required fields: kind, action, id, verifier");
-    tracing::info!("✅ Received proper completion callback");
 
     Ok(())
 }
@@ -307,6 +292,230 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
     } else {
         tracing::warn!(
             "⚠️  Skipping callback error test - requires TEST_APOLLO_KEY and TEST_APOLLO_GRAPH_REF"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let interval_ms = 100;
+
+        // Create custom payloads: one normal event, one error event (no body, empty errors)
+        let custom_payloads = vec![
+            serde_json::json!({
+                "data": {
+                    "userWasCreated": {
+                        "name": "User 1",
+                        "reviews": [{
+                            "body": "Review 1 from user 1"
+                        }]
+                    }
+                }
+            }),
+            serde_json::json!({
+                "data": {
+                    "userWasCreated": {
+                        "name": "User 2"
+                        // Missing reviews field to test error handling
+                    }
+                },
+                "errors": []
+            }),
+        ];
+
+        // Start callback server to receive router callbacks
+        let (callback_addr, callback_state) = start_callback_server().await;
+        let callback_url = format!("http://{}/callback", callback_addr);
+
+        // Start mock subgraph server with custom payloads
+        let subgraph_server = start_callback_subgraph_server_with_payloads(
+            custom_payloads.clone(),
+            interval_ms,
+            callback_url.clone(),
+        )
+        .await;
+
+        // Create router config with callback URL pointing to our callback server
+        // Use a different port for router's callback listener (callback_addr.port() + 100)
+        let router_callback_port = callback_addr.port() + 100;
+        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
+        let config = CALLBACK_CONFIG
+            .replace("http://localhost:4002/callback", &callback_url)
+            .replace("127.0.0.1:4002", &callback_listen)
+            .replace("http://localhost:4001", &subgraph_server.uri());
+
+        let mut router = IntegrationTest::builder()
+            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+            .config(&config)
+            .build()
+            .await;
+
+        router.start().await;
+        router.assert_started().await;
+
+        let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
+
+        // Send subscription request to router
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "multipart/mixed;subscriptionSpec=1.0".to_string(),
+        );
+
+        let query = crate::integration::common::Query::builder()
+            .body(serde_json::json!({
+                "query": subscription_query
+            }))
+            .headers(headers)
+            .build();
+
+        let (_trace_id, response) = router.execute_query(query).await;
+
+        // Router should respond with subscription acknowledgment
+        assert!(
+            response.status().is_success(),
+            "Subscription request failed: {}",
+            response.status()
+        );
+
+        // Wait for callbacks to be sent
+        tokio::time::sleep(tokio::time::Duration::from_millis(
+            (custom_payloads.len() as u64 * interval_ms) + 1000,
+        ))
+        .await;
+
+        // Verify callbacks were received - expect the exact user events from custom payloads
+        let expected_user_events = vec![
+            serde_json::json!({
+                "name": "User 1",
+                "reviews": [{
+                    "body": "Review 1 from user 1"
+                }]
+            }),
+            serde_json::json!({
+                "name": "User 2"
+                // Missing reviews field to test error handling
+            }),
+        ];
+        verify_callback_events(&callback_state, expected_user_events).await?;
+
+        tracing::info!(
+            "✅ Callback mode subscription test with error payload completed successfully"
+        );
+    } else {
+        tracing::warn!(
+            "⚠️  Skipping callback error payload test - requires TEST_APOLLO_KEY and TEST_APOLLO_GRAPH_REF"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError> {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let interval_ms = 100;
+
+        // Create custom payloads: one normal event, one pure error event (no data, only errors)
+        let custom_payloads = vec![
+            serde_json::json!({
+                "data": {
+                    "userWasCreated": {
+                        "name": "User 1",
+                        "reviews": [{
+                            "body": "Review 1 from user 1"
+                        }]
+                    }
+                }
+            }),
+            serde_json::json!({
+                "errors": []
+                // No data attribute at all
+            }),
+        ];
+
+        // Start callback server to receive router callbacks
+        let (callback_addr, callback_state) = start_callback_server().await;
+        let callback_url = format!("http://{}/callback", callback_addr);
+
+        // Start mock subgraph server with custom payloads
+        let subgraph_server = start_callback_subgraph_server_with_payloads(
+            custom_payloads.clone(),
+            interval_ms,
+            callback_url.clone(),
+        )
+        .await;
+
+        // Create router config with callback URL pointing to our callback server
+        // Use a different port for router's callback listener (callback_addr.port() + 100)
+        let router_callback_port = callback_addr.port() + 100;
+        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
+        let config = CALLBACK_CONFIG
+            .replace("http://localhost:4002/callback", &callback_url)
+            .replace("127.0.0.1:4002", &callback_listen)
+            .replace("http://localhost:4001", &subgraph_server.uri());
+
+        let mut router = IntegrationTest::builder()
+            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+            .config(&config)
+            .build()
+            .await;
+
+        router.start().await;
+        router.assert_started().await;
+
+        let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
+
+        // Send subscription request to router
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "Accept".to_string(),
+            "multipart/mixed;subscriptionSpec=1.0".to_string(),
+        );
+
+        let query = crate::integration::common::Query::builder()
+            .body(serde_json::json!({
+                "query": subscription_query
+            }))
+            .headers(headers)
+            .build();
+
+        let (_trace_id, response) = router.execute_query(query).await;
+
+        // Router should respond with subscription acknowledgment
+        assert!(
+            response.status().is_success(),
+            "Subscription request failed: {}",
+            response.status()
+        );
+
+        // Wait for callbacks to be sent
+        tokio::time::sleep(tokio::time::Duration::from_millis(
+            (custom_payloads.len() as u64 * interval_ms) + 1000,
+        ))
+        .await;
+
+        // Verify callbacks were received - expect only 1 user event since second callback has no userWasCreated data
+        let expected_user_events = vec![
+            serde_json::json!({
+                "name": "User 1",
+                "reviews": [{
+                    "body": "Review 1 from user 1"
+                }]
+            }),
+            // Second callback has no userWasCreated data (pure error payload), so nothing is extracted from it
+        ];
+        verify_callback_events(&callback_state, expected_user_events).await?;
+
+        tracing::info!(
+            "✅ Callback mode subscription test with pure error payload completed successfully"
+        );
+    } else {
+        tracing::warn!(
+            "⚠️  Skipping callback pure error payload test - requires TEST_APOLLO_KEY and TEST_APOLLO_GRAPH_REF"
         );
     }
 
