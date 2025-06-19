@@ -283,6 +283,7 @@ axum = { version = "0.6.20", features = [
     "original-uri",
     "ws",
 ] }
+ctor = "0.2.8"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"

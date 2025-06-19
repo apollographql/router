@@ -63,6 +63,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::Respond;
@@ -1293,4 +1294,24 @@ pub fn graph_os_enabled() -> bool {
         ),
         (Ok(_), Ok(_))
     )
+}
+
+/// Automatic tracing initialization using ctor for integration tests
+#[ctor::ctor]
+fn init_integration_test_tracing() {
+    // Initialize tracing for integration tests
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info,apollo_router=debug"))
+        .unwrap();
+
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::Layer::default()
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .compact()
+                .with_filter(filter),
+        )
+        .try_init();
 }

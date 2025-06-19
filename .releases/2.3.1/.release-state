@@ -1,0 +1,3 @@
+RELEASE_PR_URL="https://github.com/apollographql/router/pull/9999"
+CURRENT_STEP="2"
+STATUS="release_pr_created"

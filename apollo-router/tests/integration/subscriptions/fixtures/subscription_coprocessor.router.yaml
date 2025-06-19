@@ -1,0 +1,53 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: true
+homepage:
+  enabled: false
+sandbox:
+  enabled: true
+override_subgraph_url:
+  products: http://localhost:4005
+  accounts: http://localhost:4001
+include_subgraph_errors:
+  all: true
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+      subgraphs:
+        accounts:
+          path: /ws
+          protocol: graphql_transport_ws
+coprocessor:
+  url: http://localhost:8080
+  timeout: 30s
+  router:
+    request:
+      headers: true
+      body: true
+    response:
+      headers: true
+      body: true
+  supergraph:
+    request:
+      headers: true
+      body: true
+    response:
+      headers: true
+      body: true
+  subgraph:
+    all:
+      request:
+        headers: true
+        body: true
+      response:
+        headers: true
+        body: true
+headers:
+  all: # Header rules for all subgraphs
+    request:
+      - propagate:
+          named: custom_id
