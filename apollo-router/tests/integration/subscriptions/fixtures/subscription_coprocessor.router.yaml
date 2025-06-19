@@ -38,6 +38,13 @@ coprocessor:
     response:
       headers: true
       body: true
+  execution:
+    request:
+      headers: true
+      body: true
+    response:
+      headers: true
+      body: true
   subgraph:
     all:
       request:

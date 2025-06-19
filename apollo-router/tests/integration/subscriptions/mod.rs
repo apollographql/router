@@ -203,39 +203,37 @@ pub async fn verify_subscription_events(
                         let json_str = &chunk_str[json_start..=json_end];
 
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                            // Check for subscription data (could be in "data" or "payload.data")
-                            let data = parsed
-                                .get("data")
-                                .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
-
-                            if let Some(data) = data {
-                                if let Some(user_created) = data.get("userWasCreated") {
-                                    subscription_events.push(user_created.clone());
-                                } else if data.is_object() && !data.as_object().unwrap().is_empty() {
-                                    // Data object exists but no userWasCreated - only push null for non-empty objects (error scenario)
-                                    subscription_events.push(serde_json::json!(null));
-                                }
-                                // Skip empty data objects or other irrelevant data
-                            } else {
-                                // Pure error event with no data field at all
-                                subscription_events.push(serde_json::json!(null));
-                            }
-
-                            info!("Received subscription event {}", subscription_events.len());
+                            // Store the raw parsed response without any transformation
+                            subscription_events.push(parsed.clone());
+                            info!(
+                                "Received subscription event {}: {}",
+                                subscription_events.len(),
+                                parsed
+                            );
                         }
                     }
                 }
             }
 
-            // Break when we receive the completion marker or expected number of events
-            if chunk_str.contains("--graphql--")
-                || subscription_events.len() >= expected_events.len()
-            {
+            // Break when we receive the completion marker
+            if chunk_str.contains("--graphql--") {
                 debug!(
-                    "Breaking with {} events received",
+                    "Breaking on completion marker with {} events received",
                     subscription_events.len()
                 );
                 break;
+            }
+
+            // If we've received more events than expected, that's an error
+            if subscription_events.len() > expected_events.len() {
+                let extra_event = subscription_events.last().unwrap();
+                return Err(format!(
+                    "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
+                    subscription_events.len(),
+                    expected_events.len(),
+                    serde_json::to_string_pretty(extra_event)
+                        .unwrap_or_else(|_| format!("{:?}", extra_event))
+                ));
             }
         }
         Ok::<(), String>(())
@@ -244,6 +242,57 @@ pub async fn verify_subscription_events(
     timeout
         .await
         .map_err(|_| "Subscription test timed out".to_string())??;
+
+    // If we haven't received all expected events, wait a bit more and check for late arrivals
+    if subscription_events.len() < expected_events.len() {
+        return Err(format!(
+            "Received {} events but expected {}. Stream may have terminated early.",
+            subscription_events.len(),
+            expected_events.len()
+        ));
+    }
+
+    // Give the stream a moment to ensure it's properly terminated and no more events arrive
+    let termination_timeout = tokio::time::timeout(
+        tokio::time::Duration::from_millis(1000),
+        async {
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+                let chunk_str = String::from_utf8_lossy(&chunk);
+
+                // Only check for actual data events, ignore heartbeats/keep-alives
+                if chunk_str.contains("content-type: application/json") {
+                    if let Some(json_start) = chunk_str.find('{') {
+                        if let Some(json_end) = chunk_str.rfind('}') {
+                            let json_str = &chunk_str[json_start..=json_end];
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
+                            {
+                                let data = parsed
+                                    .get("data")
+                                    .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
+                                if data.is_some() {
+                                    return Err(format!(
+                                        "Unexpected additional event received after {} expected events: {}",
+                                        expected_events.len(),
+                                        chunk_str
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if chunk_str.contains("--graphql--") {
+                    debug!("Stream properly terminated with completion marker");
+                    break;
+                }
+            }
+            Ok::<(), String>(())
+        },
+    );
+
+    // It's OK if this times out - it means no additional events arrived
+    let _ = termination_timeout.await;
 
     // Simple equality comparison using pretty_assertions
     assert_eq!(
@@ -316,6 +365,7 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
 
                                             // Send multiple subscription events
                                             for (i, custom_payload) in payloads.iter().enumerate() {
+                                                // Always send exactly what we're given - no transformation
                                                 let event_data = json!({
                                                     "id": id,
                                                     "type": "data",

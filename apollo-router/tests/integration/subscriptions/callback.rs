@@ -94,6 +94,9 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
         ];
         verify_callback_events(&callback_state, expected_user_events).await?;
 
+        // Check for errors in router logs
+        router.assert_no_error_logs();
+
         tracing::info!("✅ Callback mode subscription test completed successfully");
     } else {
         tracing::warn!(
@@ -402,6 +405,9 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         ];
         verify_callback_events(&callback_state, expected_user_events).await?;
 
+        // Check for errors in router logs
+        router.assert_no_error_logs();
+
         tracing::info!(
             "✅ Callback mode subscription test with error payload completed successfully"
         );
@@ -509,6 +515,9 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
             // Second callback has no userWasCreated data (pure error payload), so nothing is extracted from it
         ];
         verify_callback_events(&callback_state, expected_user_events).await?;
+
+        // Check for errors in router logs
+        router.assert_no_error_logs();
 
         tracing::info!(
             "✅ Callback mode subscription test with pure error payload completed successfully"
