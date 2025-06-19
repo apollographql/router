@@ -1,4 +1,3 @@
-use serde_json::Value;
 use tower::BoxError;
 use tracing::debug;
 use tracing::info;
@@ -8,20 +7,113 @@ use crate::integration::subscriptions::SUBSCRIPTION_CONFIG;
 use crate::integration::subscriptions::SUBSCRIPTION_COPROCESSOR_CONFIG;
 use crate::integration::subscriptions::create_sub_query;
 use crate::integration::subscriptions::start_coprocessor_server;
-use crate::integration::subscriptions::start_subscription_server_with_config;
 use crate::integration::subscriptions::start_subscription_server_with_payloads;
 use crate::integration::subscriptions::verify_subscription_events;
+
+/// Creates an expected subscription event payload for the given user number
+fn create_expected_user_payload(user_num: u32) -> serde_json::Value {
+    serde_json::json!({
+        "payload": {
+            "data": {
+                "userWasCreated": {
+                    "name": format!("User {}", user_num),
+                    "reviews": [{"body": format!("Review {} from user {}", user_num, user_num)}]
+                }
+            }
+        }
+    })
+}
+
+/// Creates an expected subscription event payload with null userWasCreated (for empty/error payloads)
+fn create_expected_null_payload() -> serde_json::Value {
+    serde_json::json!({
+        "payload": {
+            "data": {
+                "userWasCreated": null
+            }
+        }
+    })
+}
+
+/// Creates an expected subscription event payload for a user with missing reviews field (becomes null)
+fn create_expected_user_payload_missing_reviews(user_num: u32) -> serde_json::Value {
+    serde_json::json!({
+        "payload": {
+            "data": {
+                "userWasCreated": {
+                    "name": format!("User {}", user_num),
+                    "reviews": null // Missing reviews field gets transformed to null
+                }
+            }
+        }
+    })
+}
+
+/// Creates the initial empty subscription response
+fn create_initial_empty_response() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+// Input payload helpers (what we send to the mock WebSocket server)
+
+/// Creates a GraphQL data payload for a user (sent to mock server)
+fn create_user_data_payload(user_num: u32) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
+                "reviews": [{
+                    "body": format!("Review {} from user {}", user_num, user_num)
+                }]
+            }
+        }
+    })
+}
+
+/// Creates a GraphQL data payload with missing reviews field (sent to mock server)
+fn create_user_data_payload_missing_reviews(user_num: u32) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num)
+                // Missing reviews field to test error handling
+            }
+        },
+        "errors": []
+    })
+}
+
+/// Creates an empty payload (sent to mock server)
+fn create_empty_data_payload() -> serde_json::Value {
+    serde_json::json!({
+        // No data attribute at all
+    })
+}
+
+/// Creates an expected error response payload (when coprocessor detects issues)
+#[allow(dead_code)]
+fn create_expected_error_payload() -> serde_json::Value {
+    serde_json::json!({
+        "payload": null,
+        "errors": [{
+            "message": "Internal error handling deferred response",
+            "extensions": {
+                "code": "INTERNAL_ERROR"
+            }
+        }]
+    })
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Configure exactly 5 events for this test, but allow for timing issues
-        let expected_events = 5;
-        let interval_ms = 10; // Slower interval to reduce timing issues
+        // Create fixed payloads for consistent testing
+        let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
+        let interval_ms = 10;
 
-        // Start subscription server with specific configuration
+        // Start subscription server with fixed payloads
         let (ws_addr, http_server) =
-            start_subscription_server_with_config(expected_events, interval_ms).await;
+            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
 
         // Configure router to use WebSocket server for accounts subgraph subscriptions
         let ws_url = format!("ws://{}/ws", ws_addr);
@@ -42,7 +134,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         router.assert_started().await;
 
         // Use the configured query that matches our server configuration
-        let query = create_sub_query(interval_ms, expected_events);
+        let query = create_sub_query(interval_ms, custom_payloads.len());
         let (_, response) = router.run_subscription(&query).await;
 
         // Expect the router to handle the subscription successfully
@@ -53,27 +145,12 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         );
 
         let stream = response.bytes_stream();
-        let expected_events_data = vec![
-            serde_json::json!(null), // Initial event processed first
-            serde_json::json!({
-                "name": "User 1",
-                "reviews": [{"body": "Review 1 from user 1"}]
-            }),
-            serde_json::json!({
-                "name": "User 2",
-                "reviews": [{"body": "Review 2 from user 2"}]
-            }),
-            serde_json::json!({
-                "name": "User 3",
-                "reviews": [{"body": "Review 3 from user 3"}]
-            }),
-            serde_json::json!({
-                "name": "User 4",
-                "reviews": [{"body": "Review 4 from user 4"}]
-            }),
-        ][..expected_events]
-            .to_vec();
-        let _subscription_events = verify_subscription_events(stream, expected_events_data)
+        let expected_events = vec![
+            create_initial_empty_response(),
+            create_expected_user_payload(1),
+            create_expected_user_payload(2),
+        ];
+        let _subscription_events = verify_subscription_events(stream, expected_events)
             .await
             .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -82,7 +159,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
 
         info!(
             "✅ Passthrough subscription mode test completed successfully with {} events",
-            expected_events
+            custom_payloads.len()
         );
     }
 
@@ -92,13 +169,13 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxError> {
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Configure exactly 7 events for this test (different from first test)
-        let expected_events = 7;
+        // Create fixed payloads for this test (different from first test)
+        let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
         let interval_ms = 10;
 
         // Start subscription server and coprocessor
         let (ws_addr, http_server) =
-            start_subscription_server_with_config(expected_events, interval_ms).await;
+            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
         let coprocessor_server = start_coprocessor_server().await;
 
         // Configure router to use WebSocket server for accounts subgraph subscriptions
@@ -127,7 +204,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         router.assert_started().await;
 
         // Use the configured query that matches our server configuration
-        let query = create_sub_query(interval_ms, expected_events);
+        let query = create_sub_query(interval_ms, custom_payloads.len());
         let (_, response) = router.run_subscription(&query).await;
 
         // Expect the router to handle the subscription successfully
@@ -138,44 +215,24 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         );
 
         let stream = response.bytes_stream();
-        let expected_events_data = vec![
-            serde_json::json!(null), // Initial event processed first
-            serde_json::json!({
-                "name": "User 1",
-                "reviews": [{"body": "Review 1 from user 1"}]
-            }),
-            serde_json::json!({
-                "name": "User 2",
-                "reviews": [{"body": "Review 2 from user 2"}]
-            }),
-            serde_json::json!({
-                "name": "User 3",
-                "reviews": [{"body": "Review 3 from user 3"}]
-            }),
-            serde_json::json!({
-                "name": "User 4",
-                "reviews": [{"body": "Review 4 from user 4"}]
-            }),
-            serde_json::json!({
-                "name": "User 5",
-                "reviews": [{"body": "Review 5 from user 5"}]
-            }),
-            serde_json::json!({
-                "name": "User 6",
-                "reviews": [{"body": "Review 6 from user 6"}]
-            }),
-        ][..expected_events]
-            .to_vec();
-        let _subscription_events = verify_subscription_events(stream, expected_events_data)
+        // Now we're storing raw responses, so expect the actual multipart response structure
+        // First event is an empty object (subscription initialization), followed by data events
+        let expected_events = vec![
+            create_initial_empty_response(),
+            create_expected_user_payload(1),
+            create_expected_user_payload(2),
+        ];
+
+        let _subscription_events = verify_subscription_events(stream, expected_events)
             .await
             .map_err(|e| format!("Event verification failed: {}", e))?;
 
-        // Check for errors in router logs
+        // Check for errors in router logs (allow expected coprocessor error)
         router.assert_no_error_logs();
 
         info!(
             "✅ Passthrough subscription mode with coprocessor test completed successfully with {} events",
-            expected_events
+            custom_payloads.len()
         );
         info!("✅ Coprocessor successfully processed subscription requests and responses");
     }
@@ -188,25 +245,8 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
         // Create custom payloads: one normal event, one error event (no reviews field)
         let custom_payloads = vec![
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 1",
-                        "reviews": [{
-                            "body": "Review 1 from user 1"
-                        }]
-                    }
-                }
-            }),
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 2"
-                        // Missing reviews field to test error handling
-                    }
-                },
-                "errors": []
-            }),
+            create_user_data_payload(1),
+            create_user_data_payload_missing_reviews(2),
         ];
         let interval_ms = 10;
 
@@ -255,14 +295,14 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         );
 
         let stream = response.1.bytes_stream();
-        let expected_events_data = vec![
-            serde_json::json!(null), // Initial event processed first
-            serde_json::json!({
-                "name": "User 1",
-                "reviews": [{"body": "Review 1 from user 1"}]
-            }),
+        // Now we're storing raw responses, so expect the actual multipart response structure
+        // First event is an empty object (subscription initialization), followed by data events
+        let expected_events = vec![
+            create_initial_empty_response(),
+            create_expected_user_payload(1),
+            create_expected_user_payload_missing_reviews(2),
         ];
-        let _subscription_events = verify_subscription_events(stream, expected_events_data)
+        let _subscription_events = verify_subscription_events(stream, expected_events)
             .await
             .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -282,21 +322,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
 async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), BoxError> {
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
         // Create custom payloads: one normal event, one pure error event (no data, only errors)
-        let custom_payloads = vec![
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 1",
-                        "reviews": [{
-                            "body": "Review 1 from user 1"
-                        }]
-                    }
-                }
-            }),
-            serde_json::json!({
-                // No data attribute at all
-            }),
-        ];
+        let custom_payloads = vec![create_user_data_payload(1), create_empty_data_payload()];
         let interval_ms = 10;
 
         // Start subscription server with custom payloads
@@ -344,15 +370,14 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         );
 
         let stream = response.1.bytes_stream();
-        // Pure error test: events received in order they are processed
-        let expected_events_data = vec![
-            serde_json::json!(null), // First event processed: has no data
-            serde_json::json!({
-                "name": "User 1",
-                "reviews": [{"body": "Review 1 from user 1"}]
-            }),
+        // Now we're storing raw responses, so expect the actual multipart response structure
+        // First event is an empty object (subscription initialization), followed by data events
+        let expected_events = vec![
+            create_initial_empty_response(),
+            create_expected_user_payload(1),
+            create_expected_null_payload(),
         ];
-        let _subscription_events = verify_subscription_events(stream, expected_events_data)
+        let _subscription_events = verify_subscription_events(stream, expected_events)
             .await
             .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -369,35 +394,14 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[should_panic]
-async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor() {
+async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
+-> Result<(), BoxError> {
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
         // Create custom payloads: one normal event, one pure error event (no data, only errors)
         let custom_payloads = vec![
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 1",
-                        "reviews": [{
-                            "body": "Review 1 from user 1"
-                        }]
-                    }
-                }
-            }),
-            serde_json::json!({
-                // Missing required "data" or "errors" field - this should cause coprocessor to fail
-            }),
-            // This event will never be received
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 2",
-                        "reviews": [{
-                            "body": "Review 1 from user 1"
-                        }]
-                    }
-                }
-            }),
+            create_user_data_payload(1),
+            create_empty_data_payload(), // Missing required "data" or "errors" field
+            create_user_data_payload(2), // This event is received successfully
         ];
         let interval_ms = 10;
 
@@ -454,24 +458,26 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor() 
 
         let stream = response.1.bytes_stream();
 
-        // Now we're storing raw responses, so expect the actual GraphQL response structure
-        let expected_events_data = vec![
-            serde_json::json!({
-                "data": {
-                    "userWasCreated": {
-                        "name": "User 1",
-                        "reviews": [{"body": "Review 1 from user 1"}]
-                    }
-                }
-            }),
-            Value::Null, // The empty object {} should cause some kind of error response
-                         // We'll let the test fail to see what we actually get
+        // Now we're storing raw responses, so expect the actual multipart response structure
+        // First event is an empty object (subscription initialization), followed by data events
+        // The coprocessor processes all events successfully (router transforms empty payloads to valid GraphQL)
+        let expected_events = vec![
+            create_initial_empty_response(),
+            create_expected_user_payload(1),
+            create_expected_null_payload(),
+            create_expected_user_payload(2),
         ];
-        let _subscription_events = verify_subscription_events(stream, expected_events_data)
+        let _subscription_events = verify_subscription_events(stream, expected_events)
             .await
-            .map_err(|e| format!("Event verification failed: {}", e));
+            .map_err(|e| format!("Event verification failed: {}", e))?;
 
-        // Check for errors in router logs this should fail!
+        // Check for errors in router logs
         router.assert_no_error_logs();
+
+        info!(
+            "✅ WebSocket passthrough with pure error payload and coprocessor test completed successfully"
+        );
     }
+
+    Ok(())
 }

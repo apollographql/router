@@ -954,12 +954,11 @@ impl IntegrationTest {
 
         // Check for various error patterns in the logs
         for line in &self.logs {
-            // Check for JSON logs with "level":"ERROR"
-            if line.contains("\"level\":\"ERROR\"") {
-                error_logs.push(line.clone());
-            }
-            // Check for panic patterns
-            else if line.contains("panic") || line.contains("PANIC") {
+            // Check for JSON logs with "level":"ERROR" or panic patterns
+            if line.contains("\"level\":\"ERROR\"")
+                || line.contains("panic")
+                || line.contains("PANIC")
+            {
                 error_logs.push(line.clone());
             }
             // Check for general ERROR patterns in non-JSON logs
@@ -984,6 +983,59 @@ impl IntegrationTest {
             panic!(
                 "Found {} unexpected error(s) in router logs:\n\n{}\n\nFull log dump:\n\n{}",
                 error_logs.len(),
+                error_logs.join("\n"),
+                self.logs.join("\n")
+            );
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn assert_no_error_logs_with_exceptions(&mut self, exceptions: &[&str]) {
+        // First, read any remaining logs
+        self.read_logs();
+
+        let mut error_logs = Vec::new();
+
+        // Check for various error patterns in the logs
+        for line in &self.logs {
+            // Check for JSON logs with "level":"ERROR" or panic patterns
+            if line.contains("\"level\":\"ERROR\"")
+                || line.contains("panic")
+                || line.contains("PANIC")
+            {
+                // Skip if this error matches any of the allowed exceptions
+                let is_exception = exceptions.iter().any(|exception| line.contains(exception));
+                if !is_exception {
+                    error_logs.push(line.clone());
+                }
+            }
+            // Check for general ERROR patterns in non-JSON logs
+            else if line.contains("ERROR") && !line.contains("level") {
+                // Skip false positives like field names or harmless errors
+                if !line.contains("error_code")
+                    && !line.contains("error_rate")
+                    && !line.contains("error_handling")
+                    && !line.contains("no_error")
+                    && !line.contains("ERROR:")
+                // Actual error logs usually have ERROR: prefix
+                {
+                    continue;
+                }
+                if line.contains("ERROR:") {
+                    // Skip if this error matches any of the allowed exceptions
+                    let is_exception = exceptions.iter().any(|exception| line.contains(exception));
+                    if !is_exception {
+                        error_logs.push(line.clone());
+                    }
+                }
+            }
+        }
+
+        if !error_logs.is_empty() {
+            panic!(
+                "Found {} unexpected error(s) in router logs (excluding {} exceptions):\n\n{}\n\nFull log dump:\n\n{}",
+                error_logs.len(),
+                exceptions.len(),
                 error_logs.join("\n"),
                 self.logs.join("\n")
             );
