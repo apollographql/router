@@ -6,7 +6,6 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
-use apollo_compiler::name;
 use apollo_compiler::ty;
 
 use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -30,8 +29,6 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
-
-pub(crate) const CONTEXT_NAME_ARGUMENT_NAME: Name = name!("name");
 
 pub(crate) struct ContextDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -67,7 +64,7 @@ impl ContextSpecDefinition {
         application: &'doc Node<Directive>,
     ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
         Ok(ContextDirectiveArguments {
-            name: directive_required_string_argument(application, &CONTEXT_NAME_ARGUMENT_NAME)?,
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
