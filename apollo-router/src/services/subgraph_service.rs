@@ -752,11 +752,7 @@ async fn call_websocket(
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
-        resp.map(|_| {
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::Null)
-                .build()
-        }),
+        resp.map(|_| graphql::Response::default()),
         context,
         service_name,
         subgraph_request_id,
@@ -2766,10 +2762,6 @@ mod tests {
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
-        assert_eq!(
-            response.response.body().data,
-            Some(serde_json_bytes::Value::Null)
-        );
 
         let mut gql_stream = rx_stream.next().await.unwrap();
         let message = gql_stream.next().await.unwrap();
