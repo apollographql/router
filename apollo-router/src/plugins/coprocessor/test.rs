@@ -20,6 +20,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::super::*;
+    use crate::json_ext::Object;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
