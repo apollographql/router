@@ -1,4 +1,6 @@
-#![allow(missing_docs)] // FIXME
+#![allow(missing_docs)]
+
+// FIXME
 use std::time::Instant;
 
 use apollo_compiler::response::ExecutionResponse;
@@ -68,7 +70,7 @@ impl Response {
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
-        data: Option<Value>,
+        mut data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
@@ -78,6 +80,11 @@ impl Response {
         incremental: Vec<IncrementalResponse>,
         created_at: Option<Instant>,
     ) -> Self {
+        // It's not possible to have a graphql response that is not present and has empty errors.
+        // In this situation we coerce into a valid response by setting a data of null.
+        if data.is_none() && errors.is_empty() {
+            data = Some(Value::Null);
+        }
         Self {
             label,
             data,
