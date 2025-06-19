@@ -265,6 +265,7 @@ dependencies = [
  "apollo-compiler",
  "apollo-environment-detector",
  "apollo-federation",
+ "arc-swap",
  "async-compression",
  "async-trait",
  "aws-config",

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use arc_swap::ArcSwap;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -26,7 +26,15 @@ pub(crate) type BoxCloneSyncService =
     tower::util::BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
-type ServiceCache = Arc<RwLock<HashMap<String, BoxCloneSyncService>>>;
+// Use ArcSwap to avoid locking on the cache.
+// Updates are very infrequent, so we take advantage of that to:
+//  - Return a clone of the service if the key exists (fast path)
+//  - If the key doesn't exist: (slow path)
+//    - Perform the slow creation of the new service
+//    - Use the `rcu` method to update the cache
+// `rcu` will repeatedly execute until the update succeeds at which point our new cache will be
+// available for all readers.
+type ServiceCache = ArcSwap<HashMap<String, BoxCloneSyncService>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -40,11 +48,22 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
-#[derive(Clone)]
 pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
     cache: ServiceCache,
+}
+
+// We can't clone ArcSwap, but we can give each factory its own copy
+impl Clone for HttpClientServiceFactory {
+    fn clone(&self) -> Self {
+        let cache = ArcSwap::new(self.cache.load_full());
+        Self {
+            service: self.service.clone(),
+            plugins: self.plugins.clone(),
+            cache,
+        }
+    }
 }
 
 impl HttpClientServiceFactory {
@@ -52,7 +71,7 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins,
-            cache: Arc::new(Default::default()),
+            cache: Default::default(),
         }
     }
 
@@ -75,13 +94,13 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins: Arc::new(IndexMap::default()),
-            cache: Arc::new(Default::default()),
+            cache: Default::default(),
         }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxCloneSyncService {
         // Check if we already have a memoized service for this name
-        if let Some(service) = self.cache.read().get(name) {
+        if let Some(service) = self.cache.load().get(name) {
             service.clone()
         } else {
             // Create the service if not cached
@@ -96,9 +115,11 @@ impl HttpClientServiceFactory {
 
             let boxed_clone_sync_service = BoxCloneSyncService::new(buffered_clone_service);
 
-            self.cache
-                .write()
-                .insert(name.to_string(), boxed_clone_sync_service.clone());
+            self.cache.rcu(|cache| {
+                let mut cache = HashMap::clone(cache);
+                cache.insert(name.to_string(), boxed_clone_sync_service.clone());
+                cache
+            });
 
             boxed_clone_sync_service
         }
@@ -106,11 +127,11 @@ impl HttpClientServiceFactory {
 
     #[cfg(test)]
     pub(crate) fn cache_len(&self) -> usize {
-        self.cache.read().len()
+        self.cache.load().len()
     }
 
     #[cfg(test)]
     pub(crate) fn has_cached_service(&self, name: &str) -> bool {
-        self.cache.read().contains_key(name)
+        self.cache.load().contains_key(name)
     }
 }
