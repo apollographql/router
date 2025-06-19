@@ -72,13 +72,6 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     )
 }
 
-pub async fn start_subscription_server_with_config(
-    nb_events: usize,
-    interval_ms: u64,
-) -> (SocketAddr, wiremock::MockServer) {
-    start_subscription_server_with_payloads(generate_default_payloads(nb_events), interval_ms).await
-}
-
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,

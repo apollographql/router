@@ -122,7 +122,7 @@ async fn verify_callback_events(
         .filter(|c| c.action == "complete")
         .collect();
 
-    // Note: We don't check next_callbacks.len() == expected_user_events.len() 
+    // Note: We don't check next_callbacks.len() == expected_user_events.len()
     // because some callbacks may not have userWasCreated data (e.g., pure error payloads)
 
     assert_eq!(

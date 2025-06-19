@@ -459,7 +459,6 @@ where
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
                 // providing them will be a source of confusion.
-                tracing::info!("Body: {:?}, Context: {:?}", body_to_send, context_to_send);
                 let payload = Externalizable::supergraph_builder()
                     .stage(PipelineStep::SupergraphResponse)
                     .id(generator_id)
