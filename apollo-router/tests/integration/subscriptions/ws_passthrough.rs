@@ -8,6 +8,7 @@ use crate::integration::subscriptions::SUBSCRIPTION_COPROCESSOR_CONFIG;
 use crate::integration::subscriptions::create_sub_query;
 use crate::integration::subscriptions::start_coprocessor_server;
 use crate::integration::subscriptions::start_subscription_server_with_config;
+use crate::integration::subscriptions::verify_subscription_data;
 use crate::integration::subscriptions::verify_subscription_events;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -93,9 +94,14 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
             subscription_events.len()
         );
 
+        // Use shared validation for subscription data
+        verify_subscription_data(subscription_events, expected_events)
+            .await
+            .map_err(|e| format!("Data validation failed: {}", e))?;
+
         info!(
             "✅ Passthrough subscription mode test completed successfully with {} events",
-            subscription_events.len()
+            expected_events
         );
     }
 
@@ -176,9 +182,14 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
             subscription_events.len()
         );
 
+        // Use shared validation for subscription data
+        verify_subscription_data(subscription_events, expected_events)
+            .await
+            .map_err(|e| format!("Data validation failed: {}", e))?;
+
         info!(
             "✅ Passthrough subscription mode with coprocessor test completed successfully with {} events",
-            subscription_events.len()
+            expected_events
         );
         info!("✅ Coprocessor successfully processed subscription requests and responses");
     }

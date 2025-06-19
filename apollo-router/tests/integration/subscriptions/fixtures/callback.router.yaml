@@ -1,0 +1,26 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: true
+homepage:
+  enabled: false
+sandbox:
+  enabled: true
+override_subgraph_url:
+  accounts: http://localhost:4001
+include_subgraph_errors:
+  all: true
+subscription:
+  enabled: true
+  mode:
+    callback:
+      public_url: "http://localhost:4002/callback"
+      listen: "127.0.0.1:4002"
+      path: "/callback" 
+      heartbeat_interval: 5s
+      subgraphs: ["accounts"]
+headers:
+  all:
+    request:
+      - propagate:
+          named: custom_id

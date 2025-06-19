@@ -1,13 +1,20 @@
 //! Common subscription testing functionality
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::WebSocket;
 use axum::extract::ws::WebSocketUpgrade;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
+use axum::routing::post;
 use futures::StreamExt;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use tracing::debug;
 use tracing::info;
@@ -25,9 +32,39 @@ struct SubscriptionServerConfig {
     interval_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackPayload {
+    pub kind: String,
+    pub action: String,
+    pub id: String,
+    pub verifier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ids: Option<Vec<String>>,
+}
+
+#[derive(Clone)]
+pub struct CallbackTestState {
+    pub received_callbacks: Arc<Mutex<Vec<CallbackPayload>>>,
+    pub subscription_ids: Arc<Mutex<Vec<String>>>,
+}
+
+impl Default for CallbackTestState {
+    fn default() -> Self {
+        Self {
+            received_callbacks: Arc::new(Mutex::new(Vec::new())),
+            subscription_ids: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
 pub const SUBSCRIPTION_CONFIG: &str = include_str!("fixtures/subscription.router.yaml");
 pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("fixtures/subscription_coprocessor.router.yaml");
+pub const CALLBACK_CONFIG: &str = include_str!("fixtures/callback.router.yaml");
 pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     format!(
         r#"subscription {{  userWasCreated(intervalMs: {}, nbEvents: {}) {{    name reviews {{ body }} }}}}"#,
@@ -308,6 +345,79 @@ pub async fn verify_subscription_events(
     Ok(subscription_events)
 }
 
+pub async fn verify_subscription_data(
+    events: Vec<serde_json::Value>,
+    expected_min_events: usize,
+) -> Result<(), String> {
+    // Verify we received enough subscription events
+    if events.is_empty() {
+        return Err("No subscription events were received".to_string());
+    }
+
+    if events.len() < expected_min_events {
+        return Err(format!(
+            "Expected at least {} subscription events, but received {}. Events: {:?}",
+            expected_min_events,
+            events.len(),
+            events
+        ));
+    }
+
+    debug!("Verifying {} subscription events", events.len());
+
+    // Verify content of subscription events
+    for (i, event) in events.iter().enumerate() {
+        let name = event.get("name").unwrap().as_str().unwrap();
+        if !name.starts_with("User ") {
+            return Err(format!(
+                "Event {} name should start with 'User ', got: {}",
+                i + 1,
+                name
+            ));
+        }
+
+        if let Some(reviews) = event.get("reviews").and_then(|r| r.as_array()) {
+            if reviews.is_empty() {
+                return Err(format!("Event {} reviews should not be empty", i + 1));
+            }
+            let review_body = reviews[0].get("body").unwrap().as_str().unwrap();
+            if !review_body.contains("Review") {
+                return Err(format!(
+                    "Event {} review should contain 'Review', got: {}",
+                    i + 1,
+                    review_body
+                ));
+            }
+        }
+    }
+
+    // Verify events have different content (proving streaming works)
+    if events.len() > 1 {
+        let first_name = events[0].get("name").unwrap().as_str().unwrap();
+        let last_name = events[events.len() - 1]
+            .get("name")
+            .unwrap()
+            .as_str()
+            .unwrap();
+
+        if first_name == last_name {
+            return Err(
+                "First and last events should have different names, indicating proper streaming"
+                    .to_string(),
+            );
+        }
+    }
+
+    info!(
+        "✅ Successfully verified {} subscription events",
+        events.len()
+    );
+    info!("✅ All events contain required fields: name, reviews");
+    info!("✅ Events have different content, confirming streaming works");
+
+    Ok(())
+}
+
 async fn websocket_handler(
     State(config): State<SubscriptionServerConfig>,
     ws: WebSocketUpgrade,
@@ -438,5 +548,249 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                 _ => {}
             }
         }
+    }
+}
+
+pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
+    let state = CallbackTestState::default();
+    let app_state = state.clone();
+
+    let app = Router::new()
+        .route("/callback/:id", post(handle_callback))
+        .route("/callback", post(handle_callback_no_id))
+        .route("/", get(|| async { "Callback server running" }))
+        .with_state(app_state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        info!("Starting callback server...");
+        axum::Server::from_tcp(listener.into_std().unwrap())
+            .unwrap()
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    info!("Callback server running on {}", addr);
+
+    (addr, state)
+}
+
+async fn handle_callback(
+    State(state): State<CallbackTestState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: HeaderMap,
+    axum::extract::Json(payload): axum::extract::Json<CallbackPayload>,
+) -> StatusCode {
+    debug!("Received callback for subscription {}: {:?}", id, payload);
+    debug!("Headers: {:?}", headers);
+
+    if payload.id != id {
+        warn!("ID mismatch: URL={}, payload={}", id, payload.id);
+        return StatusCode::BAD_REQUEST;
+    }
+
+    {
+        let mut callbacks = state.received_callbacks.lock().unwrap();
+        callbacks.push(payload.clone());
+    }
+
+    match payload.action.as_str() {
+        "check" => {
+            let ids = state.subscription_ids.lock().unwrap();
+            if ids.contains(&payload.id) {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::NOT_FOUND
+            }
+        }
+        "next" | "complete" => {
+            let ids = state.subscription_ids.lock().unwrap();
+            if ids.contains(&payload.id) {
+                if payload.action == "next" {
+                    StatusCode::OK
+                } else {
+                    StatusCode::ACCEPTED
+                }
+            } else {
+                StatusCode::NOT_FOUND
+            }
+        }
+        "heartbeat" => {
+            let ids = state.subscription_ids.lock().unwrap();
+            let all_valid = payload.ids.as_ref().map_or(true, |callback_ids| {
+                callback_ids.iter().all(|id| ids.contains(id))
+            });
+
+            if all_valid {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::NOT_FOUND
+            }
+        }
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
+async fn handle_callback_no_id(
+    State(state): State<CallbackTestState>,
+    headers: HeaderMap,
+    axum::extract::Json(payload): axum::extract::Json<CallbackPayload>,
+) -> StatusCode {
+    debug!("Received callback without ID: {:?}", payload);
+    debug!("Headers: {:?}", headers);
+
+    {
+        let mut callbacks = state.received_callbacks.lock().unwrap();
+        callbacks.push(payload.clone());
+    }
+
+    match payload.action.as_str() {
+        "heartbeat" => StatusCode::NO_CONTENT,
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
+pub async fn start_callback_subgraph_server(
+    nb_events: usize,
+    interval_ms: u64,
+    callback_url: String,
+) -> wiremock::MockServer {
+    let server = wiremock::MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req
+                .body_json::<serde_json::Value>()
+                .unwrap_or_else(|_| json!({}));
+
+            if let Some(query) = body.get("query").and_then(|q| q.as_str()) {
+                if query.contains("subscription") && query.contains("userWasCreated") {
+                    let extensions = body.get("extensions");
+                    let subscription_ext = extensions.and_then(|e| e.get("subscription"));
+
+                    if let Some(sub_ext) = subscription_ext {
+                        let subscription_id = sub_ext
+                            .get("subscriptionId")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("test-sub-id");
+                        let callback_url = sub_ext
+                            .get("callbackUrl")
+                            .and_then(|url| url.as_str())
+                            .unwrap_or(&callback_url);
+
+                        info!(
+                            "Subgraph received subscription request with callback URL: {}",
+                            callback_url
+                        );
+                        info!("Subscription ID: {}", subscription_id);
+
+                        tokio::spawn(send_callback_events(
+                            callback_url.to_string(),
+                            subscription_id.to_string(),
+                            nb_events,
+                            interval_ms,
+                        ));
+
+                        return ResponseTemplate::new(200).set_body_json(json!({
+                            "data": {
+                                "userWasCreated": null
+                            }
+                        }));
+                    }
+                }
+
+                return ResponseTemplate::new(200).set_body_json(json!({
+                    "data": {
+                        "_entities": [{
+                            "name": "Test User",
+                            "username": "testuser"
+                        }]
+                    }
+                }));
+            }
+
+            ResponseTemplate::new(400).set_body_json(json!({
+                "errors": [{
+                    "message": "Invalid request"
+                }]
+            }))
+        })
+        .mount(&server)
+        .await;
+
+    info!("Callback subgraph server started at: {}", server.uri());
+    server
+}
+
+async fn send_callback_events(
+    callback_url: String,
+    subscription_id: String,
+    nb_events: usize,
+    interval_ms: u64,
+) {
+    let client = reqwest::Client::new();
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    for i in 1..=nb_events {
+        let payload = CallbackPayload {
+            kind: "subscription".to_string(),
+            action: "next".to_string(),
+            id: subscription_id.clone(),
+            verifier: "test-verifier".to_string(),
+            payload: Some(json!({
+                "data": {
+                    "userWasCreated": {
+                        "name": format!("User {}", i),
+                        "reviews": [{
+                            "body": format!("Review {} from user {}", i, i)
+                        }]
+                    }
+                }
+            })),
+            errors: None,
+            ids: None,
+        };
+
+        let response = client.post(&callback_url).json(&payload).send().await;
+
+        match response {
+            Ok(resp) => debug!(
+                "Sent callback event {}/{}, status: {}",
+                i,
+                nb_events,
+                resp.status()
+            ),
+            Err(e) => warn!("Failed to send callback event {}: {}", i, e),
+        }
+
+        if i < nb_events {
+            tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
+        }
+    }
+
+    let complete_payload = CallbackPayload {
+        kind: "subscription".to_string(),
+        action: "complete".to_string(),
+        id: subscription_id.clone(),
+        verifier: "test-verifier".to_string(),
+        payload: None,
+        errors: None,
+        ids: None,
+    };
+
+    let response = client
+        .post(&callback_url)
+        .json(&complete_payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => info!("Sent completion callback, status: {}", resp.status()),
+        Err(e) => warn!("Failed to send completion callback: {}", e),
     }
 }
