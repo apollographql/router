@@ -1,7 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
@@ -11,6 +10,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::is_comparable_shape_combination;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GtMethod, gt_method, gt_shape);
@@ -107,22 +107,16 @@ fn gt_shape(
         source_id,
     );
 
-    match (arg_shape.case(), input_shape.case()) {
-        (ShapeCase::Unknown, ShapeCase::Unknown)
-        | (ShapeCase::Int(_), ShapeCase::Int(_))
-        | (ShapeCase::Float, ShapeCase::Float)
-        | (ShapeCase::Int(_), ShapeCase::Float)
-        | (ShapeCase::Float, ShapeCase::Int(_))
-        | (ShapeCase::String(_), ShapeCase::String(_)) => {
-            Shape::bool(method_name.shape_location(source_id))
-        }
-        _ => Shape::error(
+    if is_comparable_shape_combination(arg_shape.case(), input_shape.case()) {
+        Shape::bool(method_name.shape_location(source_id))
+    } else {
+        Shape::error(
             format!(
                 "Method ->{} can only compare two numbers or two strings. Found {input_shape} > {arg_shape}",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
-        ),
+        )
     }
 }
 

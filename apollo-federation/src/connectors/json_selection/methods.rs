@@ -9,6 +9,8 @@ use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
 
+mod common;
+
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
 // tests of other methods, but are not yet exposed for use in connector schemas.
