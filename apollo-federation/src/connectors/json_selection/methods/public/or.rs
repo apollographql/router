@@ -56,22 +56,20 @@ fn or_method(
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
             errors.extend(arg_errors);
 
-            result = value_opt
-                .map(|value| match value {
-                    JSON::Bool(value) => value,
-                    _ => {
-                        errors.extend(vec![ApplyToError::new(
-                            format!(
-                                "Method ->{} can only accept boolean arguments.",
-                                method_name.as_ref()
-                            ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                        )]);
-                        false
-                    }
-                })
-                .unwrap_or(false);
+            match value_opt {
+                Some(JSON::Bool(value)) => result = value,
+                Some(_) => {
+                    errors.extend(vec![ApplyToError::new(
+                        format!(
+                            "Method ->{} can only accept boolean arguments.",
+                            method_name.as_ref()
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    )]);
+                }
+                None => {}
+            }
         }
 
         (Some(JSON::Bool(result)), errors)
