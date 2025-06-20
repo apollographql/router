@@ -1277,6 +1277,104 @@ mod tests {
         mock_supergraph_service
     }
 
+    // Helper functions for supergraph request validation tests
+    fn create_supergraph_stage_for_request_validation_test() -> SupergraphStage {
+        SupergraphStage {
+            request: SupergraphRequestConf {
+                condition: None,
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                method: true,
+            },
+            response: Default::default(),
+        }
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL break response
+    fn create_mock_http_client_supergraph_request_valid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SupergraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty GraphQL break response
+    fn create_mock_http_client_supergraph_request_empty_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SupergraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {}
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns invalid GraphQL break response
+    fn create_mock_http_client_supergraph_request_invalid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SupergraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "errors": "this should be an array not a string"
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL response
+    fn create_mock_http_client_supergraph_response_valid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "SupergraphResponse",
+                    "control": "continue",
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
     // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
@@ -1350,5 +1448,198 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+    }
+
+    // ===== SUPERGRAPH REQUEST VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_enabled_valid() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_valid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid GraphQL response
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_enabled_empty() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_empty_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since empty response violates GraphQL spec
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert!(body.errors.len() > 0);
+        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_enabled_invalid() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_invalid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since errors should be array not string
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert!(body.errors.len() > 0);
+        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_disabled_valid() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_valid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            false, // Validation disabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_disabled_empty() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_empty_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            false, // Validation disabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with empty response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        // Empty object deserializes to GraphQL response with no data/errors
+        assert_eq!(body.data, None);
+        assert_eq!(body.errors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_validation_disabled_invalid() {
+        let service = create_supergraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_supergraph_request_invalid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            false, // Validation disabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with fallback to original response since invalid structure can't deserialize
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        // Falls back to original response since permissive deserialization fails too
+        assert!(body.data.is_some() || body.errors.len() > 0);
+    }
+
+    // ===== SUPERGRAPH RESPONSE VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_enabled_valid() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_supergraph_response_valid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation enabled, valid GraphQL response should be processed normally
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_enabled_empty() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_empty_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        
+        // With validation enabled, empty response should cause service call to fail due to GraphQL validation
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_enabled_invalid() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_invalid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            true, // Validation enabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        
+        // With validation enabled, invalid GraphQL response should cause service call to fail
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_disabled_valid() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_supergraph_response_valid_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            false, // Validation disabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, valid response processed via permissive deserialization
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
     }
 }
