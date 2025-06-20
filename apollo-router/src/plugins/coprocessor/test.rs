@@ -1984,6 +1984,123 @@ mod tests {
         mock_subgraph_service
     }
 
+    // Helper functions for subgraph request validation tests
+    fn create_subgraph_stage_for_request_validation_test() -> SubgraphStage {
+        SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: None,
+                headers: true,
+                context: true,
+                body: true,
+                uri: true,
+                method: true,
+                service_name: true,
+                subgraph_request_id: true,
+            },
+            response: Default::default(),
+        }
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL break response
+    fn create_mock_http_client_subgraph_request_valid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SubgraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty GraphQL break response
+    fn create_mock_http_client_subgraph_request_empty_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SubgraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {}
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns invalid GraphQL break response
+    fn create_mock_http_client_subgraph_request_invalid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "SubgraphRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "errors": "this should be an array not a string"
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL response
+    fn create_mock_http_client_subgraph_response_valid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "SubgraphResponse",
+                    "control": "continue",
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty GraphQL response
+    fn create_mock_http_client_subgraph_response_empty_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "SubgraphResponse",
+                    "control": "continue",
+                    "body": {}
+                });
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
     // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_invalid_subgraph_response() -> MockInternalHttpClientService {
         mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -2019,6 +2136,210 @@ mod tests {
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(&json!({ "test": 1234_u32 }), res.response.body().data.as_ref().unwrap());
+    }
+
+    // ===== SUBGRAPH REQUEST VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_enabled_valid() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_valid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid GraphQL response
+        assert_eq!(res.response.status(), 400);
+        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_enabled_empty() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_empty_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since empty response violates GraphQL spec
+        assert_eq!(res.response.status(), 400);
+        assert!(res.response.body().errors.len() > 0);
+        assert!(res.response.body().errors[0].message.contains("couldn't deserialize coprocessor output body"));
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_enabled_invalid() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_invalid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since errors should be array not string
+        assert_eq!(res.response.status(), 400);
+        assert!(res.response.body().errors.len() > 0);
+        assert!(res.response.body().errors[0].message.contains("couldn't deserialize coprocessor output body"));
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_disabled_valid() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_valid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_disabled_empty() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_empty_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with empty response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        // Empty object deserializes to GraphQL response with no data/errors
+        assert_eq!(res.response.body().data, None);
+        assert_eq!(res.response.body().errors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_validation_disabled_invalid() {
+        let service = create_subgraph_stage_for_request_validation_test().as_service(
+            create_mock_http_client_subgraph_request_invalid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with fallback to original response since invalid structure can't deserialize
+        assert_eq!(res.response.status(), 400);
+        // Falls back to original response since permissive deserialization fails too
+        assert!(res.response.body().data.is_some() || res.response.body().errors.len() > 0);
+    }
+
+    // ===== SUBGRAPH RESPONSE VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_enabled_valid() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_subgraph_response_valid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // With validation enabled, valid GraphQL response should be processed normally
+        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_enabled_empty() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_subgraph_response_empty_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        
+        // With validation enabled, empty response should cause service call to fail due to GraphQL validation
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_enabled_invalid() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_invalid_subgraph_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true, // Validation enabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        
+        // With validation enabled, invalid GraphQL response should cause service call to fail
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_disabled_valid() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_subgraph_response_valid_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, valid response processed via permissive deserialization
+        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_disabled_empty() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_subgraph_response_empty_response(),
+            create_mock_subgraph_service().boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, empty response deserializes successfully via serde
+        // (all fields are optional with defaults), resulting in a response with no data/errors
+        assert_eq!(res.response.body().data, None);
+        assert_eq!(res.response.body().errors.len(), 0);
     }
 
 
