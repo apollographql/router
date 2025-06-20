@@ -50,6 +50,7 @@ pub use models::CustomConfiguration;
 pub use models::Header;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
+pub use spec::Error as ConnectSpecError;
 pub use spec::SourceHTTPArguments;
 pub use string_template::StringTemplate;
 pub use variable::Namespace;
@@ -97,6 +98,10 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+
+    pub fn has_selector(&self, selector: &str) -> bool {
+        self.directive.simple_name() == selector
     }
 }
 

@@ -17,6 +17,7 @@ pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 pub use source::SourceHTTPArguments;
 pub(crate) use source::extract_source_directive_arguments;
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -74,6 +75,11 @@ impl ConnectSpec {
 
     pub(crate) fn identity_matches(identity: &Identity) -> bool {
         identity.domain == APOLLO_SPEC_DOMAIN && identity.name == Self::IDENTITY_NAME
+    }
+
+    #[cfg(feature = "test_support")]
+    pub fn test_identity() -> Identity {
+        Self::identity()
     }
 
     pub(crate) fn identity() -> Identity {
@@ -172,4 +178,36 @@ impl From<ConnectSpec> for Version {
             ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
         }
     }
+}
+
+impl TryFrom<Version> for ConnectSpec {
+    type Error = Error;
+    fn try_from(spec: Version) -> Result<Self, Self::Error> {
+        Ok(match spec {
+            Version { major: 0, minor: 1 } => ConnectSpec::V0_1,
+            Version { major: 0, minor: 2 } => ConnectSpec::V0_2,
+            Version { major: 0, minor: 3 } => ConnectSpec::V0_3,
+            Version { major, minor } => {
+                // SAFETY: There are sure more than 0 connect spec implemented
+                #[expect(clippy::unwrap_used)]
+                let latest = ConnectSpec::iter()
+                    .next_back()
+                    .unwrap();
+
+                return Err(Error {
+                    major,
+                    minor,
+                    latest,
+                });
+            }
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("connect spec version {major}.{minor}, latest available is: {latest}")]
+pub struct Error {
+    major: u32,
+    minor: u32,
+    latest: ConnectSpec,
 }
