@@ -1712,6 +1712,146 @@ mod tests {
         assert_eq!(body["data"]["test"], "modified_by_coprocessor");
     }
 
+    // ===== ROUTER RESPONSE VALIDATION TESTS =====
+    // Note: Router response stage doesn't implement GraphQL validation - it always uses permissive 
+    // deserialization since it handles streaming responses differently than other stages
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_enabled_valid() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_valid_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                true, // response_validation enabled - but router response ignores this
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage processes all responses without validation regardless of setting
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["data"]["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_enabled_empty() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_empty_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                true, // response_validation enabled - but router response ignores this
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage accepts empty responses without validation
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // Empty object passes through unchanged since router response doesn't validate
+        assert!(body.as_object().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_enabled_invalid() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_invalid_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                true, // response_validation enabled - but router response ignores this
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage accepts invalid responses without validation
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // Invalid response passes through unchanged since router response doesn't validate
+        assert_eq!(body["errors"], "this should be an array not a string");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_disabled_valid() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_valid_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false, // response_validation disabled - same behavior as enabled for router response
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage processes all responses identically regardless of validation setting
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["data"]["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_disabled_empty() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_empty_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false, // response_validation disabled - same behavior as enabled for router response
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage behavior is identical whether validation is enabled or disabled
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // Empty object passes through unchanged
+        assert!(body.as_object().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_disabled_invalid() {
+        let service_stack = create_router_stage_for_response_validation_test()
+            .as_service(
+                create_mock_http_client_router_response_invalid_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false, // response_validation disabled - same behavior as enabled for router response
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Router response stage behavior is identical whether validation is enabled or disabled
+        assert_eq!(res.response.status(), 200);
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // Invalid response passes through unchanged
+        assert_eq!(body["errors"], "this should be an array not a string");
+    }
+
     // Helper functions for router request validation tests
     fn create_router_stage_for_validation_test() -> RouterStage {
         RouterStage {
@@ -1748,6 +1888,75 @@ mod tests {
                     "body": "{}"
                 });
 
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper functions for router response validation tests
+    fn create_router_stage_for_response_validation_test() -> RouterStage {
+        RouterStage {
+            request: Default::default(),
+            response: RouterResponseConf {
+                condition: Default::default(),
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                status_code: false,
+            },
+        }
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL response
+    fn create_mock_http_client_router_response_valid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                    "body": "{\"data\": {\"test\": \"valid_response\"}}"
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty GraphQL response
+    fn create_mock_http_client_router_response_empty_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                    "body": "{}"
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns invalid GraphQL response
+    fn create_mock_http_client_router_response_invalid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                    "body": "{\"errors\": \"this should be an array not a string\"}"
+                });
                 Ok(http::Response::builder()
                     .status(200)
                     .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
