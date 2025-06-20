@@ -1649,7 +1649,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_response_validation_disabled() {
+    async fn external_plugin_router_response_validation_disabled_custom() {
         // Router stage doesn't actually implement response validation - it always uses
         // permissive deserialization since it handles streaming responses differently
         let router_stage = RouterStage {
@@ -1966,7 +1966,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_request_validation_disabled() {
+    async fn external_plugin_router_request_validation_disabled_empty() {
         let service_stack = create_router_stage_for_validation_test()
             .as_service(
                 create_mock_http_client_empty_router_response(),
@@ -1991,7 +1991,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_request_validation_enabled() {
+    async fn external_plugin_router_request_validation_enabled_empty() {
         let service_stack = create_router_stage_for_validation_test()
             .as_service(
                 create_mock_http_client_empty_router_response(),
@@ -2330,7 +2330,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_subgraph_response_validation_disabled() {
+    async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
             create_mock_subgraph_service().boxed(),

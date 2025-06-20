@@ -1412,7 +1412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_supergraph_response_validation_disabled() {
+    async fn external_plugin_supergraph_response_validation_disabled_invalid() {
         let service = create_supergraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_response(),
             create_mock_supergraph_service().boxed(),
@@ -1431,7 +1431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_supergraph_response_validation_disabled_empty_response() {
+    async fn external_plugin_supergraph_response_validation_disabled_empty() {
         let service = create_supergraph_stage_for_validation_test().as_service(
             create_mock_http_client_empty_response(),
             create_mock_supergraph_service().boxed(),
