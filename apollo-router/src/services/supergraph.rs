@@ -205,7 +205,7 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
         // Build a response
         let b = graphql::Response::builder()
@@ -252,12 +252,6 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
-        if !errors.is_empty() {
-            if let Some(context) = &context {
-                context
-                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-            }
-        }
         Response::new(
             label,
             data,
@@ -308,9 +302,6 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
-        if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-        }
         Response::new(
             Default::default(),
             Default::default(),
@@ -339,7 +330,7 @@ impl Response {
         context: Context,
     ) -> Self {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
         // Build a response
         let b = graphql::Response::builder()
@@ -366,6 +357,10 @@ impl Response {
     }
 
     pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
+        if !response.errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
+
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
             context,
@@ -382,7 +377,7 @@ impl Response {
         response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {
-        Self { response, context }
+        Self { context, response }.check_for_errors()
     }
 
     pub fn map<F>(self, f: F) -> Response
@@ -437,6 +432,16 @@ impl Response {
         F: 'static + Send + FnMut(graphql::Response) -> graphql::Response,
     {
         self.map(move |stream| stream.map(f).boxed())
+    }
+
+    fn check_for_errors(self) -> Self {
+        let context = self.context.clone();
+        self.map_stream(move |response| {
+            if !response.errors.is_empty() {
+                context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            }
+            response
+        })
     }
 }
 
