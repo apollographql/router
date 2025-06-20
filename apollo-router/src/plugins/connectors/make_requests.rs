@@ -1,19 +1,14 @@
 use std::sync::Arc;
 
 use apollo_compiler::Name;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::JSONSelection;
-use apollo_federation::connectors::Namespace;
+use apollo_federation::connectors::runtime::inputs::RequestInputs;
 use parking_lot::Mutex;
-use request_merger::MappingContextMerger;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 
 use super::http_json_transport::HttpJsonTransportError;
 use super::http_json_transport::make_request;
@@ -24,48 +19,9 @@ use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
 
-pub(crate) mod request_merger;
-
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
-
-#[derive(Clone, Default)]
-pub(crate) struct RequestInputs {
-    args: Map<ByteString, Value>,
-    this: Map<ByteString, Value>,
-    pub(crate) batch: Vec<Map<ByteString, Value>>,
-}
-
-impl RequestInputs {
-    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
-    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
-    /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
-        MappingContextMerger {
-            inputs: self,
-            variables_used,
-            config: None,
-            context: None,
-            status: None,
-            request: None,
-            response: None,
-            env: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for RequestInputs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RequestInputs {{\n    args: {},\n    this: {},\n    batch: {}\n}}",
-            serde_json::to_string(&self.args).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.this).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.batch).unwrap_or("<invalid JSON>".to_string()),
-        )
-    }
-}
 
 #[derive(Clone)]
 pub(crate) enum ResponseKey {

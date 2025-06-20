@@ -813,6 +813,7 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
@@ -820,7 +821,6 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
-    use crate::plugins::connectors::make_requests::RequestInputs;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
