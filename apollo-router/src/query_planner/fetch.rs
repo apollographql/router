@@ -365,7 +365,7 @@ impl FetchNode {
                                     errors.push(
                                         Error::builder()
                                             .locations(error.locations.clone())
-                                            // append to the entitiy's path the error's path without
+                                            // append to the entity's path the error's path without
                                             //`_entities` and the index
                                             .path(Path::from_iter(
                                                 values_path.0.iter().chain(&path.0[2..]).cloned(),
