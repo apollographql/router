@@ -252,7 +252,7 @@ mod apq_tests {
     use crate::Context;
     use crate::error::Error;
     use crate::graphql::Response;
-    use crate::plugins::content_negotiation::ClientRequestAccepts;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::router::service::from_supergraph_mock_callback;
     use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 

@@ -4,7 +4,6 @@ pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
 mod connectors;
-mod content_negotiation;
 mod coprocessor;
 mod docs;
 // In the CI environment we only install Redis on x86_64 Linux
