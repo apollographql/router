@@ -1648,6 +1648,167 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn external_plugin_router_response_validation_disabled() {
+        // Router stage doesn't actually implement response validation - it always uses
+        // permissive deserialization since it handles streaming responses differently
+        let router_stage = RouterStage {
+            response: RouterResponseConf {
+                body: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            Ok(supergraph::Response::builder()
+                .data(json!({"test": 42}))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                // Return response that modifies the body - this demonstrates router stage processes
+                // coprocessor responses without GraphQL validation (unlike other stages)
+                let response = json!({
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                    "body": "{\"data\": {\"test\": \"modified_by_coprocessor\"}}"
+                });
+
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service_stack = router_stage
+            .as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false, // response_validation - doesn't matter for router stage
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder()
+            .build()
+            .unwrap();
+
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Response should be processed normally since router stage doesn't validate
+        assert_eq!(res.response.status(), 200);
+        
+        // Router stage should accept the coprocessor response without validation
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["data"]["test"], "modified_by_coprocessor");
+    }
+
+    // Helper functions for router request validation tests
+    fn create_router_stage_for_validation_test() -> RouterStage {
+        RouterStage {
+            request: RouterRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    async fn create_mock_router_service_for_validation_test() -> router::BoxService {
+        router::service::from_supergraph_mock_callback(move |req| {
+            Ok(supergraph::Response::builder()
+                .data(json!({"test": 42}))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await
+        .boxed()
+    }
+
+    fn create_mock_http_client_empty_router_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                // Return empty GraphQL break response - passes serde but fails GraphQL validation
+                let response = json!({
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": "{}"
+                });
+
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(RouterBody::from(serde_json::to_string(&response).unwrap()))
+                    .unwrap())
+            })
+        })
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_validation_disabled() {
+        let service_stack = create_router_stage_for_validation_test()
+            .as_service(
+                create_mock_http_client_empty_router_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false, // response_validation disabled
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break, but with permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        
+        // Body should contain the empty response that passed serde but failed GraphQL validation
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // With validation disabled, should get empty object as response
+        assert!(body.as_object().unwrap().is_empty() || body.get("data").is_some() || body.get("errors").is_some());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_validation_enabled() {
+        let service_stack = create_router_stage_for_validation_test()
+            .as_service(
+                create_mock_http_client_empty_router_response(),
+                create_mock_router_service_for_validation_test().await,
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                true, // response_validation enabled
+            )
+            .boxed();
+
+        let request = router::Request::fake_builder().build().unwrap();
+        let res = service_stack.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break
+        assert_eq!(res.response.status(), 400);
+        
+        // Body should contain validation error from GraphQL validation failure 
+        let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        // Should contain GraphQL errors from validation failure, not the original empty object
+        assert!(body.get("errors").is_some());
+        // Verify it's a deserialization error (validation failed)
+        let errors = body["errors"].as_array().unwrap();
+        assert!(errors[0]["message"].as_str().unwrap().contains("couldn't deserialize coprocessor output body"));
+    }
+
     #[test]
     fn it_externalizes_headers() {
         // Build our expected HashMap

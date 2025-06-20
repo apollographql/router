@@ -823,7 +823,7 @@ async fn process_router_response_stage<C>(
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
-    _response_validation: bool,
+    _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
 ) -> Result<router::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
