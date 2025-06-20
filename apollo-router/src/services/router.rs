@@ -3,6 +3,7 @@
 use std::any::Any;
 use std::mem;
 
+use ahash::HashMap;
 use bytes::Bytes;
 use displaydoc::Display;
 use futures::Stream;
@@ -22,13 +23,15 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
+use uuid::Uuid;
 
 use self::body::RouterBody;
 use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
-use crate::context::{CONTAINS_GRAPHQL_ERROR, ROUTER_RESPONSE_ERRORS};
+use crate::context::CONTAINS_GRAPHQL_ERROR;
+use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
@@ -244,7 +247,15 @@ impl Response {
             // count errors introduced in the router service; however, it means that we handle error
             // counting differently in this layer than others.
             context
-                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .insert(
+                    ROUTER_RESPONSE_ERRORS,
+                    // We can't serialize the apollo_id, so make a map with id as the key
+                    errors
+                        .iter()
+                        .cloned()
+                        .map(|err| (err.apollo_id(), err))
+                        .collect::<HashMap<Uuid, graphql::Error>>(),
+                )
                 .expect("Unable to serialize router response errors list for context");
         }
 

@@ -261,13 +261,18 @@ impl Error {
         self.apollo_id
     }
 
+    /// Returns a duplicate of the error where [`self.apollo_id`] is now the given ID
+    pub fn with_apollo_id(&self, id: Uuid) -> Self {
+        let mut new_err = self.clone();
+        new_err.apollo_id = id;
+        new_err
+    }
+
     #[cfg(test)]
     /// Returns a duplicate of the error where [`self.apollo_id`] is `Uuid::nil()`. Used for
     /// comparing errors in tests where you cannot control the randomly generated Uuid
     pub fn with_null_id(&self) -> Self {
-        let mut new_err = self.clone();
-        new_err.apollo_id = Uuid::nil();
-        new_err
+        self.with_apollo_id(Uuid::nil())
     }
 }
 

@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
+use ahash::HashMap;
 use ahash::HashSet;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
+use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use tokio::task::id;
 use uuid::Uuid;
 
 use crate::Context;
@@ -136,7 +139,11 @@ pub(crate) async fn count_router_errors(
 
     // We look at context for our current errors instead of the existing response to avoid a full
     // response deserialization.
-    let errors: Vec<Error> = unwrap_from_context(&context, ROUTER_RESPONSE_ERRORS);
+    let errors_by_id: HashMap<Uuid, Error> = unwrap_from_context(&context, ROUTER_RESPONSE_ERRORS);
+    let errors: Vec<Error> = errors_by_id
+        .iter()
+        .map(|(id, error)| error.with_apollo_id(*id))
+        .collect();
     if !errors.is_empty() {
         count_operation_errors(&errors, &context, &errors_config);
         // Router layer handling is unique in that the list of new errors from context may not
@@ -281,7 +288,6 @@ mod test {
     use crate::graphql;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::content_negotiation::ClientRequestAccepts;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -290,7 +296,6 @@ mod test {
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::plugins::telemetry::error_counter::unwrap_from_context;
     use crate::query_planner::APOLLO_OPERATION_ID;
-    use crate::services::router::ClientRequestAccepts;
     use crate::services::SupergraphResponse;
 
     #[tokio::test]
@@ -302,16 +307,6 @@ mod test {
             };
 
             let context = Context::default();
-
-            context.extensions().with_lock(|lock| {
-                lock.insert(ClientRequestAccepts {
-                    multipart_defer: false,
-                    multipart_subscription: false,
-                    json: true,
-                    wildcard: false,
-                })
-            });
-
             let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
             let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
             let _ = context.insert(OPERATION_KIND, "query".to_string());
@@ -375,16 +370,6 @@ mod test {
             };
 
             let context = Context::default();
-
-            context.extensions().with_lock(|lock| {
-                lock.insert(ClientRequestAccepts {
-                    multipart_defer: false,
-                    multipart_subscription: false,
-                    json: true,
-                    wildcard: false,
-                })
-            });
-
             let validation_error_id = Uuid::new_v4();
             let custom_error_id = Uuid::new_v4();
 
