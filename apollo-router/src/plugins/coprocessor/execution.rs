@@ -68,6 +68,7 @@ impl ExecutionStage {
         service: execution::BoxService,
         coprocessor_url: String,
         sdl: Arc<String>,
+        response_validation: bool,
     ) -> execution::BoxService
     where
         C: Service<
@@ -100,6 +101,7 @@ impl ExecutionStage {
                         sdl,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -141,6 +143,7 @@ impl ExecutionStage {
                         sdl,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -188,6 +191,7 @@ async fn process_execution_request_stage<C>(
     sdl: Arc<String>,
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -253,9 +257,10 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response =
-                graphql::Response::from_value(co_processor_output.body.unwrap_or(Value::Null))
-                    .unwrap_or_else(|error| {
+            let graphql_response = {
+                let body_value = co_processor_output.body.unwrap_or(Value::Null);
+                if response_validation {
+                    graphql::Response::from_value(body_value).unwrap_or_else(|error| {
                         graphql::Response::builder()
                             .errors(vec![
                                 Error::builder()
@@ -266,7 +271,23 @@ where
                                     .build(),
                             ])
                             .build()
-                    });
+                    })
+                } else {
+                    // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+                    serde_json_bytes::from_value(body_value).unwrap_or_else(|error| {
+                        graphql::Response::builder()
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                    .build(),
+                            ])
+                            .build()
+                    })
+                }
+            };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -328,6 +349,7 @@ async fn process_execution_response_stage<C>(
     sdl: Arc<String>,
     response: execution::Response,
     response_config: ExecutionResponseConf,
+    response_validation: bool,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -392,7 +414,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(first, co_processor_output.body)?;
+    let new_body = handle_graphql_response(first, co_processor_output.body, response_validation)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
@@ -461,7 +483,7 @@ where
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
                 let new_deferred_response =
-                    handle_graphql_response(deferred_response, co_processor_output.body)?;
+                    handle_graphql_response(deferred_response, co_processor_output.body, response_validation)?;
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {
@@ -677,6 +699,7 @@ mod tests {
             mock_execution_service.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -745,7 +768,7 @@ mod tests {
             mock_http_client,
             mock_execution_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -871,7 +894,7 @@ mod tests {
             mock_http_client,
             mock_execution_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -983,7 +1006,7 @@ mod tests {
             mock_http_client,
             mock_execution_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = execution::Request::fake_builder()

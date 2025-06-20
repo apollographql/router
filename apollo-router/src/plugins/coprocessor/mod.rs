@@ -195,6 +195,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -207,6 +208,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -219,6 +221,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -228,6 +231,7 @@ where
             service,
             self.configuration.url.clone(),
             name.to_string(),
+            self.configuration.response_validation,
         )
     }
 }
@@ -326,6 +330,9 @@ struct Conf {
     #[schemars(with = "String", default = "default_timeout")]
     #[serde(default = "default_timeout")]
     timeout: Duration,
+    /// Response validation defaults to true
+    #[serde(default = "default_response_validation")]
+    response_validation: bool,
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
@@ -342,6 +349,10 @@ struct Conf {
 
 fn default_timeout() -> Duration {
     DEFAULT_EXTERNALIZATION_TIMEOUT
+}
+
+fn default_response_validation() -> bool {
+    true
 }
 
 fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
@@ -369,6 +380,7 @@ impl RouterStage {
         service: router::BoxService,
         coprocessor_url: String,
         sdl: Arc<String>,
+        response_validation: bool,
     ) -> router::BoxService
     where
         C: Service<
@@ -401,6 +413,7 @@ impl RouterStage {
                         sdl,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -440,6 +453,7 @@ impl RouterStage {
                         sdl,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -507,6 +521,7 @@ impl SubgraphStage {
         service: subgraph::BoxService,
         coprocessor_url: String,
         service_name: String,
+        response_validation: bool,
     ) -> subgraph::BoxService
     where
         C: Service<
@@ -538,6 +553,7 @@ impl SubgraphStage {
                         service_name,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -578,6 +594,7 @@ impl SubgraphStage {
                         service_name,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -625,6 +642,7 @@ async fn process_router_request_stage<C>(
     sdl: Arc<String>,
     mut request: router::Request,
     mut request_config: RouterRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -716,18 +734,36 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
-                graphql::Response::builder()
-                    .errors(vec![
-                        Error::builder()
-                            .message(format!(
-                                "couldn't deserialize coprocessor output body: {error}"
-                            ))
-                            .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                            .build(),
-                    ])
-                    .build()
-            }),
+            _ => {
+                if response_validation {
+                    graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
+                        graphql::Response::builder()
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                    .build(),
+                            ])
+                            .build()
+                    })
+                } else {
+                    // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+                    serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
+                        graphql::Response::builder()
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                    .build(),
+                            ])
+                            .build()
+                    })
+                }
+            }
         };
 
         let res = router::Response::builder()
@@ -787,6 +823,7 @@ async fn process_router_response_stage<C>(
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
+    _response_validation: bool,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -986,6 +1023,7 @@ async fn process_subgraph_request_stage<C>(
     service_name: String,
     mut request: subgraph::Request,
     mut request_config: SubgraphRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1069,18 +1107,36 @@ where
                             .build(),
                     ])
                     .build(),
-                value => graphql::Response::from_value(value).unwrap_or_else(|error| {
-                    graphql::Response::builder()
-                        .errors(vec![
-                            Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                .build(),
-                        ])
-                        .build()
-                }),
+                value => {
+                    if response_validation {
+                        graphql::Response::from_value(value).unwrap_or_else(|error| {
+                            graphql::Response::builder()
+                                .errors(vec![
+                                    Error::builder()
+                                        .message(format!(
+                                            "couldn't deserialize coprocessor output body: {error}"
+                                        ))
+                                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                        .build(),
+                                ])
+                                .build()
+                        })
+                    } else {
+                        // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+                        serde_json_bytes::from_value(value).unwrap_or_else(|error| {
+                            graphql::Response::builder()
+                                .errors(vec![
+                                    Error::builder()
+                                        .message(format!(
+                                            "couldn't deserialize coprocessor output body: {error}"
+                                        ))
+                                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                        .build(),
+                                ])
+                                .build()
+                        })
+                    }
+                }
             };
 
             let mut http_response = http::Response::builder()
@@ -1145,6 +1201,7 @@ async fn process_subgraph_response_stage<C>(
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
+    response_validation: bool,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1214,7 +1271,7 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body = handle_graphql_response(body, co_processor_output.body)?;
+    let new_body = handle_graphql_response(body, co_processor_output.body, response_validation)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1286,23 +1343,47 @@ pub(super) fn internalize_header_map(
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
     copro_response_body: Option<Value>,
+    response_validation: bool,
 ) -> Result<graphql::Response, BoxError> {
     Ok(match copro_response_body {
         Some(value) => {
-            let mut new_body = graphql::Response::from_value(value)?;
-            // Needs to take back these 2 fields because it's skipped by serde
-            new_body.subscribed = original_response_body.subscribed;
-            new_body.created_at = original_response_body.created_at;
-            // Required because for subscription if data is Some(Null) it won't cut the subscription
-            // And in some languages they don't have any differences between Some(Null) and Null
-            if original_response_body.data == Some(Value::Null)
-                && new_body.data.is_none()
-                && new_body.subscribed == Some(true)
-            {
-                new_body.data = Some(Value::Null);
+            if response_validation {
+                let mut new_body = graphql::Response::from_value(value)?;
+                // Needs to take back these 2 fields because it's skipped by serde
+                new_body.subscribed = original_response_body.subscribed;
+                new_body.created_at = original_response_body.created_at;
+                // Required because for subscription if data is Some(Null) it won't cut the subscription
+                // And in some languages they don't have any differences between Some(Null) and Null
+                if original_response_body.data == Some(Value::Null)
+                    && new_body.data.is_none()
+                    && new_body.subscribed == Some(true)
+                {
+                    new_body.data = Some(Value::Null);
+                }
+                new_body
+            } else {
+                // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+                match serde_json_bytes::from_value::<graphql::Response>(value) {
+                    Ok(mut new_body) => {
+                        // Needs to take back these 2 fields because it's skipped by serde
+                        new_body.subscribed = original_response_body.subscribed;
+                        new_body.created_at = original_response_body.created_at;
+                        // Required because for subscription if data is Some(Null) it won't cut the subscription
+                        // And in some languages they don't have any differences between Some(Null) and Null
+                        if original_response_body.data == Some(Value::Null)
+                            && new_body.data.is_none()
+                            && new_body.subscribed == Some(true)
+                        {
+                            new_body.data = Some(Value::Null);
+                        }
+                        new_body
+                    }
+                    Err(_) => {
+                        // If deserialization fails completely, return original response
+                        original_response_body
+                    }
+                }
             }
-
-            new_body
         }
         None => original_response_body,
     })

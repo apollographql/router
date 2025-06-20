@@ -146,7 +146,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -206,7 +206,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -265,7 +265,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -321,6 +321,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -461,6 +462,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -536,6 +538,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -599,6 +602,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -655,6 +659,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -770,6 +775,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -890,6 +896,7 @@ mod tests {
             mock_subgraph_service.boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
+            true,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -967,6 +974,7 @@ mod tests {
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
             Arc::default(),
+            true,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1090,7 +1098,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1203,7 +1211,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1329,7 +1337,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -1400,7 +1408,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1479,7 +1487,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1608,7 +1616,7 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()),
+            Arc::new("".to_string()), true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1705,6 +1713,50 @@ mod tests {
         let actual = internalize_header_map(external_form).expect("internalized header map");
 
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_handle_graphql_response_validation_enabled() {
+        let original = graphql::Response::builder()
+            .data(json!({"test": "original"}))
+            .build();
+
+        // Valid GraphQL response should work
+        let valid_response = json!({
+            "data": {"test": "modified"}
+        });
+        let result = handle_graphql_response(original.clone(), Some(valid_response), true).unwrap();
+        assert_eq!(result.data, Some(json!({"test": "modified"})));
+
+        // Invalid GraphQL response should return error when validation enabled
+        let invalid_response = json!({
+            "invalid": "structure"
+        });
+        let result = handle_graphql_response(original.clone(), Some(invalid_response), true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_handle_graphql_response_validation_disabled() {
+        let original = graphql::Response::builder()
+            .data(json!({"test": "original"}))
+            .build();
+
+        // Valid GraphQL response should work
+        let valid_response = json!({
+            "data": {"test": "modified"}
+        });
+        let result = handle_graphql_response(original.clone(), Some(valid_response), false).unwrap();
+        assert_eq!(result.data, Some(json!({"test": "modified"})));
+
+        // Invalid GraphQL response should return original when validation disabled
+        // Use a structure that will actually fail deserialization (wrong type for errors field)
+        let invalid_response = json!({
+            "errors": "this should be an array not a string"
+        });
+        let result = handle_graphql_response(original.clone(), Some(invalid_response), false).unwrap();
+        // Should fall back to original response since deserialization fails
+        assert_eq!(result.data, Some(json!({"test": "original"})));
     }
 
     #[allow(clippy::type_complexity)]
