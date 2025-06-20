@@ -245,7 +245,7 @@ mod apq_tests {
     use crate::Context;
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
-    use crate::plugins::content_negotiation::ClientRequestAccepts;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::router::service::from_supergraph_mock_callback;
     use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 

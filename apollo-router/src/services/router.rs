@@ -18,19 +18,20 @@ use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
 
 use self::body::RouterBody;
+use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use crate::plugins::content_negotiation::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
@@ -235,8 +236,9 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -319,6 +321,10 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -413,6 +419,14 @@ impl Response {
             context.unwrap_or_default(),
         )
     }
+}
+
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ClientRequestAccepts {
+    pub(crate) multipart_defer: bool,
+    pub(crate) multipart_subscription: bool,
+    pub(crate) json: bool,
+    pub(crate) wildcard: bool,
 }
 
 impl<T> From<http::Response<T>> for Response

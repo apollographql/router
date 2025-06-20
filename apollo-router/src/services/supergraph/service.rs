@@ -8,7 +8,9 @@ use std::time::Instant;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
+use futures::future::ready;
 use futures::stream::StreamExt;
+use futures::stream::once;
 use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -44,7 +46,6 @@ use crate::plugin::DynPlugin;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
-use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -76,10 +77,12 @@ use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
+use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -411,6 +414,14 @@ async fn service_call(
                         inserted = true;
                     }
                 });
+
+                // make sure to resolve the first part of the stream - that way we know context
+                // variables (`FIRST_EVENT_CONTEXT_KEY`, `CONTAINS_GRAPHQL_ERROR`) have been set
+                let (first, remaining) = StreamExt::into_future(response_stream).await;
+                let response_stream = once(ready(first.unwrap_or_default()))
+                    .chain(remaining)
+                    .boxed();
+
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
@@ -979,6 +990,7 @@ impl PluggableSupergraphServiceBuilder {
 
         let sb = Buffer::new(
             ServiceBuilder::new()
+                .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
                         .iter()
