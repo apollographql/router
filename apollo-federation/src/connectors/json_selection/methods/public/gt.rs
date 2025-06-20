@@ -49,9 +49,40 @@ fn gt_method(
     let matches = value_opt.and_then(|value| {
         match (data, &value) {
             // Number comparisons
-            (JSON::Number(left), JSON::Number(right)) => Some(JSON::Bool(
-                left.as_f64().unwrap_or(0.0) > right.as_f64().unwrap_or(0.0),
-            )),
+            (JSON::Number(left), JSON::Number(right)) => {
+                let left = match left.as_f64() {
+                    Some(val) => val,
+                    None => {
+                        // Note that we don't have tests for these `None` cases because I can't actually find a case where this ever actually fails
+                        // It seems that the current implementation in serde_json always returns a value
+                        apply_to_errors.push(ApplyToError::new(
+                            format!(
+                                "Method ->{} fail to convert applied to value to float.",
+                                method_name.as_ref(),
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ));
+                        return None;
+                    }
+                };
+                let right = match right.as_f64() {
+                    Some(val) => val,
+                    None => {
+                        apply_to_errors.push(ApplyToError::new(
+                            format!(
+                                "Method ->{} fail to convert argument to float.",
+                                method_name.as_ref(),
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ));
+                        return None;
+                    }
+                };
+
+                Some(JSON::Bool(left > right))
+            }
             // String comparisons
             (JSON::String(left), JSON::String(right)) => Some(JSON::Bool(left > right)),
             // Mixed types or uncomparable types (including arrays and objects) return false
@@ -321,4 +352,3 @@ mod tests {
             )
         );
     }
-}
