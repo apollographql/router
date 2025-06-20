@@ -1127,7 +1127,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_execution_request_invalid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_execution_request_invalid_response() -> MockInternalHttpClientService
+    {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1149,7 +1150,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_execution_response_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_execution_response_valid_response() -> MockInternalHttpClientService
+    {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -1279,8 +1281,12 @@ mod tests {
         // Should return 400 with validation error since empty response violates GraphQL spec
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert!(body.errors.len() > 0);
-        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -1299,8 +1305,12 @@ mod tests {
         // Should return 400 with validation error since errors should be array not string
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert!(body.errors.len() > 0);
-        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -1360,7 +1370,7 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         // Falls back to original response since permissive deserialization fails too
-        assert!(body.data.is_some() || body.errors.len() > 0);
+        assert!(body.data.is_some() || !body.errors.is_empty());
     }
 
     // ===== EXECUTION RESPONSE VALIDATION TESTS =====
@@ -1394,7 +1404,7 @@ mod tests {
         );
 
         let request = execution::Request::fake_builder().build();
-        
+
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
@@ -1411,7 +1421,7 @@ mod tests {
         );
 
         let request = execution::Request::fake_builder().build();
-        
+
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());

@@ -146,7 +146,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -206,7 +207,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -265,7 +267,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1098,7 +1101,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1211,7 +1215,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1337,7 +1342,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -1408,7 +1414,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1487,7 +1494,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1616,7 +1624,8 @@ mod tests {
             mock_http_client,
             mock_router_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1697,15 +1706,13 @@ mod tests {
             )
             .boxed();
 
-        let request = router::Request::fake_builder()
-            .build()
-            .unwrap();
+        let request = router::Request::fake_builder().build().unwrap();
 
         let res = service_stack.oneshot(request).await.unwrap();
 
         // Response should be processed normally since router stage doesn't validate
         assert_eq!(res.response.status(), 200);
-        
+
         // Router stage should accept the coprocessor response without validation
         let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
@@ -1713,7 +1720,7 @@ mod tests {
     }
 
     // ===== ROUTER RESPONSE VALIDATION TESTS =====
-    // Note: Router response stage doesn't implement GraphQL validation - it always uses permissive 
+    // Note: Router response stage doesn't implement GraphQL validation - it always uses permissive
     // deserialization since it handles streaming responses differently than other stages
 
     #[tokio::test]
@@ -1982,12 +1989,16 @@ mod tests {
 
         // Should return 400 due to break, but with permissive deserialization
         assert_eq!(res.response.status(), 400);
-        
+
         // Body should contain the empty response that passed serde but failed GraphQL validation
         let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // With validation disabled, should get empty object as response
-        assert!(body.as_object().unwrap().is_empty() || body.get("data").is_some() || body.get("errors").is_some());
+        assert!(
+            body.as_object().unwrap().is_empty()
+                || body.get("data").is_some()
+                || body.get("errors").is_some()
+        );
     }
 
     #[tokio::test]
@@ -2007,15 +2018,20 @@ mod tests {
 
         // Should return 400 due to break
         assert_eq!(res.response.status(), 400);
-        
-        // Body should contain validation error from GraphQL validation failure 
+
+        // Body should contain validation error from GraphQL validation failure
         let body_bytes = get_body_bytes(res.response.into_body()).await.unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // Should contain GraphQL errors from validation failure, not the original empty object
         assert!(body.get("errors").is_some());
         // Verify it's a deserialization error (validation failed)
         let errors = body["errors"].as_array().unwrap();
-        assert!(errors[0]["message"].as_str().unwrap().contains("couldn't deserialize coprocessor output body"));
+        assert!(
+            errors[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[test]
@@ -2116,7 +2132,8 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result = handle_graphql_response(original.clone(), Some(valid_response), false).unwrap();
+        let result =
+            handle_graphql_response(original.clone(), Some(valid_response), false).unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return original when validation disabled
@@ -2124,7 +2141,8 @@ mod tests {
         let invalid_response = json!({
             "errors": "this should be an array not a string"
         });
-        let result = handle_graphql_response(original.clone(), Some(invalid_response), false).unwrap();
+        let result =
+            handle_graphql_response(original.clone(), Some(invalid_response), false).unwrap();
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(result.data, Some(json!({"test": "original"})));
@@ -2138,9 +2156,10 @@ mod tests {
 
         // Empty response violates GraphQL spec (must have data or errors) but should pass serde deserialization
         let empty_response = json!({});
-        let result = handle_graphql_response(original.clone(), Some(empty_response), false).unwrap();
-        
-        // With validation disabled, empty response deserializes successfully via serde 
+        let result =
+            handle_graphql_response(original.clone(), Some(empty_response), false).unwrap();
+
+        // With validation disabled, empty response deserializes successfully via serde
         // (all fields are optional with defaults), resulting in a response with no data/errors
         assert_eq!(result.data, None);
         assert_eq!(result.errors.len(), 0);
@@ -2155,7 +2174,7 @@ mod tests {
         // Empty response should fail strict GraphQL validation
         let empty_response = json!({});
         let result = handle_graphql_response(original.clone(), Some(empty_response), true);
-        
+
         // With validation enabled, should return error due to invalid GraphQL response structure
         assert!(result.is_err());
     }
@@ -2253,7 +2272,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_subgraph_request_invalid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_subgraph_request_invalid_response() -> MockInternalHttpClientService
+    {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -2344,7 +2364,10 @@ mod tests {
 
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
-        assert_eq!(&json!({ "test": 1234_u32 }), res.response.body().data.as_ref().unwrap());
+        assert_eq!(
+            &json!({ "test": 1234_u32 }),
+            res.response.body().data.as_ref().unwrap()
+        );
     }
 
     // ===== SUBGRAPH REQUEST VALIDATION TESTS =====
@@ -2364,7 +2387,10 @@ mod tests {
 
         // Should return 400 due to break with valid GraphQL response
         assert_eq!(res.response.status(), 400);
-        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+        assert_eq!(
+            &json!({"test": "valid_response"}),
+            res.response.body().data.as_ref().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2382,8 +2408,12 @@ mod tests {
 
         // Should return 400 with validation error since empty response violates GraphQL spec
         assert_eq!(res.response.status(), 400);
-        assert!(res.response.body().errors.len() > 0);
-        assert!(res.response.body().errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!res.response.body().errors.is_empty());
+        assert!(
+            res.response.body().errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -2401,8 +2431,12 @@ mod tests {
 
         // Should return 400 with validation error since errors should be array not string
         assert_eq!(res.response.status(), 400);
-        assert!(res.response.body().errors.len() > 0);
-        assert!(res.response.body().errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!res.response.body().errors.is_empty());
+        assert!(
+            res.response.body().errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -2420,7 +2454,10 @@ mod tests {
 
         // Should return 400 due to break with valid response preserved via permissive deserialization
         assert_eq!(res.response.status(), 400);
-        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+        assert_eq!(
+            &json!({"test": "valid_response"}),
+            res.response.body().data.as_ref().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2459,7 +2496,7 @@ mod tests {
         // Should return 400 with fallback to original response since invalid structure can't deserialize
         assert_eq!(res.response.status(), 400);
         // Falls back to original response since permissive deserialization fails too
-        assert!(res.response.body().data.is_some() || res.response.body().errors.len() > 0);
+        assert!(res.response.body().data.is_some() || !res.response.body().errors.is_empty());
     }
 
     // ===== SUBGRAPH RESPONSE VALIDATION TESTS =====
@@ -2478,7 +2515,10 @@ mod tests {
         let res = service.oneshot(request).await.unwrap();
 
         // With validation enabled, valid GraphQL response should be processed normally
-        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+        assert_eq!(
+            &json!({"test": "valid_response"}),
+            res.response.body().data.as_ref().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2492,7 +2532,7 @@ mod tests {
         );
 
         let request = subgraph::Request::fake_builder().build();
-        
+
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
@@ -2509,7 +2549,7 @@ mod tests {
         );
 
         let request = subgraph::Request::fake_builder().build();
-        
+
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
@@ -2529,7 +2569,10 @@ mod tests {
         let res = service.oneshot(request).await.unwrap();
 
         // With validation disabled, valid response processed via permissive deserialization
-        assert_eq!(&json!({"test": "valid_response"}), res.response.body().data.as_ref().unwrap());
+        assert_eq!(
+            &json!({"test": "valid_response"}),
+            res.response.body().data.as_ref().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2550,7 +2593,6 @@ mod tests {
         assert_eq!(res.response.body().data, None);
         assert_eq!(res.response.body().errors.len(), 0);
     }
-
 
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(

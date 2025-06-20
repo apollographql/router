@@ -1372,7 +1372,9 @@ pub(super) fn handle_graphql_response(
             } else {
                 // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
                 match serde_json_bytes::from_value::<graphql::Response>(value) {
-                    Ok(new_body) => apply_response_post_processing(new_body, &original_response_body),
+                    Ok(new_body) => {
+                        apply_response_post_processing(new_body, &original_response_body)
+                    }
                     Err(_) => {
                         // If deserialization fails completely, return original response
                         original_response_body

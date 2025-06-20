@@ -509,8 +509,11 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response =
-                    handle_graphql_response(deferred_response, co_processor_output.body, response_validation)?;
+                let new_deferred_response = handle_graphql_response(
+                    deferred_response,
+                    co_processor_output.body,
+                    response_validation,
+                )?;
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {
@@ -725,7 +728,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -803,7 +807,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -880,7 +885,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let crate::services::supergraph::Response { context, .. } =
@@ -991,7 +997,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1104,7 +1111,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1220,7 +1228,8 @@ mod tests {
             mock_http_client,
             mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            Arc::new("".to_string()), true,
+            Arc::new("".to_string()),
+            true,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1293,7 +1302,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
-    fn create_mock_http_client_supergraph_request_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_supergraph_request_valid_response() -> MockInternalHttpClientService
+    {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1315,7 +1325,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL break response
-    fn create_mock_http_client_supergraph_request_empty_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_supergraph_request_empty_response() -> MockInternalHttpClientService
+    {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1335,7 +1346,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_supergraph_request_invalid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_supergraph_request_invalid_response() -> MockInternalHttpClientService
+    {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1357,7 +1369,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_supergraph_response_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_supergraph_response_valid_response() -> MockInternalHttpClientService
+    {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -1487,8 +1500,12 @@ mod tests {
         // Should return 400 with validation error since empty response violates GraphQL spec
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert!(body.errors.len() > 0);
-        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -1507,8 +1524,12 @@ mod tests {
         // Should return 400 with validation error since errors should be array not string
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert!(body.errors.len() > 0);
-        assert!(body.errors[0].message.contains("couldn't deserialize coprocessor output body"));
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
     }
 
     #[tokio::test]
@@ -1568,7 +1589,7 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         // Falls back to original response since permissive deserialization fails too
-        assert!(body.data.is_some() || body.errors.len() > 0);
+        assert!(body.data.is_some() || !body.errors.is_empty());
     }
 
     // ===== SUPERGRAPH RESPONSE VALIDATION TESTS =====
@@ -1602,7 +1623,7 @@ mod tests {
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
-        
+
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
@@ -1619,7 +1640,7 @@ mod tests {
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
-        
+
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
