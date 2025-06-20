@@ -1247,9 +1247,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn external_plugin_supergraph_response_validation_disabled() {
-        let supergraph_stage = SupergraphStage {
+    // Helper function to create supergraph stage for validation tests
+    fn create_supergraph_stage_for_validation_test() -> SupergraphStage {
+        SupergraphStage {
             request: Default::default(),
             response: SupergraphResponseConf {
                 condition: None,
@@ -1259,10 +1259,12 @@ mod tests {
                 sdl: true,
                 status_code: false,
             },
-        };
+        }
+    }
 
+    // Helper function to create mock supergraph service
+    fn create_mock_supergraph_service() -> MockSupergraphService {
         let mut mock_supergraph_service = MockSupergraphService::new();
-
         mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
@@ -1272,96 +1274,75 @@ mod tests {
                     .build()
                     .unwrap())
             });
+        mock_supergraph_service
+    }
 
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    // Helper function to create mock http client that returns invalid GraphQL response
+    fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                // Return invalid GraphQL structure that should fall back to original when validation disabled
                 let input = json!({
                     "version": 1,
                     "stage": "SupergraphResponse",
                     "control": "continue",
                     "body": {
-                        "errors": "this should be an array not a string" // Invalid structure
+                        "errors": "this should be an array not a string"
                     }
                 });
                 Ok(http::Response::builder()
                     .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
-        });
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed(),
-            "http://test".to_string(),
-            Arc::default(),
-            false, // Validation disabled
-        );
-
-        let request = supergraph::Request::fake_builder().build().unwrap();
-
-        let mut res = service.oneshot(request).await.unwrap();
-
-        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
-        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
-        let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(
-            json!({ "test": 1234_u32 }),
-            body.data.unwrap()
-        );
+        })
     }
 
-    #[tokio::test]
-    async fn external_plugin_supergraph_response_validation_disabled_empty_response() {
-        let supergraph_stage = SupergraphStage {
-            request: Default::default(),
-            response: SupergraphResponseConf {
-                condition: None,
-                headers: true,
-                context: true,
-                body: true,
-                sdl: true,
-                status_code: false,
-            },
-        };
-
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    // Helper function to create mock http client that returns empty response
+    fn create_mock_http_client_empty_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                // Return empty response - violates GraphQL spec but should pass serde deserialization
                 let input = json!({
                     "version": 1,
                     "stage": "SupergraphResponse",
                     "control": "continue",
-                    "body": {} // Empty response
+                    "body": {}
                 });
                 Ok(http::Response::builder()
                     .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
-        });
+        })
+    }
 
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed(),
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_disabled() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_invalid_response(),
+            create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
+        let mut res = service.oneshot(request).await.unwrap();
 
+        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
+        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_validation_disabled_empty_response() {
+        let service = create_supergraph_stage_for_validation_test().as_service(
+            create_mock_http_client_empty_response(),
+            create_mock_supergraph_service().boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+            false, // Validation disabled
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
         let mut res = service.oneshot(request).await.unwrap();
 
         // With validation disabled, empty response deserializes successfully via serde

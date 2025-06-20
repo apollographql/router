@@ -1038,9 +1038,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn external_plugin_execution_response_validation_disabled() {
-        let execution_stage = ExecutionStage {
+    // Helper function to create execution stage for validation tests
+    fn create_execution_stage_for_validation_test() -> ExecutionStage {
+        ExecutionStage {
             request: Default::default(),
             response: ExecutionResponseConf {
                 headers: true,
@@ -1049,10 +1049,12 @@ mod tests {
                 sdl: true,
                 status_code: false,
             },
-        };
+        }
+    }
 
+    // Helper function to create mock execution service
+    fn create_mock_execution_service() -> MockExecutionService {
         let mut mock_execution_service = MockExecutionService::new();
-
         mock_execution_service
             .expect_call()
             .returning(|req: execution::Request| {
@@ -1064,97 +1066,75 @@ mod tests {
                     .build()
                     .unwrap())
             });
+        mock_execution_service
+    }
 
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    // Helper function to create mock http client that returns invalid GraphQL response
+    fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                // Return invalid GraphQL structure that should fall back to original when validation disabled
                 let input = json!({
                     "version": 1,
                     "stage": "ExecutionResponse",
                     "control": "continue",
                     "body": {
-                        "errors": "this should be an array not a string" // Invalid structure
+                        "errors": "this should be an array not a string"
                     }
                 });
                 Ok(http::Response::builder()
                     .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
-        });
-
-        let service = execution_stage.as_service(
-            mock_http_client,
-            mock_execution_service.boxed(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
-        );
-
-        let request = execution::Request::fake_builder().build();
-
-        let mut res = service.oneshot(request).await.unwrap();
-
-        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
-        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
-        let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(
-            json!({ "test": 1234_u32 }),
-            body.data.unwrap()
-        );
+        })
     }
 
-    #[tokio::test]
-    async fn external_plugin_execution_response_validation_disabled_empty_response() {
-        let execution_stage = ExecutionStage {
-            request: Default::default(),
-            response: ExecutionResponseConf {
-                headers: true,
-                context: true,
-                body: true,
-                sdl: true,
-                status_code: false,
-            },
-        };
-
-        let mut mock_execution_service = MockExecutionService::new();
-
-        mock_execution_service
-            .expect_call()
-            .returning(|req: execution::Request| {
-                Ok(execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    // Helper function to create mock http client that returns empty response
+    fn create_mock_http_client_empty_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                // Return empty response - violates GraphQL spec but should pass serde deserialization
                 let input = json!({
                     "version": 1,
                     "stage": "ExecutionResponse",
                     "control": "continue",
-                    "body": {} // Empty response
+                    "body": {}
                 });
                 Ok(http::Response::builder()
                     .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
-        });
+        })
+    }
 
-        let service = execution_stage.as_service(
-            mock_http_client,
-            mock_execution_service.boxed(),
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_disabled() {
+        let service = create_execution_stage_for_validation_test().as_service(
+            create_mock_http_client_invalid_response(),
+            create_mock_execution_service().boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
         );
 
         let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
 
+        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
+        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_disabled_empty_response() {
+        let service = create_execution_stage_for_validation_test().as_service(
+            create_mock_http_client_empty_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
         let mut res = service.oneshot(request).await.unwrap();
 
         // With validation disabled, empty response deserializes successfully via serde

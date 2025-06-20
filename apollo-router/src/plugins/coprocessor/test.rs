@@ -1790,9 +1790,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn external_plugin_subgraph_response_validation_disabled() {
-        let subgraph_stage = SubgraphStage {
+    // Helper function to create subgraph stage for validation tests
+    fn create_subgraph_stage_for_validation_test() -> SubgraphStage {
+        SubgraphStage {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: None,
@@ -1803,10 +1803,12 @@ mod tests {
                 status_code: false,
                 subgraph_request_id: false,
             },
-        };
+        }
+    }
 
+    // Helper function to create mock subgraph service
+    fn create_mock_subgraph_service() -> MockSubgraphService {
         let mut mock_subgraph_service = MockSubgraphService::new();
-
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
@@ -1818,42 +1820,44 @@ mod tests {
                     .id(req.id)
                     .build())
             });
+        mock_subgraph_service
+    }
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+    // Helper function to create mock http client that returns invalid GraphQL response
+    fn create_mock_http_client_invalid_subgraph_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                // Return invalid GraphQL structure that should fall back to original when validation disabled
                 let input = json!({
                     "version": 1,
                     "stage": "SubgraphResponse",
                     "control": "continue",
                     "body": {
-                        "errors": "this should be an array not a string" // Invalid structure
+                        "errors": "this should be an array not a string"
                     }
                 });
                 Ok(http::Response::builder()
                     .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
-        });
+        })
+    }
 
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed(),
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_disabled() {
+        let service = create_subgraph_stage_for_validation_test().as_service(
+            create_mock_http_client_invalid_subgraph_response(),
+            create_mock_subgraph_service().boxed(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
         );
 
         let request = subgraph::Request::fake_builder().build();
-
         let res = service.oneshot(request).await.unwrap();
 
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
-        assert_eq!(
-            &json!({ "test": 1234_u32 }),
-            res.response.body().data.as_ref().unwrap()
-        );
+        assert_eq!(&json!({ "test": 1234_u32 }), res.response.body().data.as_ref().unwrap());
     }
 
 
