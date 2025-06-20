@@ -1,14 +1,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_federation::connectors::ApplyToError;
-use apollo_federation::connectors::HTTPMethod;
-use apollo_federation::connectors::Header;
-use apollo_federation::connectors::HeaderSource;
-use apollo_federation::connectors::HttpJsonTransport;
-use apollo_federation::connectors::MakeUriError;
-use apollo_federation::connectors::OriginatingDirective;
-use apollo_federation::connectors::ProblemLocation;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
@@ -19,16 +11,65 @@ use serde_json_bytes::json;
 use thiserror::Error;
 
 use super::form_encoding::encode_json_as_form;
-use super::mapping::aggregate_apply_to_errors_with_problem_locations;
-use super::plugin::debug::ConnectorDebugHttpRequest;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::SelectionData;
-use crate::services::connector::request_service::TransportRequest;
-use crate::services::connector::request_service::transport::http::HttpRequest;
+use crate::connectors::ApplyToError;
+use crate::connectors::HTTPMethod;
+use crate::connectors::Header;
+use crate::connectors::HeaderSource;
+use crate::connectors::HttpJsonTransport;
+use crate::connectors::MakeUriError;
+use crate::connectors::OriginatingDirective;
+use crate::connectors::ProblemLocation;
+use crate::connectors::runtime::debug::ConnectorContext;
+use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use crate::connectors::runtime::debug::SelectionData;
+use crate::connectors::runtime::mapping::Problem;
+use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
+use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_locations;
 
-pub(crate) fn make_request(
+/// Request to an HTTP transport
+#[derive(Debug)]
+pub struct HttpRequest {
+    pub inner: http::Request<String>,
+    pub debug: (
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
+}
+
+/// Response from an HTTP transport
+#[derive(Debug)]
+pub struct HttpResponse {
+    /// The response parts - the body is consumed by applying the JSON mapping
+    pub inner: http::response::Parts,
+}
+
+/// Request to an underlying transport
+#[derive(Debug)]
+pub enum TransportRequest {
+    /// A request to an HTTP transport
+    Http(HttpRequest),
+}
+
+/// Response from an underlying transport
+#[derive(Debug)]
+pub enum TransportResponse {
+    /// A response from an HTTP transport
+    Http(HttpResponse),
+}
+
+impl From<HttpRequest> for TransportRequest {
+    fn from(value: HttpRequest) -> Self {
+        Self::Http(value)
+    }
+}
+
+impl From<HttpResponse> for TransportResponse {
+    fn from(value: HttpResponse) -> Self {
+        Self::Http(value)
+    }
+}
+
+pub fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     client_headers: &HeaderMap<HeaderValue>,
@@ -103,9 +144,7 @@ pub(crate) fn make_request(
             Box::new(ConnectorDebugHttpRequest::new(
                 &request,
                 "form-urlencoded".to_string(),
-                form_body
-                    .map(|s| serde_json_bytes::Value::String(s.clone().into()))
-                    .as_ref(),
+                form_body.map(|s| Value::String(s.into())).as_ref(),
                 transport.body.as_ref().map(|body| SelectionData {
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
@@ -165,25 +204,15 @@ fn add_headers(
             }
             HeaderSource::Value(value) => match value.interpolate(inputs) {
                 Ok((value, apply_to_errors)) => {
-                    warnings.extend(
-                        apply_to_errors
-                            .iter()
-                            .cloned()
-                            .map(|e| {
-                                (
-                                    match header.originating_directive {
-                                        OriginatingDirective::Source => {
-                                            ProblemLocation::SourceHeaders
-                                        }
-                                        OriginatingDirective::Connect => {
-                                            ProblemLocation::ConnectHeaders
-                                        }
-                                    },
-                                    e,
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    );
+                    warnings.extend(apply_to_errors.iter().cloned().map(|e| {
+                        (
+                            match header.originating_directive {
+                                OriginatingDirective::Source => ProblemLocation::SourceHeaders,
+                                OriginatingDirective::Connect => ProblemLocation::ConnectHeaders,
+                            },
+                            e,
+                        )
+                    }));
 
                     if header.name == CONTENT_TYPE {
                         content_type = Some(value.clone());
@@ -206,7 +235,7 @@ fn add_headers(
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum HttpJsonTransportError {
+pub enum HttpJsonTransportError {
     #[error("Could not generate HTTP request: {0}")]
     InvalidNewRequest(#[source] http::Error),
     #[error("Could not serialize body: {0}")]
@@ -221,16 +250,16 @@ pub(crate) enum HttpJsonTransportError {
 mod tests {
     use std::str::FromStr;
 
-    use apollo_federation::connectors::HTTPMethod;
-    use apollo_federation::connectors::HeaderSource;
-    use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;
     use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::connectors::HTTPMethod;
+    use crate::connectors::HeaderSource;
+    use crate::connectors::JSONSelection;
+    use crate::connectors::StringTemplate;
 
     #[test]
     fn test_headers_to_add_no_directives() {

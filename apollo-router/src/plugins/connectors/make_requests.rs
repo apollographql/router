@@ -7,15 +7,15 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
+use apollo_federation::connectors::runtime::http_json_transport::make_request;
 use apollo_federation::connectors::runtime::inputs::RequestInputs;
 use parking_lot::Mutex;
 
-use super::http_json_transport::HttpJsonTransportError;
-use super::http_json_transport::make_request;
 use crate::Context;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
 
@@ -671,13 +671,13 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use http::Uri;
     use insta::assert_debug_snapshot;
 
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
-    use crate::services::connector::request_service::TransportRequest;
 
     #[test]
     fn test_root_fields_simple() {
