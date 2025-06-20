@@ -1340,6 +1340,25 @@ pub(super) fn internalize_header_map(
     Ok(output)
 }
 
+// Helper function to apply common post-processing to deserialized GraphQL responses
+fn apply_response_post_processing(
+    mut new_body: graphql::Response,
+    original_response_body: &graphql::Response,
+) -> graphql::Response {
+    // Needs to take back these 2 fields because it's skipped by serde
+    new_body.subscribed = original_response_body.subscribed;
+    new_body.created_at = original_response_body.created_at;
+    // Required because for subscription if data is Some(Null) it won't cut the subscription
+    // And in some languages they don't have any differences between Some(Null) and Null
+    if original_response_body.data == Some(Value::Null)
+        && new_body.data.is_none()
+        && new_body.subscribed == Some(true)
+    {
+        new_body.data = Some(Value::Null);
+    }
+    new_body
+}
+
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
     copro_response_body: Option<Value>,
@@ -1348,36 +1367,12 @@ pub(super) fn handle_graphql_response(
     Ok(match copro_response_body {
         Some(value) => {
             if response_validation {
-                let mut new_body = graphql::Response::from_value(value)?;
-                // Needs to take back these 2 fields because it's skipped by serde
-                new_body.subscribed = original_response_body.subscribed;
-                new_body.created_at = original_response_body.created_at;
-                // Required because for subscription if data is Some(Null) it won't cut the subscription
-                // And in some languages they don't have any differences between Some(Null) and Null
-                if original_response_body.data == Some(Value::Null)
-                    && new_body.data.is_none()
-                    && new_body.subscribed == Some(true)
-                {
-                    new_body.data = Some(Value::Null);
-                }
-                new_body
+                let new_body = graphql::Response::from_value(value)?;
+                apply_response_post_processing(new_body, &original_response_body)
             } else {
                 // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
                 match serde_json_bytes::from_value::<graphql::Response>(value) {
-                    Ok(mut new_body) => {
-                        // Needs to take back these 2 fields because it's skipped by serde
-                        new_body.subscribed = original_response_body.subscribed;
-                        new_body.created_at = original_response_body.created_at;
-                        // Required because for subscription if data is Some(Null) it won't cut the subscription
-                        // And in some languages they don't have any differences between Some(Null) and Null
-                        if original_response_body.data == Some(Value::Null)
-                            && new_body.data.is_none()
-                            && new_body.subscribed == Some(true)
-                        {
-                            new_body.data = Some(Value::Null);
-                        }
-                        new_body
-                    }
+                    Ok(new_body) => apply_response_post_processing(new_body, &original_response_body),
                     Err(_) => {
                         // If deserialization fails completely, return original response
                         original_response_body
