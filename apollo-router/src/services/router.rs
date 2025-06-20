@@ -28,7 +28,7 @@ use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
+use crate::context::{CONTAINS_GRAPHQL_ERROR, ROUTER_RESPONSE_ERRORS};
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
@@ -237,6 +237,15 @@ impl Response {
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            // This is ONLY guaranteed to capture errors if any were added during router service
+            // processing. We will sometimes avoid this path if no router service errors exist, even
+            // if errors were passed from the supergraph service, because that path builds the
+            // router::Response using parts_new(). This is ok because we only need this context to
+            // count errors introduced in the router service; however, it means that we handle error
+            // counting differently in this layer than others.
+            context
+                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .expect("Unable to serialize router response errors list for context");
         }
 
         // Build a response
@@ -323,6 +332,15 @@ impl Response {
     ) -> Self {
         if !errors.is_empty() {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            // This is ONLY guaranteed to capture errors if any were added during router service
+            // processing. We will sometimes avoid this path if no router service errors exist, even
+            // if errors were passed from the supergraph service, because that path builds the
+            // router::Response using parts_new(). This is ok because we only need this context to
+            // count errors introduced in the router service; however, it means that we handle error
+            // counting differently in this layer than others.
+            context
+                .insert(ROUTER_RESPONSE_ERRORS, errors.clone())
+                .expect("Unable to serialize router response errors list for context");
         }
 
         // Build a response

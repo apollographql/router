@@ -290,6 +290,7 @@ mod test {
     use crate::plugins::telemetry::error_counter::count_supergraph_errors;
     use crate::plugins::telemetry::error_counter::unwrap_from_context;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::SupergraphResponse;
 
     #[tokio::test]
