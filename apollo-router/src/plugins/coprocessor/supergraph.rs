@@ -426,11 +426,14 @@ where
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
 
+    // Check if the incoming GraphQL response was valid according to GraphQL spec
+    let incoming_payload_was_valid = crate::plugins::coprocessor::was_incoming_payload_valid(&first, response_config.body);
+
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(first, co_processor_output.body, response_validation)?;
+    let new_body = handle_graphql_response(first, co_processor_output.body, response_validation, incoming_payload_was_valid)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
@@ -505,6 +508,9 @@ where
                     PipelineStep::SupergraphResponse,
                 )?;
 
+                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                let incoming_payload_was_valid = crate::plugins::coprocessor::was_incoming_payload_valid(&deferred_response, response_config.body);
+
                 // Third, process our reply and act on the contents. Our processing logic is
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
@@ -513,6 +519,7 @@ where
                     deferred_response,
                     co_processor_output.body,
                     response_validation,
+                    incoming_payload_was_valid,
                 )?;
 
                 if let Some(context) = co_processor_output.context {

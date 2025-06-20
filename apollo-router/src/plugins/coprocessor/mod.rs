@@ -1266,12 +1266,15 @@ where
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
+    // Check if the incoming GraphQL response was valid according to GraphQL spec
+    let incoming_payload_was_valid = was_incoming_payload_valid(&body, response_config.body);
+
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body = handle_graphql_response(body, co_processor_output.body, response_validation)?;
+    let new_body = handle_graphql_response(body, co_processor_output.body, response_validation, incoming_payload_was_valid)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1359,14 +1362,44 @@ fn apply_response_post_processing(
     new_body
 }
 
+/// Check if a GraphQL response is minimally valid according to the GraphQL spec.
+/// A response is invalid if it has no data AND no errors.
+pub(super) fn is_graphql_response_minimally_valid(response: &graphql::Response) -> bool {
+    // According to GraphQL spec, a response without data must contain at least one error
+    response.data.is_some() || !response.errors.is_empty()
+}
+
+/// Check if the incoming payload was valid for conditional validation purposes.
+/// Returns true if body was not sent to coprocessor OR if the response is minimally valid.
+pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_sent: bool) -> bool {
+    if body_sent {
+        // If we sent the body to the coprocessor, check if it was minimally valid
+        is_graphql_response_minimally_valid(response)
+    } else {
+        // If we didn't send the body, assume it was valid
+        true
+    }
+}
+
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
     copro_response_body: Option<Value>,
     response_validation: bool,
+    incoming_payload_was_valid: bool,
 ) -> Result<graphql::Response, BoxError> {
+    // Enable conditional validation: only validate coprocessor responses when the incoming payload was valid.
+    // This prevents validation failures for responses that were already invalid before being sent to the coprocessor.
+    // Set to false to restore the previous behavior of always validating coprocessor responses when response_validation is true.
+    const ENABLE_CONDITIONAL_VALIDATION: bool = true;
+    
+    // Only apply validation if response_validation is enabled AND either:
+    // 1. Conditional validation is disabled, OR
+    // 2. The incoming payload to the coprocessor was valid
+    let should_validate = response_validation && (!ENABLE_CONDITIONAL_VALIDATION || incoming_payload_was_valid);
+    
     Ok(match copro_response_body {
         Some(value) => {
-            if response_validation {
+            if should_validate {
                 let new_body = graphql::Response::from_value(value)?;
                 apply_response_post_processing(new_body, &original_response_body)
             } else {

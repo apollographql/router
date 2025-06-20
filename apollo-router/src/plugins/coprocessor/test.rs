@@ -27,6 +27,9 @@ mod tests {
     use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
+    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
+    use crate::plugins::coprocessor::was_incoming_payload_valid;
+    use crate::plugins::coprocessor::handle_graphql_response;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
@@ -2111,14 +2114,14 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result = handle_graphql_response(original.clone(), Some(valid_response), true).unwrap();
+        let result = handle_graphql_response(original.clone(), Some(valid_response), true, true).unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return error when validation enabled
         let invalid_response = json!({
             "invalid": "structure"
         });
-        let result = handle_graphql_response(original.clone(), Some(invalid_response), true);
+        let result = handle_graphql_response(original.clone(), Some(invalid_response), true, true);
         assert!(result.is_err());
     }
 
@@ -2133,7 +2136,7 @@ mod tests {
             "data": {"test": "modified"}
         });
         let result =
-            handle_graphql_response(original.clone(), Some(valid_response), false).unwrap();
+            handle_graphql_response(original.clone(), Some(valid_response), false, true).unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return original when validation disabled
@@ -2142,7 +2145,7 @@ mod tests {
             "errors": "this should be an array not a string"
         });
         let result =
-            handle_graphql_response(original.clone(), Some(invalid_response), false).unwrap();
+            handle_graphql_response(original.clone(), Some(invalid_response), false, true).unwrap();
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(result.data, Some(json!({"test": "original"})));
@@ -2157,7 +2160,7 @@ mod tests {
         // Empty response violates GraphQL spec (must have data or errors) but should pass serde deserialization
         let empty_response = json!({});
         let result =
-            handle_graphql_response(original.clone(), Some(empty_response), false).unwrap();
+            handle_graphql_response(original.clone(), Some(empty_response), false, true).unwrap();
 
         // With validation disabled, empty response deserializes successfully via serde
         // (all fields are optional with defaults), resulting in a response with no data/errors
@@ -2173,7 +2176,7 @@ mod tests {
 
         // Empty response should fail strict GraphQL validation
         let empty_response = json!({});
-        let result = handle_graphql_response(original.clone(), Some(empty_response), true);
+        let result = handle_graphql_response(original.clone(), Some(empty_response), true, true);
 
         // With validation enabled, should return error due to invalid GraphQL response structure
         assert!(result.is_err());
@@ -2636,5 +2639,66 @@ mod tests {
         });
 
         mock_http_client
+    }
+
+    // Tests for conditional validation based on incoming payload validity
+
+    // Helper functions for readable tests
+    fn valid_response() -> crate::graphql::Response {
+        crate::graphql::Response::builder()
+            .data(json!({"field": "value"}))
+            .build()
+    }
+
+    fn valid_response_with_errors() -> crate::graphql::Response {
+        use crate::graphql::Error;
+        crate::graphql::Response::builder()
+            .errors(vec![Error::builder().message("error").extension_code("TEST").build()])
+            .build()
+    }
+
+    fn invalid_response() -> crate::graphql::Response {
+        crate::graphql::Response::builder().build() // No data, no errors
+    }
+
+    fn valid_copro_body() -> Value {
+        json!({"data": {"field": "new_value"}})
+    }
+
+    fn invalid_copro_body() -> Value {
+        json!({}) // No data, no errors
+    }
+
+    #[test]
+    fn test_minimal_graphql_validation() {
+        assert!(is_graphql_response_minimally_valid(&valid_response()));
+        assert!(is_graphql_response_minimally_valid(&valid_response_with_errors()));
+        assert!(!is_graphql_response_minimally_valid(&invalid_response()));
+    }
+
+    #[test]
+    fn test_was_incoming_payload_valid() {
+        // When body is not sent, always return true
+        assert!(was_incoming_payload_valid(&valid_response(), false));
+        assert!(was_incoming_payload_valid(&invalid_response(), false));
+        
+        // When body is sent, check validity
+        assert!(was_incoming_payload_valid(&valid_response(), true));
+        assert!(!was_incoming_payload_valid(&invalid_response(), true));
+    }
+
+    #[test]
+    fn test_conditional_validation_logic() {
+        // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
+        assert!(handle_graphql_response(invalid_response(), Some(invalid_copro_body()), true, false).is_ok());
+        
+        // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
+        assert!(handle_graphql_response(valid_response(), Some(invalid_copro_body()), true, true).is_err());
+        
+        // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
+        assert!(handle_graphql_response(valid_response(), Some(valid_copro_body()), true, true).is_ok());
+        
+        // Validation disabled = always bypassed (succeeds regardless)
+        assert!(handle_graphql_response(valid_response(), Some(invalid_copro_body()), false, true).is_ok());
     }
 }
