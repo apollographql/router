@@ -1755,9 +1755,107 @@ mod tests {
             "errors": "this should be an array not a string"
         });
         let result = handle_graphql_response(original.clone(), Some(invalid_response), false).unwrap();
-        // Should fall back to original response since deserialization fails
+        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
+        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(result.data, Some(json!({"test": "original"})));
     }
+
+    #[test]
+    fn test_handle_graphql_response_validation_disabled_empty_response() {
+        let original = graphql::Response::builder()
+            .data(json!({"test": "original"}))
+            .build();
+
+        // Empty response violates GraphQL spec (must have data or errors) but should pass serde deserialization
+        let empty_response = json!({});
+        let result = handle_graphql_response(original.clone(), Some(empty_response), false).unwrap();
+        
+        // With validation disabled, empty response deserializes successfully via serde 
+        // (all fields are optional with defaults), resulting in a response with no data/errors
+        assert_eq!(result.data, None);
+        assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_handle_graphql_response_validation_enabled_empty_response() {
+        let original = graphql::Response::builder()
+            .data(json!({"test": "original"}))
+            .build();
+
+        // Empty response should fail strict GraphQL validation
+        let empty_response = json!({});
+        let result = handle_graphql_response(original.clone(), Some(empty_response), true);
+        
+        // With validation enabled, should return error due to invalid GraphQL response structure
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_validation_disabled() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: None,
+                headers: true,
+                context: true,
+                body: true,
+                service_name: false,
+                status_code: false,
+                subgraph_request_id: false,
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                // Return invalid GraphQL structure that should fall back to original when validation disabled
+                let input = json!({
+                    "version": 1,
+                    "stage": "SubgraphResponse",
+                    "control": "continue",
+                    "body": {
+                        "errors": "this should be an array not a string" // Invalid structure
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Validation disabled
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
+        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
+        assert_eq!(
+            &json!({ "test": 1234_u32 }),
+            res.response.body().data.as_ref().unwrap()
+        );
+    }
+
 
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(
