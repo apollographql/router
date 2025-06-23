@@ -141,11 +141,12 @@ fn gt_shape(
     if is_comparable_shape_combination(&arg_shape, &input_shape) {
         Shape::bool(method_name.shape_location(source_id))
     } else {
-        Shape::error(
+        Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare two numbers or two strings. Found {input_shape} > {arg_shape}",
                 method_name.as_ref()
             ),
+            Shape::bool(method_name.shape_location(source_id)),
             method_name.shape_location(source_id),
         )
     }
