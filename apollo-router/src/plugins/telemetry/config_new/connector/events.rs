@@ -141,12 +141,12 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::Request;
