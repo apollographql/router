@@ -163,7 +163,7 @@ impl Response {
 
 impl ErrorExtension for Error {
     fn extension_code(&self) -> String {
-        self.code()
+        self.code().to_string()
     }
 }
 

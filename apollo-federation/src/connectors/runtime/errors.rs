@@ -48,7 +48,7 @@ impl RuntimeError {
 
 /// An error sending a connector request. This represents a problem with sending the request
 /// to the connector, rather than an error returned from the connector itself.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("Request limit exceeded")]
     RequestLimitExceeded,
@@ -56,11 +56,9 @@ pub enum Error {
     #[error("Rate limit exceeded")]
     RateLimited,
 
-    /// Timeout
-    #[error("Request timed out")]
+    #[error("Gateway timeout")]
     GatewayTimeout,
 
-    /// {0}
     #[error("Connector error: {0}")]
     TransportFailure(String),
 }
@@ -73,7 +71,7 @@ impl Error {
     ) -> RuntimeError {
         RuntimeError {
             message: self.to_string(),
-            code: Some(self.code()),
+            code: Some(self.code().to_string()),
             coordinate: Some(connector.id.coordinate()),
             subgraph_name: Some(connector.id.subgraph_name.clone()),
             path: response_key.path_string(),
@@ -81,21 +79,12 @@ impl Error {
         }
     }
 
-    pub fn code(&self) -> String {
+    pub fn code(&self) -> &'static str {
         match self {
-            Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED".to_string(),
-            Self::RateLimited => "RATE_LIMIT_EXCEEDED".to_string(),
-            Self::GatewayTimeout => "GATEWAY_TIMEOUT".to_string(),
-            Self::TransportFailure(_) => "HTTP_CLIENT_ERROR".to_string(),
-        }
-    }
-}
-
-impl Clone for Error {
-    fn clone(&self) -> Self {
-        match self {
-            Self::TransportFailure(err) => Self::TransportFailure(err.to_string()),
-            err => err.clone(),
+            Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
+            Self::RateLimited => "REQUEST_RATE_LIMITED",
+            Self::GatewayTimeout => "GATEWAY_TIMEOUT",
+            Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
         }
     }
 }

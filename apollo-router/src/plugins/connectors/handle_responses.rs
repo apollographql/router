@@ -78,8 +78,13 @@ impl graphql::Error {
             );
         }
 
-        err.build()
-            .with_subgraph_name(error.subgraph_name.as_deref().unwrap_or_default())
+        let err = err.build();
+
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err.with_subgraph_name(subgraph_name)
+        } else {
+            err
+        }
     }
 }
 
