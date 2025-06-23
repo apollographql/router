@@ -1511,14 +1511,14 @@ mod tests {
                                 "http": Object({
                                     "status": Number(404),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
@@ -1547,14 +1547,14 @@ mod tests {
                                 "http": Object({
                                     "status": Number(500),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
