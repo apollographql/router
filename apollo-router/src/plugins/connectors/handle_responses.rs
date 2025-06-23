@@ -2,6 +2,7 @@ use std::cell::LazyCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
+use apollo_federation::connectors::runtime::inputs::ContextReader;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::JSONSelection;
 use apollo_federation::connectors::ProblemLocation;
@@ -20,6 +21,8 @@ use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
+use http::HeaderMap;
+use http::HeaderValue;
 use itertools::Itertools;
 use mime::Mime;
 use opentelemetry::KeyValue;
@@ -124,9 +127,9 @@ impl RawResponse {
         self,
         result: Result<TransportResponse, Error>,
         connector: &Connector,
-        context: &Context,
+        context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+        client_headers: &HeaderMap<HeaderValue>,
     ) -> (MappedResponse, Result<TransportResponse, Error>) {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
@@ -143,7 +146,7 @@ impl RawResponse {
                     .config(connector.config.as_ref())
                     .context(context)
                     .status(parts.status.as_u16())
-                    .request(&connector.response_headers, supergraph_request.headers())
+                    .request(&connector.response_headers, client_headers)
                     .response(&connector.response_headers, Some(&parts))
                     .env(&connector.env)
                     .merge();
@@ -192,9 +195,9 @@ impl RawResponse {
         self,
         result: Result<TransportResponse, Error>,
         connector: &Connector,
-        context: &Context,
+        context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+        client_headers: &HeaderMap<HeaderValue>,
     ) -> (MappedResponse, Result<TransportResponse, Error>) {
         use serde_json_bytes::*;
 
@@ -215,7 +218,7 @@ impl RawResponse {
                         .config(connector.config.as_ref())
                         .context(context)
                         .status(parts.status.as_u16())
-                        .request(&connector.response_headers, supergraph_request.headers())
+                        .request(&connector.response_headers, client_headers)
                         .response(&connector.response_headers, Some(&parts))
                         .merge()
                 });
@@ -500,7 +503,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                 &connector,
                 context,
                 debug_context,
-                supergraph_request,
+                supergraph_request.headers(),
             )
         }
         Ok(response) => {
@@ -546,7 +549,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                     &connector,
                     context,
                     debug_context,
-                    supergraph_request,
+                    supergraph_request.headers(),
                 )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -555,7 +558,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                     &connector,
                     context,
                     debug_context,
-                    supergraph_request,
+                    supergraph_request.headers(),
                 )
             }
         }
