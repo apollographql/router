@@ -13,6 +13,7 @@ use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::RawResponse;
+use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
@@ -101,12 +102,14 @@ pub(crate) async fn process_response<T: HttpBody>(
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            raw.map_error(
+            (
+                raw.map_error(
+                    &connector,
+                    context,
+                    debug_context,
+                    supergraph_request.headers(),
+                ),
                 Err(error),
-                &connector,
-                context,
-                debug_context,
-                supergraph_request.headers(),
             )
         }
         Ok(response) => {
@@ -141,29 +144,22 @@ pub(crate) async fn process_response<T: HttpBody>(
                     key: response_key,
                 },
             };
-            let is_success = match &raw {
-                RawResponse::Error { .. } => false,
-                RawResponse::Data { parts, .. } => parts.status.is_success(),
-            };
+
+            let (mapped, is_success) = handle_raw_response(
+                raw,
+                &connector,
+                context,
+                debug_context,
+                supergraph_request.headers(),
+            );
+
             if is_success {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                raw.map_response(
-                    result,
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                raw.map_error(
-                    result,
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                )
-            }
+            };
+
+            (mapped, result)
         }
     };
 

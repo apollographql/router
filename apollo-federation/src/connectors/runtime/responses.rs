@@ -7,6 +7,7 @@ use http::HeaderValue;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use crate::connectors::Connector;
@@ -15,9 +16,7 @@ use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::debug::ConnectorContext;
 use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use crate::connectors::runtime::debug::SelectionData;
-use crate::connectors::runtime::errors::Error;
 use crate::connectors::runtime::errors::RuntimeError;
-use crate::connectors::runtime::http_json_transport::TransportResponse;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
 use crate::connectors::runtime::mapping::Problem;
@@ -30,6 +29,30 @@ const TYPENAME: &str = "__typename";
 pub enum HandleResponseError {
     #[error("Merge error: {0}")]
     MergeError(String),
+}
+
+pub fn handle_raw_response(
+    raw: RawResponse,
+    connector: &Connector,
+    context: impl ContextReader,
+    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> (MappedResponse, bool) {
+    let is_success = match &raw {
+        RawResponse::Error { .. } => false,
+        RawResponse::Data { parts, .. } => parts.status.is_success(),
+    };
+    if is_success {
+        (
+            raw.map_response(connector, context, debug_context, client_headers),
+            true,
+        )
+    } else {
+        (
+            raw.map_error(connector, context, debug_context, client_headers),
+            false,
+        )
+    }
 }
 
 // --- RAW RESPONSE ------------------------------------------------------------
@@ -62,13 +85,12 @@ impl RawResponse {
     /// As a side effect, this will also write to the debug context.
     pub fn map_response(
         self,
-        result: Result<TransportResponse, Error>,
         connector: &Connector,
         context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
-    ) -> (MappedResponse, Result<TransportResponse, Error>) {
-        let mapped_response = match self {
+    ) -> MappedResponse {
+        match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
                 data,
@@ -120,9 +142,7 @@ impl RawResponse {
                     problems: mapping_problems,
                 }
             }
-        };
-
-        (mapped_response, result)
+        }
     }
 
     /// Returns a `MappedResponse` with a GraphQL error.
@@ -130,15 +150,12 @@ impl RawResponse {
     /// As a side effect, this will also write to the debug context.
     pub fn map_error(
         self,
-        result: Result<TransportResponse, Error>,
         connector: &Connector,
         context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
-    ) -> (MappedResponse, Result<TransportResponse, Error>) {
-        use serde_json_bytes::*;
-
-        let mapped_response = match self {
+    ) -> MappedResponse {
+        match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
                 key,
@@ -264,9 +281,7 @@ impl RawResponse {
 
                 MappedResponse::Error { error, key }
             }
-        };
-
-        (mapped_response, result)
+        }
     }
 }
 
@@ -293,7 +308,7 @@ impl MappedResponse {
     /// property directly on the map, or stored in the `_entities` array.
     pub fn add_to_data(
         self,
-        data: &mut serde_json_bytes::Map<ByteString, Value>,
+        data: &mut Map<ByteString, Value>,
         errors: &mut Vec<RuntimeError>,
         count: usize,
     ) -> Result<(), HandleResponseError> {
@@ -352,7 +367,7 @@ impl MappedResponse {
                             entity.insert(field_name.clone(), value);
                         }
                         _ => {
-                            let mut entity = serde_json_bytes::Map::new();
+                            let mut entity = Map::new();
                             if let Some(typename) = typename {
                                 entity.insert(TYPENAME, Value::String(typename.as_str().into()));
                             }
