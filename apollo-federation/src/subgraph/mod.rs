@@ -535,9 +535,7 @@ pub mod test_utils {
 
 // INTERNAL: For use by Language Server Protocol (LSP) team
 // Generates a diff string containing directives and types not included in initial schema string
-pub fn schema_diff_expanded_from_initial(
-    schema_str: String,
-) -> Result<String, FederationError> {
+pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
     // Parse schema string as Schema
     let initial_schema = Schema::parse(schema_str, "")?;
 
@@ -579,7 +577,8 @@ mod tests {
 
                 type Query {
                     s: String
-                }"#.to_string();
+                }"#
+        .to_string();
 
         let diff = schema_diff_expanded_from_initial(schema_string);
 
@@ -618,7 +617,8 @@ type _Service {
 
                 type Query {
                     s: String
-                }"#.to_string();
+                }"#
+        .to_string();
 
         let diff = schema_diff_expanded_from_initial(schema_string);
 
@@ -659,7 +659,8 @@ type _Service {
 
                 type Query {
                     s: String
-                }"#.to_string();
+                }"#
+        .to_string();
 
         let diff = schema_diff_expanded_from_initial(schema_string);
 
