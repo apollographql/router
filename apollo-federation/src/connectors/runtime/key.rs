@@ -100,7 +100,7 @@ impl std::fmt::Debug for ResponseKey {
             } => f
                 .debug_struct("BatchEntity")
                 .field("selection", &selection.to_string())
-                .field("key_selection", &keys.serialize().no_indent().to_string())
+                .field("key", &keys.serialize().no_indent().to_string())
                 .field("inputs", inputs)
                 .finish(),
         }
