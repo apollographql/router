@@ -57,10 +57,10 @@ impl ResponseKey {
 
     /// Returns a serialized representation of the Path from apollo-router.
     /// Intended to be parsed into a Path when converting a connectors
-    /// [`RuntimeError`] in the router's graphql::Error.
+    /// `RuntimeError` in the router's graphql::Error.
     ///
     /// This mimics the behavior of a GraphQL subgraph, including the `_entities`
-    /// field. When the path gets to [`FetchNode::response_at_path`], it will be
+    /// field. When the path gets to `FetchNode::response_at_path`, it will be
     /// amended and appended to a parent path to create the full path to the
     /// field. For example:
     ///

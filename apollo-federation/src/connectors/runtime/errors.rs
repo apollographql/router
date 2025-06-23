@@ -41,10 +41,8 @@ impl RuntimeError {
         self
     }
 
-    pub fn code(&self) -> String {
-        self.code
-            .clone()
-            .unwrap_or_else(|| "CONNECTORS_FETCH".to_string())
+    pub fn code(&self) -> &str {
+        self.code.as_ref().map_or("CONNECTORS_FETCH", |v| v)
     }
 }
 

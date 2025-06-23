@@ -59,11 +59,11 @@ pub(crate) enum HandleResponseError {
 }
 
 impl graphql::Error {
-    fn from_connectors_runtime_error(error: &RuntimeError) -> Self {
+    fn from_connectors_runtime_error(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
         let mut err = graphql::Error::builder()
-            .message(error.message.clone())
+            .message(&error.message)
             .extension_code(error.code())
             .path(path)
             .extensions(error.extensions.clone());
@@ -560,7 +560,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     };
 
     if let MappedResponse::Error { ref error, .. } = mapped_response {
-        emit_error_event(&error.code(), &error.message, Some((*error.path).into()));
+        emit_error_event(error.code(), &error.message, Some((*error.path).into()));
     }
 
     connector::request_service::Response {
@@ -605,7 +605,7 @@ pub(crate) fn aggregate_responses(
                     .errors(
                         errors
                             .into_iter()
-                            .map(|e| graphql::Error::from_connectors_runtime_error(&e))
+                            .map(graphql::Error::from_connectors_runtime_error)
                             .collect(),
                     )
                     .build(),
