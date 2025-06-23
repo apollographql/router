@@ -41,6 +41,7 @@ mod tests {
     #[case(Shape::int([]), Shape::int([]))]
     #[case(Shape::int([]), Shape::name("test", []))]
     #[case(Shape::int([]), Shape::unknown([]))]
+    #[case(Shape::one([Shape::string([])], []), Shape::one([Shape::string([])], []))]
     fn test_is_comparable_shape_combination_positive_cases(
         #[case] shape1: Shape,
         #[case] shape2: Shape,
@@ -104,6 +105,7 @@ mod tests {
     #[case(Shape::bool([]), Shape::name("test", []))]
     #[case(Shape::bool([]), Shape::list(Shape::string([]), []))]
     #[case(Shape::bool([]), Shape::dict(Shape::string([]), []))]
+    #[case(Shape::one([Shape::string([])], []), Shape::one([Shape::int([])], []))]
     fn test_is_comparable_shape_combination_negative_cases(
         #[case] shape1: Shape,
         #[case] shape2: Shape,
