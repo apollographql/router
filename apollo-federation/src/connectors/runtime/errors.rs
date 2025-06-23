@@ -42,7 +42,7 @@ impl RuntimeError {
     }
 
     pub fn code(&self) -> &str {
-        self.code.as_ref().map_or("CONNECTORS_FETCH", |v| v)
+        self.code.as_deref().unwrap_or("CONNECTORS_FETCH")
     }
 }
 
@@ -67,7 +67,7 @@ impl Error {
     pub fn to_runtime_error(
         &self,
         connector: &Connector,
-        response_key: ResponseKey,
+        response_key: &ResponseKey,
     ) -> RuntimeError {
         RuntimeError {
             message: self.to_string(),

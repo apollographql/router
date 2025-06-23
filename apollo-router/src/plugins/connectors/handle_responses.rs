@@ -240,23 +240,16 @@ impl RawResponse {
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
                 let mut error = RuntimeError::new(message, &key);
                 error.subgraph_name = Some(connector.id.subgraph_name.clone());
+                error.coordinate = Some(connector.id.coordinate());
 
                 // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error
-                    .extension(
-                        "http",
-                        Value::Object(Map::from_iter([(
-                            "status".into(),
-                            Value::Number(parts.status.as_u16().into()),
-                        )])),
-                    )
-                    .extension(
-                        "connector",
-                        Value::Object(Map::from_iter([(
-                            "coordinate".into(),
-                            Value::String(connector.id.coordinate().into()),
-                        )])),
-                    );
+                error = error.extension(
+                    "http",
+                    Value::Object(Map::from_iter([(
+                        "status".into(),
+                        Value::Number(parts.status.as_u16().into()),
+                    )])),
+                );
 
                 // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
                 // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
@@ -498,7 +491,7 @@ pub(crate) async fn process_response<T: HttpBody>(
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, response_key.clone()),
+                error: error.to_runtime_error(&connector, &response_key),
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
