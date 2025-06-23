@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::Type;
@@ -10,6 +9,7 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use regex::Regex;
 
@@ -17,12 +17,12 @@ use crate::bail;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 use crate::schema::FromContextDirective;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::DeniesAliases;
@@ -210,7 +210,6 @@ fn validate_selection_format(
             // note that the fact that this selection is the only selection will be checked in the caller
             Selection::Field(_) => {
                 has_field = true;
-                return SelectionType::Field;
             }
             Selection::InlineFragment(fragment) => {
                 has_inline_fragment = true;
@@ -243,7 +242,7 @@ fn validate_selection_format(
             }
         }
     }
-    
+
     if has_field && has_inline_fragment {
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
@@ -252,6 +251,8 @@ fn validate_selection_format(
             .into(),
         );
         return SelectionType::Error;
+    } else if has_field {
+        return SelectionType::Field;
     }
 
     if type_conditions.len() != selection_set.selections.len() {
@@ -309,8 +310,8 @@ fn validate_field_value(
         else {
             continue;
         };
-        
-        // TODO [FED-672]: The union case should fail here if the property does not exist in all sub types, 
+
+        // TODO [FED-672]: The union case should fail here if the property does not exist in all sub types,
         // but it currently doesn't. We'll need to fix that validation
         // see test_context_fails_on_union_missing_prop
         let result = FieldSet::parse(
@@ -340,8 +341,7 @@ fn validate_field_value(
         if !errors.errors.is_empty() {
             return Ok(());
         }
-        selection_type =
-            validate_selection_format(context, &fields.selection_set, target, errors);
+        selection_type = validate_selection_format(context, &fields.selection_set, target, errors);
         // if there was an error, just return, we've already added it to the errorCollector
         if selection_type == SelectionType::Error {
             return Ok(());
@@ -417,18 +417,14 @@ fn validate_field_value(
                             );
                                 continue;
                             };
-                            let frag_type_position =
-                                TypeDefinitionPosition::from(extended_type);
-                            if ObjectTypeDefinitionPosition::try_from(
-                                frag_type_position.clone(),
-                            )
-                            .is_err()
+                            let frag_type_position = TypeDefinitionPosition::from(extended_type);
+                            if ObjectTypeDefinitionPosition::try_from(frag_type_position.clone())
+                                .is_err()
                             {
                                 errors.push(
-                                SingleFederationError::ContextSelectionInvalid { message: format!(
-                                    "Inline fragment type condition invalid: type conditions must be an object type"
-                                ) }
-                                .into(),
+                                SingleFederationError::ContextSelectionInvalid { message:
+                                    "Inline fragment type condition invalid: type conditions must be an object type".to_string()
+                                 }.into(),
                             );
                                 continue;
                             }
@@ -443,7 +439,10 @@ fn validate_field_value(
                             ) {
                                 // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
                                 // This matches the TypeScript behavior
-                                if !is_valid_implementation_field_type(expected_type, &resolved_type) {
+                                if !is_valid_implementation_field_type(
+                                    expected_type,
+                                    &resolved_type,
+                                ) {
                                     errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
@@ -456,7 +455,6 @@ fn validate_field_value(
                                     return Ok(());
                                 }
                                 used_type_conditions.insert(type_condition.as_str().to_string());
-
                             } else {
                                 errors.push(
                                 SingleFederationError::ContextSelectionInvalid {
@@ -484,20 +482,32 @@ fn validate_field_value(
                         has_matching_condition = true;
                         break;
                     } else {
-                        // get the type 
-                        let Some(type_condition_type) = schema.schema().types.get(type_condition.as_str()) else {
+                        // get the type
+                        let Some(type_condition_type) =
+                            schema.schema().types.get(type_condition.as_str())
+                        else {
                             bail!("Type not found for type condition: {}", type_condition);
                         };
                         let interfaces = match type_condition_type {
-                            ExtendedType::Interface(intf) => intf.implements_interfaces.iter().map(|i| i.name.clone()).collect(),
-                            ExtendedType::Object(obj) => obj.implements_interfaces.iter().map(|i| i.name.clone()).collect(),
+                            ExtendedType::Interface(intf) => intf
+                                .implements_interfaces
+                                .iter()
+                                .map(|i| i.name.clone())
+                                .collect(),
+                            ExtendedType::Object(obj) => obj
+                                .implements_interfaces
+                                .iter()
+                                .map(|i| i.name.clone())
+                                .collect(),
                             _ => vec![],
                         };
-                        if interfaces.iter().any(|itf| context_location_names.contains(itf.as_str())) {
+                        if interfaces
+                            .iter()
+                            .any(|itf| context_location_names.contains(itf.as_str()))
+                        {
                             has_matching_condition = true;
                             break;
                         }
-                        
                     }
                 }
                 if !has_matching_condition && !type_conditions.is_empty() {
@@ -550,28 +560,31 @@ fn is_valid_implementation_field_type(field_type: &Type, implemented_field_type:
             // Let nullableType be the unwrapped nullable type of fieldType.
             let field_type_nullable = Type::Named(field_name.clone());
             let implemented_field_type_nullable = Type::Named(impl_name.clone());
-            return is_valid_implementation_field_type(
+            is_valid_implementation_field_type(
                 &field_type_nullable,
                 &implemented_field_type_nullable,
-            );
+            )
         }
         (Type::NonNullNamed(field_name), Type::Named(_)) => {
             let field_type_nullable = Type::Named(field_name.clone());
-            return is_valid_implementation_field_type(&field_type_nullable, implemented_field_type);
+            is_valid_implementation_field_type(&field_type_nullable, implemented_field_type)
         }
         (Type::NonNullList(field_inner), Type::NonNullList(impl_inner)) => {
             let field_type_nullable = (**field_inner).clone();
             let implemented_field_type_nullable = (**impl_inner).clone();
-            return is_valid_implementation_field_type(&field_type_nullable, &implemented_field_type_nullable);
+            is_valid_implementation_field_type(
+                &field_type_nullable,
+                &implemented_field_type_nullable,
+            )
         }
         (Type::NonNullList(field_inner), Type::List(_)) => {
             let field_type_nullable = (**field_inner).clone();
-            return is_valid_implementation_field_type(&field_type_nullable, implemented_field_type);
+            is_valid_implementation_field_type(&field_type_nullable, implemented_field_type)
         }
         (Type::List(field_inner), Type::List(impl_inner)) => {
             let field_type_inner = (**field_inner).clone();
             let implemented_type_inner = (**impl_inner).clone();
-            return is_valid_implementation_field_type(&field_type_inner, &implemented_type_inner);
+            is_valid_implementation_field_type(&field_type_inner, &implemented_type_inner)
         }
         (Type::Named(field_name), Type::Named(impl_name)) => field_name == impl_name,
         _ => false,
