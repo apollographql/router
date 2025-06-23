@@ -111,8 +111,7 @@ impl Response {
         message: String,
         response_key: ResponseKey,
     ) -> Self {
-        let graphql_error =
-            RuntimeError::new(message, &response_key).with_code(error.code());
+        let graphql_error = RuntimeError::new(message, &response_key).with_code(error.code());
 
         let mapped_response = MappedResponse::Error {
             error: graphql_error,
