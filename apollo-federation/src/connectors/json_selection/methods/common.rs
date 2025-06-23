@@ -20,68 +20,64 @@ mod tests {
     use super::*;
 
     #[rstest::rstest]
-    #[case(Shape::float([]), Shape::float([]), true)]
-    #[case(Shape::float([]), Shape::unknown([]), true)]
-    #[case(Shape::float([]), Shape::name("test", []), true)]
-    #[case(Shape::float([]), Shape::int([]), true)]
-    #[case(Shape::string([]), Shape::string([]), true)]
-    #[case(Shape::string([]), Shape::unknown([]), true)]
-    #[case(Shape::string([]), Shape::name("test", []), true)]
-    #[case(Shape::unknown([]), Shape::float([]), true)]
-    #[case(Shape::unknown([]), Shape::int([]), true)]
-    #[case(Shape::unknown([]), Shape::string([]), true)]
-    #[case(Shape::unknown([]), Shape::unknown([]), true)]
-    #[case(Shape::unknown([]), Shape::name("test", []), true)]
-    #[case(Shape::name("test", []), Shape::float([]), true)]
-    #[case(Shape::name("test", []), Shape::string([]), true)]
-    #[case(Shape::name("test", []), Shape::unknown([]), true)]
-    #[case(Shape::name("test", []), Shape::int([]), true)]
-    #[case(Shape::name("test", []), Shape::name("test", []), true)]
-    #[case(Shape::int([]), Shape::float([]), true)]
-    #[case(Shape::int([]), Shape::int([]), true)]
-    #[case(Shape::int([]), Shape::name("test", []), true)]
-    #[case(Shape::int([]), Shape::unknown([]), true)]
-    fn test_is_comparable_shape_combination_2_positive_cases(
+    #[case(Shape::float([]), Shape::float([]))]
+    #[case(Shape::float([]), Shape::unknown([]))]
+    #[case(Shape::float([]), Shape::name("test", []))]
+    #[case(Shape::float([]), Shape::int([]))]
+    #[case(Shape::string([]), Shape::string([]))]
+    #[case(Shape::string([]), Shape::unknown([]))]
+    #[case(Shape::string([]), Shape::name("test", []))]
+    #[case(Shape::unknown([]), Shape::float([]))]
+    #[case(Shape::unknown([]), Shape::int([]))]
+    #[case(Shape::unknown([]), Shape::string([]))]
+    #[case(Shape::unknown([]), Shape::unknown([]))]
+    #[case(Shape::unknown([]), Shape::name("test", []))]
+    #[case(Shape::name("test", []), Shape::float([]))]
+    #[case(Shape::name("test", []), Shape::string([]))]
+    #[case(Shape::name("test", []), Shape::unknown([]))]
+    #[case(Shape::name("test", []), Shape::int([]))]
+    #[case(Shape::name("test", []), Shape::name("test", []))]
+    #[case(Shape::int([]), Shape::float([]))]
+    #[case(Shape::int([]), Shape::int([]))]
+    #[case(Shape::int([]), Shape::name("test", []))]
+    #[case(Shape::int([]), Shape::unknown([]))]
+    fn test_is_comparable_shape_combination_positive_cases(
         #[case] shape1: Shape,
         #[case] shape2: Shape,
-        #[case] expected: bool,
     ) {
-        let actual = is_comparable_shape_combination(&shape1, &shape2);
-        assert_eq!(expected, actual);
+        assert!(is_comparable_shape_combination(&shape1, &shape2));
     }
 
     #[rstest::rstest]
-    #[case(Shape::string([]), Shape::int([]), false)]
-    #[case(Shape::string([]), Shape::bool([]), false)]
-    #[case(Shape::string([]), Shape::null([]), false)]
-    #[case(Shape::string([]), Shape::float([]), false)]
-    #[case(Shape::float([]), Shape::bool([]), false)]
-    #[case(Shape::float([]), Shape::null([]), false)]
-    #[case(Shape::float([]), Shape::string([]), false)]
-    #[case(Shape::int([]), Shape::string([]), false)]
-    #[case(Shape::int([]), Shape::bool([]), false)]
-    #[case(Shape::int([]), Shape::null([]), false)]
-    #[case(Shape::null([]), Shape::float([]), false)]
-    #[case(Shape::null([]), Shape::int([]), false)]
-    #[case(Shape::null([]), Shape::null([]), false)]
-    #[case(Shape::null([]), Shape::string([]), false)]
-    #[case(Shape::null([]), Shape::unknown([]), false)]
-    #[case(Shape::null([]), Shape::name("test", []), false)]
-    #[case(Shape::name("test", []), Shape::bool([]), false)]
-    #[case(Shape::name("test", []), Shape::null([]), false)]
-    #[case(Shape::unknown([]), Shape::bool([]), false)]
-    #[case(Shape::unknown([]), Shape::null([]), false)]
-    #[case(Shape::bool([]), Shape::float([]), false)]
-    #[case(Shape::bool([]), Shape::string([]), false)]
-    #[case(Shape::bool([]), Shape::int([]), false)]
-    #[case(Shape::bool([]), Shape::unknown([]), false)]
-    #[case(Shape::bool([]), Shape::name("test", []), false)]
-    fn test_is_comparable_shape_combination_2_negative_cases(
+    #[case(Shape::string([]), Shape::int([]))]
+    #[case(Shape::string([]), Shape::bool([]))]
+    #[case(Shape::string([]), Shape::null([]))]
+    #[case(Shape::string([]), Shape::float([]))]
+    #[case(Shape::float([]), Shape::bool([]))]
+    #[case(Shape::float([]), Shape::null([]))]
+    #[case(Shape::float([]), Shape::string([]))]
+    #[case(Shape::int([]), Shape::string([]))]
+    #[case(Shape::int([]), Shape::bool([]))]
+    #[case(Shape::int([]), Shape::null([]))]
+    #[case(Shape::null([]), Shape::float([]))]
+    #[case(Shape::null([]), Shape::int([]))]
+    #[case(Shape::null([]), Shape::null([]))]
+    #[case(Shape::null([]), Shape::string([]))]
+    #[case(Shape::null([]), Shape::unknown([]))]
+    #[case(Shape::null([]), Shape::name("test", []))]
+    #[case(Shape::name("test", []), Shape::bool([]))]
+    #[case(Shape::name("test", []), Shape::null([]))]
+    #[case(Shape::unknown([]), Shape::bool([]))]
+    #[case(Shape::unknown([]), Shape::null([]))]
+    #[case(Shape::bool([]), Shape::float([]))]
+    #[case(Shape::bool([]), Shape::string([]))]
+    #[case(Shape::bool([]), Shape::int([]))]
+    #[case(Shape::bool([]), Shape::unknown([]))]
+    #[case(Shape::bool([]), Shape::name("test", []))]
+    fn test_is_comparable_shape_combination_negative_cases(
         #[case] shape1: Shape,
         #[case] shape2: Shape,
-        #[case] expected: bool,
     ) {
-        let actual = is_comparable_shape_combination(&shape1, &shape2);
-        assert_eq!(expected, actual);
+        assert!(!is_comparable_shape_combination(&shape1, &shape2));
     }
 }
