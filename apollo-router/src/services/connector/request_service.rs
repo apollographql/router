@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -47,8 +48,8 @@ use crate::services::Plugins;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-pub(crate) type ServiceResult = Result<Response, BoxError>;
+pub(crate) type BoxService<'ctx, 'error> = tower::util::BoxService<Request, Response<'ctx, 'error>, BoxError>;
+pub(crate) type ServiceResult<'ctx, 'error> = Result<Response<'ctx, 'error>, BoxError>;
 
 assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
@@ -86,10 +87,10 @@ pub struct Request {
 /// Response type for a connector
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct Response {
+pub struct Response<'ctx, 'error> {
     /// The response context
-    #[allow(dead_code)]
-    pub(crate) context: Context,
+    #[expect(dead_code)]
+    pub(crate) context: &'ctx Context,
 
     /// The connector associated with this response
     #[allow(dead_code)]
@@ -99,18 +100,18 @@ pub struct Response {
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
     /// The mapped response, including any mapping problems encountered when processing the response
-    pub(crate) mapped_response: MappedResponse,
+    pub(crate) mapped_response: MappedResponse<'ctx, 'error>,
 }
 
 #[buildstructor::buildstructor]
-impl Response {
+impl<'ctx, 'error> Response<'ctx, 'error> {
     #[builder(visibility = "pub")]
     pub(crate) fn error_new(
-        context: Context,
+        context: &'ctx Context,
         connector: Arc<Connector>,
         error: Error,
         message: String,
-        response_key: ResponseKey,
+        response_key: &'error ResponseKey,
     ) -> Self {
         let graphql_error =
             RuntimeError::new(message, &response_key).with_code(error.extension_code());
@@ -130,9 +131,9 @@ impl Response {
 
     #[builder(visibility = "pub")]
     pub(crate) fn test_new(
-        context: Context,
+        context: &'ctx Context,
         connector: Arc<Connector>,
-        response_key: ResponseKey,
+        response_key: &'error ResponseKey,
         problems: Vec<Problem>,
         data: Value,
         headers: Option<HeaderMap<HeaderValue>>,
@@ -168,11 +169,11 @@ impl ErrorExtension for Error {
 }
 
 #[derive(Clone)]
-pub(crate) struct ConnectorRequestServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Buffer<Request, BoxFuture<'static, ServiceResult>>>>,
+pub(crate) struct ConnectorRequestServiceFactory<'ctx, 'error> {
+    pub(crate) services: Arc<HashMap<String, Buffer<Request, BoxFuture<'static, ServiceResult<'ctx, 'error>>>>>,
 }
 
-impl ConnectorRequestServiceFactory {
+impl<'ctx, 'error> ConnectorRequestServiceFactory<'ctx, 'error> {
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
@@ -185,8 +186,10 @@ impl ConnectorRequestServiceFactory {
                     .iter()
                     .rev()
                     .fold(
-                        ConnectorRequestService {
+                        ConnectorRequestService::<'ctx, 'error> {
                             http_client_service_factory: http_client_service_factory.clone(),
+                            _ctx: PhantomData::<&'ctx ()>,
+                            _error: PhantomData::<&'error ()>
                         }
                         .boxed(),
                         |acc, (_, e)| e.connector_request_service(acc, source.clone()),
@@ -213,12 +216,14 @@ impl ConnectorRequestServiceFactory {
 
 /// A service for executing individual requests to Apollo Connectors
 #[derive(Clone)]
-pub(crate) struct ConnectorRequestService {
+pub(crate) struct ConnectorRequestService<'ctx, 'error> {
     pub(crate) http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
+    _ctx: PhantomData::<&'ctx ()>,
+    _error: PhantomData::<&'error ()>
 }
 
-impl tower::Service<Request> for ConnectorRequestService {
-    type Response = Response;
+impl<'ctx, 'error> tower::Service<Request> for ConnectorRequestService<'ctx, 'error> {
+    type Response = Response<'ctx, 'error>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -311,7 +316,7 @@ impl tower::Service<Request> for ConnectorRequestService {
 
             Ok(process_response(
                 result,
-                request.key.clone(),
+                &request.key,
                 request.connector,
                 &request.context,
                 debug_request,

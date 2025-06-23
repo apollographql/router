@@ -72,13 +72,13 @@ impl graphql::Error {
 // --- RAW RESPONSE ------------------------------------------------------------
 
 #[allow(clippy::large_enum_variant)]
-enum RawResponse {
+enum RawResponse<'ctx, 'error> {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
     /// 2. We couldn't deserialize the response body
     Error {
-        error: RuntimeError,
-        key: ResponseKey,
+        error: RuntimeError<'error>,
+        key: &'ctx ResponseKey,
     },
     /// Contains the response data directly from the HTTP response. We'll apply
     /// a selection to convert this into either `data` or `errors` based on
@@ -86,7 +86,7 @@ enum RawResponse {
     Data {
         parts: http::response::Parts,
         data: Value,
-        key: ResponseKey,
+        key: &'ctx ResponseKey,
         debug_request: (
             Option<Box<ConnectorDebugHttpRequest>>,
             Vec<(ProblemLocation, Problem)>,
@@ -94,7 +94,7 @@ enum RawResponse {
     },
 }
 
-impl RawResponse {
+impl<'ctx, 'error> RawResponse<'ctx, 'error>{
     /// Returns a response with data transformed by the selection mapping.
     ///
     /// As a side effect, this will also write to the debug context.
@@ -105,7 +105,7 @@ impl RawResponse {
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> (MappedResponse, Result<TransportResponse, Error>) {
+    ) -> (MappedResponse<'ctx, 'error>, Result<TransportResponse, Error>) {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
@@ -173,7 +173,7 @@ impl RawResponse {
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> (MappedResponse, Result<TransportResponse, Error>) {
+    ) -> (MappedResponse<'ctx, 'error>, Result<TransportResponse, Error>) {
         use serde_json_bytes::*;
 
         let mapped_response = match self {
@@ -321,22 +321,22 @@ impl RawResponse {
 // --- MAPPED RESPONSE ---------------------------------------------------------
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum MappedResponse {
+pub(crate) enum MappedResponse<'ctx, 'error> {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
     Error {
-        error: RuntimeError,
-        key: ResponseKey,
+        error: RuntimeError<'error>,
+        key: &'ctx ResponseKey,
     },
     /// The response data after applying the selection mapping.
     Data {
         data: Value,
-        key: ResponseKey,
+        key: &'ctx ResponseKey,
         problems: Vec<Problem>,
     },
 }
 
-impl MappedResponse {
+impl<'ctx, 'error> MappedResponse<'ctx, 'error> {
     /// Adds the response data to the `data` map or the error to the `errors`
     /// array. How data is added depends on the `ResponseKey`: it's either a
     /// property directly on the map, or stored in the `_entities` array.
@@ -461,23 +461,23 @@ impl MappedResponse {
 
 // --- handle_responses --------------------------------------------------------
 
-pub(crate) async fn process_response<T: HttpBody>(
+pub(crate) async fn process_response<'ctx, 'error, T: HttpBody>(
     result: Result<http::Response<T>, Error>,
-    response_key: ResponseKey,
+    response_key: &'error ResponseKey,
     connector: Arc<Connector>,
-    context: &Context,
+    context: &'ctx Context,
     debug_request: (
         Option<Box<ConnectorDebugHttpRequest>>,
         Vec<(ProblemLocation, Problem)>,
     ),
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-) -> connector::request_service::Response {
+) -> connector::request_service::Response<'ctx, 'error> {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, response_key.clone()),
+                error: error.to_runtime_error(&connector, response_key),
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -504,7 +504,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                 &parts,
                 connector.clone(),
                 context,
-                &response_key,
+                response_key,
                 debug_context,
                 &debug_request,
             )
@@ -555,8 +555,8 @@ pub(crate) async fn process_response<T: HttpBody>(
         );
     }
 
-    connector::request_service::Response {
-        context: context.clone(),
+    connector::request_service::Response::<'ctx, 'error> {
+        context,
         connector: connector.clone(),
         transport_result: result,
         mapped_response,
@@ -609,7 +609,7 @@ pub(crate) fn aggregate_responses(
 /// Converts the response body to bytes and deserializes it into a json Value.
 /// This is the last time we have access to the original bytes, so it's the only
 /// opportunity to write the invalid response to the debug context.
-async fn deserialize_response<T: HttpBody>(
+async fn deserialize_response<'error, T: HttpBody>(
     body: T,
     parts: &http::response::Parts,
     connector: Arc<Connector>,
@@ -620,7 +620,7 @@ async fn deserialize_response<T: HttpBody>(
         Option<Box<ConnectorDebugHttpRequest>>,
         Vec<(ProblemLocation, Problem)>,
     ),
-) -> Result<Value, RuntimeError> {
+) -> Result<Value, RuntimeError<'error>> {
     use serde_json_bytes::*;
 
     let make_err = || {
@@ -660,14 +660,14 @@ async fn deserialize_response<T: HttpBody>(
             // connectors events.
 
             let response = connector::request_service::Response {
-                context: context.clone(),
+                context,
                 connector: connector.clone(),
                 transport_result: Ok(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
                 })),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
-                    key: response_key.clone(),
+                    key: response_key,
                     problems: vec![],
                 },
             };
@@ -880,7 +880,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -891,7 +891,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response2),
-                response_key2,
+                &response_key2,
                 connector,
                 &Context::default(),
                 (None, Default::default()),
@@ -991,7 +991,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1002,7 +1002,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response2),
-                response_key2,
+                &response_key2,
                 connector,
                 &Context::default(),
                 (None, Default::default()),
@@ -1122,7 +1122,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1238,7 +1238,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1249,7 +1249,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response2),
-                response_key2,
+                &response_key2,
                 connector,
                 &Context::default(),
                 (None, Default::default()),
@@ -1381,7 +1381,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
-                response_key_plaintext,
+                &response_key_plaintext,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1392,7 +1392,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1403,7 +1403,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response2),
-                response_key2,
+                &response_key2,
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
@@ -1414,7 +1414,7 @@ mod tests {
             .mapped_response,
             process_response(
                 Ok(response3),
-                response_key3,
+                &response_key3,
                 connector,
                 &Context::default(),
                 (None, Default::default()),
@@ -1617,7 +1617,7 @@ mod tests {
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
-                response_key1,
+                &response_key1,
                 connector,
                 &Context::default(),
                 (None, Default::default()),

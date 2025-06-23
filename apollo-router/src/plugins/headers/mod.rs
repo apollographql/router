@@ -1579,9 +1579,9 @@ mod test {
         ))
     }
 
-    fn example_connector_response(
+    fn example_connector_response<'ctx, 'error>(
         _req: connector::request_service::Request,
-    ) -> Result<connector::request_service::Response, BoxError> {
+    ) -> Result<connector::request_service::Response<'ctx, 'error>, BoxError> {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
@@ -1616,7 +1616,7 @@ mod test {
         };
 
         Ok(connector::request_service::Response::test_builder()
-            .context(Context::new())
+            .context(&Context::new())
             .connector(Arc::new(connector))
             .response_key(key)
             .problems(Default::default())

@@ -6,23 +6,23 @@ use crate::connectors::Connector;
 use crate::connectors::runtime::key::ResponseKey;
 
 #[derive(Debug)]
-pub struct RuntimeError {
+pub struct RuntimeError<'error> {
     pub message: String,
     code: Option<String>,
     pub coordinate: Option<String>,
     pub subgraph_name: Option<String>,
-    pub response_key: ResponseKey,
+    pub response_key: &'error ResponseKey,
     pub extensions: Map<ByteString, Value>,
 }
 
-impl RuntimeError {
-    pub fn new(message: impl Into<String>, response_key: &ResponseKey) -> Self {
+impl<'error> RuntimeError<'error> {
+    pub fn new(message: impl Into<String>, response_key: &'error ResponseKey) -> Self {
         Self {
             message: message.into(),
             code: None,
             coordinate: None,
             subgraph_name: None,
-            response_key: response_key.clone(),
+            response_key,
             extensions: Default::default(),
         }
     }
@@ -41,10 +41,10 @@ impl RuntimeError {
         self
     }
 
-    pub fn code(&self) -> String {
+    pub fn code(&self) -> &str {
         self.code
-            .clone()
-            .unwrap_or_else(|| "CONNECTORS_FETCH".to_string())
+            .as_ref()
+            .map_or("CONNECTORS_FETCH", |v| v)
     }
 }
 
@@ -68,12 +68,12 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn to_runtime_error(
+    pub fn to_runtime_error<'error>(
         &self,
         connector: &Connector,
-        response_key: ResponseKey,
-    ) -> RuntimeError {
-        RuntimeError {
+        response_key: &'error ResponseKey,
+    ) -> RuntimeError<'error> {
+        RuntimeError::<'error> {
             message: self.to_string(),
             code: Some(self.code()),
             coordinate: Some(connector.id.coordinate()),

@@ -43,15 +43,15 @@ use crate::spec::Schema;
 /// The fetch service delegates to either the subgraph service or connector service depending
 /// on whether connectors are present in the subgraph.
 #[derive(Clone)]
-pub(crate) struct FetchService {
+pub(crate) struct FetchService<'ctx, 'error> {
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
-    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
+    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory<'ctx, 'error>>,
 }
 
-impl tower::Service<Request> for FetchService {
+impl<'ctx, 'error> tower::Service<Request> for FetchService<'ctx, 'error> {
     type Response = FetchResponse;
     type Error = BoxError;
     type Future = Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
@@ -68,7 +68,7 @@ impl tower::Service<Request> for FetchService {
     }
 }
 
-impl FetchService {
+impl<'ctx, 'error> FetchService <'ctx, 'error>{
     fn handle_fetch(
         &mut self,
         request: FetchRequest,
@@ -470,21 +470,21 @@ impl FetchService {
 }
 
 #[derive(Clone)]
-pub(crate) struct FetchServiceFactory {
+pub(crate) struct FetchServiceFactory<'ctx, 'error> {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
+    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory<'ctx, 'error>>,
 }
 
-impl FetchServiceFactory {
+impl<'ctx, 'error> FetchServiceFactory<'ctx, 'error> {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
         subscription_config: Option<SubscriptionConfig>,
-        connector_service_factory: Arc<ConnectorServiceFactory>,
+        connector_service_factory: Arc<ConnectorServiceFactory<'ctx, 'error>>,
     ) -> Self {
         Self {
             subgraph_service_factory,
@@ -496,7 +496,7 @@ impl FetchServiceFactory {
     }
 }
 
-impl ServiceFactory<Request> for FetchServiceFactory {
+impl<'ctx, 'error> ServiceFactory<Request> for FetchServiceFactory<'ctx, 'error> {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {

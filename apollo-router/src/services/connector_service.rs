@@ -50,12 +50,12 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 
 /// A service for executing connector requests.
 #[derive(Clone)]
-pub(crate) struct ConnectorService {
+pub(crate) struct ConnectorService<'ctx, 'error> {
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory<'ctx, 'error>>,
 }
 
 /// A reference to a unique Connector source.
@@ -118,7 +118,7 @@ impl Display for ConnectorSourceRef {
     }
 }
 
-impl tower::Service<ConnectRequest> for ConnectorService {
+impl<'ctx, 'error> tower::Service<ConnectRequest> for ConnectorService<'ctx, 'error> {
     type Response = ConnectResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -188,8 +188,8 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     }
 }
 
-async fn execute(
-    connector_request_service_factory: &ConnectorRequestServiceFactory,
+async fn execute<'ctx, 'error>(
+    connector_request_service_factory: &ConnectorRequestServiceFactory<'ctx, 'error>,
     request: ConnectRequest,
     connector: Connector,
     service_name: &str,
@@ -228,22 +228,22 @@ async fn execute(
 }
 
 #[derive(Clone)]
-pub(crate) struct ConnectorServiceFactory {
+pub(crate) struct ConnectorServiceFactory<'ctx, 'error> {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory<'ctx, 'error>>,
 }
 
-impl ConnectorServiceFactory {
+impl<'ctx, 'error> ConnectorServiceFactory<'ctx, 'error> {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-        connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        connector_request_service_factory: Arc<ConnectorRequestServiceFactory<'ctx, 'error>>,
     ) -> Self {
         Self {
             subgraph_schemas,
@@ -273,7 +273,7 @@ impl ConnectorServiceFactory {
     }
 }
 
-impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
+impl<'ctx, 'error> ServiceFactory<ConnectRequest> for ConnectorServiceFactory<'ctx, 'error> {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {
