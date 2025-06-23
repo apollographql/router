@@ -176,4 +176,148 @@ mod tests {
             ),
         );
     }
+
+    #[test]
+    fn eq_should_return_true_when_applied_to_equals_string_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq("hello")
+                "#
+            )
+            .apply_to(&json!({ "value": "hello" })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_false_when_applied_to_does_not_equal_string_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq("world")
+                "#
+            )
+            .apply_to(&json!({ "value": "hello" })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_true_when_applied_to_equals_bool_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq(true)
+                "#
+            )
+            .apply_to(&json!({ "value": true })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_false_when_applied_to_does_not_equal_bool_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq(false)
+                "#
+            )
+            .apply_to(&json!({ "value": true })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_true_when_applied_to_equals_object_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq({"name": "John", "age": 30})
+                "#
+            )
+            .apply_to(&json!({ "value": {"name": "John", "age": 30} })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_false_when_applied_to_does_not_equal_object_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq({"name": "Jane", "age": 25})
+                "#
+            )
+            .apply_to(&json!({ "value": {"name": "John", "age": 30} })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_true_when_applied_to_equals_array_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq([1, 2, 3])
+                "#
+            )
+            .apply_to(&json!({ "value": [1, 2, 3] })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_false_when_applied_to_does_not_equal_array_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->eq([4, 5, 6])
+                "#
+            )
+            .apply_to(&json!({ "value": [1, 2, 3] })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
 }
