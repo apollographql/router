@@ -1,31 +1,30 @@
 use std::collections::HashMap;
 
-use apollo_federation::connectors::ConnectorErrorsSettings;
-use apollo_federation::connectors::HeaderSource;
-use apollo_federation::connectors::HttpJsonTransport;
-use apollo_federation::connectors::OriginatingDirective;
-use apollo_federation::connectors::ProblemLocation;
-use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 
-use crate::plugins::connectors::mapping::Problem;
+use crate::connectors::ConnectorErrorsSettings;
+use crate::connectors::HeaderSource;
+use crate::connectors::HttpJsonTransport;
+use crate::connectors::OriginatingDirective;
+use crate::connectors::ProblemLocation;
+use crate::connectors::runtime::mapping::Problem;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct ConnectorContext {
+pub struct ConnectorContext {
     items: Vec<ConnectorContextItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ConnectorContextItem {
+pub struct ConnectorContextItem {
     problems: Vec<(ProblemLocation, Problem)>,
     request: ConnectorDebugHttpRequest,
     response: ConnectorDebugHttpResponse,
 }
 
 impl ConnectorContext {
-    pub(crate) fn push_response(
+    pub fn push_response(
         &mut self,
         request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
@@ -52,11 +51,11 @@ impl ConnectorContext {
         }
     }
 
-    pub(crate) fn push_invalid_response(
+    pub fn push_invalid_response(
         &mut self,
         request: Option<Box<ConnectorDebugHttpRequest>>,
         parts: &http::response::Parts,
-        body: &Bytes,
+        body: &[u8],
         error_settings: &ConnectorErrorsSettings,
         problems: Vec<(ProblemLocation, Problem)>,
     ) {
@@ -71,7 +70,7 @@ impl ConnectorContext {
                         .map(|(name, value)| {
                             (
                                 name.as_str().to_string(),
-                                value.to_str().unwrap().to_string(),
+                                value.to_str().unwrap_or_default().to_string(),
                             )
                         })
                         .collect(),
@@ -108,7 +107,7 @@ impl ConnectorContext {
         }
     }
 
-    pub(super) fn serialize(self) -> serde_json_bytes::Value {
+    pub fn serialize(self) -> serde_json_bytes::Value {
         json!(
             self.items
                 .iter()
@@ -131,21 +130,19 @@ impl ConnectorContext {
 /// JSONSelection Request / Response Data
 ///
 /// Contains all needed info and responses from the application of a JSONSelection
-pub(crate) struct SelectionData {
-    /// The original [`JSONSelection`] to resolve
-    pub(crate) source: String,
+pub struct SelectionData {
+    /// The original JSONSelection to resolve
+    pub source: String,
 
     /// A mapping of the original selection, taking into account renames and other
     /// transformations requested by the client
     ///
     /// Refer to [`Self::source`] for the original, schema-supplied selection.
-    pub(crate) transformed: String,
+    pub transformed: String,
 
     /// The result of applying the selection to JSON. An empty value
     /// here can potentially mean that errors were encountered.
-    ///
-    /// Refer to [`Self::errors`] for any errors found during evaluation
-    pub(crate) result: Option<serde_json_bytes::Value>,
+    pub result: Option<serde_json_bytes::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,7 +161,7 @@ struct ConnectorDebugSelection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ConnectorDebugUri {
+pub struct ConnectorDebugUri {
     base: Option<String>,
     path: Option<String>,
     query_params: Option<String>,
@@ -180,7 +177,7 @@ struct ConnectorDebugErrors {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ConnectorDebugHttpRequest {
+pub struct ConnectorDebugHttpRequest {
     url: String,
     method: String,
     headers: Vec<(String, String)>,
@@ -192,7 +189,7 @@ pub(crate) struct ConnectorDebugHttpRequest {
 }
 
 impl ConnectorDebugHttpRequest {
-    pub(crate) fn new(
+    pub fn new(
         req: &http::Request<String>,
         kind: String,
         json_body: Option<&serde_json_bytes::Value>,
@@ -220,7 +217,7 @@ impl ConnectorDebugHttpRequest {
                 .map(|(name, value)| {
                     (
                         name.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
+                        value.to_str().unwrap_or_default().to_string(),
                     )
                 })
                 .collect(),
@@ -260,7 +257,7 @@ impl ConnectorDebugHttpRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ConnectorDebugHttpResponse {
+pub struct ConnectorDebugHttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: ConnectorDebugBody,
@@ -268,7 +265,7 @@ struct ConnectorDebugHttpResponse {
 }
 
 impl ConnectorDebugHttpResponse {
-    pub(crate) fn new(
+    pub fn new(
         parts: &http::response::Parts,
         json_body: &serde_json_bytes::Value,
         selection_data: Option<SelectionData>,
@@ -282,7 +279,7 @@ impl ConnectorDebugHttpResponse {
                 .map(|(name, value)| {
                     (
                         name.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
+                        value.to_str().unwrap_or_default().to_string(),
                     )
                 })
                 .collect(),

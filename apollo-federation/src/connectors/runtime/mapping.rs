@@ -2,25 +2,23 @@
 
 use std::collections::HashMap;
 
-use apollo_federation::connectors::ApplyToError;
-use apollo_federation::connectors::ProblemLocation;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::connectors::ApplyToError;
+use crate::connectors::ProblemLocation;
+
 /// A mapping problem
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub(crate) struct Problem {
-    pub(crate) message: String,
-    pub(crate) path: String,
-    pub(crate) count: usize,
+pub struct Problem {
+    pub message: String,
+    pub path: String,
+    pub count: usize,
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem)
-pub(crate) fn aggregate_apply_to_errors(
-    errors: Vec<ApplyToError>,
-) -> impl Iterator<Item = Problem> {
+pub fn aggregate_apply_to_errors(errors: Vec<ApplyToError>) -> impl Iterator<Item = Problem> {
     errors
         .into_iter()
         .fold(
@@ -50,7 +48,7 @@ pub(crate) fn aggregate_apply_to_errors(
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
-pub(crate) fn aggregate_apply_to_errors_with_problem_locations(
+pub fn aggregate_apply_to_errors_with_problem_locations(
     errors: Vec<(ProblemLocation, ApplyToError)>,
 ) -> impl Iterator<Item = (ProblemLocation, Problem)> {
     errors

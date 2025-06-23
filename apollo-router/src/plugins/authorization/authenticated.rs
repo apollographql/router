@@ -538,7 +538,7 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
-    use crate::plugins::content_negotiation::ClientRequestAccepts;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
 
