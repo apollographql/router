@@ -551,7 +551,7 @@ async fn basic_connection_errors() {
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
         msg.starts_with(
-            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
         ),
         "got message: {}",
         msg

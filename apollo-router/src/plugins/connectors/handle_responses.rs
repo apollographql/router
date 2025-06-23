@@ -58,8 +58,8 @@ pub(crate) enum HandleResponseError {
     MergeError(String),
 }
 
-impl graphql::Error {
-    fn from_connectors_runtime_error(error: RuntimeError) -> Self {
+impl From<RuntimeError> for graphql::Error {
+    fn from(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
         let mut err = graphql::Error::builder()
@@ -67,6 +67,10 @@ impl graphql::Error {
             .extension_code(error.code())
             .path(path)
             .extensions(error.extensions.clone());
+
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err = err.extension("service", Value::String(subgraph_name.clone().into()));
+        };
 
         if let Some(coordinate) = &error.coordinate {
             err = err.extension(
@@ -607,12 +611,7 @@ pub(crate) fn aggregate_responses(
             .body(
                 graphql::Response::builder()
                     .data(data)
-                    .errors(
-                        errors
-                            .into_iter()
-                            .map(graphql::Error::from_connectors_runtime_error)
-                            .collect(),
-                    )
+                    .errors(errors.into_iter().map(|e| e.into()).collect())
                     .build(),
             )
             .unwrap(),
@@ -1439,7 +1438,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res, @r###"
         Response {
             response: Response {
                 status: 200,
@@ -1480,12 +1479,12 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(200),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1524,6 +1523,9 @@ mod tests {
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
@@ -1557,6 +1559,9 @@ mod tests {
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
@@ -1574,7 +1579,7 @@ mod tests {
                 },
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
