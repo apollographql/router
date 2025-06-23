@@ -555,60 +555,21 @@ impl RouterService {
         self,
         parts: &Parts,
     ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
-        let mut is_batch = false;
         parts.uri.query().map(|q| {
-            let mut result = vec![];
-
             match graphql::Request::from_urlencoded_query(q.to_string()) {
                 Ok(request) => {
-                    result.push(request);
+                    Ok((vec![request], false))
                 }
                 Err(err) => {
-                    // It may be a batch of requests, so try that (if config allows) before
-                    // erroring out
-                    if self.batching.enabled
-                        && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                    {
-                        result = graphql::Request::batch_from_urlencoded_query(q.to_string())
-                            .map_err(|e| TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                                extension_details: format!(
-                                    "failed to decode a valid GraphQL request from path {e}"
-                                ),
-                            })?;
-                        if result.is_empty() {
-                            return Err(TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                                extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
-                            });
-                        }
-                        is_batch = true;
-                    } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.batching.enabled
-                            && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
-                            format!("batching not supported for mode `{}`", self.batching.mode)
-                        } else {
-                            "batching not enabled".to_string()
-                        };
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "BATCHING_NOT_ENABLED".to_string(),
-                            extension_details,
-                        });
-                    } else {
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                            extension_details: format!(
-                                "failed to decode a valid GraphQL request from path {err}"
-                            ),
-                        });
-                    }
+                    Err(TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+                        extension_details: format!(
+                            "failed to decode a valid GraphQL request from path {err}"
+                        ),
+                    })
                 }
-            };
-            Ok((result, is_batch))
+            }
         }).unwrap_or_else(|| {
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
