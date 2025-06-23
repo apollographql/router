@@ -216,7 +216,7 @@ fn fix_string_enum_values_in_directives(
     let mut is_modified = false;
     for directive in directives.iter_mut() {
         let Some(directive_definition) = schema.directive_definitions.get(&directive.name) else {
-            return is_modified;
+            continue;
         };
         let directive = directive.make_mut();
         for argument in directive.arguments.iter_mut() {
