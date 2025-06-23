@@ -584,6 +584,7 @@ mod test {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
     use http::HeaderMap;
     use http::Uri;
@@ -602,7 +603,6 @@ mod test {
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::HasSchema;
