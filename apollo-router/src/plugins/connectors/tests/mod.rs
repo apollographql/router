@@ -147,11 +147,11 @@ async fn max_requests() {
             1
           ],
           "extensions": {
-            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "REQUEST_LIMIT_EXCEEDED"
+            "code": "REQUEST_LIMIT_EXCEEDED",
+            "service": "connectors"
           }
         }
       ]
@@ -220,11 +220,11 @@ async fn source_max_requests() {
             1
           ],
           "extensions": {
-            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "REQUEST_LIMIT_EXCEEDED"
+            "code": "REQUEST_LIMIT_EXCEEDED",
+            "service": "connectors"
           }
         }
       ]
