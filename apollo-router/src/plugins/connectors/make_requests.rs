@@ -1756,11 +1756,11 @@ mod tests {
             error_settings: Default::default(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -1768,7 +1768,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1872,11 +1872,11 @@ mod tests {
             error_settings: Default::default(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -1884,7 +1884,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1993,11 +1993,11 @@ mod tests {
             error_settings: Default::default(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -2006,7 +2006,7 @@ mod tests {
             },
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -2014,7 +2014,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
