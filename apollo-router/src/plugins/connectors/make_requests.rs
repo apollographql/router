@@ -20,15 +20,15 @@ const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
 
-/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
-/// the behavior of a GraphQL subgraph, including the `_entities` field. When
-/// the path gets to [`FetchNode::response_at_path`], it will be amended and
-/// appended to a parent path to create the full path to the field. For ex:
-///
-/// - parent path: `["posts", @, "user"]
-/// - path from key: `["_entities", 0, "user", "profile"]`
-/// - result: `["posts", 1, "user", "profile"]`
 impl Path {
+    /// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
+    /// the behavior of a GraphQL subgraph, including the `_entities` field. When
+    /// the path gets to [`FetchNode::response_at_path`], it will be amended and
+    /// appended to a parent path to create the full path to the field. For ex:
+    ///
+    /// - parent path: `["posts", @, "user"]
+    /// - path from key: `["_entities", 0, "user", "profile"]`
+    /// - result: `["posts", 1, "user", "profile"]`
     pub(crate) fn from_response_key(key: &ResponseKey) -> Self {
         match key {
             ResponseKey::RootField { name, .. } => {
