@@ -36,8 +36,8 @@ mod apq {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `apq` indirectly targets a connector-enabled subgraph, which is not supported"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `apq` indirectly targets a connector-enabled subgraph, which is not supported"#)
+            .await;
 
         Ok(())
     }
@@ -76,8 +76,8 @@ mod apq {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `apq` is explicitly configured for connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `apq` is explicitly configured for connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -126,9 +126,12 @@ mod apq {
 mod authentication {
     use std::path::PathBuf;
 
+    use serde_json::Value;
+    use serde_json::json;
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::Query;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
@@ -212,8 +215,8 @@ mod authentication {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
-        .await;
+            .wait_for_log_message(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
+            .await;
 
         Ok(())
     }
@@ -266,8 +269,8 @@ mod authentication {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -320,10 +323,46 @@ mod authentication {
 
         router.start().await;
         router
-        .assert_log_not_contains(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
-        .await;
+            .assert_log_not_contains(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
+            .await;
 
         Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(not(feature = "ci"), ignore)]
+    async fn test_aws_sig_v4_signing() {
+        let mut router = IntegrationTest::builder()
+            .config(include_str!("fixtures/connectors_sigv4.router.yaml"))
+            .supergraph(PathBuf::from(
+                "tests/integration/fixtures/connectors_sigv4.graphql",
+            ))
+            .build()
+            .await;
+
+        router.start().await;
+        router.assert_started().await;
+
+        let (_, response) = router
+            .execute_query(
+                Query::builder()
+                    .body(json! ({"query": "query { instances }"}))
+                    .build(),
+            )
+            .await;
+        let body: Value = response.json().await.unwrap();
+        router.graceful_shutdown().await;
+        let body = body.as_object().expect("Response body should be object");
+        let errors = body.get("errors");
+        assert!(errors.is_none(), "query generated errors: {errors:?}");
+        let me = body
+            .get("data")
+            .expect("Response body should have data")
+            .as_object()
+            .expect("Data should be object")
+            .get("instances")
+            .expect("Data should have instances");
+        assert!(me.is_null());
     }
 }
 
@@ -367,8 +406,8 @@ mod batching {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` indirectly targets a connector-enabled subgraph, which is not supported"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` indirectly targets a connector-enabled subgraph, which is not supported"#)
+            .await;
 
         Ok(())
     }
@@ -409,8 +448,8 @@ mod batching {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` is explicitly configured for connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` is explicitly configured for connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -497,8 +536,8 @@ mod coprocessor {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraphs":"connectors","message":"coprocessors which hook into `subgraph_request` or `subgraph_response`"#)
-        .await;
+            .wait_for_log_message(r#""subgraphs":"connectors","message":"coprocessors which hook into `subgraph_request` or `subgraph_response`"#)
+            .await;
 
         Ok(())
     }
@@ -534,8 +573,8 @@ mod coprocessor {
 
         router.start().await;
         router
-        .assert_log_not_contains(r#""subgraphs":"connectors","message":"coprocessors which hook into `subgraph_request` or `subgraph_response`"#)
-        .await;
+            .assert_log_not_contains(r#""subgraphs":"connectors","message":"coprocessors which hook into `subgraph_request` or `subgraph_response`"#)
+            .await;
 
         Ok(())
     }
@@ -580,8 +619,8 @@ mod entity_cache {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` indirectly targets a connector-enabled subgraph, which is not supported"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` indirectly targets a connector-enabled subgraph, which is not supported"#)
+            .await;
 
         Ok(())
     }
@@ -621,8 +660,8 @@ mod entity_cache {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` is explicitly configured for connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` is explicitly configured for connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -712,8 +751,8 @@ mod headers {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` indirectly targets a connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` indirectly targets a connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -753,8 +792,8 @@ mod headers {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` is explicitly configured for connector-enabled subgraph"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` is explicitly configured for connector-enabled subgraph"#)
+            .await;
 
         Ok(())
     }
@@ -796,8 +835,8 @@ mod rhai {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraphs":"connectors","message":"rhai scripts which hook into `subgraph_request` or `subgraph_response`"#)
-        .await;
+            .wait_for_log_message(r#""subgraphs":"connectors","message":"rhai scripts which hook into `subgraph_request` or `subgraph_response`"#)
+            .await;
 
         Ok(())
     }
@@ -843,8 +882,8 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
+            .await;
 
         Ok(())
     }
@@ -885,8 +924,8 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
+            .await;
 
         Ok(())
     }
@@ -1016,8 +1055,8 @@ mod tls {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"The `tls` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `tls.connector.sources.<subgraph_name>.<source_name>`."#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"The `tls` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `tls.connector.sources.<subgraph_name>.<source_name>`."#)
+            .await;
 
         Ok(())
     }
@@ -1061,8 +1100,8 @@ mod traffic_shaping {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"The `traffic_shaping` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `traffic_shaping.connector.sources.<subgraph_name>.<source_name>`."#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"The `traffic_shaping` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `traffic_shaping.connector.sources.<subgraph_name>.<source_name>`."#)
+            .await;
 
         Ok(())
     }
@@ -1104,8 +1143,8 @@ mod url_override {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"overriding a subgraph URL for a connectors-enabled subgraph is not supported"#)
-        .await;
+            .wait_for_log_message(r#""subgraph":"connectors","message":"overriding a subgraph URL for a connectors-enabled subgraph is not supported"#)
+            .await;
 
         Ok(())
     }

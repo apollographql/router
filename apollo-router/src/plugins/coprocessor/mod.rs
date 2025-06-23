@@ -1104,11 +1104,11 @@ where
             .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
     ));
 
-    // Finally, return a response which has a Body that wraps our stream of response chunks.
-    Ok(router::Response {
-        context,
-        response: http::Response::from_parts(parts, final_stream),
-    })
+    // Finally, return a response which has a Body that wraps our stream of response chunks
+    router::Response::http_response_builder()
+        .context(context)
+        .response(http::Response::from_parts(parts, final_stream))
+        .build()
 }
 // -----------------------------------------------------------------------------------------------------
 

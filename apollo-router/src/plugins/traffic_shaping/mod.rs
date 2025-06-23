@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
@@ -27,7 +28,6 @@ use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
 
-use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
@@ -583,6 +583,7 @@ mod test {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use bytes::Bytes;
     use http::HeaderMap;
     use http::Uri;
@@ -610,7 +611,6 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
