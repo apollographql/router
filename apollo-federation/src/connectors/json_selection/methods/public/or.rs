@@ -142,7 +142,6 @@ fn or_shape(
 #[cfg(test)]
 mod tests {
     use serde_json_bytes::json;
-    use shape::Shape;
 
     use crate::selection;
 
