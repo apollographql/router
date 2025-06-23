@@ -30,7 +30,6 @@ use tower::buffer::Buffer;
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::graphql::ErrorExtension;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
@@ -113,7 +112,7 @@ impl Response {
         response_key: ResponseKey,
     ) -> Self {
         let graphql_error =
-            RuntimeError::new(message, &response_key).with_code(error.extension_code());
+            RuntimeError::new(message, &response_key).with_code(error.code());
 
         let mapped_response = MappedResponse::Error {
             error: graphql_error,
@@ -158,12 +157,6 @@ impl Response {
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
-    }
-}
-
-impl ErrorExtension for Error {
-    fn extension_code(&self) -> String {
-        self.code().to_string()
     }
 }
 

@@ -147,11 +147,11 @@ async fn max_requests() {
             1
           ],
           "extensions": {
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "REQUEST_LIMIT_EXCEEDED",
-            "service": "connectors"
+            "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
       ]
@@ -220,11 +220,11 @@ async fn source_max_requests() {
             1
           ],
           "extensions": {
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "REQUEST_LIMIT_EXCEEDED",
-            "service": "connectors"
+            "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
       ]
@@ -453,7 +453,7 @@ async fn basic_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": null,
@@ -480,8 +480,8 @@ async fn basic_errors() {
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "service": "connectors",
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
@@ -498,8 +498,8 @@ async fn basic_errors() {
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "service": "connectors",
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
@@ -517,13 +517,13 @@ async fn basic_errors() {
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "service": "connectors",
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
     }
-    "#);
+    "###);
 }
 
 #[tokio::test]
@@ -1583,7 +1583,7 @@ async fn error_not_redacted() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": null
@@ -1601,13 +1601,13 @@ async fn error_not_redacted() {
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "service": "connectors",
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
     }
-    "#);
+    "###);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
