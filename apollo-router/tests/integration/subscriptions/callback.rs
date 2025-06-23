@@ -31,17 +31,8 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
         // Reserve ports using the existing external ports and allocate new ones
         let callback_receiver_port = callback_addr.port();
         let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
-        let subgraph_uri = subgraph_server.uri();
-        // Extract port from URI like "http://127.0.0.1:PORT"
-        let subgraph_port = subgraph_uri
-            .split(':')
-            .last()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-
         router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
-        router.set_address("SUBGRAPH_PORT", subgraph_port);
+        router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
         router.start().await;
         router.assert_started().await;
@@ -358,17 +349,8 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         // Reserve ports using the existing external ports and allocate new ones
         let callback_receiver_port = callback_addr.port();
         let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
-        let subgraph_uri = subgraph_server.uri();
-        // Extract port from URI like "http://127.0.0.1:PORT"
-        let subgraph_port = subgraph_uri
-            .split(':')
-            .last()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-
         router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
-        router.set_address("SUBGRAPH_PORT", subgraph_port);
+        router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
         router.start().await;
         router.assert_started().await;
@@ -479,17 +461,8 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
         // Reserve ports using the existing external ports and allocate new ones
         let callback_receiver_port = callback_addr.port();
         let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
-        let subgraph_uri = subgraph_server.uri();
-        // Extract port from URI like "http://127.0.0.1:PORT"
-        let subgraph_port = subgraph_uri
-            .split(':')
-            .last()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-
         router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
-        router.set_address("SUBGRAPH_PORT", subgraph_port);
+        router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
         router.start().await;
         router.assert_started().await;

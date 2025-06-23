@@ -262,6 +262,19 @@ impl IntegrationTest {
             .expect("Failed to write updated config");
     }
 
+    /// Set an address placeholder using a URI, extracting the port automatically
+    /// This is a convenience method for the common pattern of extracting port from a server URI
+    #[allow(dead_code)]
+    pub fn set_address_from_uri(&mut self, placeholder_name: &str, uri: &str) {
+        let port = uri
+            .split(':')
+            .last()
+            .expect("URI should contain a port")
+            .parse::<u16>()
+            .expect("Port should be a valid u16");
+        self.set_address(placeholder_name, port);
+    }
+
     /// Replace a string in the config file (for non-port replacements)
     /// This is useful for dynamic config adjustments beyond port replacements
     #[allow(dead_code)]
