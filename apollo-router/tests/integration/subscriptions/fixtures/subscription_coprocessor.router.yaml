@@ -7,8 +7,8 @@ homepage:
 sandbox:
   enabled: true
 override_subgraph_url:
-  products: http://localhost:4005
-  accounts: http://localhost:4001
+  products: http://localhost:{{PRODUCTS_PORT}}
+  accounts: http://localhost:{{ACCOUNTS_PORT}}
 include_subgraph_errors:
   all: true
 subscription:
@@ -22,7 +22,7 @@ subscription:
           path: /ws
           protocol: graphql_transport_ws
 coprocessor:
-  url: http://localhost:8080
+  url: http://localhost:{{COPROCESSOR_PORT}}
   timeout: 30s
   router:
     request:

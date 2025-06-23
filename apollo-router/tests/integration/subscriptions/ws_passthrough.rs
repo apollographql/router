@@ -1,5 +1,4 @@
 use tower::BoxError;
-use tracing::debug;
 use tracing::info;
 
 use crate::integration::common::IntegrationTest;
@@ -115,20 +114,20 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         let (ws_addr, http_server) =
             start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
 
-        // Configure router to use WebSocket server for accounts subgraph subscriptions
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        let config = SUBSCRIPTION_CONFIG
-            .replace("http://localhost:4005", &http_server.uri())
-            .replace("http://localhost:4001", &ws_url)
-            .replace("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-        debug!("Generated router configuration:\n{}", config);
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(SUBSCRIPTION_CONFIG)
             .build()
             .await;
+
+        // Configure URLs using the string replacement method
+        let ws_url = format!("ws://{}/ws", ws_addr);
+        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+        router.replace_config_string("rng:", "accounts:");
+
+        info!("WebSocket server started at: {}", ws_url);
 
         router.start().await;
         router.assert_started().await;
@@ -178,27 +177,25 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
             start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
         let coprocessor_server = start_coprocessor_server().await;
 
-        // Configure router to use WebSocket server for accounts subgraph subscriptions
-        // and coprocessor for request/response processing
+        // Create router with port reservations
+        let mut router = IntegrationTest::builder()
+            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+            .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+            .build()
+            .await;
+
+        // Configure URLs using the string replacement method
         let ws_url = format!("ws://{}/ws", ws_addr);
-        let config = SUBSCRIPTION_COPROCESSOR_CONFIG
-            .replace("http://localhost:4005", &http_server.uri())
-            .replace("http://localhost:4001", &ws_url)
-            .replace("http://localhost:8080", &coprocessor_server.uri())
-            .replace("rng:", "accounts:");
+        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+        router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", &coprocessor_server.uri());
+        router.replace_config_string("rng:", "accounts:");
 
         info!("WebSocket server started at: {}", ws_url);
         info!(
             "Coprocessor server started at: {}",
             coprocessor_server.uri()
         );
-        debug!("Generated router configuration:\n{}", config);
-
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
-            .build()
-            .await;
 
         router.start().await;
         router.assert_started().await;
@@ -254,20 +251,20 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         let (ws_addr, http_server) =
             start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
 
-        // Configure router to use WebSocket server for accounts subgraph subscriptions
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        let config = SUBSCRIPTION_CONFIG
-            .replace("http://localhost:4005", &http_server.uri())
-            .replace("http://localhost:4001", &ws_url)
-            .replace("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(SUBSCRIPTION_CONFIG)
             .build()
             .await;
+
+        // Configure URLs using the string replacement method
+        let ws_url = format!("ws://{}/ws", ws_addr);
+        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+        router.replace_config_string("rng:", "accounts:");
+
+        info!("WebSocket server started at: {}", ws_url);
 
         router.start().await;
         router.assert_started().await;
@@ -329,20 +326,20 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         let (ws_addr, http_server) =
             start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
 
-        // Configure router to use WebSocket server for accounts subgraph subscriptions
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        let config = SUBSCRIPTION_CONFIG
-            .replace("http://localhost:4005", &http_server.uri())
-            .replace("http://localhost:4001", &ws_url)
-            .replace("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(SUBSCRIPTION_CONFIG)
             .build()
             .await;
+
+        // Configure URLs using the string replacement method
+        let ws_url = format!("ws://{}/ws", ws_addr);
+        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+        router.replace_config_string("rng:", "accounts:");
+
+        info!("WebSocket server started at: {}", ws_url);
 
         router.start().await;
         router.assert_started().await;
@@ -410,26 +407,25 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
             start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
         let coprocessor_server = start_coprocessor_server().await;
 
-        // Configure router to use WebSocket server for accounts subgraph subscriptions
-        // and coprocessor for request/response processing
+        // Create router with port reservations
+        let mut router = IntegrationTest::builder()
+            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+            .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+            .build()
+            .await;
+
+        // Configure URLs using the string replacement method
         let ws_url = format!("ws://{}/ws", ws_addr);
-        let config = SUBSCRIPTION_COPROCESSOR_CONFIG
-            .replace("http://localhost:4005", &http_server.uri())
-            .replace("http://localhost:4001", &ws_url)
-            .replace("http://localhost:8080", &coprocessor_server.uri())
-            .replace("rng:", "accounts:");
+        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+        router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", &coprocessor_server.uri());
+        router.replace_config_string("rng:", "accounts:");
 
         info!("WebSocket server started at: {}", ws_url);
         info!(
             "Coprocessor server started at: {}",
             coprocessor_server.uri()
         );
-
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
-            .build()
-            .await;
 
         router.start().await;
         router.assert_started().await;

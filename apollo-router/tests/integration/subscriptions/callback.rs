@@ -21,20 +21,27 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
         let subgraph_server =
             start_callback_subgraph_server(nb_events, interval_ms, callback_url.clone()).await;
 
-        // Create router config with callback URL pointing to our callback server
-        // Use a different port for router's callback listener (callback_addr.port() + 100)
-        let router_callback_port = callback_addr.port() + 100;
-        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
-        let config = CALLBACK_CONFIG
-            .replace("http://localhost:4002/callback", &callback_url)
-            .replace("127.0.0.1:4002", &callback_listen)
-            .replace("http://localhost:4001", &subgraph_server.uri());
-
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(CALLBACK_CONFIG)
             .build()
             .await;
+
+        // Reserve ports using the existing external ports and allocate new ones
+        let callback_receiver_port = callback_addr.port();
+        let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
+        let subgraph_uri = subgraph_server.uri();
+        // Extract port from URI like "http://127.0.0.1:PORT"
+        let subgraph_port = subgraph_uri
+            .split(':')
+            .last()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+
+        router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
+        router.set_address("SUBGRAPH_PORT", subgraph_port);
 
         router.start().await;
         router.assert_started().await;
@@ -341,20 +348,27 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         )
         .await;
 
-        // Create router config with callback URL pointing to our callback server
-        // Use a different port for router's callback listener (callback_addr.port() + 100)
-        let router_callback_port = callback_addr.port() + 100;
-        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
-        let config = CALLBACK_CONFIG
-            .replace("http://localhost:4002/callback", &callback_url)
-            .replace("127.0.0.1:4002", &callback_listen)
-            .replace("http://localhost:4001", &subgraph_server.uri());
-
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(CALLBACK_CONFIG)
             .build()
             .await;
+
+        // Reserve ports using the existing external ports and allocate new ones
+        let callback_receiver_port = callback_addr.port();
+        let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
+        let subgraph_uri = subgraph_server.uri();
+        // Extract port from URI like "http://127.0.0.1:PORT"
+        let subgraph_port = subgraph_uri
+            .split(':')
+            .last()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+
+        router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
+        router.set_address("SUBGRAPH_PORT", subgraph_port);
 
         router.start().await;
         router.assert_started().await;
@@ -455,20 +469,27 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
         )
         .await;
 
-        // Create router config with callback URL pointing to our callback server
-        // Use a different port for router's callback listener (callback_addr.port() + 100)
-        let router_callback_port = callback_addr.port() + 100;
-        let callback_listen = format!("127.0.0.1:{}", router_callback_port);
-        let config = CALLBACK_CONFIG
-            .replace("http://localhost:4002/callback", &callback_url)
-            .replace("127.0.0.1:4002", &callback_listen)
-            .replace("http://localhost:4001", &subgraph_server.uri());
-
+        // Create router with port reservations
         let mut router = IntegrationTest::builder()
             .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(&config)
+            .config(CALLBACK_CONFIG)
             .build()
             .await;
+
+        // Reserve ports using the existing external ports and allocate new ones
+        let callback_receiver_port = callback_addr.port();
+        let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
+        let subgraph_uri = subgraph_server.uri();
+        // Extract port from URI like "http://127.0.0.1:PORT"
+        let subgraph_port = subgraph_uri
+            .split(':')
+            .last()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+
+        router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
+        router.set_address("SUBGRAPH_PORT", subgraph_port);
 
         router.start().await;
         router.assert_started().await;

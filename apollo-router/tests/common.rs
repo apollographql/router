@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -69,6 +70,39 @@ use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
+
+/// Global registry to keep track of allocated ports across all tests
+/// This helps avoid port conflicts between concurrent tests
+static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
+
+fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
+    ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+/// Allocate a port that's currently available
+/// The port is not actually bound, just marked as allocated to avoid conflicts
+fn allocate_port(name: &str) -> std::io::Result<u16> {
+    let ports_registry = get_allocated_ports();
+
+    // Try to find an available port
+    for _ in 0..100 {
+        // Try up to 100 times to find a port
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener); // Release the port immediately
+
+        let mut ports = ports_registry.lock().unwrap();
+        if !ports.contains_key(&port) {
+            ports.insert(port, name.to_string());
+            return Ok(port);
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        "Could not find available port after 100 attempts",
+    ))
+}
 
 pub struct Query {
     traced: bool,
@@ -163,6 +197,7 @@ pub struct IntegrationTest {
     logs: Vec<String>,
     env: HashMap<String, String>,
     client: reqwest::Client,
+    port_replacements: HashMap<String, u16>,
 }
 
 impl IntegrationTest {
@@ -171,6 +206,69 @@ impl IntegrationTest {
             .lock()
             .expect("lock poisoned")
             .expect("no bind address set, router must be started first.")
+    }
+
+    /// Reserve a port for use in the test and return it
+    /// If port is provided, use that port; otherwise allocate a new one
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    /// This helps avoid port conflicts between concurrent tests
+    pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
+        let port = allocate_port(placeholder_name).expect("Failed to allocate port");
+        self.set_address(placeholder_name, port);
+        port
+    }
+
+    /// Reserve a specific port for use in the test
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    pub fn set_address(&mut self, placeholder_name: &str, port: u16) {
+        // Read current config
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        // Check if placeholder exists in config
+        let placeholder_pattern = format!("{{{{{}}}}}", placeholder_name);
+        let port_pattern = format!(":{{{{{}}}}}", placeholder_name);
+        let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder_name);
+
+        if !current_config.contains(&placeholder_pattern)
+            && !current_config.contains(&port_pattern)
+            && !current_config.contains(&addr_pattern)
+        {
+            panic!(
+                "Placeholder '{}' not found in config file. Expected one of: '{}', '{}', or '{}'",
+                placeholder_name, placeholder_pattern, port_pattern, addr_pattern
+            );
+        }
+
+        // Store the replacement
+        self.port_replacements
+            .insert(placeholder_name.to_string(), port);
+
+        // Apply the replacement immediately
+        let updated_config = merge_overrides(
+            &current_config,
+            &self._subgraph_overrides,
+            None, // Don't override bind address here
+            &self.redis_namespace,
+            Some(&self.port_replacements),
+        );
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
+    }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    pub fn replace_config_string(&mut self, from: &str, to: &str) {
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        let updated_config = current_config.replace(from, to);
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
     }
 }
 
@@ -427,7 +525,8 @@ impl IntegrationTest {
         subgraph_overrides.entry("products".into()).or_insert(url);
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
+        let config_str =
+            merge_overrides(&config, &subgraph_overrides, None, &redis_namespace, None);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -490,6 +589,7 @@ impl IntegrationTest {
             subgraph_context,
             logs: vec![],
             env,
+            port_replacements: HashMap::new(),
         }
     }
 
@@ -632,6 +732,7 @@ impl IntegrationTest {
                 &self._subgraph_overrides,
                 Some(self.bind_address()),
                 &self.redis_namespace,
+                Some(&self.port_replacements),
             ),
         )
         .await
@@ -1285,12 +1386,33 @@ fn merge_overrides(
     subgraph_overrides: &HashMap<String, String>,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
+    port_replacements: Option<&HashMap<String, u16>>,
 ) -> String {
     let bind_addr = bind_addr
         .map(|a| a.to_string())
         .unwrap_or_else(|| "127.0.0.1:0".into());
+
+    // Apply port replacements to the YAML string first
+    let mut yaml_with_ports = yaml.to_string();
+    if let Some(port_replacements) = port_replacements {
+        for (placeholder, port) in port_replacements {
+            // Replace placeholder patterns like {{PLACEHOLDER_NAME}} with the actual port
+            let placeholder_pattern = format!("{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&placeholder_pattern, &port.to_string());
+
+            // Also replace patterns like :{{PLACEHOLDER_NAME}} with :port
+            let port_pattern = format!(":{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{}", port));
+
+            // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
+            let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder);
+            yaml_with_ports =
+                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{}", port));
+        }
+    }
+
     // Parse the config as yaml
-    let mut config: Value = serde_yaml::from_str(yaml).unwrap();
+    let mut config: Value = serde_yaml::from_str(&yaml_with_ports).unwrap();
 
     // Insert subgraph overrides, making sure to keep other overrides if present
     let overrides = subgraph_overrides
