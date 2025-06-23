@@ -138,7 +138,7 @@ fn gt_shape(
         source_id,
     );
 
-    if is_comparable_shape_combination(arg_shape.case(), input_shape.case()) {
+    if is_comparable_shape_combination(&arg_shape, &input_shape) {
         Shape::bool(method_name.shape_location(source_id))
     } else {
         Shape::error(
