@@ -56,9 +56,9 @@ fn eq_method(
 fn eq_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
@@ -72,9 +72,26 @@ fn eq_shape(
         );
     }
 
-    if method_args.and_then(|args| args.args.first()).is_none() {
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    };
+    let arg_shape = first_arg.compute_output_shape(
+        input_shape.clone(),
+        dollar_shape,
+        named_var_shapes,
+        source_id,
+    );
+
+    // Ensures that the arguments are of the same type... this includes covering cases like int/float and unknown/name
+    if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
+        return Shape::error(
+            format!(
+                "Method ->{} requires the applied to value and argument to be the same type to be comparable.",
+                method_name.as_ref()
+            ),
             method_name.shape_location(source_id),
         );
     }
