@@ -11,7 +11,7 @@ pub struct RuntimeError {
     code: Option<String>,
     pub coordinate: Option<String>,
     pub subgraph_name: Option<String>,
-    pub response_key: ResponseKey,
+    pub path: String,
     pub extensions: Map<ByteString, Value>,
 }
 
@@ -22,7 +22,7 @@ impl RuntimeError {
             code: None,
             coordinate: None,
             subgraph_name: None,
-            response_key: response_key.clone(),
+            path: response_key.path_string(),
             extensions: Default::default(),
         }
     }
@@ -78,7 +78,7 @@ impl Error {
             code: Some(self.code()),
             coordinate: Some(connector.id.coordinate()),
             subgraph_name: Some(connector.id.subgraph_name.clone()),
-            response_key,
+            path: response_key.path_string(),
             extensions: Default::default(),
         }
     }

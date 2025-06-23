@@ -25,6 +25,7 @@ use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
@@ -59,19 +60,31 @@ pub(crate) enum HandleResponseError {
 
 impl graphql::Error {
     fn from_connectors_runtime_error(error: &RuntimeError) -> Self {
-        graphql::Error::builder()
+        let path: Path = (&error.path).into();
+
+        let mut err = graphql::Error::builder()
             .message(error.message.clone())
             .extension_code(error.code())
-            .path(Path::from_response_key(&error.response_key))
-            .extensions(error.extensions.clone())
-            .build()
+            .path(path)
+            .extensions(error.extensions.clone());
+
+        if let Some(coordinate) = &error.coordinate {
+            err = err.extension(
+                "connector",
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )])),
+            );
+        }
+
+        err.build()
             .with_subgraph_name(error.subgraph_name.as_deref().unwrap_or_default())
     }
 }
 
 // --- RAW RESPONSE ------------------------------------------------------------
 
-#[allow(clippy::large_enum_variant)]
 enum RawResponse {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
@@ -320,7 +333,6 @@ impl RawResponse {
 
 // --- MAPPED RESPONSE ---------------------------------------------------------
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
@@ -548,11 +560,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     };
 
     if let MappedResponse::Error { ref error, .. } = mapped_response {
-        emit_error_event(
-            &error.code(),
-            &error.message,
-            Some(Path::from_response_key(&error.response_key)),
-        );
+        emit_error_event(&error.code(), &error.message, Some((*error.path).into()));
     }
 
     connector::request_service::Response {
