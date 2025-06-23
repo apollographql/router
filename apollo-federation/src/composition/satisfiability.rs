@@ -1,4 +1,5 @@
 mod satisfiability_error;
+mod validation_state;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
