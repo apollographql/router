@@ -1,7 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
@@ -94,22 +93,25 @@ fn or_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    match input_shape.case() {
-        ShapeCase::Bool(Some(true)) => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
-        }
-        ShapeCase::Unknown | ShapeCase::Bool(Some(false)) => {
-            // Continue onward... if unknown we don't know the shape, and if it's false, it still might be true later!
-        }
-        _ => {
-            return Shape::error(
-                format!(
-                    "Method ->{} can only be applied to boolean values.",
-                    method_name.as_ref()
-                ),
-                method_name.shape_location(source_id),
-            );
-        }
+    if method_args.and_then(|args| args.args.first()).is_none() {
+        return Shape::error(
+            format!(
+                "Method ->{} requires at least one argument",
+                method_name.as_ref()
+            ),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    // We will accept anything bool-like OR unknown/named
+    if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+        return Shape::error(
+            format!(
+                "Method ->{} can only be applied to boolean values.",
+                method_name.as_ref()
+            ),
+            method_name.shape_location(source_id),
+        );
     }
 
     if let Some(MethodArgs { args, .. }) = method_args {
@@ -120,22 +122,16 @@ fn or_shape(
                 named_var_shapes,
                 source_id,
             );
-            match arg_shape.case() {
-                ShapeCase::Bool(Some(true)) => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
-                }
-                ShapeCase::Unknown | ShapeCase::Bool(Some(false)) => {
-                    // Continue onward... if unknown we don't know the shape, and if it's false, it still might be true later!
-                }
-                _ => {
-                    return Shape::error(
-                        format!(
-                            "Method ->{} can only accept boolean arguments.",
-                            method_name.as_ref()
-                        ),
-                        method_name.shape_location(source_id),
-                    );
-                }
+
+            // We will accept anything bool-like OR unknown/named
+            if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
+                return Shape::error(
+                    format!(
+                        "Method ->{} can only accept boolean arguments.",
+                        method_name.as_ref()
+                    ),
+                    method_name.shape_location(source_id),
+                );
             }
         }
     }
@@ -146,6 +142,7 @@ fn or_shape(
 #[cfg(test)]
 mod tests {
     use serde_json_bytes::json;
+    use shape::Shape;
 
     use crate::selection;
 
