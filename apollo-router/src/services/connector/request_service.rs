@@ -7,6 +7,8 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
@@ -29,7 +31,6 @@ use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::ErrorExtension;
-use crate::json_ext::Path;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
@@ -111,10 +112,8 @@ impl Response {
         message: String,
         response_key: ResponseKey,
     ) -> Self {
-        let graphql_error = graphql::Error::builder()
-            .message(message)
-            .extension_code(error.extension_code())
-            .build();
+        let graphql_error =
+            RuntimeError::new(message, &response_key).with_code(error.extension_code());
 
         let mapped_response = MappedResponse::Error {
             error: graphql_error,
@@ -162,70 +161,9 @@ impl Response {
     }
 }
 
-/// An error sending a connector request. This represents a problem with sending the request
-/// to the connector, rather than an error returned from the connector itself.
-#[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub(crate) enum Error {
-    /// Request limit exceeded
-    RequestLimitExceeded,
-
-    /// Rate limit exceeded
-    RateLimited,
-
-    /// Timeout
-    GatewayTimeout,
-
-    /// {0}
-    TransportFailure(#[from] BoxError),
-}
-
-impl Clone for Error {
-    fn clone(&self) -> Self {
-        match self {
-            Self::TransportFailure(err) => Self::TransportFailure(BoxError::from(err.to_string())),
-            err => err.clone(),
-        }
-    }
-}
-
-impl Error {
-    /// Create a GraphQL error from this error.
-    #[must_use]
-    pub(crate) fn to_graphql_error(
-        &self,
-        connector: Arc<Connector>,
-        path: Option<Path>,
-    ) -> crate::error::Error {
-        use serde_json_bytes::*;
-
-        let builder = graphql::Error::builder()
-            .message(self.to_string())
-            .extension_code(self.extension_code())
-            .extension("service", connector.id.subgraph_name.clone())
-            .extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(connector.id.coordinate().into()),
-                )])),
-            );
-        if let Some(path) = path {
-            builder.path(path).build()
-        } else {
-            builder.build()
-        }
-    }
-}
-
 impl ErrorExtension for Error {
     fn extension_code(&self) -> String {
-        match self {
-            Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
-            Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
-            Self::RateLimited => "REQUEST_RATE_LIMITED",
-            Self::GatewayTimeout => "GATEWAY_TIMEOUT",
-        }
-        .to_string()
+        self.code()
     }
 }
 
@@ -349,7 +287,11 @@ impl tower::Service<Request> for ConnectorRequestService {
                                 })
                                 .await
                                 .map(|result| result.http_response)
-                                .map_err(|e| replace_subgraph_name(e, &request.connector).into())
+                                .map_err(|e|
+                                    // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                                    // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                                    Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
+                                )
                         } else {
                             Err(Error::TransportFailure("no http client found".into()))
                         }
