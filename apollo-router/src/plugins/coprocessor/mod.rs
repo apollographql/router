@@ -1274,7 +1274,12 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body = handle_graphql_response(body, co_processor_output.body, response_validation, incoming_payload_was_valid)?;
+    let new_body = handle_graphql_response(
+        body,
+        co_processor_output.body,
+        response_validation,
+        incoming_payload_was_valid,
+    )?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1391,12 +1396,13 @@ pub(super) fn handle_graphql_response(
     // This prevents validation failures for responses that were already invalid before being sent to the coprocessor.
     // Set to false to restore the previous behavior of always validating coprocessor responses when response_validation is true.
     const ENABLE_CONDITIONAL_VALIDATION: bool = true;
-    
+
     // Only apply validation if response_validation is enabled AND either:
     // 1. Conditional validation is disabled, OR
     // 2. The incoming payload to the coprocessor was valid
-    let should_validate = response_validation && (!ENABLE_CONDITIONAL_VALIDATION || incoming_payload_was_valid);
-    
+    let should_validate =
+        response_validation && (!ENABLE_CONDITIONAL_VALIDATION || incoming_payload_was_valid);
+
     Ok(match copro_response_body {
         Some(value) => {
             if should_validate {

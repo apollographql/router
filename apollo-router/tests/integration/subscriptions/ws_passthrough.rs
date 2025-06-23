@@ -188,7 +188,10 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         let ws_url = format!("ws://{}/ws", ws_addr);
         router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
         router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", &coprocessor_server.uri());
+        router.replace_config_string(
+            "http://localhost:{{COPROCESSOR_PORT}}",
+            &coprocessor_server.uri(),
+        );
         router.replace_config_string("rng:", "accounts:");
 
         info!("WebSocket server started at: {}", ws_url);
@@ -418,7 +421,10 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         let ws_url = format!("ws://{}/ws", ws_addr);
         router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
         router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", &coprocessor_server.uri());
+        router.replace_config_string(
+            "http://localhost:{{COPROCESSOR_PORT}}",
+            &coprocessor_server.uri(),
+        );
         router.replace_config_string("rng:", "accounts:");
 
         info!("WebSocket server started at: {}", ws_url);

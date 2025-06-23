@@ -25,11 +25,11 @@ mod tests {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::handle_graphql_response;
+    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
-    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
-    use crate::plugins::coprocessor::handle_graphql_response;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
@@ -2114,7 +2114,8 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result = handle_graphql_response(original.clone(), Some(valid_response), true, true).unwrap();
+        let result =
+            handle_graphql_response(original.clone(), Some(valid_response), true, true).unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return error when validation enabled
@@ -2653,7 +2654,12 @@ mod tests {
     fn valid_response_with_errors() -> crate::graphql::Response {
         use crate::graphql::Error;
         crate::graphql::Response::builder()
-            .errors(vec![Error::builder().message("error").extension_code("TEST").build()])
+            .errors(vec![
+                Error::builder()
+                    .message("error")
+                    .extension_code("TEST")
+                    .build(),
+            ])
             .build()
     }
 
@@ -2672,7 +2678,9 @@ mod tests {
     #[test]
     fn test_minimal_graphql_validation() {
         assert!(is_graphql_response_minimally_valid(&valid_response()));
-        assert!(is_graphql_response_minimally_valid(&valid_response_with_errors()));
+        assert!(is_graphql_response_minimally_valid(
+            &valid_response_with_errors()
+        ));
         assert!(!is_graphql_response_minimally_valid(&invalid_response()));
     }
 
@@ -2681,7 +2689,7 @@ mod tests {
         // When body is not sent, always return true
         assert!(was_incoming_payload_valid(&valid_response(), false));
         assert!(was_incoming_payload_valid(&invalid_response(), false));
-        
+
         // When body is sent, check validity
         assert!(was_incoming_payload_valid(&valid_response(), true));
         assert!(!was_incoming_payload_valid(&invalid_response(), true));
@@ -2690,15 +2698,26 @@ mod tests {
     #[test]
     fn test_conditional_validation_logic() {
         // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
-        assert!(handle_graphql_response(invalid_response(), Some(invalid_copro_body()), true, false).is_ok());
-        
+        assert!(
+            handle_graphql_response(invalid_response(), Some(invalid_copro_body()), true, false)
+                .is_ok()
+        );
+
         // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
-        assert!(handle_graphql_response(valid_response(), Some(invalid_copro_body()), true, true).is_err());
-        
+        assert!(
+            handle_graphql_response(valid_response(), Some(invalid_copro_body()), true, true)
+                .is_err()
+        );
+
         // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
-        assert!(handle_graphql_response(valid_response(), Some(valid_copro_body()), true, true).is_ok());
-        
+        assert!(
+            handle_graphql_response(valid_response(), Some(valid_copro_body()), true, true).is_ok()
+        );
+
         // Validation disabled = always bypassed (succeeds regardless)
-        assert!(handle_graphql_response(valid_response(), Some(invalid_copro_body()), false, true).is_ok());
+        assert!(
+            handle_graphql_response(valid_response(), Some(invalid_copro_body()), false, true)
+                .is_ok()
+        );
     }
 }

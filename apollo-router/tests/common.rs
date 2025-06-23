@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
@@ -92,8 +93,8 @@ fn allocate_port(name: &str) -> std::io::Result<u16> {
         drop(listener); // Release the port immediately
 
         let mut ports = ports_registry.lock().unwrap();
-        if !ports.contains_key(&port) {
-            ports.insert(port, name.to_string());
+        if let Entry::Vacant(e) = ports.entry(port) {
+            e.insert(name.to_string());
             return Ok(port);
         }
     }
@@ -213,6 +214,7 @@ impl IntegrationTest {
     /// The port placeholder will be immediately replaced in the config file
     /// Panics if the placeholder is not found in the config
     /// This helps avoid port conflicts between concurrent tests
+    #[allow(dead_code)]
     pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
         let port = allocate_port(placeholder_name).expect("Failed to allocate port");
         self.set_address(placeholder_name, port);
@@ -222,6 +224,7 @@ impl IntegrationTest {
     /// Reserve a specific port for use in the test
     /// The port placeholder will be immediately replaced in the config file
     /// Panics if the placeholder is not found in the config
+    #[allow(dead_code)]
     pub fn set_address(&mut self, placeholder_name: &str, port: u16) {
         // Read current config
         let current_config = std::fs::read_to_string(&self.test_config_location)
@@ -261,6 +264,7 @@ impl IntegrationTest {
 
     /// Replace a string in the config file (for non-port replacements)
     /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
     pub fn replace_config_string(&mut self, from: &str, to: &str) {
         let current_config = std::fs::read_to_string(&self.test_config_location)
             .expect("Failed to read config file");
