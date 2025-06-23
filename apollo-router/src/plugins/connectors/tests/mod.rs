@@ -477,10 +477,10 @@ async fn basic_errors() {
             "http": {
               "status": 404
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "service": "connectors",
             "code": "CONNECTOR_FETCH"
           }
         },
@@ -495,10 +495,10 @@ async fn basic_errors() {
             "http": {
               "status": 400
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "service": "connectors",
             "code": "CONNECTOR_FETCH"
           }
         },
@@ -514,10 +514,10 @@ async fn basic_errors() {
             "http": {
               "status": 400
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "service": "connectors",
             "code": "CONNECTOR_FETCH"
           }
         }
@@ -1598,10 +1598,10 @@ async fn error_not_redacted() {
             "http": {
               "status": 404
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "service": "connectors",
             "code": "CONNECTOR_FETCH"
           }
         }
