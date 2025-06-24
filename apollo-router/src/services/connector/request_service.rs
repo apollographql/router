@@ -14,6 +14,7 @@ use apollo_federation::connectors::runtime::http_json_transport::TransportReques
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -31,7 +32,6 @@ use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
