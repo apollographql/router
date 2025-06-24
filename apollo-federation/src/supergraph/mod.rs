@@ -2063,13 +2063,16 @@ fn remove_inactive_applications(
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
-        let mut fields = parse_field_set_without_normalization(
+        let (mut fields, mut is_modified) = parse_field_set_without_normalization(
             valid_schema,
             parent_type_pos.type_name().clone(),
             fields,
+            true,
         )?;
 
-        let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
+        if remove_non_external_leaf_fields(schema, &mut fields)? {
+            is_modified = true;
+        }
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None

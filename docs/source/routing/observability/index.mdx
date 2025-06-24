@@ -36,12 +36,6 @@ Once operation and field usage metrics are collected by GraphOS, you can use the
 
 Additionally, you can forward the metrics that GraphOS collects to your APM solution. Apollo offers a [Datadog integration](/graphos/platform/insights/datadog-forwarding) to forward your graph's performance metrics to your Datadog account.
 
-<EnterpriseFeature>
-
-Forwarding metrics to Datadog requires an [Enterprise plan](https://www.apollographql.com/pricing/):
-
-</EnterpriseFeature>
-
 ## Enabling additional runtime telemetry
 
 Both the GraphOS Router and Apollo Router Core run a request-handling pipeline with multiple stages that starts with receiving requests and ends with sending back responses. The continuous operation and throughput of this request pipeline, or _request lifecycle_, reflects the health of a running supergraph. Observability of the router request lifecycle is therefore key to understanding the health of a supergraph.
