@@ -299,7 +299,6 @@ impl<'a> TestHarness<'a> {
                 config.clone(),
                 schema.clone(),
                 None,
-                None,
                 Some(builder.extra_plugins),
                 Default::default(),
             )

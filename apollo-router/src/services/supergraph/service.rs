@@ -1011,7 +1011,6 @@ impl PluggableSupergraphServiceBuilder {
             query_planner_service,
             schema,
             plugins: self.plugins,
-            config: configuration,
             sb,
         })
     }
@@ -1022,7 +1021,6 @@ impl PluggableSupergraphServiceBuilder {
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
-    config: Arc<Configuration>,
     plugins: Arc<Plugins>,
     sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
@@ -1044,16 +1042,6 @@ pub(crate) trait HasSchema {
 impl HasSchema for SupergraphCreator {
     fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
-    }
-}
-
-pub(crate) trait HasConfig {
-    fn config(&self) -> Arc<Configuration>;
-}
-
-impl HasConfig for SupergraphCreator {
-    fn config(&self) -> Arc<Configuration> {
-        Arc::clone(&self.config)
     }
 }
 
