@@ -159,6 +159,7 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InternalError { .. } => ErrorCode::Internal,
         }
     }
 }
