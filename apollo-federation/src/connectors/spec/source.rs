@@ -20,6 +20,7 @@ use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::connectors::string_template;
+use crate::connectors::string_template::Part::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::error::FederationError;
@@ -220,7 +221,7 @@ impl BaseUrl {
             .filter(|namespace| namespace != &Namespace::Config && namespace != &Namespace::Env)
             .map(|namespace| namespace.to_string())
             .collect();
-        if illegal_variables.is_empty() {
+        if !illegal_variables.is_empty() {
             return Err(Message {
                 code: Code::InvalidUrl,
                 message: format!(
