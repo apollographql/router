@@ -15,7 +15,11 @@ This guide provides the following examples of running an Apollo Router container
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 
+<<<<<<< HEAD
 The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, additional details on version information are available [here](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
+=======
+The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, additional details on version information is available [here](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
+>>>>>>> 22ddee3fa (Fill out the rest of the docs areas)
 
 <ElasticNotice />
 
@@ -62,7 +66,11 @@ docker run \
 
 ## Configuring using local files
 
+<<<<<<< HEAD
 You can provide your own configuration from the host environment to the router by mounting the path which contains your configuration files to `/config` as follows:
+=======
+You can provide your own configuration from the host environment to the router by mounting the path which containers your configuration files to `/config` as follows:
+>>>>>>> 22ddee3fa (Fill out the rest of the docs areas)
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
@@ -93,10 +101,6 @@ Both local and container paths must be specified as absolute paths.
 ## Running a specific Router and MCP version
 
 The container has a tagging scheme that consists of three parts, the container version, the Apollo Router version, and the MCP Server version, each separated by underscores.
-
-//TODO - UPDATE
-
-## Passing command-line arguments to the router binary
 
 To learn more see the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
