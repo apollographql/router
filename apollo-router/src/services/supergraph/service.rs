@@ -520,12 +520,17 @@ async fn subscription_task(
     let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
 
     let mut timeout = Box::pin(tokio::time::sleep(expires_in));
-
+    i64_up_down_counter!(
+        "apollo.router.subscription.task",
+        "opened tasks for subscription",
+        1
+    );
     loop {
         tokio::select! {
             // We prefer to specify the order of checks within the select
             biased;
             _ = subscription_handle.closed_signal.recv() => {
+                dbg!("closed channel");
                 break;
             }
             _ = &mut timeout => {
@@ -564,6 +569,7 @@ async fn subscription_task(
                 }
             }
             Some(new_configuration) = configuration_updated_rx.next() => {
+                dbg!("!!!!!!!!!!!!!!!!! config update");
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
@@ -600,6 +606,7 @@ async fn subscription_task(
             }
             Some(new_schema) = schema_updated_rx.next() => {
                 if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
+                    dbg!("schema update");
                     let _ = sender
                         .send(
                             Response::builder()
@@ -608,12 +615,19 @@ async fn subscription_task(
                                 .build(),
                         )
                         .await;
+                        dbg!("break channel");
 
                     break;
                 }
             }
         }
     }
+    i64_up_down_counter!(
+        "apollo.router.subscription.task",
+        "opened tasks for subscription",
+        -1
+    );
+
     drop(sender);
     tracing::trace!("Leaving the task for subscription");
     if limit_is_set {

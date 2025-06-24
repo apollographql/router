@@ -279,6 +279,7 @@ impl YamlRouterFactory {
                 )
                 .await;
         };
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         RouterCreator::new(
             query_analysis_layer,
             persisted_query_layer,

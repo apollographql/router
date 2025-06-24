@@ -9,8 +9,15 @@ use super::common::Query;
 use super::common::Telemetry;
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("../fixtures/subscription.router.yaml");
-const SUB_QUERY: &str =
-    r#"subscription {  userWasCreated(intervalMs: 5, nbEvents: 10) {    name reviews { body } }}"#;
+const SUB_QUERY: &str = r#"subscription Subscription {
+      reviewAdded {
+        body
+        product {
+          name
+          sku
+        }
+      }
+    }"#;
 const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name username }}"#;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -123,24 +130,46 @@ async fn test_subscription_with_dedup_load_standalone() -> Result<(), BoxError> 
     Ok(())
 }
 
-#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_memory_usage() -> Result<(), BoxError> {
-    for i in 0..300i64 {
-        let response = run_subscription(SUB_QUERY, None).await;
+    for i in 0..400i64 {
+        // spawn and retry on error
+        let response = run_subscription(SUB_QUERY, Some(i)).await;
         assert!(
             response.status().is_success(),
             "error status {:?}",
             response.status()
         );
 
-        if i == 299 {
+        if i == 399 {
+            let mut stream = response.bytes_stream();
+            while let Some(_chunk) = stream.next().await {}
+            // Fake reconnection
+            println!("reconnect");
+            let response = run_subscription(SUB_QUERY, Some(i)).await;
+            assert!(
+                response.status().is_success(),
+                "error status {:?}",
+                response.status()
+            );
             let mut stream = response.bytes_stream();
             while let Some(_chunk) = stream.next().await {}
         } else {
             tokio::spawn(async move {
                 let mut stream = response.bytes_stream();
                 while let Some(_chunk) = stream.next().await {}
+                // Fake reconnection
+                loop {
+                    println!("reconnect");
+                    let response = run_subscription(SUB_QUERY, Some(i)).await;
+                    assert!(
+                        response.status().is_success(),
+                        "error status {:?}",
+                        response.status()
+                    );
+                    let mut stream = response.bytes_stream();
+                    while let Some(_chunk) = stream.next().await {}
+                }
             });
         }
         if i % 100 == 0 {
@@ -186,7 +215,7 @@ async fn run_subscription(sub_query: &str, id: Option<i64>) -> reqwest::Response
     let client = reqwest::Client::new();
 
     let mut request = client
-        .post("http://localhost:4000")
+        .post("http://localhost:4040")
         .header("accept", "multipart/mixed;subscriptionSpec=1.0")
         .header("apollographql-client-name", "custom_name")
         .header("apollographql-client-version", "1.0")
