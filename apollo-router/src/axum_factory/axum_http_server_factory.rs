@@ -85,7 +85,6 @@ fn session_count_instrument() -> ObservableGauge<u64> {
     feature = "global-allocator",
     not(feature = "dhat-heap"),
     target_os = "linux"
-
 ))]
 fn jemalloc_metrics_instruments() -> Vec<ObservableGauge<u64>> {
     use crate::axum_factory::metrics::jemalloc;
