@@ -100,7 +100,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -111,7 +111,7 @@ async fn insert() {
         }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -197,7 +197,7 @@ async fn insert() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -341,7 +341,7 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let entity_cache =
+    let response_cache =
         ResponseCache::for_test(pg_cache.clone(), map.clone(), valid_schema.clone(), true)
             .await
             .unwrap();
@@ -350,7 +350,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .extra_plugin(subgraphs.clone())
         .build_supergraph()
         .await
@@ -436,7 +436,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_private_plugin(entity_cache)
+        .extra_private_plugin(response_cache)
         .extra_plugin(subgraphs.clone())
         .build_supergraph()
         .await
@@ -570,7 +570,7 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -578,7 +578,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -672,7 +672,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -787,7 +787,7 @@ async fn no_cache_control() {
     })
     .await
     .unwrap();
-    let entity_cache = ResponseCache::for_test(
+    let response_cache = ResponseCache::for_test(
         pg_cache.clone(),
         HashMap::new(),
         valid_schema.clone(),
@@ -800,7 +800,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -849,7 +849,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -963,7 +963,7 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -971,7 +971,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1024,7 +1024,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1202,7 +1202,7 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1210,7 +1210,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1301,7 +1301,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache)
+        .extra_private_plugin(response_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
                 let mut subgraph = MockSubgraphService::new();
@@ -1468,7 +1468,7 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1476,7 +1476,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1497,7 +1497,7 @@ async fn missing_entities() {
     );
     insta::assert_json_snapshot!(response);
 
-    let entity_cache = ResponseCache::for_test(
+    let response_cache = ResponseCache::for_test(
         pg_cache.clone(),
         HashMap::new(),
         valid_schema.clone(),
@@ -1548,7 +1548,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache)
+        .extra_private_plugin(response_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1638,17 +1638,17 @@ async fn invalidate() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
-    let invalidation = entity_cache.invalidation.clone();
+    let invalidation = response_cache.invalidation.clone();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1717,7 +1717,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache.clone())
+        .extra_private_plugin(response_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1795,7 +1795,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_private_plugin(entity_cache)
+        .extra_private_plugin(response_cache)
         .build_supergraph()
         .await
         .unwrap();

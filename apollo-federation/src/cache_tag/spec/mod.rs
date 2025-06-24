@@ -74,13 +74,6 @@ impl CacheTagSpec {
         }
     }
 
-    // pub(crate) fn get_from_schema(schema: &Schema) -> Option<(Self, Link)> {
-    //     let (link, _) = Link::for_identity(schema, &Self::identity())?;
-    //     Self::try_from(&link.url.version)
-    //         .ok()
-    //         .map(|spec| (spec, link))
-    // }
-
     pub(crate) fn check_or_add(schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(link) = schema
             .metadata()

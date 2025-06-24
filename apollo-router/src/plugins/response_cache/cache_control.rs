@@ -347,27 +347,6 @@ impl CacheControl {
         self.private
     }
 
-    // We don't support revalidation yet
-    #[allow(dead_code)]
-    pub(crate) fn should_revalidate(&self) -> bool {
-        if self.no_cache {
-            return true;
-        }
-
-        let elapsed = self.elapsed();
-        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
-
-        if self.immutable && !expired {
-            return false;
-        }
-
-        if (self.must_revalidate || self.proxy_revalidate) && expired {
-            return true;
-        }
-
-        false
-    }
-
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
         let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
