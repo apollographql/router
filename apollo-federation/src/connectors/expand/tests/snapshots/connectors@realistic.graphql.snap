@@ -20,8 +20,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -303,8 +312,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -455,8 +473,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -657,8 +684,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [

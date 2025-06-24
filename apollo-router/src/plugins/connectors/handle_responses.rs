@@ -419,7 +419,6 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
-    use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
 
