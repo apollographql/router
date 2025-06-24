@@ -734,36 +734,7 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => {
-                if response_validation {
-                    graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
-                        graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                    .build(),
-                            ])
-                            .build()
-                    })
-                } else {
-                    // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
-                    serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
-                        graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                    .build(),
-                            ])
-                            .build()
-                    })
-                }
-            }
+            _ => deserialize_coprocessor_response(body_as_value, response_validation),
         };
 
         let res = router::Response::builder()
@@ -1107,36 +1078,7 @@ where
                             .build(),
                     ])
                     .build(),
-                value => {
-                    if response_validation {
-                        graphql::Response::from_value(value).unwrap_or_else(|error| {
-                            graphql::Response::builder()
-                                .errors(vec![
-                                    Error::builder()
-                                        .message(format!(
-                                            "couldn't deserialize coprocessor output body: {error}"
-                                        ))
-                                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                        .build(),
-                                ])
-                                .build()
-                        })
-                    } else {
-                        // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
-                        serde_json_bytes::from_value(value).unwrap_or_else(|error| {
-                            graphql::Response::builder()
-                                .errors(vec![
-                                    Error::builder()
-                                        .message(format!(
-                                            "couldn't deserialize coprocessor output body: {error}"
-                                        ))
-                                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                        .build(),
-                                ])
-                                .build()
-                        })
-                    }
-                }
+                value => deserialize_coprocessor_response(value, response_validation),
             };
 
             let mut http_response = http::Response::builder()
@@ -1383,6 +1325,41 @@ pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_sent
     } else {
         // If we didn't send the body, assume it was valid
         true
+    }
+}
+
+/// Deserializes a GraphQL response from a Value with optional validation
+pub(super) fn deserialize_coprocessor_response(
+    body_as_value: Value,
+    response_validation: bool,
+) -> graphql::Response {
+    if response_validation {
+        graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
+            graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!(
+                            "couldn't deserialize coprocessor output body: {error}"
+                        ))
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build()
+        })
+    } else {
+        // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+        serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
+            graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!(
+                            "couldn't deserialize coprocessor output body: {error}"
+                        ))
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build()
+        })
     }
 }
 

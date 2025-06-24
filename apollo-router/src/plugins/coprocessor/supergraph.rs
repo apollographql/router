@@ -267,34 +267,7 @@ where
         let res = {
             let graphql_response = {
                 let body_value = co_processor_output.body.unwrap_or(Value::Null);
-                if response_validation {
-                    graphql::Response::from_value(body_value).unwrap_or_else(|error| {
-                        graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                    .build(),
-                            ])
-                            .build()
-                    })
-                } else {
-                    // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
-                    serde_json_bytes::from_value(body_value).unwrap_or_else(|error| {
-                        graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                    .build(),
-                            ])
-                            .build()
-                    })
-                }
+                deserialize_coprocessor_response(body_value, response_validation)
             };
 
             let mut http_response = http::Response::builder()
