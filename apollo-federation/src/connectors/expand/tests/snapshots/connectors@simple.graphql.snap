@@ -422,14 +422,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         response_headers: {},
         request_variable_keys: {
             $this: {
-                "c",
                 "b",
+                "c",
             },
         },
         response_variable_keys: {
             $this: {
-                "b",
                 "c",
+                "b",
             },
         },
         batch_settings: None,
