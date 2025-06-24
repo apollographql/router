@@ -326,7 +326,7 @@ mod tests {
             })
             .collect();
 
-        let source = sources.get(0).unwrap();
+        let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
         assert_eq!(
             source
