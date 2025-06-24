@@ -20,15 +20,11 @@ Learn more about [in-memory caching](/graphos/routing/performance/caching/in-mem
 
 ## Distributed caching
 
-<EnterpriseFeature />
-
 You can configure a Redis-backed distributed cache that enables multiple router instances to share cached values. Those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). If any of your router instances caches a particular value, all of your instances can look up that value to significantly improve responsiveness.
 
 Learn more about [distributed caching](/graphos/routing/performance/caching/distributed).
 
 ## Entity-based caching
-
-<EnterpriseFeature />
 
 Entity caching speeds up graph data retrieval by storing only the necessary data for entities, rather than entire client responses. It's helpful in scenarios where the same data is requested frequently, such as product information systems and user profile services.
 
