@@ -725,7 +725,7 @@ mod test_make_uri {
     fn source_template_variables_retained() {
         let transport = HttpJsonTransport {
             source_template: StringTemplate::from_str("http://${$config.subdomain}.localhost").ok(),
-            connect_template: "/connect?c=d#connectFragment".parse().unwrap(),
+            connect_template: "/connect?c=d".parse().unwrap(),
             ..Default::default()
         };
 
@@ -743,7 +743,7 @@ mod test_make_uri {
                 "http://{$config.subdomain}.localhost:{$config.port}",
             )
             .ok(),
-            connect_template: "/connect?c=d#connectFragment".parse().unwrap(),
+            connect_template: "/connect?c=d".parse().unwrap(),
             ..Default::default()
         };
         let mut vars: IndexMap<String, Value> = Default::default();
