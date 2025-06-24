@@ -618,6 +618,7 @@ mod test {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
@@ -629,7 +630,6 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
