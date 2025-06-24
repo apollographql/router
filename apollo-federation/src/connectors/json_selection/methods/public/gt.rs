@@ -252,7 +252,7 @@ mod method_tests {
     }
 
     #[test]
-    fn gt_should_return_false_with_error_for_null_values() {
+    fn gt_should_error_for_null_values() {
         let result = selection!(
             r#"
                 result: value->gt(null)
@@ -270,7 +270,7 @@ mod method_tests {
     }
 
     #[test]
-    fn gt_should_return_false_with_error_for_boolean_values() {
+    fn gt_should_error_for_boolean_values() {
         let result = selection!(
             r#"
                 result: value->gt(false)
@@ -288,7 +288,7 @@ mod method_tests {
     }
 
     #[test]
-    fn gt_should_return_false_with_error_for_arrays() {
+    fn gt_should_error_for_arrays() {
         let result = selection!(
             r#"
                     result: value->gt([1,2])
@@ -306,7 +306,7 @@ mod method_tests {
     }
 
     #[test]
-    fn gt_should_return_false_with_error_for_objects() {
+    fn gt_should_error_for_objects() {
         let result = selection!(
             r#"
                     result: value->gt({"a": 1})
@@ -322,7 +322,7 @@ mod method_tests {
     }
 
     #[test]
-    fn gt_should_return_false_and_error_for_mixed_types() {
+    fn gt_should_error_for_mixed_types() {
         let result = selection!(
             r#"
                     result: value->gt("string")
