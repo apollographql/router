@@ -20,7 +20,6 @@ use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::connectors::string_template;
-use crate::connectors::string_template::Part::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::error::FederationError;
