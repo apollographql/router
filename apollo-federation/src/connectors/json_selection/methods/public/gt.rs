@@ -338,4 +338,116 @@ mod method_tests {
             )
         );
     }
+
+    #[test]
+    fn gt_should_return_error_when_no_arguments_provided() {
+        let result = selection!(
+            r#"
+                    result: value->gt()
+                "#
+        )
+        .apply_to(&json!({ "value": 42 }));
+
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gt requires exactly one argument")
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use serde_json::Number;
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..7,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        gt_shape(
+            &WithRange::new("gt".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::none(),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn gt_shape_should_return_bool_on_valid_strings() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::string([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn gt_shape_should_return_bool_on_valid_numbers() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
+                Shape::int([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn gt_shape_should_error_on_mixed_types() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::int([])
+            ),
+            Shape::error_with_partial(
+                "Method ->gt can only compare two numbers or two strings. Found Int > \"a\""
+                    .to_string(),
+                Shape::bool([get_location()]),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn gt_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::string([])),
+            Shape::error(
+                "Method ->gt requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn gt_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::Number(Number::from(42)), None),
+                    WithRange::new(LitExpr::Number(Number::from(42)), None)
+                ],
+                Shape::int([])
+            ),
+            Shape::error(
+                "Method ->gt requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
 }

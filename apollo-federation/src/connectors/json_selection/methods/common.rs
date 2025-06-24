@@ -1,10 +1,11 @@
-use crate::connectors::json_selection::location::Ranged;
-use crate::connectors::json_selection::location::WithRange;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
-use crate::connectors::{ApplyToError, json_selection::immutable::InputPath};
+use crate::connectors::ApplyToError;
+use crate::connectors::json_selection::immutable::InputPath;
+use crate::connectors::json_selection::location::Ranged;
+use crate::connectors::json_selection::location::WithRange;
 
 pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) -> bool {
     if Shape::float([]).accepts(shape1) {
