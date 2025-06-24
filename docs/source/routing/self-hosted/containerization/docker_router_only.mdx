@@ -59,7 +59,7 @@ For more complex configurations, such as overriding subgraph URLs or propagating
 
 Apollo's default Docker images include a [basic router configuration](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml). Inside the container, this file is located at `/dist/config/router.yaml`.
 
-If you wish to override the default configuration, it is important preserve aspects of the default configuration. In particular, it is generally important for the router to bind to and listen on the special address of `0.0.0.0` (for all interfaces) to ensure it's exposed on a network interface that's accessible outside of the local container. Without this configuration, the router will only listen on `localhost`.
+If you wish to override the default configuration, it is important to preserve aspects of the default configuration. In particular, it is generally important for the router to bind to and listen on the special address of `0.0.0.0` (for all interfaces) to ensure it's exposed on a network interface that's accessible outside of the local container. Without this configuration, the router will only listen on `localhost`.
 
 You can provide your own configuration from the host environment to the router by mounting your configuration to `/dist/config/router.yaml` as follows:
 
