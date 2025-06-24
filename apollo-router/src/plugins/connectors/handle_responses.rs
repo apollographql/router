@@ -8,6 +8,8 @@ use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use apollo_federation::connectors::runtime::debug::SelectionData;
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
@@ -23,6 +25,7 @@ use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
@@ -41,7 +44,6 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
-use crate::services::connector::request_service::Error;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
 
@@ -56,6 +58,40 @@ pub(crate) enum HandleResponseError {
     MergeError(String),
 }
 
+impl From<RuntimeError> for graphql::Error {
+    fn from(error: RuntimeError) -> Self {
+        let path: Path = (&error.path).into();
+
+        let mut err = graphql::Error::builder()
+            .message(&error.message)
+            .extension_code(error.code())
+            .path(path)
+            .extensions(error.extensions.clone());
+
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err = err.extension("service", Value::String(subgraph_name.clone().into()));
+        };
+
+        if let Some(coordinate) = &error.coordinate {
+            err = err.extension(
+                "connector",
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )])),
+            );
+        }
+
+        let err = err.build();
+
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err.with_subgraph_name(subgraph_name)
+        } else {
+            err
+        }
+    }
+}
+
 // --- RAW RESPONSE ------------------------------------------------------------
 
 enum RawResponse {
@@ -63,7 +99,7 @@ enum RawResponse {
     /// 1. We didn't even make the request (we hit the request limit)
     /// 2. We couldn't deserialize the response body
     Error {
-        error: graphql::Error,
+        error: RuntimeError,
         key: ResponseKey,
     },
     /// Contains the response data directly from the HTTP response. We'll apply
@@ -87,11 +123,11 @@ impl RawResponse {
     fn map_response(
         self,
         result: Result<TransportResponse, Error>,
-        connector: Arc<Connector>,
+        connector: &Connector,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> connector::request_service::Response {
+    ) -> (MappedResponse, Result<TransportResponse, Error>) {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
             RawResponse::Data {
@@ -146,12 +182,7 @@ impl RawResponse {
             }
         };
 
-        connector::request_service::Response {
-            context: context.clone(),
-            connector: connector.clone(),
-            transport_result: result,
-            mapped_response,
-        }
+        (mapped_response, result)
     }
 
     /// Returns a `MappedResponse` with a GraphQL error.
@@ -160,11 +191,11 @@ impl RawResponse {
     fn map_error(
         self,
         result: Result<TransportResponse, Error>,
-        connector: Arc<Connector>,
+        connector: &Connector,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> connector::request_service::Response {
+    ) -> (MappedResponse, Result<TransportResponse, Error>) {
         use serde_json_bytes::*;
 
         let mapped_response = match self {
@@ -207,26 +238,18 @@ impl RawResponse {
                 };
 
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
-                let mut error = graphql::Error::builder()
-                    .message(message)
-                    .path(Path::from_response_key(&key));
+                let mut error = RuntimeError::new(message, &key);
+                error.subgraph_name = Some(connector.id.subgraph_name.clone());
+                error.coordinate = Some(connector.id.coordinate());
 
                 // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error
-                    .extension(
-                        "http",
-                        Value::Object(Map::from_iter([(
-                            "status".into(),
-                            Value::Number(parts.status.as_u16().into()),
-                        )])),
-                    )
-                    .extension(
-                        "connector",
-                        Value::Object(Map::from_iter([(
-                            "coordinate".into(),
-                            Value::String(connector.id.coordinate().into()),
-                        )])),
-                    );
+                error = error.extension(
+                    "http",
+                    Value::Object(Map::from_iter([(
+                        "status".into(),
+                        Value::Number(parts.status.as_u16().into()),
+                    )])),
+                );
 
                 // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
                 // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
@@ -285,12 +308,7 @@ impl RawResponse {
                     }
                 }
 
-                // Now we can finally build the actual error!
-                let error = error
-                    .extension_code(extension_code)
-                    .build()
-                    // Always set the subgraph name and if required, it will get filtered out by the include_subgraph_errors plugin
-                    .with_subgraph_name(&connector.id.subgraph_name);
+                error = error.with_code(extension_code);
 
                 if let Some(debug) = debug_context {
                     debug.lock().push_response(
@@ -311,26 +329,7 @@ impl RawResponse {
             }
         };
 
-        if let MappedResponse::Error {
-            error: ref mapped_error,
-            key: _,
-        } = mapped_response
-        {
-            if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
-                emit_error_event(
-                    error_code.as_str(),
-                    &mapped_error.message,
-                    mapped_error.path.clone(),
-                );
-            }
-        }
-
-        connector::request_service::Response {
-            context: context.clone(),
-            connector: connector.clone(),
-            transport_result: result,
-            mapped_response,
-        }
+        (mapped_response, result)
     }
 }
 
@@ -340,7 +339,7 @@ pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
     Error {
-        error: graphql::Error,
+        error: RuntimeError,
         key: ResponseKey,
     },
     /// The response data after applying the selection mapping.
@@ -358,7 +357,7 @@ impl MappedResponse {
     fn add_to_data(
         self,
         data: &mut serde_json_bytes::Map<ByteString, Value>,
-        errors: &mut Vec<graphql::Error>,
+        errors: &mut Vec<RuntimeError>,
         count: usize,
     ) -> Result<(), HandleResponseError> {
         match self {
@@ -488,20 +487,17 @@ pub(crate) async fn process_response<T: HttpBody>(
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
-    match result {
+    let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             let raw = RawResponse::Error {
-                error: error.to_graphql_error(
-                    connector.clone(),
-                    Some(Path::from_response_key(&response_key)),
-                ),
+                error: error.to_runtime_error(&connector, &response_key),
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             raw.map_error(
                 Err(error),
-                connector,
+                &connector,
                 context,
                 debug_context,
                 supergraph_request,
@@ -547,7 +543,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                 raw.map_response(
                     result,
-                    connector,
+                    &connector,
                     context,
                     debug_context,
                     supergraph_request,
@@ -556,13 +552,24 @@ pub(crate) async fn process_response<T: HttpBody>(
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                 raw.map_error(
                     result,
-                    connector,
+                    &connector,
                     context,
                     debug_context,
                     supergraph_request,
                 )
             }
         }
+    };
+
+    if let MappedResponse::Error { ref error, .. } = mapped_response {
+        emit_error_event(error.code(), &error.message, Some((*error.path).into()));
+    }
+
+    connector::request_service::Response {
+        context: context.clone(),
+        connector: connector.clone(),
+        transport_result: result,
+        mapped_response,
     }
 }
 
@@ -597,7 +604,7 @@ pub(crate) fn aggregate_responses(
             .body(
                 graphql::Response::builder()
                     .data(data)
-                    .errors(errors)
+                    .errors(errors.into_iter().map(|e| e.into()).collect())
                     .build(),
             )
             .unwrap(),
@@ -618,37 +625,30 @@ async fn deserialize_response<T: HttpBody>(
         Option<Box<ConnectorDebugHttpRequest>>,
         Vec<(ProblemLocation, Problem)>,
     ),
-) -> Result<Value, graphql::Error> {
+) -> Result<Value, RuntimeError> {
     use serde_json_bytes::*;
 
-    let make_err = |path: Path| {
-        graphql::Error::builder()
-            .message("The server returned data in an unexpected format.".to_string())
-            .extension_code("CONNECTOR_RESPONSE_INVALID")
-            .extension("service", connector.id.subgraph_name.clone())
-            .extension(
-                "http",
-                Value::Object(Map::from_iter([(
-                    "status".into(),
-                    Value::Number(parts.status.as_u16().into()),
-                )])),
-            )
-            .extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(connector.id.coordinate().into()),
-                )])),
-            )
-            .path(path)
-            .build()
-            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+    let make_err = || {
+        let mut err = RuntimeError::new(
+            "The server returned data in an unexpected format.".to_string(),
+            response_key,
+        );
+        err.subgraph_name = Some(connector.id.subgraph_name.clone());
+        err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+        err.coordinate = Some(connector.id.coordinate());
+        err = err.extension(
+            "http",
+            Value::Object(Map::from_iter([(
+                "status".into(),
+                Value::Number(parts.status.as_u16().into()),
+            )])),
+        );
+        err
     };
 
-    let path = Path::from_response_key(response_key);
     let body = &router::body::into_bytes(body)
         .await
-        .map_err(|_| make_err(path.clone()))?;
+        .map_err(|_| make_err())?;
 
     let log_response_level = context
         .extensions()
@@ -767,7 +767,7 @@ async fn deserialize_response<T: HttpBody>(
                         debug_request.1.clone(),
                     );
                 }
-                Err(make_err(path))
+                Err(make_err())
             }
         }
     } else if content_type
@@ -792,7 +792,7 @@ async fn deserialize_response<T: HttpBody>(
                     debug_request.1.clone(),
                 );
             }
-            return Err(make_err(path));
+            return Err(make_err());
         }
 
         Ok(Value::String(decoded_body.into_owned().into()))
@@ -1431,7 +1431,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res, @r###"
         Response {
             response: Response {
                 status: 200,
@@ -1472,12 +1472,12 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(200),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1511,6 +1511,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(404),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1544,6 +1547,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(500),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1566,7 +1572,7 @@ mod tests {
                 },
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
